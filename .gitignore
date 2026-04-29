@@ -10,3 +10,8 @@ venv/
 .DS_Store
 *.egg-info/
 .kw-pipeline/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+pytest-junit.xml
