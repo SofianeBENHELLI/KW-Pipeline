@@ -87,9 +87,7 @@ def test_persistent_versioned_upload_to_unknown_document_raises(tmp_path):
     services = build_persistent_services(tmp_path)
 
     try:
-        services.documents.upload(
-            "p.txt", "text/plain", b"x", document_id="never-existed"
-        )
+        services.documents.upload("p.txt", "text/plain", b"x", document_id="never-existed")
     except KeyError as exc:
         assert "Document not found" in str(exc)
     else:
@@ -98,9 +96,7 @@ def test_persistent_versioned_upload_to_unknown_document_raises(tmp_path):
 
 def test_persistent_review_decision_survives_restart(tmp_path):
     first_services = build_persistent_services(tmp_path)
-    uploaded = first_services.documents.upload(
-        "policy.txt", "text/plain", b"to review"
-    )
+    uploaded = first_services.documents.upload("policy.txt", "text/plain", b"to review")
     # Drive the version into NEEDS_REVIEW so we can transition out of it.
     first_services.documents.update_status(
         document_id=uploaded.document_id,
@@ -161,7 +157,9 @@ def test_sqlite_initialize_adds_review_columns_to_legacy_schema(tmp_path):
     SQLiteCatalogStore(db_path)
 
     inspector = sqlite3.connect(db_path)
-    columns = {row[1] for row in inspector.execute("PRAGMA table_info(document_versions)").fetchall()}
+    columns = {
+        row[1] for row in inspector.execute("PRAGMA table_info(document_versions)").fetchall()
+    }
     inspector.close()
 
     assert "reviewer_note" in columns

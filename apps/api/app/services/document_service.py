@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.models.document import DocumentVersionStatus
@@ -86,9 +86,7 @@ class DocumentService:
             digest=digest,
             duplicate=duplicate,
         )
-        self.catalog.append_version_to_document(
-            document_id=existing_document.id, version=version
-        )
+        self.catalog.append_version_to_document(document_id=existing_document.id, version=version)
         return version
 
     def _build_version(
@@ -132,7 +130,9 @@ class DocumentService:
         """Return a specific version within a document family."""
         return self.catalog.get_version(document_id=document_id, version_id=version_id)
 
-    def update_status(self, document_id: str, version_id: str, status: DocumentVersionStatus) -> DocumentVersion:
+    def update_status(
+        self, document_id: str, version_id: str, status: DocumentVersionStatus
+    ) -> DocumentVersion:
         """Update and return a document version lifecycle status."""
         return self.catalog.update_version_status(
             document_id=document_id,
@@ -206,5 +206,5 @@ class DocumentService:
             version_id=version_id,
             status=target_status,
             reviewer_note=reviewer_note,
-            reviewed_at=datetime.now(timezone.utc),
+            reviewed_at=datetime.now(UTC),
         )

@@ -82,7 +82,9 @@ def test_get_extraction_returns_404_before_extraction():
         files={"file": ("policy.txt", b"Policy title", "text/plain")},
     ).json()
 
-    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/extraction")
+    response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/extraction"
+    )
 
     assert response.status_code == 404
     assert "Raw extraction not found." in response.json()["detail"]
@@ -186,7 +188,10 @@ def test_duplicate_upload_conflicts_when_extracting_duplicate_version():
     )
 
     assert extraction_response.status_code == 409
-    assert "Duplicate versions are not extracted independently." in extraction_response.json()["detail"]
+    assert (
+        "Duplicate versions are not extracted independently."
+        in extraction_response.json()["detail"]
+    )
 
 
 def test_persistent_app_keeps_catalog_between_app_instances(tmp_path):

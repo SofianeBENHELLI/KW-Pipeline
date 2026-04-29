@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -333,13 +333,9 @@ class SQLiteCatalogStore:
                 for row in connection.execute("PRAGMA table_info(document_versions)").fetchall()
             }
             if "reviewer_note" not in existing_columns:
-                connection.execute(
-                    "ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT"
-                )
+                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT")
             if "reviewed_at" not in existing_columns:
-                connection.execute(
-                    "ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT"
-                )
+                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_document_versions_sha256

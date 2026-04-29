@@ -14,10 +14,7 @@ def test_compute_sha256_changes_when_bytes_change():
 def test_empty_bytes_match_published_sha256_vector():
     # SHA-256 of empty input is a well-known constant — guards against accidental
     # algorithm or encoding changes (e.g., switching to a hex/base64 mix-up).
-    assert (
-        compute_sha256(b"")
-        == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
+    assert compute_sha256(b"") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 def test_returns_64_character_lowercase_hex():
@@ -34,4 +31,3 @@ def test_handles_large_payload_without_error():
     payload = b"\x00" * (1024 * 1024)
 
     assert len(compute_sha256(payload)) == 64
-

@@ -28,9 +28,7 @@ class TestNotFoundPaths:
         assert response.json()["detail"] == "Document not found."
 
     def test_extract_unknown_document_returns_404(self):
-        response = _client().post(
-            "/documents/missing-doc/versions/missing-version/extract"
-        )
+        response = _client().post("/documents/missing-doc/versions/missing-version/extract")
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()

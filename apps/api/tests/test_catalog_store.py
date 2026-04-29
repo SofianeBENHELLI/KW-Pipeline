@@ -1,3 +1,5 @@
+from datetime import UTC
+
 import pytest
 
 from app.models.document import DocumentVersionStatus
@@ -225,12 +227,12 @@ class TestInMemoryCatalogStoreFailure:
 
 class TestInMemoryCatalogStoreReview:
     def test_update_review_writes_status_note_and_timestamp(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
         version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
         store.save_document_with_version(_make_document(version), version)
-        moment = datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc)
+        moment = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
 
         updated = store.update_version_review(
             document_id=version.document_id,
@@ -245,7 +247,7 @@ class TestInMemoryCatalogStoreReview:
         assert updated.reviewed_at == moment
 
     def test_update_review_accepts_none_reviewer_note(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
         version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
@@ -256,7 +258,7 @@ class TestInMemoryCatalogStoreReview:
             version_id=version.id,
             status=DocumentVersionStatus.REJECTED,
             reviewer_note=None,
-            reviewed_at=datetime.now(timezone.utc),
+            reviewed_at=datetime.now(UTC),
         )
 
         assert updated.status == DocumentVersionStatus.REJECTED
@@ -264,7 +266,7 @@ class TestInMemoryCatalogStoreReview:
         assert updated.reviewed_at is not None
 
     def test_update_review_propagates_missing_document(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
 
@@ -274,5 +276,5 @@ class TestInMemoryCatalogStoreReview:
                 version_id="missing",
                 status=DocumentVersionStatus.VALIDATED,
                 reviewer_note=None,
-                reviewed_at=datetime.now(timezone.utc),
+                reviewed_at=datetime.now(UTC),
             )

@@ -16,12 +16,8 @@ def _drive_to_needs_review(client: TestClient) -> dict:
         "/documents/upload",
         files={"file": ("policy.txt", b"text body", "text/plain")},
     ).json()
-    client.post(
-        f"/documents/{version['document_id']}/versions/{version['id']}/extract"
-    )
-    client.post(
-        f"/documents/{version['document_id']}/versions/{version['id']}/semantic"
-    )
+    client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
+    client.post(f"/documents/{version['document_id']}/versions/{version['id']}/semantic")
     return version
 
 
@@ -47,9 +43,7 @@ class TestValidateEndpoint:
         client = _client()
         v = _drive_to_needs_review(client)
 
-        response = client.post(
-            f"/documents/{v['document_id']}/versions/{v['id']}/validate"
-        )
+        response = client.post(f"/documents/{v['document_id']}/versions/{v['id']}/validate")
 
         assert response.status_code == 200
         version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]

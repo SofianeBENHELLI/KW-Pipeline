@@ -1,6 +1,6 @@
 """HTTP-level coverage for the parser-failure path:
-  POST /extract returns 422 with the persisted reason in `detail`,
-  and GET /documents{,/{id}} surfaces `failure_reason` for FAILED versions."""
+POST /extract returns 422 with the persisted reason in `detail`,
+and GET /documents{,/{id}} surfaces `failure_reason` for FAILED versions."""
 
 from fastapi.testclient import TestClient
 
@@ -52,9 +52,7 @@ class TestExtractEndpointFailurePath:
         client = _client_with_failing_parser()
         version = _upload(client)
 
-        client.post(
-            f"/documents/{version['document_id']}/versions/{version['id']}/extract"
-        )
+        client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
         document = client.get(f"/documents/{version['document_id']}").json()
 
         failed_version = document["versions"][0]
@@ -65,13 +63,10 @@ class TestExtractEndpointFailurePath:
         client = _client_with_failing_parser()
         version = _upload(client)
 
-        client.post(
-            f"/documents/{version['document_id']}/versions/{version['id']}/extract"
-        )
+        client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
         catalog = client.get("/documents").json()
 
         assert catalog[0]["versions"][0]["status"] == "FAILED"
         assert (
-            catalog[0]["versions"][0]["failure_reason"]
-            == "FailingParser: simulated parser failure"
+            catalog[0]["versions"][0]["failure_reason"] == "FailingParser: simulated parser failure"
         )

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -55,7 +55,7 @@ def _stub_raw() -> RawExtraction:
         sections=[],
         source_references=[],
         warnings=[],
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 
@@ -135,9 +135,7 @@ class TestMarkdownRenderPopulated:
         assert "Supplier delay." in markdown
 
     def test_section_with_empty_text_falls_back_to_none_identified(self):
-        semantic = _stub_semantic(
-            sections=[SemanticSection(id="s1", heading="H", text="")]
-        )
+        semantic = _stub_semantic(sections=[SemanticSection(id="s1", heading="H", text="")])
         markdown = MarkdownGenerator().render(
             version=_stub_version(), semantic=semantic, raw_extraction=_stub_raw()
         )
@@ -181,4 +179,3 @@ class TestFormatLocation:
         )
 
         assert "- `r1` (page 2, line 4-6): hello" in markdown
-

@@ -1,6 +1,6 @@
 """HTTP-level coverage for the versioned upload path:
-  POST /documents/upload?document_id=<existing> appends a v2,
-  POST /documents/upload?document_id=<missing>  returns 404."""
+POST /documents/upload?document_id=<existing> appends a v2,
+POST /documents/upload?document_id=<missing>  returns 404."""
 
 from fastapi.testclient import TestClient
 
@@ -40,9 +40,7 @@ class TestVersionedUploadHttp:
     def test_versioned_upload_to_missing_document_returns_404(self):
         client = _client()
 
-        status, body = _upload(
-            client, content=b"orphan", document_id="not-a-real-document"
-        )
+        status, body = _upload(client, content=b"orphan", document_id="not-a-real-document")
 
         assert status == 404
         assert "Document not found" in body["detail"]

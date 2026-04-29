@@ -71,12 +71,8 @@ class TestUploadAppendsVersion:
     def test_consecutive_versioned_uploads_increment_version_number(self):
         service = DocumentService(storage=InMemoryStorageService())
         v1 = service.upload("policy.txt", "text/plain", b"one")
-        v2 = service.upload(
-            "policy.txt", "text/plain", b"two", document_id=v1.document_id
-        )
-        v3 = service.upload(
-            "policy.txt", "text/plain", b"three", document_id=v1.document_id
-        )
+        v2 = service.upload("policy.txt", "text/plain", b"two", document_id=v1.document_id)
+        v3 = service.upload("policy.txt", "text/plain", b"three", document_id=v1.document_id)
 
         assert (v1.version_number, v2.version_number, v3.version_number) == (1, 2, 3)
 
@@ -115,9 +111,7 @@ class TestUploadAppendsVersion:
         service = DocumentService(storage=InMemoryStorageService())
         v1 = service.upload("draft.txt", "text/plain", b"first")
 
-        v2 = service.upload(
-            "final.txt", "text/plain", b"second", document_id=v1.document_id
-        )
+        v2 = service.upload("final.txt", "text/plain", b"second", document_id=v1.document_id)
 
         document = service.get_document(v1.document_id)
         # `original_filename` on the family stays the first filename uploaded;

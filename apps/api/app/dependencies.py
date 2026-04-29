@@ -1,14 +1,18 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
-from app.services.semantic_output_service import SemanticOutputService
 from app.services.semantic_extractor import SemanticExtractor
-from app.services.catalog_store import SQLiteCatalogStore
-from app.services.storage_service import FileSystemStorageService, InMemoryStorageService, StorageService
+from app.services.semantic_output_service import SemanticOutputService
+from app.services.storage_service import (
+    FileSystemStorageService,
+    InMemoryStorageService,
+    StorageService,
+)
 
 
 @dataclass(frozen=True)

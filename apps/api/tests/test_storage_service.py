@@ -9,9 +9,7 @@ from app.services.storage_service import (
 
 class TestSafeStorageKey:
     def test_passes_through_already_safe_filenames(self):
-        assert (
-            safe_storage_key("v1", "policy.txt") == "documents/v1/policy.txt"
-        )
+        assert safe_storage_key("v1", "policy.txt") == "documents/v1/policy.txt"
         assert (
             safe_storage_key("v1", "annual-report_2024.pdf")
             == "documents/v1/annual-report_2024.pdf"
@@ -23,10 +21,7 @@ class TestSafeStorageKey:
         assert safe_storage_key("v1", "foo/bar.txt") == "documents/v1/bar.txt"
 
     def test_strips_windows_path_components(self):
-        assert (
-            safe_storage_key("v1", r"C:\Users\me\policy.txt")
-            == "documents/v1/policy.txt"
-        )
+        assert safe_storage_key("v1", r"C:\Users\me\policy.txt") == "documents/v1/policy.txt"
 
     def test_replaces_control_and_null_bytes(self):
         assert safe_storage_key("v1", "a\x00b.txt") == "documents/v1/a_b.txt"
