@@ -76,10 +76,5 @@ jobs:
             apps/api/pytest-junit.xml
           if-no-files-found: warn
 
-  frontend:
-    name: Frontend (placeholder)
-    runs-on: ubuntu-latest
-    # Re-enable once #14 lands the apps/web scaffold (package.json, vitest, playwright).
-    if: false
-    steps:
-      - run: echo "frontend tests are not yet wired"
+  # The frontend pytest/vitest job will be added once #14 scaffolds apps/web
+  # (package.json, vitest, playwright) so there is something concrete to run.
