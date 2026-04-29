@@ -94,6 +94,87 @@ def test_persistent_versioned_upload_to_unknown_document_raises(tmp_path):
         raise AssertionError("Expected KeyError for missing document.")
 
 
+def test_persistent_extraction_survives_restart(tmp_path):
+    """Bug fix for #34: a re-built service container must surface the raw
+    extraction that was saved by an earlier instance — otherwise reviewers
+    can't fetch the JSON they need to validate against."""
+    first = build_persistent_services(tmp_path)
+    uploaded = first.documents.upload("policy.txt", "text/plain", b"first line\nsecond line")
+    first.extraction_jobs.extract(document_id=uploaded.document_id, version_id=uploaded.id)
+
+    second = build_persistent_services(tmp_path)
+    raw = second.extraction_jobs.get_raw_extraction(
+        document_id=uploaded.document_id, version_id=uploaded.id
+    )
+
+    assert raw.parser_name == "plain_text"
+    assert raw.text == "first line\nsecond line"
+    assert len(raw.source_references) == 2
+
+
+def test_persistent_semantic_document_and_markdown_survive_restart(tmp_path):
+    """Bug fix for #34: SemanticDocument + Markdown survive a restart so the
+    reviewer's UI keeps working without re-running the pipeline."""
+    first = build_persistent_services(tmp_path)
+    uploaded = first.documents.upload("policy.txt", "text/plain", b"Policy title\nReview required")
+    first.extraction_jobs.extract(document_id=uploaded.document_id, version_id=uploaded.id)
+    first.semantic_outputs.generate(document_id=uploaded.document_id, version_id=uploaded.id)
+
+    second = build_persistent_services(tmp_path)
+    semantic = second.semantic_outputs.get(document_id=uploaded.document_id, version_id=uploaded.id)
+    markdown = second.semantic_outputs.get_markdown(
+        document_id=uploaded.document_id, version_id=uploaded.id
+    )
+
+    assert semantic.validation_status == "needs_review"
+    assert "Policy" in markdown
+    assert "## Source Lineage" in markdown
+
+
+def test_persistent_get_raw_extraction_raises_when_not_yet_extracted(tmp_path):
+    """SQLite-specific path: uploaded but not extracted means an empty
+    raw_extractions row, not a fall-through to a stale in-memory dict."""
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("policy.txt", "text/plain", b"x")
+
+    try:
+        services.extraction_jobs.get_raw_extraction(
+            document_id=uploaded.document_id, version_id=uploaded.id
+        )
+    except KeyError as exc:
+        assert "Raw extraction not found" in str(exc)
+    else:
+        raise AssertionError("Expected KeyError for un-extracted version.")
+
+
+def test_persistent_validate_works_after_restart(tmp_path):
+    """End-to-end bug fix for #34: a reviewer can pick up a NEEDS_REVIEW
+    version after a restart and validate it without 404s anywhere."""
+    first = build_persistent_services(tmp_path)
+    uploaded = first.documents.upload("policy.txt", "text/plain", b"line one")
+    first.extraction_jobs.extract(document_id=uploaded.document_id, version_id=uploaded.id)
+    first.semantic_outputs.generate(document_id=uploaded.document_id, version_id=uploaded.id)
+
+    # Simulate the reviewer coming back the next day in a fresh process.
+    second = build_persistent_services(tmp_path)
+    second.documents.mark_validated(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        reviewer_note="approved post-restart",
+    )
+    second.semantic_outputs.record_validation(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        status="validated",
+    )
+
+    version = second.documents.get_version(uploaded.document_id, uploaded.id)
+    assert version.status == DocumentVersionStatus.VALIDATED
+    assert version.reviewer_note == "approved post-restart"
+    semantic = second.semantic_outputs.get(document_id=uploaded.document_id, version_id=uploaded.id)
+    assert semantic.validation_status == "validated"
+
+
 def test_persistent_review_decision_survives_restart(tmp_path):
     first_services = build_persistent_services(tmp_path)
     uploaded = first_services.documents.upload("policy.txt", "text/plain", b"to review")

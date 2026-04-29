@@ -5,6 +5,8 @@ from typing import Protocol
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentVersion
+from app.schemas.extraction import RawExtraction
+from app.schemas.semantic_document import SemanticDocument
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
 
@@ -58,6 +60,20 @@ class CatalogStore(Protocol):
         """Atomically write a reviewer's decision: status (VALIDATED or
         REJECTED), the optional note, and the timestamp it was made."""
 
+    # ------- Generated artefacts (raw extraction + semantic output) ------- #
+
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        """Persist parser output for a version. Replaces any prior extraction."""
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        """Return the persisted raw extraction. Raises KeyError if none exists."""
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        """Persist semantic JSON (and rendered Markdown if any) for a version."""
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        """Return the persisted semantic document. Raises KeyError if none exists."""
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -66,6 +82,8 @@ class InMemoryCatalogStore:
         self.documents: dict[str, Document] = {}
         self.versions_by_hash: dict[str, DocumentVersion] = {}
         self.versions: dict[str, DocumentVersion] = {}
+        self.raw_extractions: dict[str, RawExtraction] = {}
+        self.semantic_documents: dict[str, SemanticDocument] = {}
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         return self.versions_by_hash.get(sha256)
@@ -135,6 +153,24 @@ class InMemoryCatalogStore:
         version.reviewer_note = reviewer_note
         version.reviewed_at = reviewed_at
         return version
+
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        self.raw_extractions[version_id] = raw_extraction
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        raw_extraction = self.raw_extractions.get(version_id)
+        if raw_extraction is None:
+            raise KeyError("Raw extraction not found.")
+        return raw_extraction
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        self.semantic_documents[version_id] = semantic
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        semantic = self.semantic_documents.get(version_id)
+        if semantic is None:
+            raise KeyError("Semantic output not found.")
+        return semantic
 
 
 class SQLiteCatalogStore:
@@ -292,6 +328,60 @@ class SQLiteCatalogStore:
             )
         return self.get_version(document_id=document_id, version_id=version_id)
 
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO raw_extractions (document_version_id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(document_version_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (
+                    version_id,
+                    raw_extraction.model_dump_json(),
+                    raw_extraction.created_at.isoformat(),
+                ),
+            )
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM raw_extractions WHERE document_version_id = ?",
+                (version_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Raw extraction not found.")
+        return RawExtraction.model_validate_json(row["payload"])
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO semantic_documents (document_version_id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(document_version_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (
+                    version_id,
+                    semantic.model_dump_json(),
+                    semantic.created_at.isoformat(),
+                ),
+            )
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM semantic_documents WHERE document_version_id = ?",
+                (version_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Semantic output not found.")
+        return SemanticDocument.model_validate_json(row["payload"])
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -340,6 +430,30 @@ class SQLiteCatalogStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_document_versions_sha256
                 ON document_versions (sha256)
+                """
+            )
+            # Generated artefacts: one row per version, holding the full
+            # Pydantic JSON payload. document_version_id is the PK because
+            # each version has at most one extraction and at most one
+            # semantic document; re-extraction overwrites in place.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS raw_extractions (
+                    document_version_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_documents (
+                    document_version_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
+                )
                 """
             )
 

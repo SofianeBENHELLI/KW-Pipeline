@@ -15,12 +15,16 @@ class ExtractionFailed(Exception):
 
 
 class ExtractionJobService:
-    """Coordinates parser execution and extraction lifecycle transitions."""
+    """Coordinates parser execution and extraction lifecycle transitions.
+
+    Raw extraction JSON is persisted via the catalog store, so re-fetching
+    a previously extracted version after a process restart returns the
+    same payload without re-running the parser.
+    """
 
     def __init__(self, documents: DocumentService, parser: PlainTextParser):
         self.documents = documents
         self.parser = parser
-        self.raw_extractions: dict[str, RawExtraction] = {}
 
     def extract(self, document_id: str, version_id: str) -> RawExtraction:
         """Run extraction for one stored, non-duplicate document version."""
@@ -34,14 +38,11 @@ class ExtractionJobService:
             reason = f"{type(self.parser).__name__}: {exc}"
             self.documents.mark_failed(document_id, version_id, reason)
             raise ExtractionFailed(reason) from exc
-        self.raw_extractions[version_id] = raw_extraction
+        self.documents.catalog.save_raw_extraction(version_id, raw_extraction)
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
         return raw_extraction
 
     def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
         """Return raw extraction output for a document version."""
         self.documents.get_version(document_id=document_id, version_id=version_id)
-        raw_extraction = self.raw_extractions.get(version_id)
-        if raw_extraction is None:
-            raise KeyError("Raw extraction not found.")
-        return raw_extraction
+        return self.documents.catalog.get_raw_extraction(version_id)

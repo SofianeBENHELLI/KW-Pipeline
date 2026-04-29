@@ -100,17 +100,21 @@ class TestSemanticOutputServiceLookup:
             )
 
     def test_get_markdown_raises_when_cached_semantic_lacks_markdown(self):
-        """Defensive branch: a cached SemanticDocument without rendered Markdown
-        must surface as 'Markdown output not found.' rather than returning None."""
+        """Defensive branch: a persisted SemanticDocument without rendered
+        Markdown must surface as 'Markdown output not found.' rather than
+        returning None."""
         services = build_services()
         document_id, version_id = _upload(services)
 
-        # Bypass `generate()` and inject a markdown-less semantic document directly
-        # so we exercise the `markdown is None` guard.
-        services.semantic_outputs.semantic_documents[version_id] = SemanticDocument(
-            document_version_id=version_id,
-            document_profile=DocumentProfile(title="Policy"),
-            markdown=None,
+        # Bypass `generate()` and store a markdown-less semantic document
+        # directly via the catalog so we exercise the `markdown is None` guard.
+        services.documents.catalog.save_semantic_document(
+            version_id,
+            SemanticDocument(
+                document_version_id=version_id,
+                document_profile=DocumentProfile(title="Policy"),
+                markdown=None,
+            ),
         )
 
         with pytest.raises(KeyError, match="Markdown output not found"):
