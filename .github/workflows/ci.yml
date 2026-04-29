@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: Lint workflows (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          fail-on-error: true
+
+  backend:
+    name: Backend (pytest, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+
+      - name: Install API package with test extras
+        run: pip install -e ".[test]"
+
+      - name: Run pytest with coverage
+        run: |
+          pytest \
+            --cov=app \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=95 \
+            --junitxml=pytest-junit.xml
+
+      - name: Append coverage to job summary
+        if: always()
+        run: |
+          {
+            echo "### Coverage — Python ${{ matrix.python-version }}"
+            echo
+            echo '```'
+            python -m coverage report --show-missing
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: |
+            apps/api/coverage.xml
+            apps/api/pytest-junit.xml
+          if-no-files-found: warn
+
+  # The frontend pytest/vitest job will be added once #14 scaffolds apps/web
+  # (package.json, vitest, playwright) so there is something concrete to run.

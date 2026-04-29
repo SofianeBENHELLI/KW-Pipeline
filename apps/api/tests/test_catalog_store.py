@@ -1,0 +1,122 @@
+import pytest
+
+from app.models.document import DocumentVersionStatus
+from app.schemas.document import Document, DocumentVersion
+from app.services.catalog_store import InMemoryCatalogStore
+
+
+def _make_version(
+    document_id: str = "doc-1",
+    version_id: str = "ver-1",
+    sha256: str = "a" * 64,
+    duplicate_of: str | None = None,
+    status: DocumentVersionStatus = DocumentVersionStatus.STORED,
+) -> DocumentVersion:
+    return DocumentVersion(
+        id=version_id,
+        document_id=document_id,
+        version_number=1,
+        filename="file.txt",
+        content_type="text/plain",
+        file_size=10,
+        sha256=sha256,
+        storage_uri=f"memory://documents/{version_id}/file.txt",
+        status=status,
+        duplicate_of_version_id=duplicate_of,
+    )
+
+
+def _make_document(version: DocumentVersion) -> Document:
+    return Document.with_first_version(version)
+
+
+class TestInMemoryCatalogStoreSave:
+    def test_save_indexes_unique_version_by_hash(self):
+        store = InMemoryCatalogStore()
+        version = _make_version()
+
+        store.save_document_with_version(_make_document(version), version)
+
+        assert store.find_version_by_hash(version.sha256) is version
+        assert store.versions[version.id] is version
+
+    def test_save_does_not_index_duplicate_by_hash(self):
+        store = InMemoryCatalogStore()
+        original = _make_version(version_id="ver-1")
+        store.save_document_with_version(_make_document(original), original)
+
+        duplicate = _make_version(
+            document_id="doc-2",
+            version_id="ver-2",
+            duplicate_of="ver-1",
+            status=DocumentVersionStatus.DUPLICATE_DETECTED,
+        )
+        store.save_document_with_version(_make_document(duplicate), duplicate)
+
+        # Hash should still resolve to the original, not the duplicate.
+        assert store.find_version_by_hash(original.sha256) is original
+
+
+class TestInMemoryCatalogStoreLookup:
+    def test_get_document_returns_none_for_unknown(self):
+        store = InMemoryCatalogStore()
+        assert store.get_document("missing") is None
+
+    def test_find_version_by_hash_returns_none_for_unknown(self):
+        store = InMemoryCatalogStore()
+        assert store.find_version_by_hash("nope") is None
+
+    def test_get_version_raises_when_document_missing(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Document not found"):
+            store.get_version("missing-doc", "missing-version")
+
+    def test_get_version_raises_when_version_missing(self):
+        store = InMemoryCatalogStore()
+        version = _make_version()
+        store.save_document_with_version(_make_document(version), version)
+
+        with pytest.raises(KeyError, match="Document version not found"):
+            store.get_version(version.document_id, "other-version-id")
+
+    def test_list_documents_returns_all_saved(self):
+        store = InMemoryCatalogStore()
+        v1 = _make_version(document_id="d1", version_id="v1", sha256="a" * 64)
+        v2 = _make_version(document_id="d2", version_id="v2", sha256="b" * 64)
+        store.save_document_with_version(_make_document(v1), v1)
+        store.save_document_with_version(_make_document(v2), v2)
+
+        ids = sorted(d.id for d in store.list_documents())
+
+        assert ids == ["d1", "d2"]
+
+
+class TestInMemoryCatalogStoreUpdate:
+    def test_update_status_changes_version_state(self):
+        store = InMemoryCatalogStore()
+        version = _make_version()
+        store.save_document_with_version(_make_document(version), version)
+
+        updated = store.update_version_status(
+            document_id=version.document_id,
+            version_id=version.id,
+            status=DocumentVersionStatus.EXTRACTING,
+        )
+
+        assert updated.status == DocumentVersionStatus.EXTRACTING
+        # Subsequent get reflects the new state.
+        assert (
+            store.get_version(version.document_id, version.id).status
+            == DocumentVersionStatus.EXTRACTING
+        )
+
+    def test_update_status_propagates_missing_version(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError):
+            store.update_version_status(
+                document_id="missing",
+                version_id="missing",
+                status=DocumentVersionStatus.EXTRACTED,
+            )

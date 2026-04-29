@@ -15,8 +15,18 @@ dependencies = [
 test = [
   "httpx==0.28.1",
   "pytest==8.3.5",
+  "pytest-cov==6.0.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
