@@ -3,11 +3,11 @@ import pytest
 from app.models.document import DocumentVersionStatus
 from app.services.document_parser import PlainTextParser
 from app.services.document_service import DocumentService
-from app.services.extraction_job_service import ExtractionJobService
+from app.services.extraction_job_service import ExtractionFailed, ExtractionJobService
 from app.services.storage_service import InMemoryStorageService
 
 
-class _AlwaysFailingParser:
+class AlwaysFailingParser:
     """Parser stub that raises on every parse — used to test the FAILED path."""
 
     def parse(self, version, storage):
@@ -33,19 +33,34 @@ def test_extraction_generates_raw_json_and_updates_status():
 def test_extraction_marks_version_failed_when_parser_raises():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("broken.txt", "text/plain", b"anything")
-    jobs = ExtractionJobService(documents=documents, parser=_AlwaysFailingParser())
+    jobs = ExtractionJobService(documents=documents, parser=AlwaysFailingParser())
 
-    with pytest.raises(RuntimeError, match="simulated parser failure"):
+    with pytest.raises(ExtractionFailed) as excinfo:
         jobs.extract(document_id=version.document_id, version_id=version.id)
 
-    # Status flipped to FAILED before the exception propagated.
-    assert (
-        documents.get_version(version.document_id, version.id).status
-        == DocumentVersionStatus.FAILED
-    )
+    # The reason carried on the exception is the same string persisted on the
+    # version, prefixed with the parser class name.
+    assert excinfo.value.reason == "AlwaysFailingParser: simulated parser failure"
+    # Original parser exception is preserved as __cause__.
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    failed = documents.get_version(version.document_id, version.id)
+    assert failed.status == DocumentVersionStatus.FAILED
+    assert failed.failure_reason == "AlwaysFailingParser: simulated parser failure"
+
     # No raw extraction was cached for the failing run.
     with pytest.raises(KeyError, match="Raw extraction not found"):
         jobs.get_raw_extraction(document_id=version.document_id, version_id=version.id)
+
+
+def test_successful_extraction_does_not_set_failure_reason():
+    documents = DocumentService(storage=InMemoryStorageService())
+    version = documents.upload("note.txt", "text/plain", b"line one\nline two")
+    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+
+    jobs.extract(document_id=version.document_id, version_id=version.id)
+
+    assert documents.get_version(version.document_id, version.id).failure_reason is None
 
 
 def test_extraction_refuses_duplicate_versions():

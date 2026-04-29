@@ -1,6 +1,7 @@
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 
 from app.dependencies import PipelineServices
+from app.services.extraction_job_service import ExtractionFailed
 
 
 def build_router(services: PipelineServices) -> APIRouter:
@@ -41,6 +42,8 @@ def build_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ExtractionFailed as exc:
+            raise HTTPException(status_code=422, detail=exc.reason) from exc
 
     @router.get("/documents/{document_id}/versions/{version_id}/extraction")
     def get_extraction(document_id: str, version_id: str):

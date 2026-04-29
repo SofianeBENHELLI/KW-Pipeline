@@ -4,6 +4,16 @@ from app.services.document_parser import PlainTextParser
 from app.services.document_service import DocumentService
 
 
+class ExtractionFailed(Exception):
+    """Raised when a parser fails. Carries the persisted, human-readable reason
+    so HTTP routes (and other callers) can surface the same string the catalog
+    stored on the version."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class ExtractionJobService:
     """Coordinates parser execution and extraction lifecycle transitions."""
 
@@ -20,9 +30,10 @@ class ExtractionJobService:
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTING)
         try:
             raw_extraction = self.parser.parse(version=version, storage=self.documents.storage)
-        except Exception:
-            self.documents.update_status(document_id, version_id, DocumentVersionStatus.FAILED)
-            raise
+        except Exception as exc:
+            reason = f"{type(self.parser).__name__}: {exc}"
+            self.documents.mark_failed(document_id, version_id, reason)
+            raise ExtractionFailed(reason) from exc
         self.raw_extractions[version_id] = raw_extraction
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
         return raw_extraction

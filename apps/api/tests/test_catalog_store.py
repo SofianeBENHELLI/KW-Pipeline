@@ -120,3 +120,46 @@ class TestInMemoryCatalogStoreUpdate:
                 version_id="missing",
                 status=DocumentVersionStatus.EXTRACTED,
             )
+
+
+class TestInMemoryCatalogStoreFailure:
+    def test_update_failure_sets_status_and_reason_atomically(self):
+        store = InMemoryCatalogStore()
+        version = _make_version()
+        store.save_document_with_version(_make_document(version), version)
+
+        updated = store.update_version_failure(
+            document_id=version.document_id,
+            version_id=version.id,
+            reason="PlainTextParser: corrupt bytes",
+        )
+
+        assert updated.status == DocumentVersionStatus.FAILED
+        assert updated.failure_reason == "PlainTextParser: corrupt bytes"
+
+        # Subsequent get also reflects the new state.
+        fetched = store.get_version(version.document_id, version.id)
+        assert fetched.status == DocumentVersionStatus.FAILED
+        assert fetched.failure_reason == "PlainTextParser: corrupt bytes"
+
+    def test_update_failure_propagates_missing_document(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Document not found"):
+            store.update_version_failure(
+                document_id="missing",
+                version_id="missing",
+                reason="x",
+            )
+
+    def test_update_failure_propagates_missing_version(self):
+        store = InMemoryCatalogStore()
+        version = _make_version()
+        store.save_document_with_version(_make_document(version), version)
+
+        with pytest.raises(KeyError, match="Document version not found"):
+            store.update_version_failure(
+                document_id=version.document_id,
+                version_id="other-version",
+                reason="x",
+            )

@@ -67,6 +67,23 @@ def test_persistent_catalog_raises_clear_errors_for_missing_records(tmp_path):
         raise AssertionError("Expected missing version lookup to fail.")
 
 
+def test_persistent_failure_reason_survives_restart(tmp_path):
+    first_services = build_persistent_services(tmp_path)
+    uploaded = first_services.documents.upload("doomed.txt", "text/plain", b"x")
+
+    first_services.documents.mark_failed(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        reason="PlainTextParser: simulated parser failure",
+    )
+
+    second_services = build_persistent_services(tmp_path)
+    version = second_services.documents.get_version(uploaded.document_id, uploaded.id)
+
+    assert version.status == DocumentVersionStatus.FAILED
+    assert version.failure_reason == "PlainTextParser: simulated parser failure"
+
+
 def test_filesystem_storage_rejects_parent_traversal(tmp_path):
     storage = FileSystemStorageService(tmp_path)
 
