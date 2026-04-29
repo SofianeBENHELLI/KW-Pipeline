@@ -9,6 +9,8 @@ def utc_now() -> datetime:
 
 
 class SourceReference(BaseModel):
+    """Pointer from extracted or semantic content back to source text."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     document_version_id: str
     section_id: str
@@ -19,6 +21,8 @@ class SourceReference(BaseModel):
 
 
 class RawExtraction(BaseModel):
+    """Inspectable parser output stored before semantic extraction."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     document_version_id: str
     parser_name: str

@@ -13,6 +13,8 @@ def utc_now() -> datetime:
 
 
 class DocumentProfile(BaseModel):
+    """High-level metadata used at the top of semantic Markdown output."""
+
     title: str
     document_type: str = "unknown"
     purpose: str | None = None
@@ -21,6 +23,8 @@ class DocumentProfile(BaseModel):
 
 
 class SemanticSection(BaseModel):
+    """Reviewable semantic section with optional source lineage."""
+
     id: str
     heading: str
     text: str
@@ -28,6 +32,8 @@ class SemanticSection(BaseModel):
 
 
 class SemanticAsset(BaseModel):
+    """Typed semantic claim or asset extracted from the document."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     type: str
     text: str
@@ -43,6 +49,8 @@ class SemanticAsset(BaseModel):
 
 
 class SemanticDocument(BaseModel):
+    """Governed semantic output for one document version."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     document_version_id: str
     schema_version: str = "v0.1"

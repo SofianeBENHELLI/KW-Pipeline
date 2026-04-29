@@ -4,13 +4,19 @@ from app.services.storage_service import InMemoryStorageService
 
 
 class PlainTextParser:
+    """Deterministic parser used until Docling integration is introduced.
+
+    It treats each non-empty text line as a reviewable source reference while
+    preserving original line numbers for traceability.
+    """
+
     name = "plain_text"
     version = "0.1"
 
     def parse(self, version: DocumentVersion, storage: InMemoryStorageService) -> RawExtraction:
+        """Parse stored bytes into inspectable raw extraction JSON."""
         content = storage.get(version.storage_uri)
         text = content.decode("utf-8", errors="replace")
-        lines = [line for line in text.splitlines() if line.strip()]
         source_references = [
             SourceReference(
                 document_version_id=version.id,
@@ -19,7 +25,8 @@ class PlainTextParser:
                 line_end=index,
                 snippet=line.strip()[:240],
             )
-            for index, line in enumerate(lines, start=1)
+            for index, line in enumerate(text.splitlines(), start=1)
+            if line.strip()
         ]
         sections = [
             {

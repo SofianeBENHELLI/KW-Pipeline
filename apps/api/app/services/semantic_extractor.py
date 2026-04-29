@@ -4,7 +4,14 @@ from app.schemas.semantic_document import DocumentProfile, SemanticDocument, Sem
 
 
 class SemanticExtractor:
+    """Builds schema-validated semantic JSON from raw parser output.
+
+    The current implementation is intentionally conservative: it preserves
+    parser sections and marks the whole semantic document as `needs_review`.
+    """
+
     def extract(self, version: DocumentVersion, raw_extraction: RawExtraction) -> SemanticDocument:
+        """Transform raw extraction output into a governed semantic document."""
         title = self._title_from_filename(version.filename)
         sections = [
             SemanticSection(

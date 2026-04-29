@@ -4,12 +4,15 @@ from app.schemas.semantic_document import SemanticDocument
 
 
 class MarkdownGenerator:
+    """Renders reviewable Markdown from semantic JSON and extraction metadata."""
+
     def render(
         self,
         version: DocumentVersion,
         semantic: SemanticDocument,
         raw_extraction: RawExtraction,
     ) -> str:
+        """Generate deterministic Markdown for one document version."""
         lines = [
             "---",
             f'document_id: "{version.document_id}"',

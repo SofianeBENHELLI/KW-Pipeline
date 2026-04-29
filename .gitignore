@@ -4,7 +4,8 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .venv/
+.venv312/
 venv/
 .env
 .DS_Store
-
+*.egg-info/

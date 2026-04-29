@@ -7,6 +7,13 @@ from app.services.storage_service import InMemoryStorageService
 
 
 class DocumentService:
+    """In-memory catalog service for document families and immutable versions.
+
+    The service models the MVP catalog rules before introducing a database:
+    every upload is hashed, duplicate detection uses the hash instead of the
+    filename, and duplicate versions point back to the first matching version.
+    """
+
     def __init__(self, storage: InMemoryStorageService):
         self.storage = storage
         self.documents: dict[str, Document] = {}
@@ -14,6 +21,7 @@ class DocumentService:
         self.versions: dict[str, DocumentVersion] = {}
 
     def upload(self, filename: str, content_type: str, content: bytes) -> DocumentVersion:
+        """Store uploaded bytes and return the cataloged document version."""
         digest = compute_sha256(content)
         duplicate = self.versions_by_hash.get(digest)
         document_id = str(uuid4())
@@ -40,12 +48,15 @@ class DocumentService:
         return version
 
     def list_documents(self) -> list[Document]:
+        """Return all cataloged document families."""
         return list(self.documents.values())
 
     def get_document(self, document_id: str) -> Document | None:
+        """Return a document family by ID, or `None` when absent."""
         return self.documents.get(document_id)
 
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
+        """Return a specific version within a document family."""
         document = self.documents.get(document_id)
         if document is None:
             raise KeyError("Document not found.")
@@ -55,9 +66,11 @@ class DocumentService:
         raise KeyError("Document version not found.")
 
     def update_status(self, document_id: str, version_id: str, status: DocumentVersionStatus) -> DocumentVersion:
+        """Update and return a document version lifecycle status."""
         version = self.get_version(document_id=document_id, version_id=version_id)
         version.status = status
         return version
 
     def mark_semantic_ready(self, document_id: str, version_id: str) -> DocumentVersion:
+        """Mark generated semantic output as requiring human review."""
         return self.update_status(document_id, version_id, DocumentVersionStatus.NEEDS_REVIEW)

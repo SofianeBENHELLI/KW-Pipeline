@@ -5,12 +5,15 @@ from app.services.document_service import DocumentService
 
 
 class ExtractionJobService:
+    """Coordinates parser execution and extraction lifecycle transitions."""
+
     def __init__(self, documents: DocumentService, parser: PlainTextParser):
         self.documents = documents
         self.parser = parser
         self.raw_extractions: dict[str, RawExtraction] = {}
 
     def extract(self, document_id: str, version_id: str) -> RawExtraction:
+        """Run extraction for one stored, non-duplicate document version."""
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
         if version.status == DocumentVersionStatus.DUPLICATE_DETECTED:
             raise ValueError("Duplicate versions are not extracted independently.")
@@ -25,6 +28,7 @@ class ExtractionJobService:
         return raw_extraction
 
     def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        """Return raw extraction output for a document version."""
         raw_extraction = self.raw_extractions.get(version_id)
         if raw_extraction is None:
             raise KeyError("Raw extraction not found.")

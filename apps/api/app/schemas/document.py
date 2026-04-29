@@ -12,6 +12,8 @@ def utc_now() -> datetime:
 
 
 class DocumentVersion(BaseModel):
+    """One immutable binary upload in the catalog."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     document_id: str
     version_number: int
@@ -27,6 +29,8 @@ class DocumentVersion(BaseModel):
 
 
 class Document(BaseModel):
+    """Logical document family containing one or more versions."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     original_filename: str
     latest_version_id: str
