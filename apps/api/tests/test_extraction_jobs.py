@@ -44,8 +44,8 @@ def test_extraction_marks_version_failed_when_parser_raises():
         == DocumentVersionStatus.FAILED
     )
     # No raw extraction was cached for the failing run.
-    with pytest.raises(KeyError):
-        jobs.get_raw_extraction(version.id)
+    with pytest.raises(KeyError, match="Raw extraction not found"):
+        jobs.get_raw_extraction(document_id=version.document_id, version_id=version.id)
 
 
 def test_extraction_refuses_duplicate_versions():
@@ -60,10 +60,25 @@ def test_extraction_refuses_duplicate_versions():
         jobs.extract(document_id=duplicate.document_id, version_id=duplicate.id)
 
 
-def test_get_raw_extraction_raises_for_unknown_version():
+def test_get_raw_extraction_raises_when_version_was_uploaded_but_not_extracted():
+    documents = DocumentService(storage=InMemoryStorageService())
+    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    version = documents.upload("policy.txt", "text/plain", b"never extracted")
+
+    with pytest.raises(KeyError, match="Raw extraction not found"):
+        jobs.get_raw_extraction(
+            document_id=version.document_id,
+            version_id=version.id,
+        )
+
+
+def test_get_raw_extraction_raises_for_unknown_document():
     documents = DocumentService(storage=InMemoryStorageService())
     jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
 
-    with pytest.raises(KeyError, match="Raw extraction not found"):
-        jobs.get_raw_extraction("never-extracted-version-id")
+    with pytest.raises(KeyError):
+        jobs.get_raw_extraction(
+            document_id="missing-document-id",
+            version_id="missing-version-id",
+        )
 
