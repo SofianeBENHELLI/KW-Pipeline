@@ -32,6 +32,14 @@ class CatalogStore(Protocol):
     ) -> DocumentVersion:
         """Persist a lifecycle status change and return the updated version."""
 
+    def update_version_failure(
+        self,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> DocumentVersion:
+        """Mark a version FAILED and persist a human-readable failure reason."""
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -73,6 +81,17 @@ class InMemoryCatalogStore:
     ) -> DocumentVersion:
         version = self.get_version(document_id=document_id, version_id=version_id)
         version.status = status
+        return version
+
+    def update_version_failure(
+        self,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> DocumentVersion:
+        version = self.get_version(document_id=document_id, version_id=version_id)
+        version.status = DocumentVersionStatus.FAILED
+        version.failure_reason = reason
         return version
 
 
@@ -180,6 +199,24 @@ class SQLiteCatalogStore:
                 WHERE document_id = ? AND id = ?
                 """,
                 (status.value, document_id, version_id),
+            )
+        return self.get_version(document_id=document_id, version_id=version_id)
+
+    def update_version_failure(
+        self,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> DocumentVersion:
+        self.get_version(document_id=document_id, version_id=version_id)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE document_versions
+                SET status = ?, failure_reason = ?
+                WHERE document_id = ? AND id = ?
+                """,
+                (DocumentVersionStatus.FAILED.value, reason, document_id, version_id),
             )
         return self.get_version(document_id=document_id, version_id=version_id)
 

@@ -62,6 +62,19 @@ class DocumentService:
             status=status,
         )
 
+    def mark_failed(
+        self,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> DocumentVersion:
+        """Mark a version FAILED and persist the human-readable failure reason."""
+        return self.catalog.update_version_failure(
+            document_id=document_id,
+            version_id=version_id,
+            reason=reason,
+        )
+
     def mark_semantic_ready(self, document_id: str, version_id: str) -> DocumentVersion:
         """Mark generated semantic output as requiring human review."""
         return self.update_status(document_id, version_id, DocumentVersionStatus.NEEDS_REVIEW)
