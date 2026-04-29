@@ -1,9 +1,12 @@
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentVersion
+
+ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
 
 
 class CatalogStore(Protocol):
@@ -14,6 +17,10 @@ class CatalogStore(Protocol):
 
     def save_document_with_version(self, document: Document, version: DocumentVersion) -> None:
         """Persist a newly created document family and first version."""
+
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        """Append a new version to an existing document family and update
+        ``Document.latest_version_id``."""
 
     def list_documents(self) -> list[Document]:
         """Return all document families with their versions."""
@@ -40,6 +47,17 @@ class CatalogStore(Protocol):
     ) -> DocumentVersion:
         """Mark a version FAILED and persist a human-readable failure reason."""
 
+    def update_version_review(
+        self,
+        document_id: str,
+        version_id: str,
+        status: ReviewedStatus,
+        reviewer_note: str | None,
+        reviewed_at: datetime,
+    ) -> DocumentVersion:
+        """Atomically write a reviewer's decision: status (VALIDATED or
+        REJECTED), the optional note, and the timestamp it was made."""
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -57,6 +75,16 @@ class InMemoryCatalogStore:
         self.versions[version.id] = version
         if version.duplicate_of_version_id is None:
             self.versions_by_hash[version.sha256] = version
+
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        document = self.documents.get(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        document.versions.append(version)
+        document.latest_version_id = version.id
+        self.versions[version.id] = version
+        if version.duplicate_of_version_id is None:
+            self.versions_by_hash.setdefault(version.sha256, version)
 
     def list_documents(self) -> list[Document]:
         return list(self.documents.values())
@@ -92,6 +120,20 @@ class InMemoryCatalogStore:
         version = self.get_version(document_id=document_id, version_id=version_id)
         version.status = DocumentVersionStatus.FAILED
         version.failure_reason = reason
+        return version
+
+    def update_version_review(
+        self,
+        document_id: str,
+        version_id: str,
+        status: ReviewedStatus,
+        reviewer_note: str | None,
+        reviewed_at: datetime,
+    ) -> DocumentVersion:
+        version = self.get_version(document_id=document_id, version_id=version_id)
+        version.status = status
+        version.reviewer_note = reviewer_note
+        version.reviewed_at = reviewed_at
         return version
 
 
@@ -131,6 +173,16 @@ class SQLiteCatalogStore:
                 ),
             )
             self._insert_version(connection, version)
+
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        if self.get_document(document_id) is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            self._insert_version(connection, version)
+            connection.execute(
+                "UPDATE documents SET latest_version_id = ? WHERE id = ?",
+                (version.id, document_id),
+            )
 
     def list_documents(self) -> list[Document]:
         with self._connect() as connection:
@@ -220,6 +272,26 @@ class SQLiteCatalogStore:
             )
         return self.get_version(document_id=document_id, version_id=version_id)
 
+    def update_version_review(
+        self,
+        document_id: str,
+        version_id: str,
+        status: ReviewedStatus,
+        reviewer_note: str | None,
+        reviewed_at: datetime,
+    ) -> DocumentVersion:
+        self.get_version(document_id=document_id, version_id=version_id)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE document_versions
+                SET status = ?, reviewer_note = ?, reviewed_at = ?
+                WHERE document_id = ? AND id = ?
+                """,
+                (status.value, reviewer_note, reviewed_at.isoformat(), document_id, version_id),
+            )
+        return self.get_version(document_id=document_id, version_id=version_id)
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -246,11 +318,28 @@ class SQLiteCatalogStore:
                     status TEXT NOT NULL,
                     duplicate_of_version_id TEXT,
                     failure_reason TEXT,
+                    reviewer_note TEXT,
+                    reviewed_at TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (document_id) REFERENCES documents(id)
                 )
                 """
             )
+            # Add review columns to pre-existing databases that were created
+            # before reviewer_note / reviewed_at were introduced. SQLite does
+            # not support `ADD COLUMN IF NOT EXISTS`, so we inspect first.
+            existing_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(document_versions)").fetchall()
+            }
+            if "reviewer_note" not in existing_columns:
+                connection.execute(
+                    "ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT"
+                )
+            if "reviewed_at" not in existing_columns:
+                connection.execute(
+                    "ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_document_versions_sha256
@@ -278,9 +367,11 @@ class SQLiteCatalogStore:
                 status,
                 duplicate_of_version_id,
                 failure_reason,
+                reviewer_note,
+                reviewed_at,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 version.id,
@@ -294,6 +385,8 @@ class SQLiteCatalogStore:
                 version.status.value,
                 version.duplicate_of_version_id,
                 version.failure_reason,
+                version.reviewer_note,
+                version.reviewed_at.isoformat() if version.reviewed_at else None,
                 version.created_at.isoformat(),
             ),
         )
@@ -320,5 +413,7 @@ class SQLiteCatalogStore:
             status=DocumentVersionStatus(row["status"]),
             duplicate_of_version_id=row["duplicate_of_version_id"],
             failure_reason=row["failure_reason"],
+            reviewer_note=row["reviewer_note"],
+            reviewed_at=row["reviewed_at"],
             created_at=row["created_at"],
         )
