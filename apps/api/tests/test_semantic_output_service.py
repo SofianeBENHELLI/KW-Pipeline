@@ -73,6 +73,44 @@ class TestSemanticOutputServiceLookup:
         assert "## Source Lineage" in markdown
         assert "policy text" in markdown
 
+    def test_record_validation_updates_cached_validation_status(self):
+        services = build_services()
+        document_id, version_id = _upload(services)
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+        services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+
+        services.semantic_outputs.record_validation(
+            document_id=document_id, version_id=version_id, status="validated"
+        )
+
+        assert (
+            services.semantic_outputs.get(
+                document_id=document_id, version_id=version_id
+            ).validation_status
+            == "validated"
+        )
+
+    def test_record_validation_supports_rejected_state(self):
+        services = build_services()
+        document_id, version_id = _upload(services)
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+        services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+
+        result = services.semantic_outputs.record_validation(
+            document_id=document_id, version_id=version_id, status="rejected"
+        )
+
+        assert result.validation_status == "rejected"
+
+    def test_record_validation_raises_when_no_semantic_output_exists(self):
+        services = build_services()
+        document_id, version_id = _upload(services)
+
+        with pytest.raises(KeyError, match="Semantic output not found"):
+            services.semantic_outputs.record_validation(
+                document_id=document_id, version_id=version_id, status="validated"
+            )
+
     def test_get_markdown_raises_when_cached_semantic_lacks_markdown(self):
         """Defensive branch: a cached SemanticDocument without rendered Markdown
         must surface as 'Markdown output not found.' rather than returning None."""

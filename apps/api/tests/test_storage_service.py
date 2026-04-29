@@ -1,6 +1,62 @@
 import pytest
 
-from app.services.storage_service import FileSystemStorageService, InMemoryStorageService
+from app.services.storage_service import (
+    FileSystemStorageService,
+    InMemoryStorageService,
+    safe_storage_key,
+)
+
+
+class TestSafeStorageKey:
+    def test_passes_through_already_safe_filenames(self):
+        assert (
+            safe_storage_key("v1", "policy.txt") == "documents/v1/policy.txt"
+        )
+        assert (
+            safe_storage_key("v1", "annual-report_2024.pdf")
+            == "documents/v1/annual-report_2024.pdf"
+        )
+
+    def test_strips_path_components_to_basename(self):
+        assert safe_storage_key("v1", "/etc/passwd") == "documents/v1/passwd"
+        assert safe_storage_key("v1", "../../etc/passwd") == "documents/v1/passwd"
+        assert safe_storage_key("v1", "foo/bar.txt") == "documents/v1/bar.txt"
+
+    def test_strips_windows_path_components(self):
+        assert (
+            safe_storage_key("v1", r"C:\Users\me\policy.txt")
+            == "documents/v1/policy.txt"
+        )
+
+    def test_replaces_control_and_null_bytes(self):
+        assert safe_storage_key("v1", "a\x00b.txt") == "documents/v1/a_b.txt"
+        assert safe_storage_key("v1", "x\ny.txt") == "documents/v1/x_y.txt"
+
+    def test_replaces_shell_metacharacters(self):
+        assert safe_storage_key("v1", "a;b|c.txt") == "documents/v1/a_b_c.txt"
+        assert safe_storage_key("v1", "$(rm -rf).txt") == "documents/v1/__rm_-rf_.txt"
+
+    def test_strips_leading_dots_to_block_dotfiles(self):
+        assert safe_storage_key("v1", ".htaccess") == "documents/v1/htaccess"
+        assert safe_storage_key("v1", "...config") == "documents/v1/config"
+
+    def test_caps_long_filenames_at_200_chars(self):
+        very_long = "a" * 1000 + ".txt"
+        result = safe_storage_key("v1", very_long)
+
+        assert result.startswith("documents/v1/")
+        # The basename portion is capped at 200 chars.
+        basename = result.removeprefix("documents/v1/")
+        assert len(basename) == 200
+
+    def test_falls_back_when_sanitization_yields_empty(self):
+        assert safe_storage_key("v1", "") == "documents/v1/upload"
+        assert safe_storage_key("v1", "...") == "documents/v1/upload"
+        assert safe_storage_key("v1", "/") == "documents/v1/upload"
+
+    def test_preserves_unicode_alphanumerics(self):
+        # `.isalnum()` is unicode-aware, so accented letters round-trip cleanly.
+        assert safe_storage_key("v1", "résumé.pdf") == "documents/v1/résumé.pdf"
 
 
 class TestInMemoryStorage:

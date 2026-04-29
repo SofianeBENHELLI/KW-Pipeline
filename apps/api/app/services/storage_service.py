@@ -2,6 +2,29 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
+# Maximum sanitized basename length, in code points. Matches common filesystem
+# component limits (255) with headroom for the documents/<uuid>/ prefix.
+_MAX_KEY_BASENAME_LENGTH = 200
+
+
+def safe_storage_key(version_id: str, filename: str) -> str:
+    """Build a storage key from a version ID and a sanitized filename.
+
+    Strips path components (only the trailing basename is used), replaces
+    every character outside `[A-Za-z0-9._-]` and unicode alphanumerics with
+    `_`, removes leading dots so dotfiles can't be created, caps the
+    sanitized name at 200 code points, and falls back to ``"upload"``
+    when the result would be empty. Only the storage key is sanitized —
+    the user-facing ``DocumentVersion.filename`` is preserved as-is.
+    """
+    base = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in base)
+    safe = safe.lstrip(".")
+    safe = safe[:_MAX_KEY_BASENAME_LENGTH]
+    if not safe:
+        safe = "upload"
+    return f"documents/{version_id}/{safe}"
+
 
 class StorageService(Protocol):
     """Object storage boundary for raw uploaded bytes."""

@@ -122,6 +122,64 @@ class TestInMemoryCatalogStoreUpdate:
             )
 
 
+class TestInMemoryCatalogStoreAppend:
+    def test_append_adds_version_and_updates_latest_pointer(self):
+        store = InMemoryCatalogStore()
+        v1 = _make_version(version_id="v1", sha256="a" * 64)
+        store.save_document_with_version(_make_document(v1), v1)
+
+        v2 = _make_version(
+            document_id=v1.document_id,
+            version_id="v2",
+            sha256="b" * 64,
+        )
+        store.append_version_to_document(document_id=v1.document_id, version=v2)
+
+        document = store.get_document(v1.document_id)
+        assert [v.id for v in document.versions] == ["v1", "v2"]
+        assert document.latest_version_id == "v2"
+        assert store.versions["v2"] is v2
+
+    def test_append_indexes_unique_version_by_hash(self):
+        store = InMemoryCatalogStore()
+        v1 = _make_version(version_id="v1", sha256="a" * 64)
+        store.save_document_with_version(_make_document(v1), v1)
+
+        v2 = _make_version(
+            document_id=v1.document_id,
+            version_id="v2",
+            sha256="b" * 64,
+        )
+        store.append_version_to_document(document_id=v1.document_id, version=v2)
+
+        assert store.find_version_by_hash("b" * 64) is v2
+
+    def test_append_does_not_overwrite_hash_index_on_duplicate(self):
+        store = InMemoryCatalogStore()
+        v1 = _make_version(version_id="v1", sha256="a" * 64)
+        store.save_document_with_version(_make_document(v1), v1)
+
+        # Append a new version that's flagged as duplicate of v1.
+        v2 = _make_version(
+            document_id=v1.document_id,
+            version_id="v2",
+            sha256="a" * 64,
+            duplicate_of="v1",
+            status=DocumentVersionStatus.DUPLICATE_DETECTED,
+        )
+        store.append_version_to_document(document_id=v1.document_id, version=v2)
+
+        # Hash still points at the original, not the duplicate.
+        assert store.find_version_by_hash("a" * 64) is v1
+
+    def test_append_to_unknown_document_raises_keyerror(self):
+        store = InMemoryCatalogStore()
+        ghost = _make_version(version_id="ghost", document_id="ghost-doc")
+
+        with pytest.raises(KeyError, match="Document not found"):
+            store.append_version_to_document(document_id="ghost-doc", version=ghost)
+
+
 class TestInMemoryCatalogStoreFailure:
     def test_update_failure_sets_status_and_reason_atomically(self):
         store = InMemoryCatalogStore()
@@ -162,4 +220,59 @@ class TestInMemoryCatalogStoreFailure:
                 document_id=version.document_id,
                 version_id="other-version",
                 reason="x",
+            )
+
+
+class TestInMemoryCatalogStoreReview:
+    def test_update_review_writes_status_note_and_timestamp(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+        version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
+        store.save_document_with_version(_make_document(version), version)
+        moment = datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc)
+
+        updated = store.update_version_review(
+            document_id=version.document_id,
+            version_id=version.id,
+            status=DocumentVersionStatus.VALIDATED,
+            reviewer_note="ship it",
+            reviewed_at=moment,
+        )
+
+        assert updated.status == DocumentVersionStatus.VALIDATED
+        assert updated.reviewer_note == "ship it"
+        assert updated.reviewed_at == moment
+
+    def test_update_review_accepts_none_reviewer_note(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+        version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
+        store.save_document_with_version(_make_document(version), version)
+
+        updated = store.update_version_review(
+            document_id=version.document_id,
+            version_id=version.id,
+            status=DocumentVersionStatus.REJECTED,
+            reviewer_note=None,
+            reviewed_at=datetime.now(timezone.utc),
+        )
+
+        assert updated.status == DocumentVersionStatus.REJECTED
+        assert updated.reviewer_note is None
+        assert updated.reviewed_at is not None
+
+    def test_update_review_propagates_missing_document(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Document not found"):
+            store.update_version_review(
+                document_id="missing",
+                version_id="missing",
+                status=DocumentVersionStatus.VALIDATED,
+                reviewer_note=None,
+                reviewed_at=datetime.now(timezone.utc),
             )
