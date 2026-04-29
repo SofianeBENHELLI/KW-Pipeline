@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 
 from app.dependencies import PipelineServices
 
@@ -42,21 +42,39 @@ def build_router(services: PipelineServices) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @router.post("/documents/{document_id}/versions/{version_id}/semantic")
-    def generate_semantic_document(document_id: str, version_id: str):
+    @router.get("/documents/{document_id}/versions/{version_id}/extraction")
+    def get_extraction(document_id: str, version_id: str):
         try:
-            raw_extraction = services.extraction_jobs.get_raw_extraction(version_id)
-            version = services.documents.get_version(document_id=document_id, version_id=version_id)
-            semantic = services.semantic_extractor.extract(version=version, raw_extraction=raw_extraction)
-            semantic.markdown = services.markdown_generator.render(
-                version=version,
-                semantic=semantic,
-                raw_extraction=raw_extraction,
+            return services.extraction_jobs.get_raw_extraction(
+                document_id=document_id,
+                version_id=version_id,
             )
-            services.documents.mark_semantic_ready(document_id=document_id, version_id=version_id)
-            return semantic
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return router
+    @router.post("/documents/{document_id}/versions/{version_id}/semantic")
+    def generate_semantic_document(document_id: str, version_id: str):
+        try:
+            return services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @router.get("/documents/{document_id}/versions/{version_id}/semantic")
+    def get_semantic_document(document_id: str, version_id: str):
+        try:
+            return services.semantic_outputs.get(document_id=document_id, version_id=version_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get("/documents/{document_id}/versions/{version_id}/markdown")
+    def get_markdown(document_id: str, version_id: str):
+        try:
+            markdown = services.semantic_outputs.get_markdown(
+                document_id=document_id,
+                version_id=version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(content=markdown, media_type="text/markdown")
+
+    return router

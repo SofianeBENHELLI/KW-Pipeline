@@ -40,21 +40,34 @@ Starts raw extraction for a stored document version.
 
 `GET /documents/{document_id}/versions/{version_id}/extraction`
 
-Returns extraction status, parser metadata, raw extraction availability, and
-failure details.
+Returns cached raw extraction JSON for a document version.
+
+Returns `404` when extraction has not run or the document version does not
+exist.
 
 ## Generate Semantic Output
 
 `POST /documents/{document_id}/versions/{version_id}/semantic`
 
-Generates semantic JSON and Markdown from raw extraction JSON.
+Generates semantic JSON and Markdown from cached raw extraction JSON. Repeated
+calls return the cached semantic output instead of regenerating it.
 
 ## Get Semantic Output
 
 `GET /documents/{document_id}/versions/{version_id}/semantic`
 
-Returns semantic JSON metadata, warnings, Markdown availability, and validation
-status.
+Returns cached semantic JSON, including warnings, source references, validation
+status, and generated Markdown when available.
+
+Returns `404` when semantic output has not been generated.
+
+## Get Markdown Output
+
+`GET /documents/{document_id}/versions/{version_id}/markdown`
+
+Returns cached generated Markdown as `text/markdown`.
+
+Returns `404` when Markdown output has not been generated.
 
 ## Review Semantic Output
 

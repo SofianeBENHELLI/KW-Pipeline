@@ -41,6 +41,12 @@ def test_upload_catalog_detail_extract_and_semantic_flow():
     assert extraction["parser_name"] == "plain_text"
     assert len(extraction["source_references"]) == 2
 
+    get_extraction_response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/extraction"
+    )
+    assert get_extraction_response.status_code == 200
+    assert get_extraction_response.json()["id"] == extraction["id"]
+
     semantic_response = client.post(
         f"/documents/{version['document_id']}/versions/{version['id']}/semantic"
     )
@@ -50,6 +56,101 @@ def test_upload_catalog_detail_extract_and_semantic_flow():
     assert "# Policy" in semantic["markdown"]
     assert "Policy title" in semantic["markdown"]
     assert "## Source Lineage" in semantic["markdown"]
+
+    semantic_detail_response = client.get(f"/documents/{version['document_id']}")
+    assert semantic_detail_response.status_code == 200
+    assert semantic_detail_response.json()["versions"][0]["status"] == "NEEDS_REVIEW"
+
+    get_semantic_response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/semantic"
+    )
+    assert get_semantic_response.status_code == 200
+    assert get_semantic_response.json()["id"] == semantic["id"]
+
+    get_markdown_response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/markdown"
+    )
+    assert get_markdown_response.status_code == 200
+    assert get_markdown_response.headers["content-type"].startswith("text/markdown")
+    assert get_markdown_response.text == semantic["markdown"]
+
+
+def test_get_extraction_returns_404_before_extraction():
+    client = TestClient(create_app())
+    version = client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", b"Policy title", "text/plain")},
+    ).json()
+
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/extraction")
+
+    assert response.status_code == 404
+    assert "Raw extraction not found." in response.json()["detail"]
+
+
+def test_get_semantic_and_markdown_return_404_before_generation():
+    client = TestClient(create_app())
+    version = client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", b"Policy title", "text/plain")},
+    ).json()
+    client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
+
+    semantic_response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/semantic"
+    )
+    markdown_response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/markdown"
+    )
+
+    assert semantic_response.status_code == 404
+    assert "Semantic output not found." in semantic_response.json()["detail"]
+    assert markdown_response.status_code == 404
+    assert "Semantic output not found." in markdown_response.json()["detail"]
+
+
+def test_semantic_generation_returns_404_before_extraction():
+    client = TestClient(create_app())
+    version = client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", b"Policy title", "text/plain")},
+    ).json()
+
+    response = client.post(f"/documents/{version['document_id']}/versions/{version['id']}/semantic")
+
+    assert response.status_code == 404
+    assert "Raw extraction not found." in response.json()["detail"]
+
+
+def test_retrieval_endpoints_return_404_for_missing_version():
+    client = TestClient(create_app())
+
+    extraction_response = client.get("/documents/missing/versions/missing/extraction")
+    semantic_response = client.get("/documents/missing/versions/missing/semantic")
+    markdown_response = client.get("/documents/missing/versions/missing/markdown")
+
+    assert extraction_response.status_code == 404
+    assert semantic_response.status_code == 404
+    assert markdown_response.status_code == 404
+
+
+def test_semantic_generation_is_cached_for_repeat_requests():
+    client = TestClient(create_app())
+    version = client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", b"Policy title", "text/plain")},
+    ).json()
+    client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
+
+    first = client.post(f"/documents/{version['document_id']}/versions/{version['id']}/semantic")
+    second = client.post(f"/documents/{version['document_id']}/versions/{version['id']}/semantic")
+    fetched = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/semantic")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert fetched.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert fetched.json()["id"] == first.json()["id"]
 
 
 def test_upload_rejects_empty_file():
@@ -86,3 +187,20 @@ def test_duplicate_upload_conflicts_when_extracting_duplicate_version():
 
     assert extraction_response.status_code == 409
     assert "Duplicate versions are not extracted independently." in extraction_response.json()["detail"]
+
+
+def test_persistent_app_keeps_catalog_between_app_instances(tmp_path):
+    first_client = TestClient(create_app(persistent=True, data_dir=str(tmp_path)))
+    upload_response = first_client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", b"Persistent API policy", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+
+    second_client = TestClient(create_app(persistent=True, data_dir=str(tmp_path)))
+    catalog_response = second_client.get("/documents")
+
+    assert catalog_response.status_code == 200
+    assert catalog_response.json()[0]["id"] == uploaded["document_id"]
+    assert catalog_response.json()[0]["versions"][0]["id"] == uploaded["id"]

@@ -27,8 +27,9 @@ class ExtractionJobService:
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
         return raw_extraction
 
-    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+    def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
         """Return raw extraction output for a document version."""
+        self.documents.get_version(document_id=document_id, version_id=version_id)
         raw_extraction = self.raw_extractions.get(version_id)
         if raw_extraction is None:
             raise KeyError("Raw extraction not found.")
