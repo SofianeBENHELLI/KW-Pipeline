@@ -1,7 +1,14 @@
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.services.extraction_job_service import ExtractionFailed
+
+
+class ReviewRequest(BaseModel):
+    """Optional reviewer note attached to a validate or reject decision."""
+
+    reviewer_note: str | None = None
 
 
 def build_router(services: PipelineServices) -> APIRouter:
@@ -86,5 +93,57 @@ def build_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(content=markdown, media_type="text/markdown")
+
+    @router.post("/documents/{document_id}/versions/{version_id}/validate")
+    def validate_version(
+        document_id: str,
+        version_id: str,
+        request: ReviewRequest = Body(default_factory=ReviewRequest),
+    ):
+        return _record_review(
+            document_id=document_id,
+            version_id=version_id,
+            request=request,
+            mark=services.documents.mark_validated,
+            cached_status="validated",
+        )
+
+    @router.post("/documents/{document_id}/versions/{version_id}/reject")
+    def reject_version(
+        document_id: str,
+        version_id: str,
+        request: ReviewRequest = Body(default_factory=ReviewRequest),
+    ):
+        return _record_review(
+            document_id=document_id,
+            version_id=version_id,
+            request=request,
+            mark=services.documents.mark_rejected,
+            cached_status="rejected",
+        )
+
+    def _record_review(
+        *,
+        document_id: str,
+        version_id: str,
+        request: ReviewRequest,
+        mark,
+        cached_status,
+    ):
+        try:
+            mark(
+                document_id=document_id,
+                version_id=version_id,
+                reviewer_note=request.reviewer_note,
+            )
+            return services.semantic_outputs.record_validation(
+                document_id=document_id,
+                version_id=version_id,
+                status=cached_status,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return router

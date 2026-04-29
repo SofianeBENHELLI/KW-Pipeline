@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.models.document import DocumentVersionStatus
@@ -155,3 +156,55 @@ class DocumentService:
     def mark_semantic_ready(self, document_id: str, version_id: str) -> DocumentVersion:
         """Mark generated semantic output as requiring human review."""
         return self.update_status(document_id, version_id, DocumentVersionStatus.NEEDS_REVIEW)
+
+    def mark_validated(
+        self,
+        document_id: str,
+        version_id: str,
+        reviewer_note: str | None = None,
+    ) -> DocumentVersion:
+        """Reviewer accepts the semantic output. Refuses transition unless the
+        version is currently in NEEDS_REVIEW."""
+        return self._record_review(
+            document_id=document_id,
+            version_id=version_id,
+            target_status=DocumentVersionStatus.VALIDATED,
+            reviewer_note=reviewer_note,
+        )
+
+    def mark_rejected(
+        self,
+        document_id: str,
+        version_id: str,
+        reviewer_note: str | None = None,
+    ) -> DocumentVersion:
+        """Reviewer rejects the semantic output. Refuses transition unless the
+        version is currently in NEEDS_REVIEW."""
+        return self._record_review(
+            document_id=document_id,
+            version_id=version_id,
+            target_status=DocumentVersionStatus.REJECTED,
+            reviewer_note=reviewer_note,
+        )
+
+    def _record_review(
+        self,
+        *,
+        document_id: str,
+        version_id: str,
+        target_status: DocumentVersionStatus,
+        reviewer_note: str | None,
+    ) -> DocumentVersion:
+        version = self.catalog.get_version(document_id=document_id, version_id=version_id)
+        if version.status != DocumentVersionStatus.NEEDS_REVIEW:
+            raise ValueError(
+                f"Version is in {version.status.value}, not NEEDS_REVIEW; "
+                f"cannot transition to {target_status.value}."
+            )
+        return self.catalog.update_version_review(
+            document_id=document_id,
+            version_id=version_id,
+            status=target_status,
+            reviewer_note=reviewer_note,
+            reviewed_at=datetime.now(timezone.utc),
+        )

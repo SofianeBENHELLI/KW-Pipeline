@@ -1,3 +1,5 @@
+from typing import Literal
+
 from app.schemas.semantic_document import SemanticDocument
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
@@ -56,3 +58,18 @@ class SemanticOutputService:
         if semantic.markdown is None:
             raise KeyError("Markdown output not found.")
         return semantic.markdown
+
+    def record_validation(
+        self,
+        document_id: str,
+        version_id: str,
+        status: Literal["validated", "rejected"],
+    ) -> SemanticDocument:
+        """Update the cached SemanticDocument to reflect a reviewer's decision.
+
+        The DocumentVersion lifecycle status is updated separately via
+        ``DocumentService.mark_validated/mark_rejected``; this method keeps the
+        cached semantic JSON's ``validation_status`` in sync."""
+        semantic = self.get(document_id=document_id, version_id=version_id)
+        semantic.validation_status = status
+        return semantic

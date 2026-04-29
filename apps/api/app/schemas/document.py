@@ -25,6 +25,8 @@ class DocumentVersion(BaseModel):
     status: DocumentVersionStatus
     duplicate_of_version_id: str | None = None
     failure_reason: str | None = None
+    reviewer_note: str | None = None
+    reviewed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
