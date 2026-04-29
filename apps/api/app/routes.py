@@ -13,15 +13,22 @@ def build_router(services: PipelineServices) -> APIRouter:
         return {"status": "ok"}
 
     @router.post("/documents/upload")
-    async def upload_document(file: UploadFile = File(...)):
+    async def upload_document(
+        file: UploadFile = File(...),
+        document_id: str | None = None,
+    ):
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-        return services.documents.upload(
-            filename=file.filename or "untitled",
-            content_type=file.content_type or "application/octet-stream",
-            content=content,
-        )
+        try:
+            return services.documents.upload(
+                filename=file.filename or "untitled",
+                content_type=file.content_type or "application/octet-stream",
+                content=content,
+                document_id=document_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get("/documents")
     def list_documents():

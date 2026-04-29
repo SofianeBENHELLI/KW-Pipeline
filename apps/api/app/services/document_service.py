@@ -4,7 +4,7 @@ from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentVersion
 from app.services.catalog_store import CatalogStore, InMemoryCatalogStore
 from app.services.hash_service import compute_sha256
-from app.services.storage_service import StorageService
+from app.services.storage_service import StorageService, safe_storage_key
 
 
 class DocumentService:
@@ -18,18 +18,98 @@ class DocumentService:
         self.storage = storage
         self.catalog = catalog or InMemoryCatalogStore()
 
-    def upload(self, filename: str, content_type: str, content: bytes) -> DocumentVersion:
-        """Store uploaded bytes and return the cataloged document version."""
+    def upload(
+        self,
+        filename: str,
+        content_type: str,
+        content: bytes,
+        document_id: str | None = None,
+    ) -> DocumentVersion:
+        """Store uploaded bytes and return the cataloged document version.
+
+        When ``document_id`` is provided, the upload is appended to the
+        existing document family as a new version (``version_number =
+        max(existing) + 1``). Without it, a new document family is created
+        with ``version_number = 1``. Hash-based duplicate detection runs in
+        both cases and wins over version creation: matching bytes always
+        produce a ``DUPLICATE_DETECTED`` version pointing at the original.
+        """
+        if document_id is None:
+            return self._upload_new_family(filename, content_type, content)
+
+        existing_document = self.catalog.get_document(document_id)
+        if existing_document is None:
+            raise KeyError("Document not found.")
+        return self._append_new_version(existing_document, filename, content_type, content)
+
+    def _upload_new_family(
+        self,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> DocumentVersion:
         digest = compute_sha256(content)
         duplicate = self.catalog.find_version_by_hash(digest)
         document_id = str(uuid4())
-        version_id = str(uuid4())
-        storage_uri = self.storage.put(f"documents/{version_id}/{filename}", content)
-        status = DocumentVersionStatus.DUPLICATE_DETECTED if duplicate else DocumentVersionStatus.STORED
-        version = DocumentVersion(
-            id=version_id,
+        version = self._build_version(
             document_id=document_id,
             version_number=1,
+            filename=filename,
+            content_type=content_type,
+            content=content,
+            digest=digest,
+            duplicate=duplicate,
+        )
+        document = Document.with_first_version(version)
+        self.catalog.save_document_with_version(document=document, version=version)
+        return version
+
+    def _append_new_version(
+        self,
+        existing_document: Document,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> DocumentVersion:
+        digest = compute_sha256(content)
+        duplicate = self.catalog.find_version_by_hash(digest)
+        next_version_number = (
+            max((v.version_number for v in existing_document.versions), default=0) + 1
+        )
+        version = self._build_version(
+            document_id=existing_document.id,
+            version_number=next_version_number,
+            filename=filename,
+            content_type=content_type,
+            content=content,
+            digest=digest,
+            duplicate=duplicate,
+        )
+        self.catalog.append_version_to_document(
+            document_id=existing_document.id, version=version
+        )
+        return version
+
+    def _build_version(
+        self,
+        *,
+        document_id: str,
+        version_number: int,
+        filename: str,
+        content_type: str,
+        content: bytes,
+        digest: str,
+        duplicate: DocumentVersion | None,
+    ) -> DocumentVersion:
+        version_id = str(uuid4())
+        storage_uri = self.storage.put(safe_storage_key(version_id, filename), content)
+        status = (
+            DocumentVersionStatus.DUPLICATE_DETECTED if duplicate else DocumentVersionStatus.STORED
+        )
+        return DocumentVersion(
+            id=version_id,
+            document_id=document_id,
+            version_number=version_number,
             filename=filename,
             content_type=content_type,
             file_size=len(content),
@@ -38,9 +118,6 @@ class DocumentService:
             status=status,
             duplicate_of_version_id=duplicate.id if duplicate else None,
         )
-        document = Document.with_first_version(version)
-        self.catalog.save_document_with_version(document=document, version=version)
-        return version
 
     def list_documents(self) -> list[Document]:
         """Return all cataloged document families."""

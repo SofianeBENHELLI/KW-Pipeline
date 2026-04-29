@@ -15,6 +15,10 @@ class CatalogStore(Protocol):
     def save_document_with_version(self, document: Document, version: DocumentVersion) -> None:
         """Persist a newly created document family and first version."""
 
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        """Append a new version to an existing document family and update
+        ``Document.latest_version_id``."""
+
     def list_documents(self) -> list[Document]:
         """Return all document families with their versions."""
 
@@ -57,6 +61,16 @@ class InMemoryCatalogStore:
         self.versions[version.id] = version
         if version.duplicate_of_version_id is None:
             self.versions_by_hash[version.sha256] = version
+
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        document = self.documents.get(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        document.versions.append(version)
+        document.latest_version_id = version.id
+        self.versions[version.id] = version
+        if version.duplicate_of_version_id is None:
+            self.versions_by_hash.setdefault(version.sha256, version)
 
     def list_documents(self) -> list[Document]:
         return list(self.documents.values())
@@ -131,6 +145,16 @@ class SQLiteCatalogStore:
                 ),
             )
             self._insert_version(connection, version)
+
+    def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
+        if self.get_document(document_id) is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            self._insert_version(connection, version)
+            connection.execute(
+                "UPDATE documents SET latest_version_id = ? WHERE id = ?",
+                (version.id, document_id),
+            )
 
     def list_documents(self) -> list[Document]:
         with self._connect() as connection:

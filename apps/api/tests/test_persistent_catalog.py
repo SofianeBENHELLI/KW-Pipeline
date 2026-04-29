@@ -67,6 +67,63 @@ def test_persistent_catalog_raises_clear_errors_for_missing_records(tmp_path):
         raise AssertionError("Expected missing version lookup to fail.")
 
 
+def test_persistent_versioned_upload_survives_restart(tmp_path):
+    first_services = build_persistent_services(tmp_path)
+    v1 = first_services.documents.upload("policy.txt", "text/plain", b"v1 bytes")
+    v2 = first_services.documents.upload(
+        "policy.txt", "text/plain", b"v2 bytes", document_id=v1.document_id
+    )
+
+    second_services = build_persistent_services(tmp_path)
+    document = second_services.documents.get_document(v1.document_id)
+
+    assert document is not None
+    assert [v.id for v in document.versions] == [v1.id, v2.id]
+    assert document.latest_version_id == v2.id
+    assert document.versions[1].version_number == 2
+
+
+def test_persistent_versioned_upload_to_unknown_document_raises(tmp_path):
+    services = build_persistent_services(tmp_path)
+
+    try:
+        services.documents.upload(
+            "p.txt", "text/plain", b"x", document_id="never-existed"
+        )
+    except KeyError as exc:
+        assert "Document not found" in str(exc)
+    else:
+        raise AssertionError("Expected KeyError for missing document.")
+
+
+def test_sqlite_append_to_missing_document_raises_directly(tmp_path):
+    """The store-level guard fires when callers bypass DocumentService and
+    hand a missing document_id straight to the catalog."""
+    from app.models.document import DocumentVersionStatus
+    from app.schemas.document import DocumentVersion
+    from app.services.catalog_store import SQLiteCatalogStore
+
+    store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+    orphan = DocumentVersion(
+        id="ver-1",
+        document_id="ghost-doc",
+        version_number=1,
+        filename="p.txt",
+        content_type="text/plain",
+        file_size=1,
+        sha256="a" * 64,
+        storage_uri="file:///tmp/ignored",
+        status=DocumentVersionStatus.STORED,
+    )
+
+    try:
+        store.append_version_to_document(document_id="ghost-doc", version=orphan)
+    except KeyError as exc:
+        assert "Document not found" in str(exc)
+    else:
+        raise AssertionError("Expected KeyError for missing document.")
+
+
 def test_persistent_failure_reason_survives_restart(tmp_path):
     first_services = build_persistent_services(tmp_path)
     uploaded = first_services.documents.upload("doomed.txt", "text/plain", b"x")
