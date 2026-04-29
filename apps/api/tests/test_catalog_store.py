@@ -221,3 +221,58 @@ class TestInMemoryCatalogStoreFailure:
                 version_id="other-version",
                 reason="x",
             )
+
+
+class TestInMemoryCatalogStoreReview:
+    def test_update_review_writes_status_note_and_timestamp(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+        version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
+        store.save_document_with_version(_make_document(version), version)
+        moment = datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc)
+
+        updated = store.update_version_review(
+            document_id=version.document_id,
+            version_id=version.id,
+            status=DocumentVersionStatus.VALIDATED,
+            reviewer_note="ship it",
+            reviewed_at=moment,
+        )
+
+        assert updated.status == DocumentVersionStatus.VALIDATED
+        assert updated.reviewer_note == "ship it"
+        assert updated.reviewed_at == moment
+
+    def test_update_review_accepts_none_reviewer_note(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+        version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
+        store.save_document_with_version(_make_document(version), version)
+
+        updated = store.update_version_review(
+            document_id=version.document_id,
+            version_id=version.id,
+            status=DocumentVersionStatus.REJECTED,
+            reviewer_note=None,
+            reviewed_at=datetime.now(timezone.utc),
+        )
+
+        assert updated.status == DocumentVersionStatus.REJECTED
+        assert updated.reviewer_note is None
+        assert updated.reviewed_at is not None
+
+    def test_update_review_propagates_missing_document(self):
+        from datetime import datetime, timezone
+
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Document not found"):
+            store.update_version_review(
+                document_id="missing",
+                version_id="missing",
+                status=DocumentVersionStatus.VALIDATED,
+                reviewer_note=None,
+                reviewed_at=datetime.now(timezone.utc),
+            )
