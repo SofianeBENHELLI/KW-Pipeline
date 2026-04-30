@@ -1,3 +1,5 @@
+import base64
+import binascii
 import copy
 import json
 import sqlite3
@@ -19,6 +21,54 @@ from app.services.semantic_schema_loader import load_semantic_document
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
 
+
+class InvalidCursor(ValueError):
+    """Raised when a pagination cursor cannot be decoded.
+
+    The route layer maps this to HTTP 400 with the message in ``detail`` so
+    clients can debug malformed cursors instead of seeing a 500.
+    """
+
+
+def _encode_cursor(position: tuple[datetime, str]) -> str:
+    """Encode a ``(created_at, id)`` pair as an opaque URL-safe base64 token.
+
+    The wire format is JSON inside base64 so the codec stays readable in
+    server logs while remaining opaque to clients. Callers MUST treat the
+    returned string as opaque — its shape is not part of the public API.
+    """
+    created_at, document_id = position
+    payload = json.dumps([created_at.isoformat(), document_id]).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_cursor(token: str) -> tuple[datetime, str]:
+    """Decode an opaque cursor back into a ``(created_at, id)`` tuple.
+
+    Raises :class:`InvalidCursor` for malformed base64, malformed JSON,
+    wrong shape (not a 2-element list), or wrong types. The error message
+    is safe to surface to clients — it never leaks server state.
+    """
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii"))
+    except (binascii.Error, UnicodeEncodeError, ValueError) as exc:
+        raise InvalidCursor(f"Cursor is not valid base64: {exc}") from exc
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InvalidCursor(f"Cursor payload is not valid JSON: {exc}") from exc
+    if not isinstance(decoded, list) or len(decoded) != 2:
+        raise InvalidCursor("Cursor payload must be a [created_at, id] pair.")
+    created_at_raw, document_id = decoded
+    if not isinstance(created_at_raw, str) or not isinstance(document_id, str):
+        raise InvalidCursor("Cursor fields must be strings.")
+    try:
+        created_at = datetime.fromisoformat(created_at_raw)
+    except ValueError as exc:
+        raise InvalidCursor(f"Cursor created_at is not an ISO datetime: {exc}") from exc
+    return created_at, document_id
+
+
 # How long a write may wait on a contended SQLite database before raising
 # `database is locked`. 5 s is well above any healthy contention window in the
 # MVP and short enough that a real deadlock surfaces before a request gateway
@@ -39,8 +89,23 @@ class CatalogStore(Protocol):
         """Append a new version to an existing document family and update
         ``Document.latest_version_id``."""
 
-    def list_documents(self) -> list[Document]:
-        """Return all document families with their versions."""
+    def list_documents(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> list[Document]:
+        """Return document families with their versions.
+
+        Documents are returned sorted by ``(created_at ASC, id ASC)`` — the
+        ``id`` tie-breaker keeps two same-second uploads from shifting
+        between pages. When ``cursor`` is provided, only rows strictly
+        greater than the encoded ``(created_at, id)`` tuple are returned.
+        When ``limit`` is provided, at most ``limit`` rows are returned.
+        Both are optional and default to "all rows from the start".
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
+        """
 
     def get_document(self, document_id: str) -> Document | None:
         """Return one document family with versions."""
@@ -144,8 +209,22 @@ class InMemoryCatalogStore:
         if version.duplicate_of_version_id is None:
             self.versions_by_hash.setdefault(version.sha256, version)
 
-    def list_documents(self) -> list[Document]:
-        return list(self.documents.values())
+    def list_documents(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> list[Document]:
+        ordered = sorted(
+            self.documents.values(),
+            key=lambda d: (d.created_at, d.id),
+        )
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            ordered = [d for d in ordered if (d.created_at, d.id) > (after_created_at, after_id)]
+        if limit is not None:
+            ordered = ordered[:limit]
+        return ordered
 
     def get_document(self, document_id: str) -> Document | None:
         return self.documents.get(document_id)
@@ -275,13 +354,46 @@ class SQLiteCatalogStore:
                 (version.id, document_id),
             )
 
-    def list_documents(self) -> list[Document]:
+    def list_documents(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> list[Document]:
+        # Build the documents query with optional cursor/limit clauses.
+        # The tuple comparison `(created_at, id) > (?, ?)` is supported by
+        # SQLite directly and matches the in-memory store's ordering.
+        params: list[object] = []
+        where_clause = ""
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            where_clause = " WHERE (created_at, id) > (?, ?)"
+            params.extend([after_created_at.isoformat(), after_id])
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ?"
+            params.append(int(limit))
+        query = (
+            "SELECT * FROM documents"
+            + where_clause
+            + " ORDER BY created_at ASC, id ASC"
+            + limit_clause
+        )
         with self._connect() as connection:
-            document_rows = connection.execute(
-                "SELECT * FROM documents ORDER BY created_at ASC"
-            ).fetchall()
+            document_rows = connection.execute(query, tuple(params)).fetchall()
+            if not document_rows:
+                return []
+            # Only fetch versions belonging to the slice we're returning so
+            # we don't read the whole `document_versions` table per page.
+            ids = [row["id"] for row in document_rows]
+            placeholders = ", ".join("?" for _ in ids)
             version_rows = connection.execute(
-                "SELECT * FROM document_versions ORDER BY created_at ASC"
+                f"""
+                SELECT * FROM document_versions
+                WHERE document_id IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                tuple(ids),
             ).fetchall()
         versions_by_document: dict[str, list[DocumentVersion]] = {}
         for row in version_rows:

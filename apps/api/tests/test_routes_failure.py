@@ -69,7 +69,9 @@ class TestExtractEndpointFailurePath:
         client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
         catalog = client.get("/documents").json()
 
-        assert catalog[0]["versions"][0]["status"] == "FAILED"
+        assert catalog["items"][0]["versions"][0]["status"] == "FAILED"
         assert (
-            catalog[0]["versions"][0]["failure_reason"] == "FailingParser: simulated parser failure"
+            catalog["items"][0]["versions"][0]["failure_reason"]
+            == "FailingParser: simulated parser failure"
         )
+        assert catalog["next_cursor"] is None

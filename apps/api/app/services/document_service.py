@@ -5,7 +5,11 @@ from uuid import uuid4
 
 from app.models.document import DocumentVersionStatus, assert_transition
 from app.schemas.document import Document, DocumentVersion
-from app.services.catalog_store import CatalogStore, InMemoryCatalogStore
+from app.services.catalog_store import (
+    CatalogStore,
+    InMemoryCatalogStore,
+    _encode_cursor,
+)
 from app.services.hash_service import compute_sha256
 from app.services.storage_service import StorageService, safe_storage_key
 
@@ -192,8 +196,35 @@ class DocumentService:
         )
 
     def list_documents(self) -> list[Document]:
-        """Return all cataloged document families."""
+        """Return all cataloged document families.
+
+        Kept for in-process callers that want every document in catalog
+        order. The HTTP route uses :meth:`list_documents_page` to paginate.
+        """
         return self.catalog.list_documents()
+
+    def list_documents_page(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> tuple[list[Document], str | None]:
+        """Return one page of documents and the cursor for the next page.
+
+        ``next_cursor`` is ``None`` when the page is short — i.e. the
+        underlying store returned fewer than ``limit`` rows, which means
+        there is no more data to walk. Otherwise the cursor encodes the
+        last returned row's ``(created_at, id)`` so the next call returns
+        rows strictly greater than that tuple.
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded; the
+        route layer maps that to HTTP 400.
+        """
+        items = self.catalog.list_documents(cursor=cursor, limit=limit)
+        if len(items) < limit:
+            return items, None
+        last = items[-1]
+        return items, _encode_cursor((last.created_at, last.id))
 
     def get_document(self, document_id: str) -> Document | None:
         """Return a document family by ID, or `None` when absent."""

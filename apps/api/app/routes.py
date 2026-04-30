@@ -7,7 +7,15 @@ from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.models.document import DocumentVersionStatus
+from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
+
+# Cursor pagination guardrails for `GET /documents`. The default page size
+# matches the in-memory store's typical working set; the max ceiling keeps
+# a single response under a few hundred KB even with verbose versions.
+DEFAULT_PAGE_LIMIT = 50
+MIN_PAGE_LIMIT = 1
+MAX_PAGE_LIMIT = 200
 
 # Default upload guardrails. These mirror the values used by the production
 # deployment until Pydantic Settings (#43) lands and replaces the ad-hoc
@@ -123,8 +131,25 @@ def build_router(services: PipelineServices) -> APIRouter:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get("/documents")
-    def list_documents():
-        return services.documents.list_documents()
+    def list_documents(limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None):
+        if limit < MIN_PAGE_LIMIT or limit > MAX_PAGE_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"limit must be between {MIN_PAGE_LIMIT} and {MAX_PAGE_LIMIT}; got {limit}."
+                ),
+            )
+        try:
+            items, next_cursor = services.documents.list_documents_page(
+                limit=limit,
+                cursor=cursor,
+            )
+        except InvalidCursor as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid cursor: {exc}",
+            ) from exc
+        return {"items": items, "next_cursor": next_cursor}
 
     @router.get("/documents/{document_id}")
     def get_document(document_id: str):
