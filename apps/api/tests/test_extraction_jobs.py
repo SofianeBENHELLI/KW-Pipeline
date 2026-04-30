@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.document import DocumentVersionStatus
-from app.services.document_parser import PlainTextParser
+from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed, ExtractionJobService
 from app.services.storage_service import InMemoryStorageService
@@ -9,6 +9,10 @@ from app.services.storage_service import InMemoryStorageService
 
 class AlwaysFailingParser:
     """Parser stub that raises on every parse — used to test the FAILED path."""
+
+    name = "always_failing"
+    version = "test"
+    supported_content_types = frozenset({"text/plain"})
 
     def parse(self, version, storage):
         raise RuntimeError("simulated parser failure")
@@ -96,3 +100,39 @@ def test_get_raw_extraction_raises_for_unknown_document():
             document_id="missing-document-id",
             version_id="missing-version-id",
         )
+
+
+def test_extraction_dispatches_through_parser_registry():
+    documents = DocumentService(storage=InMemoryStorageService())
+    version = documents.upload("note.txt", "text/plain", b"hello")
+    registry = ParserRegistry([PlainTextParser()])
+    jobs = ExtractionJobService(documents=documents, parsers=registry)
+
+    extraction = jobs.extract(document_id=version.document_id, version_id=version.id)
+
+    assert extraction.parser_name == "plain_text"
+    assert (
+        documents.get_version(version.document_id, version.id).status
+        == DocumentVersionStatus.EXTRACTED
+    )
+
+
+def test_extraction_marks_version_failed_for_unsupported_content_type():
+    documents = DocumentService(storage=InMemoryStorageService())
+    version = documents.upload("scan.pdf", "application/pdf", b"%PDF-1.7 fake")
+    # Registry knows only about text/plain, so application/pdf is unsupported.
+    jobs = ExtractionJobService(documents=documents, parsers=ParserRegistry([PlainTextParser()]))
+
+    with pytest.raises(ExtractionFailed) as excinfo:
+        jobs.extract(document_id=version.document_id, version_id=version.id)
+
+    assert excinfo.value.reason == "No parser for content_type: application/pdf"
+    failed = documents.get_version(version.document_id, version.id)
+    assert failed.status == DocumentVersionStatus.FAILED
+    assert failed.failure_reason == "No parser for content_type: application/pdf"
+
+
+def test_extraction_job_service_requires_parsers_or_parser():
+    documents = DocumentService(storage=InMemoryStorageService())
+    with pytest.raises(TypeError, match="parsers=` or `parser="):
+        ExtractionJobService(documents=documents)

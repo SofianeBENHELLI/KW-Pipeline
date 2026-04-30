@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
+from app.services.document_parser import ParserRegistry
 
 
 class FailingParser:
@@ -14,18 +15,20 @@ class FailingParser:
 
     name = "failing"
     version = "test"
+    supported_content_types = frozenset({"text/plain"})
 
     def parse(self, version, storage):
         raise RuntimeError("simulated parser failure")
 
 
 def _client_with_failing_parser() -> TestClient:
-    """Build the standard pipeline, then swap the parser used by the extraction
-    job service for a stub that raises. ExtractionJobService.parser is a regular
-    attribute, so this monkey-patch is safe even though PipelineServices is
-    a frozen dataclass."""
+    """Build the standard pipeline, then swap the parser registry used by the
+    extraction job service for one whose only registered parser raises.
+    ``ExtractionJobService.parsers`` is a regular attribute, so this
+    monkey-patch is safe even though ``PipelineServices`` is a frozen
+    dataclass."""
     services = build_services()
-    services.extraction_jobs.parser = FailingParser()
+    services.extraction_jobs.parsers = ParserRegistry([FailingParser()])
     return TestClient(create_app(services=services))
 
 
