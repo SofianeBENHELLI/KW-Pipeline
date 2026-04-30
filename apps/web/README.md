@@ -37,9 +37,29 @@ apps/web/
 └── src/
     ├── App.tsx
     ├── App.test.tsx
+    ├── domain/
+    │   └── document.ts
+    ├── features/
+    │   ├── pipeline/
+    │   │   └── PipelineWidget.tsx
+    │   └── review/
+    │       └── ReviewWorkspace.tsx
+    ├── fixtures/
+    │   └── sampleDocuments.ts
     ├── main.tsx
-    └── test-setup.ts
+    ├── styles.css
+    ├── test-setup.ts
+    └── ui/
+        └── StatusBadge.tsx
 ```
+
+## Frontend Slices
+
+- `domain/` mirrors backend API shapes and lifecycle statuses.
+- `features/pipeline/` owns the compact dashboard widget experience.
+- `features/review/` owns the expanded document review workspace.
+- `fixtures/` provides API-shaped sample data until live HTTP hooks land.
+- `ui/` contains shared presentation primitives such as status badges.
 
 ## Notes
 
