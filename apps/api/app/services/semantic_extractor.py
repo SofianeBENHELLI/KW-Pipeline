@@ -35,7 +35,9 @@ class SemanticExtractor:
             sections=sections,
             assets=[],
             warnings=warnings,
-            source_references=[ref.model_dump(mode="json") for ref in raw_extraction.source_references],
+            source_references=[
+                ref.model_dump(mode="json") for ref in raw_extraction.source_references
+            ],
             validation_status="needs_review",
         )
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Self
 from uuid import uuid4
 
@@ -8,7 +8,7 @@ from app.models.document import DocumentVersionStatus
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class DocumentVersion(BaseModel):

@@ -17,11 +17,33 @@ jobs:
     name: Lint workflows (actionlint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
         with:
           fail-on-error: true
+
+  python-lint:
+    name: Lint Python (ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.12
+
+      - name: ruff check
+        run: ruff check
+
+      - name: ruff format --check
+        run: ruff format --check
 
   backend:
     name: Backend (pytest, py${{ matrix.python-version }})
@@ -34,9 +56,9 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -68,7 +90,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}
           path: |
@@ -76,5 +98,35 @@ jobs:
             apps/api/pytest-junit.xml
           if-no-files-found: warn
 
-  # The frontend pytest/vitest job will be added once #14 scaffolds apps/web
-  # (package.json, vitest, playwright) so there is something concrete to run.
+  frontend:
+    name: Frontend (vitest, node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # `cache: npm` is only enabled once apps/web/package-lock.json is
+          # committed; setup-node@v4 errors out if the cache-dependency-path
+          # cannot be resolved.
+
+      - name: Install dependencies (lockfile-aware)
+        # Prefer reproducible installs via `npm ci` once package-lock.json
+        # is committed. Until then this step falls back to `npm install`,
+        # which generates a lockfile in CI but does not commit it.
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run vitest
+        run: npx vitest run

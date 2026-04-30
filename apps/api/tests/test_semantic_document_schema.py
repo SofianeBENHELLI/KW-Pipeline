@@ -55,9 +55,7 @@ class TestSemanticAssetConfidenceBounds:
 
 
 class TestSemanticAssetReviewStatusValues:
-    @pytest.mark.parametrize(
-        "status", ["needs_review", "source_backed", "validated", "rejected"]
-    )
+    @pytest.mark.parametrize("status", ["needs_review", "source_backed", "validated", "rejected"])
     def test_known_review_statuses_are_accepted(self, status):
         asset = SemanticAsset(
             type="t",
@@ -92,9 +90,7 @@ class TestSemanticDocumentDefaults:
         assert doc.warnings == []
         assert doc.markdown is None
 
-    @pytest.mark.parametrize(
-        "status", ["needs_review", "validated", "rejected"]
-    )
+    @pytest.mark.parametrize("status", ["needs_review", "validated", "rejected"])
     def test_known_validation_statuses_are_accepted(self, status):
         doc = SemanticDocument(
             document_version_id="v1",
@@ -131,4 +127,3 @@ class TestDocumentProfile:
         assert profile.audience is None
         assert profile.executive_summary is None
         assert profile.document_type == "unknown"
-

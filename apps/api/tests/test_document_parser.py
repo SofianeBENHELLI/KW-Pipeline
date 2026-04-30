@@ -23,4 +23,3 @@ def test_plain_text_parser_warns_when_no_text_is_extracted():
 
     assert extraction.source_references == []
     assert "No non-empty text lines were extracted." in extraction.warnings
-

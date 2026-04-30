@@ -30,3 +30,26 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F/W: pycodestyle + pyflakes (default). I: isort. UP: pyupgrade.
+# B: bugbear (catches a handful of common Python bugs). C4: comprehensions.
+# SIM: simplify. Adding rules later is the easy direction.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI uses `Depends`, `File`, `Body`, etc. as argument defaults by design;
+# these calls return marker objects, not stateful values.
+extend-immutable-calls = [
+  "fastapi.Body",
+  "fastapi.Depends",
+  "fastapi.File",
+  "fastapi.Form",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

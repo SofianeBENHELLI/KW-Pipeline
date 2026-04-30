@@ -96,4 +96,3 @@ def test_get_raw_extraction_raises_for_unknown_document():
             document_id="missing-document-id",
             version_id="missing-version-id",
         )
-

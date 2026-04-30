@@ -1,3 +1,5 @@
+from datetime import UTC
+
 import pytest
 
 from app.models.document import DocumentVersionStatus
@@ -225,12 +227,12 @@ class TestInMemoryCatalogStoreFailure:
 
 class TestInMemoryCatalogStoreReview:
     def test_update_review_writes_status_note_and_timestamp(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
         version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
         store.save_document_with_version(_make_document(version), version)
-        moment = datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc)
+        moment = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
 
         updated = store.update_version_review(
             document_id=version.document_id,
@@ -245,7 +247,7 @@ class TestInMemoryCatalogStoreReview:
         assert updated.reviewed_at == moment
 
     def test_update_review_accepts_none_reviewer_note(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
         version = _make_version(status=DocumentVersionStatus.NEEDS_REVIEW)
@@ -256,7 +258,7 @@ class TestInMemoryCatalogStoreReview:
             version_id=version.id,
             status=DocumentVersionStatus.REJECTED,
             reviewer_note=None,
-            reviewed_at=datetime.now(timezone.utc),
+            reviewed_at=datetime.now(UTC),
         )
 
         assert updated.status == DocumentVersionStatus.REJECTED
@@ -264,7 +266,7 @@ class TestInMemoryCatalogStoreReview:
         assert updated.reviewed_at is not None
 
     def test_update_review_propagates_missing_document(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         store = InMemoryCatalogStore()
 
@@ -274,5 +276,72 @@ class TestInMemoryCatalogStoreReview:
                 version_id="missing",
                 status=DocumentVersionStatus.VALIDATED,
                 reviewer_note=None,
-                reviewed_at=datetime.now(timezone.utc),
+                reviewed_at=datetime.now(UTC),
             )
+
+
+class TestInMemoryCatalogStoreArtefacts:
+    """Generated artefacts (raw extraction + semantic document) round-trip
+    cleanly through save/get and overwrite on repeat saves."""
+
+    def _raw(self, version_id: str = "ver-1", text: str = "hello"):
+        from app.schemas.extraction import RawExtraction
+
+        return RawExtraction(
+            document_version_id=version_id,
+            parser_name="plain_text",
+            parser_version="0.1",
+            text=text,
+        )
+
+    def _semantic(self, version_id: str = "ver-1", title: str = "Policy"):
+        from app.schemas.semantic_document import DocumentProfile, SemanticDocument
+
+        return SemanticDocument(
+            document_version_id=version_id,
+            document_profile=DocumentProfile(title=title),
+        )
+
+    def test_save_and_get_raw_extraction_round_trip(self):
+        store = InMemoryCatalogStore()
+        raw = self._raw(text="round trip")
+
+        store.save_raw_extraction("ver-1", raw)
+
+        assert store.get_raw_extraction("ver-1") is raw
+
+    def test_get_raw_extraction_raises_when_missing(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Raw extraction not found"):
+            store.get_raw_extraction("never-extracted")
+
+    def test_save_raw_extraction_overwrites_prior_payload(self):
+        store = InMemoryCatalogStore()
+        store.save_raw_extraction("ver-1", self._raw(text="first"))
+
+        store.save_raw_extraction("ver-1", self._raw(text="second"))
+
+        assert store.get_raw_extraction("ver-1").text == "second"
+
+    def test_save_and_get_semantic_document_round_trip(self):
+        store = InMemoryCatalogStore()
+        semantic = self._semantic(title="Round Trip")
+
+        store.save_semantic_document("ver-1", semantic)
+
+        assert store.get_semantic_document("ver-1") is semantic
+
+    def test_get_semantic_document_raises_when_missing(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Semantic output not found"):
+            store.get_semantic_document("never-generated")
+
+    def test_save_semantic_document_overwrites_prior_payload(self):
+        store = InMemoryCatalogStore()
+        store.save_semantic_document("ver-1", self._semantic(title="First"))
+
+        store.save_semantic_document("ver-1", self._semantic(title="Second"))
+
+        assert store.get_semantic_document("ver-1").document_profile.title == "Second"

@@ -72,7 +72,9 @@ def build_router(services: PipelineServices) -> APIRouter:
     @router.post("/documents/{document_id}/versions/{version_id}/semantic")
     def generate_semantic_document(document_id: str, version_id: str):
         try:
-            return services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+            return services.semantic_outputs.generate(
+                document_id=document_id, version_id=version_id
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

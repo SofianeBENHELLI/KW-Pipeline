@@ -15,12 +15,8 @@ class TestSemanticOutputServiceGenerate:
         document_id, version_id = _upload(services)
         services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
 
-        first = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
-        second = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
+        first = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+        second = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
 
         assert second is first
 
@@ -29,9 +25,7 @@ class TestSemanticOutputServiceGenerate:
         document_id, version_id = _upload(services)
 
         with pytest.raises(KeyError, match="Raw extraction not found"):
-            services.semantic_outputs.generate(
-                document_id=document_id, version_id=version_id
-            )
+            services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
 
 
 class TestSemanticOutputServiceLookup:
@@ -43,9 +37,7 @@ class TestSemanticOutputServiceLookup:
             document_id=document_id, version_id=version_id
         )
 
-        fetched = services.semantic_outputs.get(
-            document_id=document_id, version_id=version_id
-        )
+        fetched = services.semantic_outputs.get(document_id=document_id, version_id=version_id)
 
         assert fetched is generated
 
@@ -54,17 +46,13 @@ class TestSemanticOutputServiceLookup:
         document_id, version_id = _upload(services)
 
         with pytest.raises(KeyError, match="Semantic output not found"):
-            services.semantic_outputs.get(
-                document_id=document_id, version_id=version_id
-            )
+            services.semantic_outputs.get(document_id=document_id, version_id=version_id)
 
     def test_get_markdown_returns_rendered_markdown(self):
         services = build_services()
         document_id, version_id = _upload(services)
         services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
-        services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
+        services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
 
         markdown = services.semantic_outputs.get_markdown(
             document_id=document_id, version_id=version_id
@@ -112,20 +100,22 @@ class TestSemanticOutputServiceLookup:
             )
 
     def test_get_markdown_raises_when_cached_semantic_lacks_markdown(self):
-        """Defensive branch: a cached SemanticDocument without rendered Markdown
-        must surface as 'Markdown output not found.' rather than returning None."""
+        """Defensive branch: a persisted SemanticDocument without rendered
+        Markdown must surface as 'Markdown output not found.' rather than
+        returning None."""
         services = build_services()
         document_id, version_id = _upload(services)
 
-        # Bypass `generate()` and inject a markdown-less semantic document directly
-        # so we exercise the `markdown is None` guard.
-        services.semantic_outputs.semantic_documents[version_id] = SemanticDocument(
-            document_version_id=version_id,
-            document_profile=DocumentProfile(title="Policy"),
-            markdown=None,
+        # Bypass `generate()` and store a markdown-less semantic document
+        # directly via the catalog so we exercise the `markdown is None` guard.
+        services.documents.catalog.save_semantic_document(
+            version_id,
+            SemanticDocument(
+                document_version_id=version_id,
+                document_profile=DocumentProfile(title="Policy"),
+                markdown=None,
+            ),
         )
 
         with pytest.raises(KeyError, match="Markdown output not found"):
-            services.semantic_outputs.get_markdown(
-                document_id=document_id, version_id=version_id
-            )
+            services.semantic_outputs.get_markdown(document_id=document_id, version_id=version_id)

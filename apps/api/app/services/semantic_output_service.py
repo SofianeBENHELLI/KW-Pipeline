@@ -8,7 +8,12 @@ from app.services.semantic_extractor import SemanticExtractor
 
 
 class SemanticOutputService:
-    """Caches generated semantic JSON and Markdown for document versions."""
+    """Generates and persists semantic JSON + Markdown for document versions.
+
+    Storage goes through the catalog store, so a process restart never
+    loses generated artefacts — `get`, `get_markdown`, and `record_validation`
+    all keep working after a fresh `build_persistent_services(...)`.
+    """
 
     def __init__(
         self,
@@ -21,13 +26,13 @@ class SemanticOutputService:
         self.extraction_jobs = extraction_jobs
         self.semantic_extractor = semantic_extractor
         self.markdown_generator = markdown_generator
-        self.semantic_documents: dict[str, SemanticDocument] = {}
 
     def generate(self, document_id: str, version_id: str) -> SemanticDocument:
-        """Generate semantic output once and return cached output afterward."""
-        existing = self.semantic_documents.get(version_id)
-        if existing is not None:
-            return existing
+        """Generate semantic output once and return persisted output afterward."""
+        try:
+            return self.documents.catalog.get_semantic_document(version_id)
+        except KeyError:
+            pass  # nothing cached yet — generate below
 
         raw_extraction = self.extraction_jobs.get_raw_extraction(
             document_id=document_id,
@@ -40,20 +45,17 @@ class SemanticOutputService:
             semantic=semantic,
             raw_extraction=raw_extraction,
         )
-        self.semantic_documents[version_id] = semantic
+        self.documents.catalog.save_semantic_document(version_id, semantic)
         self.documents.mark_semantic_ready(document_id=document_id, version_id=version_id)
         return semantic
 
     def get(self, document_id: str, version_id: str) -> SemanticDocument:
-        """Return cached semantic output for a document version."""
+        """Return persisted semantic output for a document version."""
         self.documents.get_version(document_id=document_id, version_id=version_id)
-        semantic = self.semantic_documents.get(version_id)
-        if semantic is None:
-            raise KeyError("Semantic output not found.")
-        return semantic
+        return self.documents.catalog.get_semantic_document(version_id)
 
     def get_markdown(self, document_id: str, version_id: str) -> str:
-        """Return cached Markdown output for a document version."""
+        """Return persisted Markdown output for a document version."""
         semantic = self.get(document_id=document_id, version_id=version_id)
         if semantic.markdown is None:
             raise KeyError("Markdown output not found.")
@@ -65,11 +67,12 @@ class SemanticOutputService:
         version_id: str,
         status: Literal["validated", "rejected"],
     ) -> SemanticDocument:
-        """Update the cached SemanticDocument to reflect a reviewer's decision.
+        """Update the persisted SemanticDocument to reflect a reviewer's decision.
 
         The DocumentVersion lifecycle status is updated separately via
         ``DocumentService.mark_validated/mark_rejected``; this method keeps the
-        cached semantic JSON's ``validation_status`` in sync."""
+        persisted semantic JSON's ``validation_status`` in sync."""
         semantic = self.get(document_id=document_id, version_id=version_id)
         semantic.validation_status = status
+        self.documents.catalog.save_semantic_document(version_id, semantic)
         return semantic

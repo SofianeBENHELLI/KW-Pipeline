@@ -1,12 +1,22 @@
 import sqlite3
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentVersion
+from app.schemas.extraction import RawExtraction
+from app.schemas.semantic_document import SemanticDocument
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
+
+# How long a write may wait on a contended SQLite database before raising
+# `database is locked`. 5 s is well above any healthy contention window in the
+# MVP and short enough that a real deadlock surfaces before a request gateway
+# times out.
+_SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 class CatalogStore(Protocol):
@@ -58,6 +68,20 @@ class CatalogStore(Protocol):
         """Atomically write a reviewer's decision: status (VALIDATED or
         REJECTED), the optional note, and the timestamp it was made."""
 
+    # ------- Generated artefacts (raw extraction + semantic output) ------- #
+
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        """Persist parser output for a version. Replaces any prior extraction."""
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        """Return the persisted raw extraction. Raises KeyError if none exists."""
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        """Persist semantic JSON (and rendered Markdown if any) for a version."""
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        """Return the persisted semantic document. Raises KeyError if none exists."""
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -66,6 +90,8 @@ class InMemoryCatalogStore:
         self.documents: dict[str, Document] = {}
         self.versions_by_hash: dict[str, DocumentVersion] = {}
         self.versions: dict[str, DocumentVersion] = {}
+        self.raw_extractions: dict[str, RawExtraction] = {}
+        self.semantic_documents: dict[str, SemanticDocument] = {}
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         return self.versions_by_hash.get(sha256)
@@ -136,6 +162,24 @@ class InMemoryCatalogStore:
         version.reviewed_at = reviewed_at
         return version
 
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        self.raw_extractions[version_id] = raw_extraction
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        raw_extraction = self.raw_extractions.get(version_id)
+        if raw_extraction is None:
+            raise KeyError("Raw extraction not found.")
+        return raw_extraction
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        self.semantic_documents[version_id] = semantic
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        semantic = self.semantic_documents.get(version_id)
+        if semantic is None:
+            raise KeyError("Semantic output not found.")
+        return semantic
+
 
 class SQLiteCatalogStore:
     """SQLite-backed catalog store for the local persistent MVP."""
@@ -146,11 +190,15 @@ class SQLiteCatalogStore:
         self._initialize()
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
+        # Excluding rows where `duplicate_of_version_id IS NOT NULL` matches
+        # the in-memory store's behaviour (it never indexes duplicates by
+        # hash) and prevents a third upload of the same bytes from chaining
+        # off a duplicate row instead of pointing at the original version.
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM document_versions
-                WHERE sha256 = ?
+                WHERE sha256 = ? AND duplicate_of_version_id IS NULL
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
@@ -292,8 +340,67 @@ class SQLiteCatalogStore:
             )
         return self.get_version(document_id=document_id, version_id=version_id)
 
+    def save_raw_extraction(self, version_id: str, raw_extraction: RawExtraction) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO raw_extractions (document_version_id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(document_version_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (
+                    version_id,
+                    raw_extraction.model_dump_json(),
+                    raw_extraction.created_at.isoformat(),
+                ),
+            )
+
+    def get_raw_extraction(self, version_id: str) -> RawExtraction:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM raw_extractions WHERE document_version_id = ?",
+                (version_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Raw extraction not found.")
+        return RawExtraction.model_validate_json(row["payload"])
+
+    def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO semantic_documents (document_version_id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(document_version_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (
+                    version_id,
+                    semantic.model_dump_json(),
+                    semantic.created_at.isoformat(),
+                ),
+            )
+
+    def get_semantic_document(self, version_id: str) -> SemanticDocument:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM semantic_documents WHERE document_version_id = ?",
+                (version_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Semantic output not found.")
+        return SemanticDocument.model_validate_json(row["payload"])
+
     def _initialize(self) -> None:
         with self._connect() as connection:
+            # WAL is per-database and survives restart, so set once here.
+            # WAL allows a writer + readers concurrently and reduces
+            # `database is locked` errors during the eventual extraction
+            # worker / API request overlap.
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS documents (
@@ -333,24 +440,60 @@ class SQLiteCatalogStore:
                 for row in connection.execute("PRAGMA table_info(document_versions)").fetchall()
             }
             if "reviewer_note" not in existing_columns:
-                connection.execute(
-                    "ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT"
-                )
+                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT")
             if "reviewed_at" not in existing_columns:
-                connection.execute(
-                    "ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT"
-                )
+                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_document_versions_sha256
                 ON document_versions (sha256)
                 """
             )
+            # Generated artefacts: one row per version, holding the full
+            # Pydantic JSON payload. document_version_id is the PK because
+            # each version has at most one extraction and at most one
+            # semantic document; re-extraction overwrites in place.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS raw_extractions (
+                    document_version_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_documents (
+                    document_version_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
+                )
+                """
+            )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection, commit on success, and **always close**.
+
+        Python's `sqlite3.Connection` is itself a context manager that
+        commits on exit but does NOT release the underlying handle —
+        relying on it leaks one file descriptor per call. Wrapping in
+        an explicit `@contextmanager` closes the connection, enables
+        foreign-key enforcement, and sets a busy timeout for every
+        operation.
+        """
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _insert_version(self, connection: sqlite3.Connection, version: DocumentVersion) -> None:
         connection.execute(
