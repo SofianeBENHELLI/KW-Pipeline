@@ -1,4 +1,6 @@
 import os
+import tempfile
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Body, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
@@ -12,6 +14,16 @@ from app.services.extraction_job_service import ExtractionFailed
 # `os.environ.get` reads at request time.
 DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MiB
 DEFAULT_ALLOWED_CONTENT_TYPES = "text/plain"
+
+# Streaming read granularity for the upload route. Matches the storage
+# service's write granularity so peak resident memory during upload is one
+# chunk plus framing overhead, regardless of total payload size.
+_UPLOAD_READ_CHUNK_SIZE = 8 * 1024 * 1024
+# Threshold below which `SpooledTemporaryFile` keeps bytes in RAM. Chosen
+# at 1 MiB so anything larger spills to a real file on disk; this keeps the
+# resident set bounded for multi-GB uploads while still avoiding a syscall
+# round-trip for small ones.
+_SPOOL_ROLLOVER_BYTES = 1 * 1024 * 1024
 
 
 def _max_upload_bytes() -> int:
@@ -72,23 +84,43 @@ def build_router(services: PipelineServices) -> APIRouter:
                 ),
             )
 
-        content = await file.read()
-        if len(content) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Upload exceeds limit of {max_bytes} bytes",
-            )
-        if not content:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-        try:
-            return services.documents.upload(
-                filename=file.filename or "untitled",
-                content_type=raw_content_type,
-                content=content,
-                document_id=document_id,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # Spool the upload to a temp file in 8 MiB chunks so peak resident
+        # memory tracks the chunk size, not the payload size. The size limit
+        # is enforced incrementally — we stop reading the moment the running
+        # total crosses ``max_bytes``, so a 51 MB body never materialises.
+        with tempfile.SpooledTemporaryFile(max_size=_SPOOL_ROLLOVER_BYTES, mode="w+b") as spool:
+            total = 0
+            while True:
+                chunk = await file.read(_UPLOAD_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds limit of {max_bytes} bytes",
+                    )
+                spool.write(chunk)
+            if total == 0:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+            spool.seek(0)
+
+            def _iter_chunks() -> Iterator[bytes]:
+                while True:
+                    block = spool.read(_UPLOAD_READ_CHUNK_SIZE)
+                    if not block:
+                        return
+                    yield block
+
+            try:
+                return services.documents.upload_stream(
+                    filename=file.filename or "untitled",
+                    content_type=raw_content_type,
+                    chunks=_iter_chunks(),
+                    document_id=document_id,
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get("/documents")
     def list_documents():
