@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
+from app.services.document_parser import PlainTextParser
 
 
 def _client():
@@ -136,3 +137,67 @@ class TestCorsMiddleware:
         )
 
         assert "access-control-allow-origin" not in response.headers
+
+
+class TestExtractWhitespaceOnly:
+    """Issue #58: whitespace-only uploads must not silently progress to
+    NEEDS_REVIEW with an empty Markdown asset."""
+
+    def test_whitespace_only_upload_then_extract_returns_422(self):
+        client = _client()
+
+        upload = client.post(
+            "/documents/upload",
+            files={"file": ("blank.txt", b"\n\n   \n", "text/plain")},
+        ).json()
+
+        response = client.post(
+            f"/documents/{upload['document_id']}/versions/{upload['id']}/extract"
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "PlainTextParser: No extractable content"
+
+        document = client.get(f"/documents/{upload['document_id']}").json()
+        failed_version = document["versions"][0]
+        assert failed_version["status"] == "FAILED"
+        assert failed_version["failure_reason"] == "PlainTextParser: No extractable content"
+
+
+class TestExtractUnknownContentType:
+    """A content_type with no parser registered must surface as ExtractionFailed
+    (HTTP 422), not crash. The persisted ``failure_reason`` keeps the failure
+    visible to reviewers via GET /documents."""
+
+    def test_unsupported_content_type_returns_422(self):
+        client = _client()
+
+        upload = client.post(
+            "/documents/upload",
+            files={"file": ("blob.bin", b"opaque", "application/octet-stream")},
+        ).json()
+
+        response = client.post(
+            f"/documents/{upload['document_id']}/versions/{upload['id']}/extract"
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "No parser for content_type: application/octet-stream"
+
+        document = client.get(f"/documents/{upload['document_id']}").json()
+        failed_version = document["versions"][0]
+        assert failed_version["status"] == "FAILED"
+        assert (
+            failed_version["failure_reason"]
+            == "No parser for content_type: application/octet-stream"
+        )
+
+
+class TestParserRegistryWiring:
+    """Verifies build_services() registers PlainTextParser by content type."""
+
+    def test_build_services_registers_plain_text_parser(self):
+        services = build_services()
+        parser = services.parsers.for_content_type("text/plain")
+
+        assert isinstance(parser, PlainTextParser)

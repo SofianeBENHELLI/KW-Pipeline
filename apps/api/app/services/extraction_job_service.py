@@ -1,6 +1,6 @@
 from app.models.document import DocumentVersionStatus
 from app.schemas.extraction import RawExtraction
-from app.services.document_parser import Parser, ParserRegistry
+from app.services.document_parser import ParserRegistry
 from app.services.document_service import DocumentService
 
 
@@ -21,34 +21,17 @@ class ExtractionJobService:
     a previously extracted version after a process restart returns the
     same payload without re-running the parser.
 
-    Parser dispatch is handled by ``ParserRegistry``; the right concrete parser
-    is picked at extract time using ``DocumentVersion.content_type``. The legacy
-    ``parser=`` keyword is retained so existing wiring (``dependencies.py``)
-    and tests that monkey-patch ``services.extraction_jobs.parser`` keep working
-    while the multi-parser ecosystem (#45/#46/#47) is being built out. Final
-    registry wiring in ``dependencies.py`` is owned by the supervisor and is
-    pending follow-up.
+    Parser selection is delegated to a ``ParserRegistry`` keyed on
+    ``DocumentVersion.content_type``. The registry decouples the job
+    service from any specific parser implementation and lets a single
+    deployment serve multiple content types. The legacy ``parser=`` shim
+    introduced by #39 is dropped here — call sites must pass
+    ``parsers=ParserRegistry([...])``.
     """
 
-    def __init__(
-        self,
-        documents: DocumentService,
-        parsers: ParserRegistry | None = None,
-        *,
-        parser: Parser | None = None,
-    ):
-        if parsers is None and parser is None:
-            raise TypeError("ExtractionJobService requires `parsers=` or `parser=`.")
-        if parsers is None:
-            # Legacy single-parser path: wrap the lone parser in a registry
-            # so extract() can still dispatch by content_type.
-            parsers = ParserRegistry([parser])
+    def __init__(self, *, documents: DocumentService, parsers: ParserRegistry):
         self.documents = documents
         self.parsers = parsers
-        # Kept for backward compatibility with callers that read or override
-        # ``services.extraction_jobs.parser`` directly. New code should
-        # consult ``self.parsers``.
-        self.parser = parser
 
     def extract(self, document_id: str, version_id: str) -> RawExtraction:
         """Run extraction for one stored, non-duplicate document version."""
@@ -72,6 +55,10 @@ class ExtractionJobService:
             reason = f"{type(parser).__name__}: {exc}"
             self.documents.mark_failed(document_id, version_id, reason)
             raise ExtractionFailed(reason) from exc
+        if not raw_extraction.source_references:
+            reason = f"{type(parser).__name__}: No extractable content"
+            self.documents.mark_failed(document_id, version_id, reason)
+            raise ExtractionFailed(reason)
         self.documents.catalog.save_raw_extraction(version_id, raw_extraction)
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
         return raw_extraction
