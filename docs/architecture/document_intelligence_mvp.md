@@ -44,6 +44,11 @@ Orbital owns human review:
 6. Validate or reject extraction results.
 7. Show failed extraction states clearly.
 
+Orbital should start as an efficient reviewer workbench rather than a fancy
+application shell. The frontend must support a compact widget mode for future
+3DEXPERIENCE dashboard embedding and an expanded mode for detailed review. The
+same components should serve both modes where possible.
+
 ## Lifecycle
 
 Document versions move through these states:

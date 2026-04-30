@@ -31,8 +31,8 @@ to store catalog metadata in SQLite and raw uploads on disk.
   semantic JSON that remains `needs_review`.
 - `MarkdownGenerator` renders deterministic Markdown with required frontmatter
   and source lineage.
-- `SemanticOutputService` caches generated semantic JSON and Markdown so API
-  retrieval endpoints can serve review output without re-running generation.
+- `SemanticOutputService` generates and persists semantic JSON and Markdown so
+  API retrieval endpoints can serve review output without re-running generation.
 
 ## Schemas
 
@@ -56,3 +56,11 @@ The directory is ignored by Git and can be deleted to reset local state.
 
 See `docs/architecture/persistence.md` for the persistence boundary and adapter
 details.
+
+## Frontend
+
+`apps/web/` contains the Orbital reviewer UI. It uses Vite, React 18,
+TypeScript, and Vitest. The frontend should be developed as an operational
+workbench that can later be embedded as a compact 3DEXPERIENCE-compatible
+widget. See `docs/architecture/orbital_widget_ux.md` for the frontend UX
+direction and widget constraints.

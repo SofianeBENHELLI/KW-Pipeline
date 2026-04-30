@@ -6,6 +6,11 @@ Stack: Vite + React 18 + TypeScript, Vitest + @testing-library/react,
 react-router-dom. Rationale lives in
 [`docs/adr/ADR-004-orbital-frontend-stack.md`](../../docs/adr/ADR-004-orbital-frontend-stack.md).
 
+The UI is intentionally an operational workbench, not a fancy standalone app.
+It should be able to run first as a normal web app and later as a compact
+3DEXPERIENCE-compatible widget. UX direction lives in
+[`docs/architecture/orbital_widget_ux.md`](../../docs/architecture/orbital_widget_ux.md).
+
 ## Quickstart
 
 Requires Node 22 LTS.
@@ -47,3 +52,5 @@ apps/web/
   in a CORS-permissive dev mode or add a Vite proxy.
 - A future Tauri shell can wrap this same build for a native desktop window
   without changing the React app.
+- Keep branding behind a small theme layer so official 3DEXPERIENCE /
+  Dassault Systemes tokens can replace local defaults later.

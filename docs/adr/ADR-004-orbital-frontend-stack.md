@@ -13,6 +13,12 @@ product surface. It must run on PC and macOS workstations used by the team
 without per-OS installers, and it has to talk to the FastAPI backend in
 `apps/api/`.
 
+Orbital should also be designed so it can later run as a compact widget inside
+a 3DEXPERIENCE dashboard. The MVP may ship as a standalone Vite app first, but
+the UI shape must avoid assumptions that would make widget embedding expensive:
+large hero layouts, full-window-only navigation, decorative backgrounds, and
+hardcoded brand styling.
+
 The constraints that drive this decision:
 
 - **PC + macOS.** The reviewer pool spans both. Anything that needs an OS
@@ -20,6 +26,10 @@ The constraints that drive this decision:
   packaging.
 - **Internal review tool, not a public site.** No SSR, no SEO, no hydration
   budget, no per-route latency targets. The audience is logged-in reviewers.
+- **Future 3DEXPERIENCE widget.** The UI should behave like a compact
+  operational widget first and an expanded review workspace second. Branding
+  should stay behind a theme layer until official Dassault Systemes /
+  3DEXPERIENCE tokens are available.
 - **Backend already in Python/FastAPI.** The frontend talks to that API and
   renders the artifacts the pipeline emits (Markdown, JSON, source bytes).
 - **Small team.** We want a stack the existing engineers can run in 10 minutes
@@ -71,3 +81,6 @@ tool.
 - Choosing Vitest keeps the test runner in the same config graph as the build,
   so a future Storybook or Playwright layer plugs in without a second
   transformer.
+- The first screens should be built from reusable React components that can
+  render in both compact widget mode and expanded workspace mode. See
+  `docs/architecture/orbital_widget_ux.md` for the UX direction.
