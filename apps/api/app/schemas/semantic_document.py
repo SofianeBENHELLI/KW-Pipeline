@@ -53,7 +53,7 @@ class SemanticDocument(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     document_version_id: str
-    schema_version: str = "v0.1"
+    schema_version: Literal["v0.1"] = "v0.1"
     document_profile: DocumentProfile
     sections: list[SemanticSection] = Field(default_factory=list)
     assets: list[SemanticAsset] = Field(default_factory=list)

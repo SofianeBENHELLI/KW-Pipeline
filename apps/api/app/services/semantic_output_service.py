@@ -5,6 +5,7 @@ from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.semantic_extractor import SemanticExtractor
+from app.services.semantic_schema_loader import load_semantic_document
 
 
 class SemanticOutputService:
@@ -30,7 +31,8 @@ class SemanticOutputService:
     def generate(self, document_id: str, version_id: str) -> SemanticDocument:
         """Generate semantic output once and return persisted output afterward."""
         try:
-            return self.documents.catalog.get_semantic_document(version_id)
+            payload = self.documents.catalog.get_semantic_document_payload(version_id)
+            return load_semantic_document(payload)
         except KeyError:
             pass  # nothing cached yet — generate below
 
@@ -50,9 +52,16 @@ class SemanticOutputService:
         return semantic
 
     def get(self, document_id: str, version_id: str) -> SemanticDocument:
-        """Return persisted semantic output for a document version."""
+        """Return persisted semantic output for a document version.
+
+        The catalog returns the raw JSON payload; the schema loader is the
+        single boundary that produces a typed ``SemanticDocument``. Per
+        ADR-008, this lets older payloads route through registered
+        migrators when the schema evolves.
+        """
         self.documents.get_version(document_id=document_id, version_id=version_id)
-        return self.documents.catalog.get_semantic_document(version_id)
+        payload = self.documents.catalog.get_semantic_document_payload(version_id)
+        return load_semantic_document(payload)
 
     def get_markdown(self, document_id: str, version_id: str) -> str:
         """Return persisted Markdown output for a document version."""
