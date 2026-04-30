@@ -88,13 +88,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          # `cache: npm` is only enabled once apps/web/package-lock.json is
+          # committed; setup-node@v4 errors out if the cache-dependency-path
+          # cannot be resolved.
 
       - name: Install dependencies (lockfile-aware)
-        # Prefer reproducible installs via `npm ci` once package-lock.json is
-        # committed. Until then this step falls back to `npm install`, which
-        # generates a lockfile and is cache-compatible with the key above.
+        # Prefer reproducible installs via `npm ci` once package-lock.json
+        # is committed. Until then this step falls back to `npm install`,
+        # which generates a lockfile in CI but does not commit it.
         run: |
           if [ -f package-lock.json ]; then
             npm ci
