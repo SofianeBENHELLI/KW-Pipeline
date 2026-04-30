@@ -17,6 +17,28 @@ Response fields:
 - `status`
 - `duplicate_of_version_id`
 
+### Upload size limit
+
+Uploads larger than `MAX_UPLOAD_BYTES` are rejected with HTTP `413 Payload Too
+Large` and a detail of `"Upload exceeds limit of <N> bytes"`.
+
+`MAX_UPLOAD_BYTES` is read from the environment at request time. When unset it
+defaults to `52428800` (50 MiB). Streaming enforcement (rejecting before the
+whole body is buffered) is tracked separately in #41.
+
+### Content type allowlist
+
+The request `Content-Type` of the uploaded part is compared against
+`ALLOWED_CONTENT_TYPES`, a comma-separated list read from the environment at
+request time. When unset it defaults to `text/plain`. PDF and DOCX entries
+will be added once their parsers land in milestone 4.
+
+Media-type parameters are stripped before comparison, so
+`text/plain; charset=utf-8` is accepted when `text/plain` is on the allowlist.
+
+A disallowed content type produces HTTP `415 Unsupported Media Type` with a
+detail of `"Content type '<received>' is not allowed. Allowed: <sorted, joined>"`.
+
 ## List Documents
 
 `GET /documents`
