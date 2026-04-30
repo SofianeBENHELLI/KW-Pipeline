@@ -169,7 +169,11 @@ class TestExtractUnknownContentType:
     (HTTP 422), not crash. The persisted ``failure_reason`` keeps the failure
     visible to reviewers via GET /documents."""
 
-    def test_unsupported_content_type_returns_422(self):
+    def test_unsupported_content_type_returns_422(self, monkeypatch):
+        # The route-level allowlist (#37) defaults to text/plain only, so we
+        # widen it here to exercise the parser registry's no-match path
+        # specifically — that's what this test is about, not the upload guard.
+        monkeypatch.setenv("ALLOWED_CONTENT_TYPES", "text/plain,application/octet-stream")
         client = _client()
 
         upload = client.post(
