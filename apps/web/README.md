@@ -27,7 +27,6 @@ apps/web/
 ├── index.html
 ├── package.json
 ├── tsconfig.json
-├── tsconfig.node.json
 ├── vite.config.ts
 ├── vitest.config.ts
 └── src/

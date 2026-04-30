@@ -1,4 +1,4 @@
-export default function App(): JSX.Element {
+export default function App() {
   return (
     <main>
       <h1>Orbital — KW Pipeline</h1>
