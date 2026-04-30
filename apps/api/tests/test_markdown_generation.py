@@ -7,7 +7,7 @@ from app.models.document import DocumentVersionStatus
 from app.schemas.document import DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import DocumentProfile, SemanticDocument, SemanticSection
-from app.services.document_parser import PlainTextParser
+from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
@@ -26,7 +26,7 @@ def _extract_frontmatter(markdown: str) -> dict:
 def test_semantic_extraction_and_markdown_include_required_frontmatter():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("risk-register.txt", "text/plain", b"Risk: supplier delay")
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=ParserRegistry([PlainTextParser()]))
     raw = jobs.extract(document_id=version.document_id, version_id=version.id)
 
     semantic = SemanticExtractor().extract(version=version, raw_extraction=raw)

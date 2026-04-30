@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.services.catalog_store import SQLiteCatalogStore
-from app.services.document_parser import PlainTextParser
+from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
@@ -26,7 +26,7 @@ class PipelineServices:
 
     storage: StorageService
     documents: DocumentService
-    parser: PlainTextParser
+    parsers: ParserRegistry
     extraction_jobs: ExtractionJobService
     semantic_extractor: SemanticExtractor
     markdown_generator: MarkdownGenerator
@@ -37,14 +37,14 @@ def build_services() -> PipelineServices:
     """Create fresh in-memory services for tests and ephemeral demos."""
     storage = InMemoryStorageService()
     documents = DocumentService(storage=storage)
-    parser = PlainTextParser()
-    extraction_jobs = ExtractionJobService(documents=documents, parser=parser)
+    parsers = ParserRegistry([PlainTextParser()])
+    extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor()
     markdown_generator = MarkdownGenerator()
     return PipelineServices(
         storage=storage,
         documents=documents,
-        parser=parser,
+        parsers=parsers,
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
@@ -65,14 +65,14 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
         storage=storage,
         catalog=SQLiteCatalogStore(root / "catalog.sqlite3"),
     )
-    parser = PlainTextParser()
-    extraction_jobs = ExtractionJobService(documents=documents, parser=parser)
+    parsers = ParserRegistry([PlainTextParser()])
+    extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor()
     markdown_generator = MarkdownGenerator()
     return PipelineServices(
         storage=storage,
         documents=documents,
-        parser=parser,
+        parsers=parsers,
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,

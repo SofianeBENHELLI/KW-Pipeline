@@ -19,10 +19,14 @@ class AlwaysFailingParser:
         raise RuntimeError("simulated parser failure")
 
 
+def _registry(*parsers) -> ParserRegistry:
+    return ParserRegistry(list(parsers) or [PlainTextParser()])
+
+
 def test_extraction_generates_raw_json_and_updates_status():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("note.txt", "text/plain", b"First line\nSecond line")
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
 
     extraction = jobs.extract(document_id=version.document_id, version_id=version.id)
 
@@ -38,7 +42,7 @@ def test_extraction_generates_raw_json_and_updates_status():
 def test_extraction_marks_version_failed_when_parser_raises():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("broken.txt", "text/plain", b"anything")
-    jobs = ExtractionJobService(documents=documents, parser=AlwaysFailingParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry(AlwaysFailingParser()))
 
     with pytest.raises(ExtractionFailed) as excinfo:
         jobs.extract(document_id=version.document_id, version_id=version.id)
@@ -61,7 +65,7 @@ def test_extraction_marks_version_failed_when_parser_raises():
 def test_successful_extraction_does_not_set_failure_reason():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("note.txt", "text/plain", b"line one\nline two")
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
 
     jobs.extract(document_id=version.document_id, version_id=version.id)
 
@@ -72,7 +76,7 @@ def test_extraction_refuses_duplicate_versions():
     documents = DocumentService(storage=InMemoryStorageService())
     documents.upload("a.txt", "text/plain", b"shared")
     duplicate = documents.upload("b.txt", "text/plain", b"shared")
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
 
     assert duplicate.status == DocumentVersionStatus.DUPLICATE_DETECTED
 
@@ -82,7 +86,7 @@ def test_extraction_refuses_duplicate_versions():
 
 def test_get_raw_extraction_raises_when_version_was_uploaded_but_not_extracted():
     documents = DocumentService(storage=InMemoryStorageService())
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
     version = documents.upload("policy.txt", "text/plain", b"never extracted")
 
     with pytest.raises(KeyError, match="Raw extraction not found"):
@@ -94,7 +98,7 @@ def test_get_raw_extraction_raises_when_version_was_uploaded_but_not_extracted()
 
 def test_get_raw_extraction_raises_for_unknown_document():
     documents = DocumentService(storage=InMemoryStorageService())
-    jobs = ExtractionJobService(documents=documents, parser=PlainTextParser())
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
 
     with pytest.raises(KeyError):
         jobs.get_raw_extraction(
@@ -160,7 +164,20 @@ def test_extraction_checks_lifecycle_before_parser_registry_failure():
     assert current.failure_reason is None
 
 
-def test_extraction_job_service_requires_parsers_or_parser():
+def test_extraction_marks_version_failed_when_no_source_references():
+    """Whitespace-only content runs the parser cleanly but yields zero source
+    references. The job service must catch this at the lifecycle boundary and
+    mark the version FAILED rather than letting an empty-but-valid extraction
+    flow downstream into NEEDS_REVIEW (issue #58)."""
     documents = DocumentService(storage=InMemoryStorageService())
-    with pytest.raises(TypeError, match="parsers=` or `parser="):
-        ExtractionJobService(documents=documents)
+    version = documents.upload("blank.txt", "text/plain", b"\n\n   \n")
+    jobs = ExtractionJobService(documents=documents, parsers=_registry())
+
+    with pytest.raises(ExtractionFailed) as excinfo:
+        jobs.extract(document_id=version.document_id, version_id=version.id)
+
+    assert excinfo.value.reason == "PlainTextParser: No extractable content"
+
+    failed = documents.get_version(version.document_id, version.id)
+    assert failed.status == DocumentVersionStatus.FAILED
+    assert failed.failure_reason == "PlainTextParser: No extractable content"
