@@ -437,3 +437,122 @@ def test_third_duplicate_upload_points_at_original_not_chain(tmp_path):
     assert v1.duplicate_of_version_id is None
     assert v2.duplicate_of_version_id == v1.id
     assert v3.duplicate_of_version_id == v1.id  # NOT v2.id
+
+
+# --- Issue #62: Optimistic concurrency on status updates ----------------- #
+
+
+def test_sqlite_update_version_status_rejects_illegal_predecessor(tmp_path):
+    """A target whose predecessor set does not include the row's current
+    status raises ``IllegalTransition`` and leaves the row alone."""
+    from app.models.document import IllegalTransition
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("policy.txt", "text/plain", b"x")  # STORED
+
+    with pytest.raises(IllegalTransition) as excinfo:
+        services.documents.catalog.update_version_status(
+            document_id=uploaded.document_id,
+            version_id=uploaded.id,
+            status=DocumentVersionStatus.VALIDATED,
+        )
+
+    message = str(excinfo.value)
+    assert "VALIDATED" in message  # target
+    assert "STORED" in message  # actual
+    assert "NEEDS_REVIEW" in message  # only legal predecessor of VALIDATED
+
+    # Row still STORED — the failed UPDATE was a no-op.
+    version = services.documents.get_version(uploaded.document_id, uploaded.id)
+    assert version.status == DocumentVersionStatus.STORED
+
+
+def test_sqlite_update_version_status_to_status_with_no_predecessors(tmp_path):
+    """``DUPLICATE_DETECTED`` has no incoming FSM edges. Even if a caller
+    bypasses the service layer and aims the catalog at it directly, the
+    write must refuse with ``IllegalTransition`` rather than silently
+    succeeding (or hitting a SQLite ``IN ()`` syntax error)."""
+    from app.models.document import IllegalTransition
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("policy.txt", "text/plain", b"x")
+
+    with pytest.raises(IllegalTransition):
+        services.documents.catalog.update_version_status(
+            document_id=uploaded.document_id,
+            version_id=uploaded.id,
+            status=DocumentVersionStatus.DUPLICATE_DETECTED,
+        )
+
+
+def test_sqlite_update_version_status_missing_version_raises_keyerror(tmp_path):
+    """Passing a non-existent version through the catalog still surfaces the
+    KeyError ladder rather than ``IllegalTransition`` — concurrency is a
+    different failure mode from "row never existed"."""
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("policy.txt", "text/plain", b"x")
+
+    with pytest.raises(KeyError, match="Document version not found"):
+        services.documents.catalog.update_version_status(
+            document_id=uploaded.document_id,
+            version_id="never-existed",
+            status=DocumentVersionStatus.EXTRACTING,
+        )
+
+
+def test_sqlite_concurrent_status_transitions_only_one_wins(tmp_path):
+    """Two threads, two SQLite connections, the same legal transition: the
+    optimistic ``IN (...)`` predicate guarantees exactly one writer succeeds
+    and the loser raises ``IllegalTransition`` instead of silently
+    overwriting the winner."""
+    import threading
+
+    from app.models.document import IllegalTransition
+    from app.services.catalog_store import SQLiteCatalogStore
+
+    # Seed the row through a service so the lifecycle is consistent, then
+    # rebuild fresh stores per thread so each owns its own connection.
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("race.txt", "text/plain", b"contended")
+    document_id, version_id = uploaded.document_id, uploaded.id
+
+    db_path = tmp_path / "catalog.sqlite3"
+    barrier = threading.Barrier(2)
+    results: dict[str, BaseException | DocumentVersion] = {}
+
+    def attempt(label: str) -> None:
+        store = SQLiteCatalogStore(db_path)
+        barrier.wait()
+        try:
+            results[label] = store.update_version_status(
+                document_id=document_id,
+                version_id=version_id,
+                status=DocumentVersionStatus.EXTRACTING,
+            )
+        except BaseException as exc:  # noqa: BLE001 — we record both branches
+            results[label] = exc
+
+    threads = [
+        threading.Thread(target=attempt, args=("a",)),
+        threading.Thread(target=attempt, args=("b",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    successes = [v for v in results.values() if isinstance(v, DocumentVersion)]
+    failures = [v for v in results.values() if isinstance(v, IllegalTransition)]
+    other = [v for v in results.values() if not isinstance(v, DocumentVersion | IllegalTransition)]
+
+    assert other == [], f"Unexpected error type: {other!r}"
+    assert len(successes) == 1, f"Expected exactly one winner, got {results!r}"
+    assert len(failures) == 1, f"Expected exactly one IllegalTransition, got {results!r}"
+    # The loser's message names both expected and actual states.
+    message = str(failures[0])
+    assert "EXTRACTING" in message
+    assert "STORED" in message or "EXTRACTING" in message
+
+    # Final state is the winning transition.
+    final = services.documents.get_version(document_id, version_id)
+    assert final.status == DocumentVersionStatus.EXTRACTING

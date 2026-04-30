@@ -5,7 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from app.models.document import DocumentVersionStatus
+from app.models.document import (
+    ALLOWED_PREDECESSORS,
+    DocumentVersionStatus,
+    IllegalTransition,
+)
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
@@ -47,7 +51,14 @@ class CatalogStore(Protocol):
         version_id: str,
         status: DocumentVersionStatus,
     ) -> DocumentVersion:
-        """Persist a lifecycle status change and return the updated version."""
+        """Persist a lifecycle status change and return the updated version.
+
+        The write is guarded by the predecessor set derived from the FSM:
+        the row is only updated if its current status is one of the states
+        ``status`` is reachable from. If the row's status no longer matches
+        (because another writer raced ahead) the implementation raises
+        :class:`IllegalTransition` and leaves the catalog untouched.
+        """
 
     def update_version_failure(
         self,
@@ -134,6 +145,13 @@ class InMemoryCatalogStore:
         status: DocumentVersionStatus,
     ) -> DocumentVersion:
         version = self.get_version(document_id=document_id, version_id=version_id)
+        predecessors = ALLOWED_PREDECESSORS[status]
+        if version.status not in predecessors:
+            raise IllegalTransition(
+                f"Cannot transition to {status.value}: expected current status in "
+                f"{{{', '.join(sorted(s.value for s in predecessors))}}} "
+                f"but found {version.status.value}."
+            )
         version.status = status
         return version
 
@@ -290,16 +308,49 @@ class SQLiteCatalogStore:
         version_id: str,
         status: DocumentVersionStatus,
     ) -> DocumentVersion:
+        # Confirm the row exists at all so a missing version still raises
+        # KeyError ("Document not found." / "Document version not found.")
+        # rather than masquerading as a concurrency conflict.
         self.get_version(document_id=document_id, version_id=version_id)
+        predecessors = ALLOWED_PREDECESSORS[status]
+        # Build an "?, ?, ..." placeholder list so the predecessor set is
+        # bound as parameters (sqlite3 won't expand a list inside a single
+        # placeholder). An empty predecessor set means the FSM has no edges
+        # leading into ``status`` — the UPDATE will match zero rows and the
+        # rowcount==0 branch below raises with a clear message.
+        if predecessors:
+            placeholders = ", ".join("?" for _ in predecessors)
+            predecessor_values = tuple(s.value for s in predecessors)
+        else:
+            # SQLite rejects "IN ()". Use a sentinel that no real status
+            # equals so the UPDATE matches zero rows by construction.
+            placeholders = "?"
+            predecessor_values = ("__no_legal_predecessor__",)
         with self._connect() as connection:
-            connection.execute(
-                """
+            cursor = connection.execute(
+                f"""
                 UPDATE document_versions
                 SET status = ?
-                WHERE document_id = ? AND id = ?
+                WHERE document_id = ? AND id = ? AND status IN ({placeholders})
                 """,
-                (status.value, document_id, version_id),
+                (status.value, document_id, version_id, *predecessor_values),
             )
+            if cursor.rowcount == 0:
+                actual_row = connection.execute(
+                    """
+                    SELECT status FROM document_versions
+                    WHERE document_id = ? AND id = ?
+                    """,
+                    (document_id, version_id),
+                ).fetchone()
+                actual_status = actual_row["status"] if actual_row else "<missing>"
+                expected = (
+                    ", ".join(sorted(s.value for s in predecessors)) if predecessors else "<none>"
+                )
+                raise IllegalTransition(
+                    f"Cannot transition to {status.value}: expected current status in "
+                    f"{{{expected}}} but found {actual_status}."
+                )
         return self.get_version(document_id=document_id, version_id=version_id)
 
     def update_version_failure(
