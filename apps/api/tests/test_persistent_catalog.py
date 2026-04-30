@@ -1,5 +1,11 @@
+import sqlite3
+
+import pytest
+
 from app.dependencies import build_persistent_services
 from app.models.document import DocumentVersionStatus
+from app.schemas.document import DocumentVersion
+from app.services.catalog_store import SQLiteCatalogStore
 from app.services.storage_service import FileSystemStorageService
 
 
@@ -314,3 +320,102 @@ def test_filesystem_storage_rejects_file_uri_outside_root(tmp_path):
         assert "outside the configured root" in str(exc)
     else:
         raise AssertionError("Expected outside file URI to be rejected.")
+
+
+# --- Issue #56: SQLite connections must close after every operation -------- #
+
+
+def test_sqlite_connect_closes_handle_after_use(tmp_path):
+    """Defect #56: `with self._connect()` previously committed but didn't close.
+    The handle must be released the moment the with-block exits."""
+    store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    with store._connect() as connection:
+        connection.execute("SELECT 1")
+
+    # The connection is now closed; using it must raise ProgrammingError.
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+
+
+def test_sqlite_many_operations_dont_leak_connections(tmp_path):
+    """Smoke test for the leak: 250 catalog operations should not exhaust
+    file descriptors. (On the buggy version, every `_connect()` left a
+    handle open; the OS would close them at process exit but accumulating
+    them is the issue.)"""
+    services = build_persistent_services(tmp_path)
+    for i in range(250):
+        services.documents.upload(f"doc-{i}.txt", "text/plain", f"body {i}".encode())
+    assert len(services.documents.list_documents()) == 250
+
+
+# --- Issue #57: Foreign keys, busy_timeout, WAL --------------------------- #
+
+
+def test_sqlite_pragma_foreign_keys_is_enabled(tmp_path):
+    store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    with store._connect() as connection:
+        (foreign_keys,) = connection.execute("PRAGMA foreign_keys").fetchone()
+
+    assert foreign_keys == 1
+
+
+def test_sqlite_pragma_busy_timeout_is_set(tmp_path):
+    store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    with store._connect() as connection:
+        (busy_timeout,) = connection.execute("PRAGMA busy_timeout").fetchone()
+
+    # We set 5000 ms; assert at least the documented minimum.
+    assert busy_timeout >= 5000
+
+
+def test_sqlite_journal_mode_is_wal(tmp_path):
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    # Read journal_mode through a bare connection to avoid the store's own
+    # PRAGMA defaults masking a regression.
+    with sqlite3.connect(tmp_path / "catalog.sqlite3") as connection:
+        (journal_mode,) = connection.execute("PRAGMA journal_mode").fetchone()
+
+    assert journal_mode.lower() == "wal"
+
+
+def test_sqlite_foreign_key_violation_is_rejected(tmp_path):
+    """With foreign_keys = ON, inserting a version pointing at a non-existent
+    document raises IntegrityError instead of silently orphaning the row."""
+    store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+    orphan = DocumentVersion(
+        document_id="never-existed",
+        version_number=1,
+        filename="ghost.txt",
+        content_type="text/plain",
+        file_size=1,
+        sha256="a" * 64,
+        storage_uri="file:///tmp/ghost",
+        status=DocumentVersionStatus.STORED,
+    )
+
+    with (
+        pytest.raises(sqlite3.IntegrityError, match=r"FOREIGN KEY"),
+        store._connect() as connection,
+    ):
+        store._insert_version(connection, orphan)
+
+
+# --- Issue #61: find_version_by_hash must not return duplicates ---------- #
+
+
+def test_third_duplicate_upload_points_at_original_not_chain(tmp_path):
+    """Defect #61 (SQLite-only): the third upload of the same bytes used to
+    `duplicate_of_version_id` point at the *second* upload (a duplicate
+    itself), forming a chain. Must point at the original."""
+    services = build_persistent_services(tmp_path)
+    v1 = services.documents.upload("a.txt", "text/plain", b"shared bytes")
+    v2 = services.documents.upload("b.txt", "text/plain", b"shared bytes")
+    v3 = services.documents.upload("c.txt", "text/plain", b"shared bytes")
+
+    assert v1.duplicate_of_version_id is None
+    assert v2.duplicate_of_version_id == v1.id
+    assert v3.duplicate_of_version_id == v1.id  # NOT v2.id
