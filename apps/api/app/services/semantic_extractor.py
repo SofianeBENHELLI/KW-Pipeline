@@ -15,10 +15,10 @@ class SemanticExtractor:
         title = self._title_from_filename(version.filename)
         sections = [
             SemanticSection(
-                id=section["id"],
-                heading=section.get("heading", "Extracted Text"),
-                text=section.get("text", ""),
-                source_reference_ids=section.get("source_reference_ids", []),
+                id=section.id,
+                heading=section.heading,
+                text=section.text,
+                source_reference_ids=list(section.source_reference_ids),
             )
             for section in raw_extraction.sections
         ]

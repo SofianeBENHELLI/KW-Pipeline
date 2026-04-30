@@ -20,6 +20,25 @@ class SourceReference(BaseModel):
     snippet: str
 
 
+class RawSection(BaseModel):
+    """Typed parser-produced section.
+
+    Carries the minimum fields needed for semantic extraction plus optional
+    placeholders for fields that future parsers (e.g. Docling for PDFs) will
+    populate. Keeping the schema explicit avoids the historical
+    ``list[dict]`` shape and the ``.get()``-driven access pattern that came
+    with it.
+    """
+
+    id: str
+    heading: str = "Extracted Text"
+    text: str
+    source_reference_ids: list[str] = Field(default_factory=list)
+    page_number: int | None = None  # populated by future PDF parser
+    bbox: tuple[float, float, float, float] | None = None  # Docling region, future
+    parser_metadata: dict[str, str] = Field(default_factory=dict)
+
+
 class RawExtraction(BaseModel):
     """Inspectable parser output stored before semantic extraction."""
 
@@ -28,7 +47,7 @@ class RawExtraction(BaseModel):
     parser_name: str
     parser_version: str
     text: str
-    sections: list[dict] = Field(default_factory=list)
+    sections: list[RawSection] = Field(default_factory=list)
     source_references: list[SourceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
