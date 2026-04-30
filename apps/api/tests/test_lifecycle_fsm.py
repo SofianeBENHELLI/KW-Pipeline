@@ -21,8 +21,10 @@ from fastapi.testclient import TestClient
 from app.dependencies import build_services
 from app.main import create_app
 from app.models.document import (
+    ALLOWED_PREDECESSORS,
     ALLOWED_TRANSITIONS,
     DocumentVersionStatus,
+    IllegalTransition,
     assert_transition,
 )
 from app.schemas.document import Document, DocumentVersion
@@ -93,6 +95,33 @@ class TestAllowedTransitionsMap:
         assert ALLOWED_TRANSITIONS[terminal] == frozenset()
 
 
+class TestAllowedPredecessorsMap:
+    def test_every_status_appears(self):
+        """Every status — including those with no incoming edges — has an
+        entry, so callers never have to guard ``KeyError``."""
+        for status in DocumentVersionStatus:
+            assert status in ALLOWED_PREDECESSORS
+
+    def test_predecessor_map_is_reverse_of_transitions(self):
+        """For every legal ``current -> target`` edge, ``current`` must be in
+        ``ALLOWED_PREDECESSORS[target]`` and nothing else may be."""
+        expected: dict[DocumentVersionStatus, set[DocumentVersionStatus]] = {
+            status: set() for status in DocumentVersionStatus
+        }
+        for current, targets in ALLOWED_TRANSITIONS.items():
+            for target in targets:
+                expected[target].add(current)
+        for target, predecessors in expected.items():
+            assert ALLOWED_PREDECESSORS[target] == frozenset(predecessors)
+
+    def test_initial_states_have_no_predecessors(self):
+        """UPLOADED and HASHED are entry points: nothing transitions *to* them."""
+        assert ALLOWED_PREDECESSORS[DocumentVersionStatus.UPLOADED] == frozenset()
+        assert ALLOWED_PREDECESSORS[DocumentVersionStatus.HASHED] == frozenset()
+        # DUPLICATE_DETECTED is set on creation, not via update_status.
+        assert ALLOWED_PREDECESSORS[DocumentVersionStatus.DUPLICATE_DETECTED] == frozenset()
+
+
 class TestAssertTransition:
     @pytest.mark.parametrize(("current", "target"), LEGAL_TRANSITIONS)
     def test_legal_transition_does_not_raise(
@@ -101,7 +130,7 @@ class TestAssertTransition:
         assert_transition(current, target)
 
     def test_illegal_transition_raises_with_both_states(self):
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(IllegalTransition) as excinfo:
             assert_transition(DocumentVersionStatus.STORED, DocumentVersionStatus.VALIDATED)
 
         message = str(excinfo.value)
@@ -109,11 +138,17 @@ class TestAssertTransition:
         assert "VALIDATED" in message
         assert "Cannot transition" in message
 
+    def test_illegal_transition_is_a_value_error(self):
+        """``IllegalTransition`` subclasses ``ValueError`` so existing routes
+        that translate ``ValueError -> 409`` keep working unchanged."""
+        with pytest.raises(ValueError):
+            assert_transition(DocumentVersionStatus.STORED, DocumentVersionStatus.VALIDATED)
+
     @pytest.mark.parametrize("terminal", TERMINAL_STATES)
     def test_no_transitions_out_of_terminal_states(self, terminal: DocumentVersionStatus):
         # Pick any non-equal status as a target; terminal states accept none.
         target = next(s for s in DocumentVersionStatus if s != terminal)
-        with pytest.raises(ValueError, match="Cannot transition"):
+        with pytest.raises(IllegalTransition, match="Cannot transition"):
             assert_transition(terminal, target)
 
 
@@ -132,7 +167,7 @@ class TestDocumentServiceUpdateStatusFSM:
     def test_illegal_transition_raises_value_error_with_both_states(self):
         service, document_id, version_id = _make_service_with_version(DocumentVersionStatus.STORED)
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(IllegalTransition) as excinfo:
             service.update_status(document_id, version_id, DocumentVersionStatus.VALIDATED)
 
         message = str(excinfo.value)
@@ -144,7 +179,7 @@ class TestDocumentServiceUpdateStatusFSM:
         leaves the version in its original state."""
         service, document_id, version_id = _make_service_with_version(DocumentVersionStatus.STORED)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(IllegalTransition):
             service.update_status(document_id, version_id, DocumentVersionStatus.NEEDS_REVIEW)
 
         assert service.get_version(document_id, version_id).status == DocumentVersionStatus.STORED
@@ -154,7 +189,7 @@ class TestDocumentServiceUpdateStatusFSM:
         ``update_status`` — terminal-out edges are empty in the FSM."""
         service, document_id, version_id = _make_service_with_version(DocumentVersionStatus.FAILED)
 
-        with pytest.raises(ValueError, match="Cannot transition from FAILED"):
+        with pytest.raises(IllegalTransition, match="Cannot transition from FAILED"):
             service.update_status(document_id, version_id, DocumentVersionStatus.FAILED)
 
 

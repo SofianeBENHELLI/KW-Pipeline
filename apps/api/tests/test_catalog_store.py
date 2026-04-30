@@ -2,7 +2,7 @@ from datetime import UTC
 
 import pytest
 
-from app.models.document import DocumentVersionStatus
+from app.models.document import DocumentVersionStatus, IllegalTransition
 from app.schemas.document import Document, DocumentVersion
 from app.services.catalog_store import InMemoryCatalogStore
 
@@ -122,6 +122,37 @@ class TestInMemoryCatalogStoreUpdate:
                 version_id="missing",
                 status=DocumentVersionStatus.EXTRACTED,
             )
+
+    def test_update_status_rejects_illegal_predecessor(self):
+        """The InMemory store mirrors the SQLite optimistic check: a transition
+        whose predecessor set doesn't include the row's current status raises
+        ``IllegalTransition`` with both expected and actual states named."""
+        store = InMemoryCatalogStore()
+        version = _make_version()  # STORED
+        store.save_document_with_version(_make_document(version), version)
+
+        with pytest.raises(IllegalTransition) as excinfo:
+            store.update_version_status(
+                document_id=version.document_id,
+                version_id=version.id,
+                status=DocumentVersionStatus.VALIDATED,
+            )
+
+        message = str(excinfo.value)
+        assert "VALIDATED" in message
+        assert "STORED" in message
+        # NEEDS_REVIEW is the only legal predecessor of VALIDATED.
+        assert "NEEDS_REVIEW" in message
+        # Catalog left untouched.
+        assert (
+            store.get_version(version.document_id, version.id).status
+            == DocumentVersionStatus.STORED
+        )
+
+    def test_illegal_transition_subclasses_value_error(self):
+        """``IllegalTransition`` must remain a ``ValueError`` so route handlers
+        that translate ``ValueError -> 409`` keep working without changes."""
+        assert issubclass(IllegalTransition, ValueError)
 
 
 class TestInMemoryCatalogStoreAppend:
