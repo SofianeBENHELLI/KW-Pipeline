@@ -144,6 +144,27 @@ def test_persistent_semantic_document_and_markdown_survive_restart(tmp_path):
     assert "## Source Lineage" in markdown
 
 
+def test_sqlite_semantic_document_routes_through_loader(tmp_path):
+    """ADR-008: SQLiteCatalogStore.get_semantic_document must produce a
+    typed model via the schema loader, and get_semantic_document_payload
+    must expose the raw dict with KeyError on miss."""
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("policy.txt", "text/plain", b"hello")
+    services.extraction_jobs.extract(document_id=uploaded.document_id, version_id=uploaded.id)
+    services.semantic_outputs.generate(document_id=uploaded.document_id, version_id=uploaded.id)
+
+    catalog = services.documents.catalog
+    typed = catalog.get_semantic_document(uploaded.id)
+    payload = catalog.get_semantic_document_payload(uploaded.id)
+
+    assert typed.schema_version == "v0.1"
+    assert isinstance(payload, dict)
+    assert payload["schema_version"] == "v0.1"
+
+    with pytest.raises(KeyError, match="Semantic output not found"):
+        catalog.get_semantic_document_payload("nope")
+
+
 def test_persistent_get_raw_extraction_raises_when_not_yet_extracted(tmp_path):
     """SQLite-specific path: uploaded but not extracted means an empty
     raw_extractions row, not a fall-through to a stale in-memory dict."""

@@ -1,3 +1,5 @@
+import copy
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,6 +15,7 @@ from app.models.document import (
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
+from app.services.semantic_schema_loader import load_semantic_document
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
 
@@ -91,7 +94,22 @@ class CatalogStore(Protocol):
         """Persist semantic JSON (and rendered Markdown if any) for a version."""
 
     def get_semantic_document(self, version_id: str) -> SemanticDocument:
-        """Return the persisted semantic document. Raises KeyError if none exists."""
+        """Return the persisted semantic document. Raises KeyError if none exists.
+
+        Implementations route through ``semantic_schema_loader`` so older
+        persisted payloads are migrated to the current shape before being
+        returned. Per ADR-008.
+        """
+
+    def get_semantic_document_payload(self, version_id: str) -> dict:
+        """Return the raw persisted JSON payload as a dict.
+
+        This is the read-side counterpart to ``save_semantic_document``: it
+        returns the bytes-on-disk shape (whatever ``schema_version`` they
+        carry) without coercing them through the current Pydantic model, so
+        callers can route them through the schema loader explicitly. Raises
+        KeyError if none exists.
+        """
 
 
 class InMemoryCatalogStore:
@@ -102,7 +120,10 @@ class InMemoryCatalogStore:
         self.versions_by_hash: dict[str, DocumentVersion] = {}
         self.versions: dict[str, DocumentVersion] = {}
         self.raw_extractions: dict[str, RawExtraction] = {}
-        self.semantic_documents: dict[str, SemanticDocument] = {}
+        # Stored as raw JSON-shaped dicts (not typed SemanticDocument) so the
+        # in-memory store mirrors the SQLite payload column and the loader
+        # is the single boundary that yields a typed model. Per ADR-008.
+        self.semantic_documents: dict[str, dict] = {}
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         return self.versions_by_hash.get(sha256)
@@ -190,13 +211,17 @@ class InMemoryCatalogStore:
         return raw_extraction
 
     def save_semantic_document(self, version_id: str, semantic: SemanticDocument) -> None:
-        self.semantic_documents[version_id] = semantic
+        self.semantic_documents[version_id] = semantic.model_dump(mode="json")
 
     def get_semantic_document(self, version_id: str) -> SemanticDocument:
-        semantic = self.semantic_documents.get(version_id)
-        if semantic is None:
+        return load_semantic_document(self.get_semantic_document_payload(version_id))
+
+    def get_semantic_document_payload(self, version_id: str) -> dict:
+        payload = self.semantic_documents.get(version_id)
+        if payload is None:
             raise KeyError("Semantic output not found.")
-        return semantic
+        # Deep copy so callers can't mutate persisted state.
+        return copy.deepcopy(payload)
 
 
 class SQLiteCatalogStore:
@@ -436,14 +461,7 @@ class SQLiteCatalogStore:
             )
 
     def get_semantic_document(self, version_id: str) -> SemanticDocument:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT payload FROM semantic_documents WHERE document_version_id = ?",
-                (version_id,),
-            ).fetchone()
-        if row is None:
-            raise KeyError("Semantic output not found.")
-        return SemanticDocument.model_validate_json(row["payload"])
+        return load_semantic_document(self.get_semantic_document_payload(version_id))
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -611,3 +629,13 @@ class SQLiteCatalogStore:
             reviewed_at=row["reviewed_at"],
             created_at=row["created_at"],
         )
+
+    def get_semantic_document_payload(self, version_id: str) -> dict:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM semantic_documents WHERE document_version_id = ?",
+                (version_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Semantic output not found.")
+        return json.loads(row["payload"])

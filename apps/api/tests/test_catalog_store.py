@@ -361,7 +361,41 @@ class TestInMemoryCatalogStoreArtefacts:
 
         store.save_semantic_document("ver-1", semantic)
 
-        assert store.get_semantic_document("ver-1") is semantic
+        # Per ADR-008 the loader rebuilds the typed model on read, so we
+        # compare by content rather than identity.
+        loaded = store.get_semantic_document("ver-1")
+        assert loaded.id == semantic.id
+        assert loaded.document_profile.title == "Round Trip"
+        assert loaded.schema_version == "v0.1"
+
+    def test_get_semantic_document_payload_returns_raw_dict(self):
+        store = InMemoryCatalogStore()
+        semantic = self._semantic(title="Raw")
+
+        store.save_semantic_document("ver-1", semantic)
+
+        payload = store.get_semantic_document_payload("ver-1")
+
+        assert isinstance(payload, dict)
+        assert payload["schema_version"] == "v0.1"
+        assert payload["document_profile"]["title"] == "Raw"
+
+    def test_get_semantic_document_payload_raises_when_missing(self):
+        store = InMemoryCatalogStore()
+
+        with pytest.raises(KeyError, match="Semantic output not found"):
+            store.get_semantic_document_payload("never-generated")
+
+    def test_get_semantic_document_payload_returns_a_copy(self):
+        # Mutating the returned dict must not corrupt persisted state.
+        store = InMemoryCatalogStore()
+        store.save_semantic_document("ver-1", self._semantic(title="Immutable"))
+
+        payload = store.get_semantic_document_payload("ver-1")
+        payload["document_profile"]["title"] = "Tampered"
+
+        again = store.get_semantic_document_payload("ver-1")
+        assert again["document_profile"]["title"] == "Immutable"
 
     def test_get_semantic_document_raises_when_missing(self):
         store = InMemoryCatalogStore()

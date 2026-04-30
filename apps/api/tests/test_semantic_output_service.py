@@ -18,7 +18,11 @@ class TestSemanticOutputServiceGenerate:
         first = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
         second = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
 
-        assert second is first
+        # Per ADR-008, the schema loader is the single boundary on read, so
+        # repeat calls return semantically-equal but not identical instances.
+        # Identity (`id` field) and content must still match.
+        assert second.id == first.id
+        assert second.model_dump() == first.model_dump()
 
     def test_generate_requires_a_prior_extraction(self):
         services = build_services()
@@ -39,7 +43,10 @@ class TestSemanticOutputServiceLookup:
 
         fetched = services.semantic_outputs.get(document_id=document_id, version_id=version_id)
 
-        assert fetched is generated
+        # Loader rebuilds the model on each read (ADR-008), so equality is
+        # by content, not identity.
+        assert fetched.id == generated.id
+        assert fetched.model_dump() == generated.model_dump()
 
     def test_get_raises_when_no_semantic_output_was_generated(self):
         services = build_services()
@@ -119,3 +126,36 @@ class TestSemanticOutputServiceLookup:
 
         with pytest.raises(KeyError, match="Markdown output not found"):
             services.semantic_outputs.get_markdown(document_id=document_id, version_id=version_id)
+
+
+class TestSemanticOutputServiceLoaderIntegration:
+    """Per ADR-008, reads route through the schema loader: the catalog
+    returns the raw JSON payload and the loader produces the typed model."""
+
+    def test_get_routes_through_schema_loader(self):
+        services = build_services()
+        document_id, version_id = _upload(services)
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+        generated = services.semantic_outputs.generate(
+            document_id=document_id, version_id=version_id
+        )
+
+        # Catalog exposes the raw JSON payload (a dict) — that's the boundary
+        # the loader consumes.
+        payload = services.documents.catalog.get_semantic_document_payload(version_id)
+        assert isinstance(payload, dict)
+        assert payload["schema_version"] == "v0.1"
+        assert payload["id"] == generated.id
+
+    def test_generate_falls_back_to_loader_on_cache_hit(self):
+        services = build_services()
+        document_id, version_id = _upload(services)
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+
+        first = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+        # Second call must read the cached payload through the loader and
+        # short-circuit before re-running the extractor.
+        second = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+
+        assert second.id == first.id
+        assert isinstance(second, SemanticDocument)

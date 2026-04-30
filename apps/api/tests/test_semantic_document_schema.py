@@ -127,3 +127,35 @@ class TestDocumentProfile:
         assert profile.audience is None
         assert profile.executive_summary is None
         assert profile.document_type == "unknown"
+
+
+class TestSemanticDocumentSchemaVersion:
+    """Per ADR-008, ``schema_version`` is a ``Literal[...]`` enumerating the
+    supported persisted versions. Free-form values must be rejected so an
+    accidental drift never silently bypasses the migration loader."""
+
+    def test_default_schema_version_is_v0_1(self):
+        doc = SemanticDocument(
+            document_version_id="v1",
+            document_profile=DocumentProfile(title="T"),
+        )
+
+        assert doc.schema_version == "v0.1"
+
+    def test_explicit_v0_1_is_accepted(self):
+        doc = SemanticDocument(
+            document_version_id="v1",
+            document_profile=DocumentProfile(title="T"),
+            schema_version="v0.1",
+        )
+
+        assert doc.schema_version == "v0.1"
+
+    @pytest.mark.parametrize("bogus", ["v0.2", "v1.0", "0.1", "draft", ""])
+    def test_unknown_schema_version_is_rejected(self, bogus):
+        with pytest.raises(ValidationError):
+            SemanticDocument(
+                document_version_id="v1",
+                document_profile=DocumentProfile(title="T"),
+                schema_version=bogus,
+            )
