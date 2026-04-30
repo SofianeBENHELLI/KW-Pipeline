@@ -118,3 +118,73 @@ class TestUploadAppendsVersion:
         # individual versions can carry their own filename.
         assert document.original_filename == "draft.txt"
         assert v2.filename == "final.txt"
+
+
+class TestUploadStream:
+    def test_upload_stream_produces_same_digest_as_upload(self):
+        service_a = DocumentService(storage=InMemoryStorageService())
+        service_b = DocumentService(storage=InMemoryStorageService())
+        payload = b"streaming versus contiguous"
+
+        whole = service_a.upload("p.txt", "text/plain", payload)
+        streamed = service_b.upload_stream(
+            "p.txt", "text/plain", iter([payload[:10], payload[10:]])
+        )
+
+        assert streamed.sha256 == whole.sha256
+        assert streamed.file_size == whole.file_size
+        assert streamed.status == DocumentVersionStatus.STORED
+
+    def test_upload_stream_round_trips_bytes_through_storage(self):
+        service = DocumentService(storage=InMemoryStorageService())
+        payload = b"chunk one|chunk two|chunk three"
+        chunks = [b"chunk one|", b"chunk two|", b"chunk three"]
+
+        version = service.upload_stream("p.txt", "text/plain", iter(chunks))
+
+        assert service.storage.get(version.storage_uri) == payload
+        assert version.file_size == len(payload)
+
+    def test_upload_stream_detects_duplicate_by_hash(self):
+        service = DocumentService(storage=InMemoryStorageService())
+        first = service.upload("p.txt", "text/plain", b"shared")
+
+        duplicate = service.upload_stream("renamed.txt", "text/plain", iter([b"sha", b"red"]))
+
+        assert duplicate.status == DocumentVersionStatus.DUPLICATE_DETECTED
+        assert duplicate.duplicate_of_version_id == first.id
+
+    def test_upload_stream_appends_version_when_document_id_given(self):
+        service = DocumentService(storage=InMemoryStorageService())
+        v1 = service.upload("p.txt", "text/plain", b"v1 bytes")
+
+        v2 = service.upload_stream(
+            "p.txt",
+            "text/plain",
+            iter([b"v2 ", b"bytes"]),
+            document_id=v1.document_id,
+        )
+
+        assert v2.document_id == v1.document_id
+        assert v2.version_number == 2
+        assert v2.status == DocumentVersionStatus.STORED
+
+    def test_upload_stream_with_unknown_document_id_raises(self):
+        service = DocumentService(storage=InMemoryStorageService())
+
+        with pytest.raises(KeyError, match="Document not found"):
+            service.upload_stream(
+                "p.txt",
+                "text/plain",
+                iter([b"x"]),
+                document_id="missing",
+            )
+
+    def test_upload_stream_handles_empty_iterable(self):
+        # Empty payload still produces the published SHA-256 vector.
+        service = DocumentService(storage=InMemoryStorageService())
+
+        version = service.upload_stream("empty.txt", "text/plain", iter(()))
+
+        assert version.sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        assert version.file_size == 0

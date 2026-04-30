@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -5,6 +6,11 @@ from typing import Protocol
 # Maximum sanitized basename length, in code points. Matches common filesystem
 # component limits (255) with headroom for the documents/<uuid>/ prefix.
 _MAX_KEY_BASENAME_LENGTH = 200
+
+# Streaming write granularity. 8 MiB is large enough that syscall overhead is
+# amortised on real disks, small enough that peak resident memory stays
+# bounded for multi-gigabyte uploads.
+_STREAM_CHUNK_SIZE = 8 * 1024 * 1024
 
 
 def safe_storage_key(version_id: str, filename: str) -> str:
@@ -32,6 +38,9 @@ class StorageService(Protocol):
     def put(self, key: str, content: bytes) -> str:
         """Store bytes and return a URI-like handle."""
 
+    def put_stream(self, key: str, chunks: Iterable[bytes]) -> str:
+        """Store an iterable of byte chunks incrementally and return a URI."""
+
     def get(self, uri: str) -> bytes:
         """Load bytes from a URI-like handle."""
 
@@ -47,6 +56,18 @@ class InMemoryStorageService:
         uri = f"memory://{key}"
         self.objects[uri] = content
         return uri
+
+    def put_stream(self, key: str, chunks: Iterable[bytes]) -> str:
+        """Accumulate an iterable of chunks and store the joined bytes.
+
+        The in-memory backend has nowhere to spool to, so we accumulate into
+        a ``bytearray`` and store the result. Real object stores would
+        forward each chunk to a multipart upload — the API matches.
+        """
+        buffer = bytearray()
+        for chunk in chunks:
+            buffer.extend(chunk)
+        return self.put(key, bytes(buffer))
 
     def get(self, uri: str) -> bytes:
         """Load bytes previously stored under a memory URI."""
@@ -68,6 +89,20 @@ class FileSystemStorageService:
         path = self._path_for_key(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
+        return path.resolve().as_uri()
+
+    def put_stream(self, key: str, chunks: Iterable[bytes]) -> str:
+        """Stream chunks to disk without materialising the full payload.
+
+        Opens the destination once and writes each chunk as it arrives; the
+        OS page cache plus the caller's chunk size (typically 8 MiB) bound
+        the resident set. Returns the same ``file://`` URI as ``put``.
+        """
+        path = self._path_for_key(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as fh:
+            for chunk in chunks:
+                fh.write(chunk)
         return path.resolve().as_uri()
 
     def get(self, uri: str) -> bytes:

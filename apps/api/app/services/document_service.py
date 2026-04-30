@@ -1,4 +1,6 @@
+from collections.abc import Iterable
 from datetime import UTC, datetime
+from hashlib import sha256
 from uuid import uuid4
 
 from app.models.document import DocumentVersionStatus, assert_transition
@@ -42,6 +44,77 @@ class DocumentService:
         if existing_document is None:
             raise KeyError("Document not found.")
         return self._append_new_version(existing_document, filename, content_type, content)
+
+    def upload_stream(
+        self,
+        filename: str,
+        content_type: str,
+        chunks: Iterable[bytes],
+        document_id: str | None = None,
+    ) -> DocumentVersion:
+        """Streaming sibling of :meth:`upload` for chunk-iterable callers.
+
+        The chunk iterator is consumed exactly once: each chunk is hashed
+        and forwarded to storage in lockstep, so peak memory tracks the
+        chunk size (typically 8 MiB) instead of the full payload. The
+        resulting digest is byte-identical to ``upload(joined_bytes)``.
+        """
+        if document_id is not None:
+            existing_document = self.catalog.get_document(document_id)
+            if existing_document is None:
+                raise KeyError("Document not found.")
+            target_document = existing_document
+        else:
+            target_document = None
+
+        version_id = str(uuid4())
+        digest_obj = sha256()
+        total_size = 0
+
+        def _hash_and_count(source: Iterable[bytes]) -> Iterable[bytes]:
+            nonlocal total_size
+            for chunk in source:
+                digest_obj.update(chunk)
+                total_size += len(chunk)
+                yield chunk
+
+        storage_uri = self.storage.put_stream(
+            safe_storage_key(version_id, filename), _hash_and_count(chunks)
+        )
+        digest = digest_obj.hexdigest()
+        duplicate = self.catalog.find_version_by_hash(digest)
+
+        if target_document is None:
+            document_id_value = str(uuid4())
+            version_number = 1
+        else:
+            document_id_value = target_document.id
+            version_number = (
+                max((v.version_number for v in target_document.versions), default=0) + 1
+            )
+
+        status = (
+            DocumentVersionStatus.DUPLICATE_DETECTED if duplicate else DocumentVersionStatus.STORED
+        )
+        version = DocumentVersion(
+            id=version_id,
+            document_id=document_id_value,
+            version_number=version_number,
+            filename=filename,
+            content_type=content_type,
+            file_size=total_size,
+            sha256=digest,
+            storage_uri=storage_uri,
+            status=status,
+            duplicate_of_version_id=duplicate.id if duplicate else None,
+        )
+
+        if target_document is None:
+            document = Document.with_first_version(version)
+            self.catalog.save_document_with_version(document=document, version=version)
+        else:
+            self.catalog.append_version_to_document(document_id=target_document.id, version=version)
+        return version
 
     def _upload_new_family(
         self,

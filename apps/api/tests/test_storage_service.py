@@ -143,3 +143,70 @@ class TestFileSystemStorage:
         uri = storage.put("k", b"x")
 
         assert storage.get(uri) == b"x"
+
+
+class TestInMemoryStoragePutStream:
+    def test_put_stream_accumulates_chunks(self):
+        storage = InMemoryStorageService()
+        chunks = [b"part one ", b"part two ", b"part three"]
+
+        uri = storage.put_stream("documents/v/joined.txt", iter(chunks))
+
+        assert uri == "memory://documents/v/joined.txt"
+        assert storage.get(uri) == b"part one part two part three"
+
+    def test_put_stream_handles_empty_iterable(self):
+        storage = InMemoryStorageService()
+
+        uri = storage.put_stream("documents/v/empty.txt", iter(()))
+
+        assert storage.get(uri) == b""
+
+    def test_put_stream_matches_put_for_same_payload(self):
+        storage = InMemoryStorageService()
+        payload = b"identical bytes by either path"
+
+        whole_uri = storage.put("a", payload)
+        streamed_uri = storage.put_stream("b", iter([payload[:10], payload[10:]]))
+
+        assert storage.get(whole_uri) == storage.get(streamed_uri)
+
+
+class TestFileSystemStoragePutStream:
+    def test_put_stream_writes_chunks_to_disk(self, tmp_path):
+        storage = FileSystemStorageService(tmp_path)
+        chunks = [b"one ", b"two ", b"three"]
+
+        uri = storage.put_stream("documents/abc/policy.txt", iter(chunks))
+
+        assert uri.startswith("file://")
+        assert (tmp_path / "documents" / "abc" / "policy.txt").read_bytes() == b"one two three"
+
+    def test_put_stream_creates_intermediate_directories(self, tmp_path):
+        storage = FileSystemStorageService(tmp_path)
+
+        uri = storage.put_stream("a/b/c/d.txt", iter([b"deep"]))
+
+        assert (tmp_path / "a" / "b" / "c" / "d.txt").read_bytes() == b"deep"
+        assert storage.get(uri) == b"deep"
+
+    def test_put_stream_rejects_absolute_keys(self, tmp_path):
+        storage = FileSystemStorageService(tmp_path)
+
+        with pytest.raises(ValueError, match="parent traversal|relative"):
+            storage.put_stream("/etc/passwd", iter([b"nope"]))
+
+    def test_put_stream_handles_empty_iterable(self, tmp_path):
+        storage = FileSystemStorageService(tmp_path)
+
+        uri = storage.put_stream("empty.bin", iter(()))
+
+        assert storage.get(uri) == b""
+
+    def test_put_stream_round_trips_with_get(self, tmp_path):
+        storage = FileSystemStorageService(tmp_path)
+        payload = bytes(range(256)) * 17
+
+        uri = storage.put_stream("k", iter([payload[:500], payload[500:]]))
+
+        assert storage.get(uri) == payload
