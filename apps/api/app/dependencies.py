@@ -39,7 +39,7 @@ def build_services() -> PipelineServices:
     documents = DocumentService(storage=storage)
     parsers = ParserRegistry([PlainTextParser()])
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
-    semantic_extractor = SemanticExtractor()
+    semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
     return PipelineServices(
         storage=storage,
@@ -67,7 +67,7 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
     )
     parsers = ParserRegistry([PlainTextParser()])
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
-    semantic_extractor = SemanticExtractor()
+    semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
     return PipelineServices(
         storage=storage,

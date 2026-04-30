@@ -1,8 +1,12 @@
+import logging
+
 import pytest
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import DocumentVersion
 from app.schemas.extraction import RawExtraction, SourceReference
+from app.schemas.semantic_document import SemanticAsset
+from app.services.enrichers import NoOpEnricher, SemanticEnricher
 from app.services.semantic_extractor import SemanticExtractor
 
 
@@ -158,3 +162,134 @@ class TestSemanticExtractorOutput:
         assert isinstance(semantic.source_references, list)
         assert all(isinstance(r, dict) for r in semantic.source_references)
         assert semantic.source_references[0]["snippet"] == "hello"
+
+
+class _StubEnricher:
+    """Test enricher that returns whatever it was constructed with."""
+
+    def __init__(self, name: str, results: list) -> None:
+        self.name = name
+        self._results = results
+        self.calls: list[tuple] = []
+
+    def enrich(self, raw_extraction, existing_assets):
+        self.calls.append((raw_extraction, list(existing_assets)))
+        return list(self._results)
+
+
+class _RaisingEnricher:
+    name = "boom"
+
+    def enrich(self, raw_extraction, existing_assets):
+        raise RuntimeError("simulated provider failure")
+
+
+class TestSemanticEnricherProtocol:
+    def test_noop_enricher_is_runtime_protocol_member(self):
+        assert isinstance(NoOpEnricher(), SemanticEnricher)
+
+    def test_noop_enricher_returns_no_assets(self):
+        version = _version()
+        raw = _extraction()
+        extractor = SemanticExtractor(enrichers=[NoOpEnricher()])
+
+        semantic = extractor.extract(version=version, raw_extraction=raw)
+
+        assert semantic.assets == []
+
+    def test_no_enrichers_means_no_extra_assets(self):
+        version = _version()
+        raw = _extraction()
+        extractor = SemanticExtractor(enrichers=[])
+
+        semantic = extractor.extract(version=version, raw_extraction=raw)
+
+        assert semantic.assets == []
+
+    def test_default_constructor_has_no_enrichers(self):
+        # Backwards compatibility: existing call sites with no kwargs still work.
+        version = _version()
+        raw = _extraction()
+        extractor = SemanticExtractor()
+
+        semantic = extractor.extract(version=version, raw_extraction=raw)
+
+        assert semantic.assets == []
+
+
+class TestSemanticEnricherBoundary:
+    def test_valid_asset_has_review_status_forced_to_needs_review(self):
+        version = _version()
+        ref = SourceReference(document_version_id=version.id, section_id="s1", snippet="t")
+        raw = _extraction(source_refs=[ref])
+        # Enricher claims a fully source-backed asset; the boundary must
+        # downgrade it to needs_review regardless.
+        claimed = SemanticAsset(
+            type="claim",
+            text="LLM-extracted claim",
+            confidence=0.9,
+            review_status="source_backed",
+            source_reference_ids=[ref.id],
+        )
+        enricher = _StubEnricher(name="stub", results=[claimed])
+        extractor = SemanticExtractor(enrichers=[enricher])
+
+        semantic = extractor.extract(version=version, raw_extraction=raw)
+
+        assert len(semantic.assets) == 1
+        produced = semantic.assets[0]
+        assert produced.text == "LLM-extracted claim"
+        assert produced.review_status == "needs_review"
+
+    def test_invalid_asset_is_dropped_and_logged(self, caplog):
+        version = _version()
+        valid = SemanticAsset(type="claim", text="ok", confidence=0.5)
+        # confidence=2.0 violates the [0, 1] constraint on SemanticAsset.
+        invalid = {"type": "claim", "text": "bad", "confidence": 2.0}
+        enricher = _StubEnricher(name="lossy", results=[invalid, valid])
+        extractor = SemanticExtractor(enrichers=[enricher])
+
+        with caplog.at_level(logging.WARNING, logger="app.services.semantic_extractor"):
+            semantic = extractor.extract(version=version, raw_extraction=_extraction())
+
+        # Only the valid asset survives; pipeline keeps going.
+        assert len(semantic.assets) == 1
+        assert semantic.assets[0].text == "ok"
+        assert semantic.assets[0].review_status == "needs_review"
+        # And the drop was logged with the enricher's name.
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("lossy" in r.getMessage() for r in warnings)
+
+    def test_raising_enricher_is_logged_and_skipped(self, caplog):
+        version = _version()
+        ok_asset = SemanticAsset(type="claim", text="kept", confidence=0.4)
+        raiser = _RaisingEnricher()
+        survivor = _StubEnricher(name="survivor", results=[ok_asset])
+        extractor = SemanticExtractor(enrichers=[raiser, survivor])
+
+        with caplog.at_level(logging.ERROR, logger="app.services.semantic_extractor"):
+            semantic = extractor.extract(version=version, raw_extraction=_extraction())
+
+        # The raising enricher contributed nothing, but the next one ran.
+        assert len(semantic.assets) == 1
+        assert semantic.assets[0].text == "kept"
+        # The exception was logged via logger.exception.
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert any("boom" in r.getMessage() for r in errors)
+        assert any(r.exc_info for r in errors)
+        # And the raiser's failure didn't poison the surviving enricher's input.
+        assert survivor.calls and survivor.calls[0][1] == []
+
+    def test_two_enrichers_run_in_registration_order(self):
+        version = _version()
+        first_asset = SemanticAsset(type="claim", text="first", confidence=0.1)
+        second_asset = SemanticAsset(type="claim", text="second", confidence=0.2)
+        first = _StubEnricher(name="first", results=[first_asset])
+        second = _StubEnricher(name="second", results=[second_asset])
+        extractor = SemanticExtractor(enrichers=[first, second])
+
+        semantic = extractor.extract(version=version, raw_extraction=_extraction())
+
+        assert [a.text for a in semantic.assets] == ["first", "second"]
+        # The second enricher saw the first one's output as `existing_assets`.
+        assert second.calls[0][1][0].text == "first"
