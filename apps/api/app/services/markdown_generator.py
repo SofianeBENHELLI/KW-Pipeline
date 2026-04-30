@@ -1,3 +1,5 @@
+import yaml
+
 from app.schemas.document import DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
@@ -13,18 +15,26 @@ class MarkdownGenerator:
         raw_extraction: RawExtraction,
     ) -> str:
         """Generate deterministic Markdown for one document version."""
+        frontmatter = yaml.safe_dump(
+            {
+                "document_id": version.document_id,
+                "version_id": version.id,
+                "filename": version.filename,
+                "sha256": version.sha256,
+                "parser": raw_extraction.parser_name,
+                "parser_version": raw_extraction.parser_version,
+                "extraction_date": raw_extraction.created_at.isoformat(),
+                "validation_status": semantic.validation_status,
+                "source_uri": version.storage_uri,
+                "schema_version": semantic.schema_version,
+            },
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
         lines = [
             "---",
-            f'document_id: "{version.document_id}"',
-            f'version_id: "{version.id}"',
-            f'filename: "{version.filename}"',
-            f'sha256: "{version.sha256}"',
-            f'parser: "{raw_extraction.parser_name}"',
-            f'parser_version: "{raw_extraction.parser_version}"',
-            f'extraction_date: "{raw_extraction.created_at.isoformat()}"',
-            f'validation_status: "{semantic.validation_status}"',
-            f'source_uri: "{version.storage_uri}"',
-            f'schema_version: "{semantic.schema_version}"',
+            frontmatter.rstrip("\n"),
             "---",
             "",
             f"# {semantic.document_profile.title}",

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+import yaml
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import DocumentVersion
@@ -14,6 +15,14 @@ from app.services.semantic_extractor import SemanticExtractor
 from app.services.storage_service import InMemoryStorageService
 
 
+def _extract_frontmatter(markdown: str) -> dict:
+    """Parse the YAML frontmatter block out of a rendered Markdown document."""
+    assert markdown.startswith("---\n"), markdown[:20]
+    body = markdown[len("---\n") :]
+    end = body.index("\n---\n")
+    return yaml.safe_load(body[:end])
+
+
 def test_semantic_extraction_and_markdown_include_required_frontmatter():
     documents = DocumentService(storage=InMemoryStorageService())
     version = documents.upload("risk-register.txt", "text/plain", b"Risk: supplier delay")
@@ -23,11 +32,12 @@ def test_semantic_extraction_and_markdown_include_required_frontmatter():
     semantic = SemanticExtractor().extract(version=version, raw_extraction=raw)
     markdown = MarkdownGenerator().render(version=version, semantic=semantic, raw_extraction=raw)
 
-    assert 'document_id: "' in markdown
-    assert f'version_id: "{version.id}"' in markdown
-    assert f'sha256: "{version.sha256}"' in markdown
-    assert 'parser: "plain_text"' in markdown
-    assert 'validation_status: "needs_review"' in markdown
+    front = _extract_frontmatter(markdown)
+    assert front["document_id"] == version.document_id
+    assert front["version_id"] == version.id
+    assert front["sha256"] == version.sha256
+    assert front["parser"] == "plain_text"
+    assert front["validation_status"] == "needs_review"
     assert "## Source Lineage" in markdown
     assert "Risk: supplier delay" in markdown
 
@@ -46,10 +56,10 @@ def _stub_version(filename: str = "doc.txt") -> DocumentVersion:
     )
 
 
-def _stub_raw() -> RawExtraction:
+def _stub_raw(parser_name: str = "plain_text") -> RawExtraction:
     return RawExtraction(
         document_version_id="ver-1",
-        parser_name="plain_text",
+        parser_name=parser_name,
         parser_version="0.1",
         text="any",
         sections=[],
@@ -179,3 +189,72 @@ class TestFormatLocation:
         )
 
         assert "- `r1` (page 2, line 4-6): hello" in markdown
+
+
+class TestFrontmatterEscaping:
+    """yaml.safe_dump must round-trip adversarial filename/parser/storage_uri values
+    that would break a hand-rolled f-string YAML serializer (issue #64)."""
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            'has "double" quotes.txt',
+            "has\\backslash.txt",
+            "has\nnewline.txt",
+            "has\ttab.txt",
+            "résumé-naïve-中文-😀.txt",
+            "single 'quote' and \"double\" quote.txt",
+            "ends with backslash\\",
+            "---\nfake_key: injected\n",
+        ],
+    )
+    def test_adversarial_filenames_round_trip_through_yaml(self, filename):
+        version = _stub_version(filename=filename)
+        markdown = MarkdownGenerator().render(
+            version=version, semantic=_stub_semantic(), raw_extraction=_stub_raw()
+        )
+
+        front = _extract_frontmatter(markdown)
+        assert front["filename"] == filename
+        # storage_uri embeds the filename; it must round-trip too.
+        assert front["source_uri"] == version.storage_uri
+        # Injection attempts must not leak fake keys.
+        assert "fake_key" not in front
+
+    def test_adversarial_parser_name_round_trips(self):
+        raw = _stub_raw(parser_name='evil"\nparser: hijacked')
+        markdown = MarkdownGenerator().render(
+            version=_stub_version(), semantic=_stub_semantic(), raw_extraction=raw
+        )
+
+        front = _extract_frontmatter(markdown)
+        assert front["parser"] == 'evil"\nparser: hijacked'
+        assert front["validation_status"] == "needs_review"
+
+    def test_safe_filename_renders_as_plain_yaml_scalar(self):
+        markdown = MarkdownGenerator().render(
+            version=_stub_version(filename="doc.txt"),
+            semantic=_stub_semantic(),
+            raw_extraction=_stub_raw(),
+        )
+
+        # Plain ASCII filenames stay readable; the frontmatter parses identically
+        # whether or not yaml decides to quote.
+        front = _extract_frontmatter(markdown)
+        assert front["filename"] == "doc.txt"
+        assert front["source_uri"] == "memory://documents/ver-1/doc.txt"
+
+    def test_frontmatter_block_is_well_formed(self):
+        markdown = MarkdownGenerator().render(
+            version=_stub_version(),
+            semantic=_stub_semantic(),
+            raw_extraction=_stub_raw(),
+        )
+
+        # Exactly one opening "---" line and one closing "---" line bracket the
+        # frontmatter; the body that follows is the document title.
+        lines = markdown.splitlines()
+        assert lines[0] == "---"
+        closing = lines.index("---", 1)
+        assert lines[closing + 1] == ""
+        assert lines[closing + 2].startswith("# ")
