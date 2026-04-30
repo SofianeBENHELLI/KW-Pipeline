@@ -1,5 +1,5 @@
 from app.schemas.document import DocumentVersion
-from app.schemas.extraction import RawExtraction, SourceReference
+from app.schemas.extraction import RawExtraction, RawSection, SourceReference
 from app.services.storage_service import InMemoryStorageService
 
 
@@ -29,12 +29,12 @@ class PlainTextParser:
             if line.strip()
         ]
         sections = [
-            {
-                "id": ref.section_id,
-                "heading": "Extracted Text",
-                "text": ref.snippet,
-                "source_reference_ids": [ref.id],
-            }
+            RawSection(
+                id=ref.section_id,
+                heading="Extracted Text",
+                text=ref.snippet,
+                source_reference_ids=[ref.id],
+            )
             for ref in source_references
         ]
         warnings = []
