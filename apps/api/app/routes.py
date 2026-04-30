@@ -1,8 +1,38 @@
+import os
+
 from fastapi import APIRouter, Body, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.services.extraction_job_service import ExtractionFailed
+
+# Default upload guardrails. These mirror the values used by the production
+# deployment until Pydantic Settings (#43) lands and replaces the ad-hoc
+# `os.environ.get` reads at request time.
+DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MiB
+DEFAULT_ALLOWED_CONTENT_TYPES = "text/plain"
+
+
+def _max_upload_bytes() -> int:
+    """Read MAX_UPLOAD_BYTES from the environment at request time.
+
+    Read on every request so tests can `monkeypatch.setenv` per case. Falls
+    back to ``DEFAULT_MAX_UPLOAD_BYTES`` when the env var is unset.
+    """
+    raw = os.environ.get("MAX_UPLOAD_BYTES")
+    if raw is None or raw == "":
+        return DEFAULT_MAX_UPLOAD_BYTES
+    return int(raw)
+
+
+def _allowed_content_types() -> set[str]:
+    """Read ALLOWED_CONTENT_TYPES from the environment at request time.
+
+    The env var is a comma-separated list. Empty entries are dropped so a
+    trailing comma does not silently allow ``""``.
+    """
+    raw = os.environ.get("ALLOWED_CONTENT_TYPES", DEFAULT_ALLOWED_CONTENT_TYPES)
+    return {entry.strip() for entry in raw.split(",") if entry.strip()}
 
 
 class ReviewRequest(BaseModel):
@@ -24,13 +54,35 @@ def build_router(services: PipelineServices) -> APIRouter:
         file: UploadFile = File(...),
         document_id: str | None = None,
     ):
+        max_bytes = _max_upload_bytes()
+        allowed = _allowed_content_types()
+
+        # Strip any media-type parameters (e.g. `; charset=utf-8`) before
+        # comparing against the allowlist — RFC 7231 lets clients tack them
+        # on freely, but the bare type is what we gate on.
+        raw_content_type = file.content_type or "application/octet-stream"
+        bare_content_type = raw_content_type.split(";")[0].strip()
+        if bare_content_type not in allowed:
+            allowed_list = ", ".join(sorted(allowed))
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    f"Content type '{bare_content_type}' is not allowed. Allowed: {allowed_list}"
+                ),
+            )
+
         content = await file.read()
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds limit of {max_bytes} bytes",
+            )
         if not content:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
         try:
             return services.documents.upload(
                 filename=file.filename or "untitled",
-                content_type=file.content_type or "application/octet-stream",
+                content_type=raw_content_type,
                 content=content,
                 document_id=document_id,
             )
