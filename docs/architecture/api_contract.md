@@ -41,9 +41,48 @@ detail of `"Content type '<received>' is not allowed. Allowed: <sorted, joined>"
 
 ## List Documents
 
-`GET /documents`
+`GET /documents?limit=50&cursor=<opaque>`
 
-Returns catalog entries with latest version metadata.
+Returns one cursor-paginated page of catalog entries with latest version
+metadata.
+
+Response shape:
+
+```json
+{
+  "items": [Document, ...],
+  "next_cursor": "<opaque base64>" | null
+}
+```
+
+### Pagination
+
+- `limit` defaults to `50`. Valid range: `1 <= limit <= 200`. Values outside
+  that range are rejected with HTTP `400 Bad Request` and a detail of
+  `"limit must be between 1 and 200; got <N>."`.
+- `cursor` is an opaque URL-safe base64 token. Clients MUST treat it as
+  opaque — its internal shape (currently base64-of-JSON over
+  `[created_at_iso, document_id]`) is not part of the public contract and
+  may change without notice.
+- The cursor encodes the `(created_at, id)` of the **last returned row**,
+  so the next page returns rows strictly greater than that tuple under the
+  stable ordering `(created_at ASC, id ASC)`. The `id` tie-breaker keeps
+  two same-second uploads from shifting between pages.
+- `next_cursor` is `null` when the page wasn't full (fewer than `limit`
+  rows returned). In that case there is no further data to walk. When the
+  page is exactly full, `next_cursor` is non-null and a follow-up call may
+  yield an empty page (`{"items": [], "next_cursor": null}`).
+- A malformed `cursor` (bad base64, malformed JSON, wrong shape, wrong
+  types, unparseable datetime) is rejected with HTTP `400 Bad Request` and
+  a detail of `"Invalid cursor: <reason>"`. The route never returns 500
+  for client-supplied cursor errors.
+
+### Backward compatibility
+
+The previous shape (a bare JSON array of documents) is intentionally
+broken. Callers that previously did `response.json()` to receive a list
+must now read `response.json()["items"]`. There is no transitional
+fallback — fielding two response shapes is worse than the cutover.
 
 ## Get Document
 

@@ -60,7 +60,7 @@ class TestEmptyAndDuplicate:
             files={"file": ("empty.txt", b"", "text/plain")},
         )
 
-        assert client.get("/documents").json() == []
+        assert client.get("/documents").json() == {"items": [], "next_cursor": None}
 
     def test_duplicate_extract_returns_conflict(self):
         client = _client()

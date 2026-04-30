@@ -27,7 +27,9 @@ def test_upload_catalog_detail_extract_and_semantic_flow():
 
     catalog_response = client.get("/documents")
     assert catalog_response.status_code == 200
-    assert catalog_response.json()[0]["id"] == version["document_id"]
+    catalog_body = catalog_response.json()
+    assert catalog_body["items"][0]["id"] == version["document_id"]
+    assert catalog_body["next_cursor"] is None
 
     detail_response = client.get(f"/documents/{version['document_id']}")
     assert detail_response.status_code == 200
@@ -207,5 +209,7 @@ def test_persistent_app_keeps_catalog_between_app_instances(tmp_path):
     catalog_response = second_client.get("/documents")
 
     assert catalog_response.status_code == 200
-    assert catalog_response.json()[0]["id"] == uploaded["document_id"]
-    assert catalog_response.json()[0]["versions"][0]["id"] == uploaded["id"]
+    body = catalog_response.json()
+    assert body["items"][0]["id"] == uploaded["document_id"]
+    assert body["items"][0]["versions"][0]["id"] == uploaded["id"]
+    assert body["next_cursor"] is None
