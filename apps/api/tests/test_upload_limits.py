@@ -165,7 +165,7 @@ def _build_filesystem_router(tmp_path):
     """
     from app.dependencies import PipelineServices
     from app.routes import build_router
-    from app.services.document_parser import PlainTextParser
+    from app.services.document_parser import ParserRegistry, PlainTextParser
     from app.services.document_service import DocumentService
     from app.services.extraction_job_service import ExtractionJobService
     from app.services.markdown_generator import MarkdownGenerator
@@ -175,14 +175,14 @@ def _build_filesystem_router(tmp_path):
 
     storage = FileSystemStorageService(root=tmp_path / "raw")
     documents = DocumentService(storage=storage)
-    parser = PlainTextParser()
-    extraction_jobs = ExtractionJobService(documents=documents, parser=parser)
-    semantic_extractor = SemanticExtractor()
+    parsers = ParserRegistry([PlainTextParser()])
+    extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
+    semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
     services = PipelineServices(
         storage=storage,
         documents=documents,
-        parser=parser,
+        parsers=parsers,
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
