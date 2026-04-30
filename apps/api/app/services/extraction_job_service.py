@@ -55,6 +55,7 @@ class ExtractionJobService:
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
         if version.status == DocumentVersionStatus.DUPLICATE_DETECTED:
             raise ValueError("Duplicate versions are not extracted independently.")
+        self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTING)
         try:
             parser = self.parsers.for_content_type(version.content_type)
         except KeyError as exc:
@@ -65,7 +66,6 @@ class ExtractionJobService:
             )
             self.documents.mark_failed(document_id, version_id, reason)
             raise ExtractionFailed(reason) from exc
-        self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTING)
         try:
             raw_extraction = parser.parse(version=version, storage=self.documents.storage)
         except Exception as exc:

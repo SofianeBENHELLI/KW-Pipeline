@@ -2,6 +2,7 @@
 
 from fastapi.testclient import TestClient
 
+from app.dependencies import build_services
 from app.main import create_app
 
 
@@ -60,6 +61,23 @@ class TestValidateEndpoint:
 
         assert response.status_code == 404
 
+    def test_validate_missing_semantic_output_does_not_mutate_status(self):
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+        services.documents.catalog.semantic_documents.clear()
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={"reviewer_note": "should not leak into catalog"},
+        )
+
+        assert response.status_code == 404
+        version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]
+        assert version["status"] == "NEEDS_REVIEW"
+        assert version["reviewer_note"] is None
+        assert version["reviewed_at"] is None
+
 
 class TestRejectEndpoint:
     def test_reject_flips_status_and_validation_state(self):
@@ -77,6 +95,23 @@ class TestRejectEndpoint:
         version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]
         assert version["status"] == "REJECTED"
         assert version["reviewer_note"] == "missing lineage on key claim"
+
+    def test_reject_missing_semantic_output_does_not_mutate_status(self):
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+        services.documents.catalog.semantic_documents.clear()
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reject",
+            json={"reviewer_note": "should not leak into catalog"},
+        )
+
+        assert response.status_code == 404
+        version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]
+        assert version["status"] == "NEEDS_REVIEW"
+        assert version["reviewer_note"] is None
+        assert version["reviewed_at"] is None
 
 
 class TestReviewWrongState:

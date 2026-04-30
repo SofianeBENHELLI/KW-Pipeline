@@ -67,9 +67,9 @@ apps/web/
   react-router-dom versions we use today. The ADR explains the trade-off.
 - Vitest reuses the Vite config, so there is one transform pipeline for dev,
   build, and tests.
-- The dev server talks to the FastAPI backend in `apps/api/`. CORS for the
-  cross-origin dev call lands in issue #36; until then either run the backend
-  in a CORS-permissive dev mode or add a Vite proxy.
+- The dev server talks to the FastAPI backend in `apps/api/`. Add
+  `http://localhost:5173` or `http://127.0.0.1:5173` to
+  `CORS_ALLOWED_ORIGINS` when running the API locally.
 - A future Tauri shell can wrap this same build for a native desktop window
   without changing the React app.
 - Keep branding behind a small theme layer so official 3DEXPERIENCE /

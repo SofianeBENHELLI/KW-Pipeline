@@ -73,9 +73,9 @@ tool.
   access or offline behavior, we wrap the same Vite build in **Tauri** — the
   React app does not change.
 - The frontend talks to `apps/api/` over HTTP from a different origin during
-  local dev (Vite on `:5173`, FastAPI on `:8000`). This depends on the backend
-  CORS configuration tracked in issue #36; until that lands, dev work uses a
-  Vite proxy or a CORS-permissive backend dev mode.
+  local dev (Vite on `:5173`, FastAPI on `:8000`). The backend now exposes a
+  `CORS_ALLOWED_ORIGINS` allowlist so local development can opt in
+  explicitly without a permissive default.
 - No SSR means no server-rendered SEO and no per-route Node server, which is
   the correct tradeoff for an authenticated internal tool.
 - Choosing Vitest keeps the test runner in the same config graph as the build,

@@ -48,10 +48,18 @@ Run backend tests with:
 
 ## Frontend Unit Tests
 
-These tests are written as skipped placeholders until `apps/web` is scaffolded.
+Run frontend tests with:
+
+```bash
+cd apps/web
+npm test
+npm run build
+```
 
 | Component | Test Case | Expected Result |
 | --- | --- | --- |
+| App shell | Render current scaffold. | Compact pipeline widget and expanded review workspace are visible. |
+| Widget | Sample statuses include review, failed, and validated. | Status badges and upload affordance are visible. |
 | Upload form | No file selected. | Upload action is disabled or validation error is shown. |
 | Upload form | File selected. | Filename, type, and size are displayed before submit. |
 | Catalog row | Document has duplicate status. | Duplicate/version indicator is visible. |
@@ -62,7 +70,9 @@ These tests are written as skipped placeholders until `apps/web` is scaffolded.
 
 ## Frontend Integration Tests
 
-These tests are represented in `apps/web/e2e/document-ingestion.spec.ts` and should be enabled once the Next.js app exists.
+End-to-end tests should be enabled once Orbital is wired to live Harvester API
+data. The current Vite/React scaffold uses fixture data; issue #77 owns the
+API-client wiring that will make these flows executable.
 
 | Flow | Test Case | Expected Result |
 | --- | --- | --- |

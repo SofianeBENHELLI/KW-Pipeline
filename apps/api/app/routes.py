@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
+from app.models.document import DocumentVersionStatus
 from app.services.extraction_job_service import ExtractionFailed
 
 # Default upload guardrails. These mirror the values used by the production
@@ -185,6 +186,16 @@ def build_router(services: PipelineServices) -> APIRouter:
         cached_status,
     ):
         try:
+            version = services.documents.get_version(
+                document_id=document_id,
+                version_id=version_id,
+            )
+            if version.status != DocumentVersionStatus.NEEDS_REVIEW:
+                raise ValueError(
+                    f"Version is in {version.status.value}, not NEEDS_REVIEW; "
+                    f"cannot transition to {cached_status.upper()}."
+                )
+            services.semantic_outputs.get(document_id=document_id, version_id=version_id)
             mark(
                 document_id=document_id,
                 version_id=version_id,

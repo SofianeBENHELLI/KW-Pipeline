@@ -15,7 +15,9 @@ The first implementation target is intentionally narrow:
 - generate one Markdown asset per document version;
 - keep all unverified semantic claims in `needs_review`.
 
-See `docs/architecture/document_intelligence_mvp.md` for the initial contract.
+See `docs/architecture/document_intelligence_mvp.md` for the initial contract
+and `docs/roadmap/mvp_backlog_review.md` for the current backlog review and
+remaining-work plan.
 
 ## Development
 
@@ -31,6 +33,15 @@ Run the backend test suite:
 
 ```bash
 .venv312/bin/python -m pytest apps/api/tests
+```
+
+Install and run the frontend checks:
+
+```bash
+cd apps/web
+npm ci
+npm test
+npm run build
 ```
 
 ## Local Persistence

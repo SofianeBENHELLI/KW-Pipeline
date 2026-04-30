@@ -1,6 +1,7 @@
 import pytest
 
 from app.models.document import DocumentVersionStatus
+from app.schemas.document import Document, DocumentVersion
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed, ExtractionJobService
@@ -130,6 +131,33 @@ def test_extraction_marks_version_failed_for_unsupported_content_type():
     failed = documents.get_version(version.document_id, version.id)
     assert failed.status == DocumentVersionStatus.FAILED
     assert failed.failure_reason == "No parser for content_type: application/pdf"
+
+
+def test_extraction_checks_lifecycle_before_parser_registry_failure():
+    documents = DocumentService(storage=InMemoryStorageService())
+    version = DocumentVersion(
+        id="ver-reviewed-pdf",
+        document_id="doc-reviewed-pdf",
+        version_number=1,
+        filename="reviewed.pdf",
+        content_type="application/pdf",
+        file_size=12,
+        sha256="a" * 64,
+        storage_uri="memory://documents/ver-reviewed-pdf/reviewed.pdf",
+        status=DocumentVersionStatus.VALIDATED,
+    )
+    documents.catalog.save_document_with_version(
+        document=Document.with_first_version(version),
+        version=version,
+    )
+    jobs = ExtractionJobService(documents=documents, parsers=ParserRegistry([PlainTextParser()]))
+
+    with pytest.raises(ValueError, match="Cannot transition from VALIDATED to EXTRACTING"):
+        jobs.extract(document_id=version.document_id, version_id=version.id)
+
+    current = documents.get_version(version.document_id, version.id)
+    assert current.status == DocumentVersionStatus.VALIDATED
+    assert current.failure_reason is None
 
 
 def test_extraction_job_service_requires_parsers_or_parser():
