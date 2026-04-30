@@ -6,6 +6,7 @@ from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
+from app.services.parsers import DocxParser
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
@@ -33,11 +34,27 @@ class PipelineServices:
     semantic_outputs: SemanticOutputService
 
 
+def _build_parser_registry() -> ParserRegistry:
+    """Construct the parser registry shared by both wirings.
+
+    Append new parsers to the end of the list; ``ParserRegistry`` resolves
+    by content type and the parsers here advertise disjoint
+    ``supported_content_types`` so order is not load-bearing for behaviour,
+    only for diff-collision avoidance.
+    """
+    return ParserRegistry(
+        [
+            PlainTextParser(),
+            DocxParser(),
+        ]
+    )
+
+
 def build_services() -> PipelineServices:
     """Create fresh in-memory services for tests and ephemeral demos."""
     storage = InMemoryStorageService()
     documents = DocumentService(storage=storage)
-    parsers = ParserRegistry([PlainTextParser()])
+    parsers = _build_parser_registry()
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
@@ -65,7 +82,7 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
         storage=storage,
         catalog=SQLiteCatalogStore(root / "catalog.sqlite3"),
     )
-    parsers = ParserRegistry([PlainTextParser()])
+    parsers = _build_parser_registry()
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
