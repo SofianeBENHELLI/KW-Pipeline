@@ -1,4 +1,6 @@
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -9,6 +11,12 @@ from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
+
+# How long a write may wait on a contended SQLite database before raising
+# `database is locked`. 5 s is well above any healthy contention window in the
+# MVP and short enough that a real deadlock surfaces before a request gateway
+# times out.
+_SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 class CatalogStore(Protocol):
@@ -182,11 +190,15 @@ class SQLiteCatalogStore:
         self._initialize()
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
+        # Excluding rows where `duplicate_of_version_id IS NOT NULL` matches
+        # the in-memory store's behaviour (it never indexes duplicates by
+        # hash) and prevents a third upload of the same bytes from chaining
+        # off a duplicate row instead of pointing at the original version.
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM document_versions
-                WHERE sha256 = ?
+                WHERE sha256 = ? AND duplicate_of_version_id IS NULL
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
@@ -384,6 +396,11 @@ class SQLiteCatalogStore:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            # WAL is per-database and survives restart, so set once here.
+            # WAL allows a writer + readers concurrently and reduces
+            # `database is locked` errors during the eventual extraction
+            # worker / API request overlap.
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS documents (
@@ -457,10 +474,26 @@ class SQLiteCatalogStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection, commit on success, and **always close**.
+
+        Python's `sqlite3.Connection` is itself a context manager that
+        commits on exit but does NOT release the underlying handle —
+        relying on it leaks one file descriptor per call. Wrapping in
+        an explicit `@contextmanager` closes the connection, enables
+        foreign-key enforcement, and sets a busy timeout for every
+        operation.
+        """
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _insert_version(self, connection: sqlite3.Connection, version: DocumentVersion) -> None:
         connection.execute(
