@@ -78,3 +78,28 @@ Accepts:
 - `decision`: `validated` or `rejected`
 - `reviewer`
 - `notes`
+
+## CORS
+
+The API installs Starlette's `CORSMiddleware` so the Orbital frontend can talk
+to it from a separate origin. The allowlist is read from the
+`CORS_ALLOWED_ORIGINS` environment variable as a comma-separated list of exact
+origins (no wildcards):
+
+```
+CORS_ALLOWED_ORIGINS=http://localhost:5173,https://orbital.example.com
+```
+
+Behaviour:
+
+- `allow_origins` — exactly the origins parsed from the env var. Empty by
+  default, which means no cross-origin requests are accepted until an operator
+  opts in.
+- `allow_credentials` — `False` (cookies and `Authorization` are not echoed).
+- `allow_methods` — `GET`, `POST`, `OPTIONS`.
+- `allow_headers` — any (frontend can send `Content-Type`, etc.).
+
+Preflight `OPTIONS` requests from an origin in the allowlist receive a
+matching `Access-Control-Allow-Origin` header; requests from origins outside
+the allowlist do not. The env-var read is intentionally inline; it will be
+folded into Pydantic Settings once issue #43 lands.

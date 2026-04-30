@@ -1,6 +1,7 @@
 """HTTP error-path coverage for routes that aren't fully exercised by the
 happy-path integration tests."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
@@ -80,3 +81,58 @@ class TestEmptyAndDuplicate:
         )
 
         assert response.status_code == 409
+
+
+class TestCorsMiddleware:
+    """Verify the CORS allowlist is read from the env var and that origins
+    outside the list are silently denied (no `Access-Control-Allow-Origin`
+    header echoed back, which is how Starlette's CORSMiddleware signals
+    rejection — it still returns the preflight response, just without the
+    permissive headers)."""
+
+    @pytest.fixture
+    def configured_client(self, monkeypatch):
+        monkeypatch.setenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173, https://orbital.example.com",
+        )
+        return TestClient(create_app())
+
+    def test_preflight_from_allowed_origin_echoes_origin_header(self, configured_client):
+        response = configured_client.options(
+            "/documents",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert "GET" in response.headers["access-control-allow-methods"]
+
+    def test_preflight_from_unknown_origin_is_not_allowed(self, configured_client):
+        response = configured_client.options(
+            "/documents",
+            headers={
+                "Origin": "https://evil.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_default_app_has_empty_allowlist(self, monkeypatch):
+        """With no env var set, no origin should ever be allowed."""
+        monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+        client = TestClient(create_app())
+
+        response = client.options(
+            "/documents",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert "access-control-allow-origin" not in response.headers
