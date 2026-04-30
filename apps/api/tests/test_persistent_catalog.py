@@ -36,6 +36,13 @@ def test_persistent_status_updates_survive_restart(tmp_path):
     first_services = build_persistent_services(tmp_path)
     uploaded = first_services.documents.upload("status.txt", "text/plain", b"status")
 
+    # Walk the FSM rather than jump-cutting STORED -> EXTRACTED, which the
+    # lifecycle guard now refuses.
+    first_services.documents.update_status(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        status=DocumentVersionStatus.EXTRACTING,
+    )
     first_services.documents.update_status(
         document_id=uploaded.document_id,
         version_id=uploaded.id,
@@ -178,7 +185,18 @@ def test_persistent_validate_works_after_restart(tmp_path):
 def test_persistent_review_decision_survives_restart(tmp_path):
     first_services = build_persistent_services(tmp_path)
     uploaded = first_services.documents.upload("policy.txt", "text/plain", b"to review")
-    # Drive the version into NEEDS_REVIEW so we can transition out of it.
+    # Drive the version through legal FSM states into NEEDS_REVIEW so we can
+    # transition out of it: STORED -> EXTRACTING -> EXTRACTED -> NEEDS_REVIEW.
+    first_services.documents.update_status(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        status=DocumentVersionStatus.EXTRACTING,
+    )
+    first_services.documents.update_status(
+        document_id=uploaded.document_id,
+        version_id=uploaded.id,
+        status=DocumentVersionStatus.EXTRACTED,
+    )
     first_services.documents.update_status(
         document_id=uploaded.document_id,
         version_id=uploaded.id,

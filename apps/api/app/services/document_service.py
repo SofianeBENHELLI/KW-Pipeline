@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from app.models.document import DocumentVersionStatus
+from app.models.document import DocumentVersionStatus, assert_transition
 from app.schemas.document import Document, DocumentVersion
 from app.services.catalog_store import CatalogStore, InMemoryCatalogStore
 from app.services.hash_service import compute_sha256
@@ -133,7 +133,16 @@ class DocumentService:
     def update_status(
         self, document_id: str, version_id: str, status: DocumentVersionStatus
     ) -> DocumentVersion:
-        """Update and return a document version lifecycle status."""
+        """Update and return a document version lifecycle status.
+
+        The transition from the version's current status to ``status`` is
+        validated against ``ALLOWED_TRANSITIONS``; an illegal transition
+        raises ``ValueError`` and the catalog is left untouched. ``mark_failed``,
+        ``mark_validated``, and ``mark_rejected`` enforce their own preconditions
+        and bypass this helper deliberately.
+        """
+        version = self.catalog.get_version(document_id=document_id, version_id=version_id)
+        assert_transition(version.status, status)
         return self.catalog.update_version_status(
             document_id=document_id,
             version_id=version_id,
