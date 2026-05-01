@@ -78,7 +78,10 @@ class InMemoryStorageService:
 class FileSystemStorageService:
     """Filesystem object-store adapter for the local persistent MVP."""
 
-    root: Path | str
+    # Accepts ``Path | str`` from callers but is normalised to ``Path`` in
+    # ``__post_init__``. The annotation matches the post-init invariant so
+    # downstream methods don't need to re-narrow on every access.
+    root: Path
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)

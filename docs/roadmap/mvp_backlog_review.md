@@ -147,7 +147,10 @@ After the knowledge-layer work settles:
 2. Real parsers beyond PDF/DOCX/plain text: `#47` (OCR), `#20`
    (Docling integration was rejected for the MVP — ADR-010 — but a
    future evaluator).
-3. `#44` mypy/pyright in CI.
+3. ~~`#44` mypy/pyright in CI.~~ Closed: `python-typecheck`
+   job runs mypy against `apps/api/app/` on every PR with a
+   pragmatic `[tool.mypy]` config (strict-optional on,
+   untyped-defs off).
 
 ## Open Decisions
 

@@ -32,6 +32,7 @@ dependencies = [
 test = [
   "fpdf2>=2.7",
   "httpx==0.28.1",
+  "mypy==1.13.0",
   "pytest==8.3.5",
   "pytest-cov==6.0.0",
 ]
@@ -75,3 +76,21 @@ extend-immutable-calls = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_incomplete_defs = true
+# Pragmatic — full strict mode is too aggressive for the first cut;
+# we can ratchet later.
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["neo4j.*", "anthropic.*", "pdfplumber.*", "docx.*", "fpdf.*", "yaml"]
+ignore_missing_imports = true
