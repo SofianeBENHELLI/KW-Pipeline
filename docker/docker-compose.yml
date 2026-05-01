@@ -1,0 +1,53 @@
+# Opt-in compose stack for the knowledge layer (ADR-012, Phase 1b).
+#
+# Defines a Neo4j 5.23 Community service plus the FastAPI app wired
+# to it via KW_NEO4J_* env vars. Default unit tests do not need this
+# stack; it exists for local end-to-end development and for the
+# `integration` CI job that exercises Neo4jGraphStore against a real
+# bolt:// connection.
+#
+# Note: there is intentionally no `web` / frontend service here. The
+# Vite dev server is expected to run on the host (`npm run dev` from
+# apps/web/) — keeping it out of compose avoids node_modules churn
+# inside Docker for what is otherwise a trivial dev workflow.
+#
+# Quickstart:
+#   docker compose -f docker/docker-compose.yml up neo4j   # bolt + browser only
+#   docker compose -f docker/docker-compose.yml up         # neo4j + api
+
+services:
+  neo4j:
+    image: neo4j:5.23-community
+    container_name: kw-pipeline-neo4j
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/test_password_change_me
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    container_name: kw-pipeline-api
+    ports:
+      - "8000:8000"
+    environment:
+      KW_KNOWLEDGE_LAYER_ENABLED: "true"
+      KW_NEO4J_URI: bolt://neo4j:7687
+      KW_NEO4J_USER: neo4j
+      KW_NEO4J_PASSWORD: test_password_change_me
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+volumes:
+  neo4j_data:

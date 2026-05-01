@@ -144,6 +144,47 @@ jobs:
             exit 1
           fi
 
+  integration:
+    name: Backend integration (Neo4j, py3.12)
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5.23-community
+        env:
+          NEO4J_AUTH: neo4j/test_password_change_me
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      KW_NEO4J_URI: bolt://localhost:7687
+      KW_NEO4J_USER: neo4j
+      KW_NEO4J_PASSWORD: test_password_change_me
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+
+      - name: Install API package with test extras
+        run: pip install -e ".[test]"
+
+      # `addopts` in pyproject.toml deselects the `integration` marker by
+      # default; --override-ini swaps in a marker expression that *only*
+      # selects integration tests for this job.
+      - name: Run integration tests
+        run: pytest -m integration --override-ini="addopts=-ra --strict-markers --strict-config -m integration" -v
+
   frontend:
     name: Frontend (vitest, node 22)
     runs-on: ubuntu-latest
