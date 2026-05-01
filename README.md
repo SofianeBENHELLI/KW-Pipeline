@@ -74,6 +74,27 @@ Persistent mode creates:
 
 Delete `.kw-pipeline/` to reset local MVP state.
 
+## Demo seed data
+
+After starting the demo backend, seed deterministic demo content:
+
+```bash
+cd apps/api
+# Broaden the upload allowlist so PDF/DOCX fixtures are accepted; the
+# default backend only allows text/plain.
+KW_ALLOWED_CONTENT_TYPES="text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" \
+  uvicorn app.main:app --reload &
+python scripts/seed_demo.py
+```
+
+The script uploads a small, reviewable corpus that demonstrates duplicate
+detection, version lineage, and the upload → extract → semantic → review
+loop. See `apps/api/fixtures/demo/README.md` for what each file shows.
+Re-running the seed against an already-populated backend is harmless:
+duplicate uploads simply return `DUPLICATE_DETECTED`. Pass
+`--validate-one` to also flip one document to `VALIDATED` so the
+optional knowledge-graph projection has something to render.
+
 ## Knowledge Layer (Optional)
 
 The knowledge layer is **opt-in** and disabled by default. With no env vars

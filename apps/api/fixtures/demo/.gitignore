@@ -1,0 +1,4 @@
+# Materialised on first run by ../../scripts/_demo_fixtures.py.
+# Committing them would churn binary diffs (PDF/DOCX embed timestamps).
+change_request.pdf
+meeting_notes.docx
