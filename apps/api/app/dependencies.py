@@ -5,6 +5,11 @@ from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionJobService
+from app.services.idempotency_store import (
+    IdempotencyStore,
+    InMemoryIdempotencyStore,
+    SQLiteIdempotencyStore,
+)
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser
 from app.services.semantic_extractor import SemanticExtractor
@@ -32,6 +37,7 @@ class PipelineServices:
     semantic_extractor: SemanticExtractor
     markdown_generator: MarkdownGenerator
     semantic_outputs: SemanticOutputService
+    idempotency: IdempotencyStore
 
 
 def _build_parser_registry() -> ParserRegistry:
@@ -71,6 +77,7 @@ def build_services() -> PipelineServices:
             semantic_extractor=semantic_extractor,
             markdown_generator=markdown_generator,
         ),
+        idempotency=InMemoryIdempotencyStore(),
     )
 
 
@@ -99,4 +106,5 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
             semantic_extractor=semantic_extractor,
             markdown_generator=markdown_generator,
         ),
+        idempotency=SQLiteIdempotencyStore(root / "idempotency.sqlite3"),
     )
