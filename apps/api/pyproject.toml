@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "Harvester API for KW Pipeline document ingestion and semantic extraction."
 requires-python = ">=3.11"
 dependencies = [
+  # Anthropic Python SDK for the optional knowledge layer Phase 2 (ADR-013).
+  # Imported lazily by `AnthropicLLMClient`; unit tests use `FakeLLMClient`
+  # so the SDK is never called in the default suite. The extractor refuses
+  # to construct without `ANTHROPIC_API_KEY`, so this dep is dormant unless
+  # a deployment opts in.
+  "anthropic>=0.40",
   "fastapi==0.115.6",
   "jinja2==3.1.6",
   # Bolt driver for the optional knowledge layer (ADR-012). Tiny package;

@@ -467,11 +467,12 @@ def build_router(services: PipelineServices) -> APIRouter:
         # the authoritative record; the graph catches up via
         # re-projection or out-of-band reconciliation.
         if cached_status == "validated" and services.knowledge_projector is not None:
+            document_for_projection = None
             try:
-                document = services.documents.get_document(document_id)
-                if document is not None:
+                document_for_projection = services.documents.get_document(document_id)
+                if document_for_projection is not None:
                     services.knowledge_projector.project(
-                        document=document,
+                        document=document_for_projection,
                         version=version,
                         semantic=result,
                     )
@@ -480,6 +481,30 @@ def build_router(services: PipelineServices) -> APIRouter:
                     "knowledge.projection.failed",
                     extra={"document_id": document_id, "version_id": version_id},
                 )
+
+            # Phase 2 (ADR-013): LLM-driven entity extraction. Same
+            # fire-and-log discipline — extraction failures must not
+            # roll back validation. Runs after projection so the
+            # entity edges land in the same graph the projector just
+            # primed; the projector's ``delete_subgraph_for_version``
+            # already cleaned old entity edges, so the upserts are
+            # against a fresh slate.
+            if services.entity_extractor is not None and document_for_projection is not None:
+                try:
+                    extraction_result = services.entity_extractor.extract(
+                        document=document_for_projection,
+                        version=version,
+                        semantic=result,
+                    )
+                    services.knowledge_projector.project_entities(extraction_result)
+                except Exception:
+                    log.exception(
+                        "knowledge.entity_extraction.failed",
+                        extra={
+                            "document_id": document_id,
+                            "version_id": version_id,
+                        },
+                    )
 
         return result
 

@@ -12,6 +12,8 @@ from app.services.idempotency_store import (
     SQLiteIdempotencyStore,
 )
 from app.services.knowledge import (
+    AnthropicLLMClient,
+    EntityExtractor,
     GraphStore,
     InMemoryGraphStore,
     KnowledgeProjector,
@@ -53,6 +55,11 @@ class PipelineServices:
     # routes.
     graph_store: GraphStore = field(default_factory=InMemoryGraphStore)
     knowledge_projector: KnowledgeProjector | None = None
+    # Phase 2 (ADR-013): LLM-driven entity extraction. Constructed iff
+    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND ``ANTHROPIC_API_KEY`` is
+    # set; otherwise None and the route layer treats entity extraction
+    # as disabled — Phase 1a behaviour is preserved.
+    entity_extractor: EntityExtractor | None = None
 
 
 def _build_parser_registry() -> ParserRegistry:
@@ -70,6 +77,34 @@ def _build_parser_registry() -> ParserRegistry:
             PdfParser(),
         ]
     )
+
+
+def _maybe_build_entity_extractor() -> EntityExtractor | None:
+    """Build the LLM-driven entity extractor if enabled (ADR-013).
+
+    Returns ``None`` unless **both** ``KW_KNOWLEDGE_LAYER_ENABLED`` is
+    truthy **and** ``ANTHROPIC_API_KEY`` is set in the environment.
+    The Phase 1a-only path (graph projection without entities) is
+    preserved when the API key is absent so contributors who don't
+    have an Anthropic account can still run the knowledge layer
+    end-to-end against the in-memory graph store.
+    """
+    enabled = os.environ.get("KW_KNOWLEDGE_LAYER_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not enabled or not api_key:
+        return None
+    model = os.environ.get("KW_ANTHROPIC_MODEL", "").strip() or None
+    llm = (
+        AnthropicLLMClient(api_key=api_key, model=model)
+        if model
+        else AnthropicLLMClient(api_key=api_key)
+    )
+    return EntityExtractor(llm=llm)
 
 
 def _maybe_build_knowledge_layer() -> tuple[GraphStore, KnowledgeProjector | None]:
@@ -137,6 +172,7 @@ def build_services() -> PipelineServices:
         idempotency=InMemoryIdempotencyStore(),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
+        entity_extractor=_maybe_build_entity_extractor(),
     )
 
 
@@ -169,4 +205,5 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
         idempotency=SQLiteIdempotencyStore(root / "idempotency.sqlite3"),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
+        entity_extractor=_maybe_build_entity_extractor(),
     )

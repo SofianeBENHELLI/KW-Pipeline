@@ -140,8 +140,17 @@ class InMemoryGraphStore:
         with self._lock:
             node_ids = self._version_to_node_ids.pop(version_id, set())
             edge_ids = self._version_to_edge_ids.pop(version_id, set())
+            # Reference-counted node cleanup: an entity node may be
+            # shared across versions (Phase 2 hashes entity ids by
+            # ``(subject, subject_type)`` so the same canonical entity
+            # is one node). Only remove the node when no remaining
+            # version still claims it.
             for node_id in node_ids:
-                self._nodes.pop(node_id, None)
+                still_referenced = any(
+                    node_id in members for members in self._version_to_node_ids.values()
+                )
+                if not still_referenced:
+                    self._nodes.pop(node_id, None)
             for edge_id in edge_ids:
                 self._edges.pop(edge_id, None)
 
@@ -336,12 +345,40 @@ class Neo4jGraphStore:
         )
 
     def delete_subgraph_for_version(self, *, document_id: str, version_id: str) -> None:
+        # Phase 1 nodes (document/version/section) are version-scoped:
+        # delete them outright. Phase 2 entity nodes are hashed by
+        # (subject, subject_type) and may be referenced by other
+        # versions; we delete only the HAS_ENTITY edges scoped to this
+        # version, then garbage-collect entity nodes that no longer
+        # have any incoming HAS_ENTITY edge.
+        # Phase 1b's fix: properties are stored *flat* on the
+        # node/relationship (not nested under a `properties` map), so
+        # all WHERE predicates below reference the property name
+        # directly (``r.version_id``, ``n.version_id``).
         self._write(
             """
-            MATCH (n:KnowledgeNode {version_id: $version_id})
+            MATCH ()-[r:KNOWLEDGE_EDGE]-()
+            WHERE r.version_id = $version_id
+            DELETE r
+            """,
+            {"version_id": version_id},
+        )
+        self._write(
+            """
+            MATCH (n:KnowledgeNode)
+            WHERE n.kind IN ['document','version','section']
+              AND n.version_id = $version_id
             DETACH DELETE n
             """,
             {"version_id": version_id},
+        )
+        self._write(
+            """
+            MATCH (n:KnowledgeNode {kind: 'entity'})
+            WHERE NOT (n)<-[:KNOWLEDGE_EDGE {kind: 'has_entity'}]-()
+            DETACH DELETE n
+            """,
+            {},
         )
 
     def find_subgraph_for_document(self, document_id: str) -> KnowledgeGraphProjection:
