@@ -16,6 +16,8 @@
     "openapi:check": "openapi-typescript ../api/openapi.json -o /tmp/kw-schema.check.ts && diff -u src/api/generated/schema.ts /tmp/kw-schema.check.ts"
   },
   "dependencies": {
+    "@neo4j-nvl/base": "^0.3.6",
+    "@neo4j-nvl/react": "^0.3.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"

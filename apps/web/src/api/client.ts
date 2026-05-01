@@ -17,6 +17,8 @@ import type { paths } from "./generated/schema";
 import type {
   ApiDocument,
   ApiDocumentVersion,
+  ApiKnowledgeGraphPage,
+  ApiKnowledgeGraphProjection,
   ApiRawExtraction,
   ApiSemanticDocument,
   ApiUploadResponse,
@@ -278,6 +280,39 @@ export async function rejectVersion(
     await http.POST("/documents/{document_id}/versions/{version_id}/reject", {
       params: { path: { document_id: documentId, version_id: versionId } },
       body: { reviewer_note: reviewerNote ?? null },
+    }),
+  );
+}
+
+// ─── Knowledge graph endpoints ───────────────────────────────────────────────
+
+/**
+ * GET /documents/{document_id}/graph
+ * Returns the knowledge-graph projection (nodes + edges) written on the
+ * most recent VALIDATED transition for this document family.
+ */
+export async function getDocumentGraph(
+  documentId: string,
+): Promise<ApiKnowledgeGraphProjection> {
+  return unwrap(
+    await http.GET("/documents/{document_id}/graph", {
+      params: { path: { document_id: documentId } },
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/graph
+ * Cursor-paginated walk of every projected document. Pass `cursor` to
+ * advance pages; `next_cursor === null` marks the end.
+ */
+export async function getKnowledgeGraph(
+  limit = 50,
+  cursor?: string,
+): Promise<ApiKnowledgeGraphPage> {
+  return unwrap(
+    await http.GET("/knowledge/graph", {
+      params: { query: { limit, ...(cursor ? { cursor } : {}) } },
     }),
   );
 }
