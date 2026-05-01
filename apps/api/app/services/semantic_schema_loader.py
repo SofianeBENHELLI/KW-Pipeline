@@ -45,7 +45,7 @@ def load_semantic_document(payload: dict | str) -> SemanticDocument:
     data = json.loads(payload) if isinstance(payload, str) else dict(payload)
 
     raw_version = data.get("schema_version")
-    migrator = MIGRATORS.get(raw_version)
+    migrator = MIGRATORS.get(raw_version) if isinstance(raw_version, str) else None
     if migrator is None:
         raise UnsupportedSchemaVersion(
             f"Unsupported SemanticDocument schema_version: {raw_version!r}. "

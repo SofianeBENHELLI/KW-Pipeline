@@ -106,9 +106,17 @@ These are mechanical wins that build directly on what just landed:
    `MAX_UPLOAD_BYTES`, `ALLOWED_CONTENT_TYPES`, `CORS_ALLOWED_ORIGINS`,
    and `ANTHROPIC_API_KEY` keep working as `pydantic.AliasChoices`
    aliases so existing deployments need no change.
-4. **`#42` structured logging / audit trail.** The knowledge-layer
-   side-effects already log `knowledge.projection.written` /
-   `knowledge.projection.failed`; #42 turns those into structured JSON.
+4. ~~**`#42` structured logging / audit trail.**~~ Done — every
+   significant lifecycle moment now emits a named event with a
+   consistent `extra={...}` payload (`document.uploaded`,
+   `document.status_changed`, `extraction.{started,succeeded,failed}`,
+   `semantic.{generated,cached}`, `review.{validated,rejected}`,
+   `idempotency.replayed`, plus the existing
+   `knowledge.projection.{written,failed}` and the new
+   `knowledge.entity_extraction.completed`). `KW_LOG_FORMAT=json`
+   flips the formatter to one JSON object per line for production
+   containers; default `text` keeps local tracebacks readable. See
+   `docs/architecture/logging.md`.
 
 ### 2. 3DEXPERIENCE widget readiness
 
@@ -139,7 +147,10 @@ After the knowledge-layer work settles:
 2. Real parsers beyond PDF/DOCX/plain text: `#47` (OCR), `#20`
    (Docling integration was rejected for the MVP — ADR-010 — but a
    future evaluator).
-3. `#44` mypy/pyright in CI.
+3. ~~`#44` mypy/pyright in CI.~~ Closed: `python-typecheck`
+   job runs mypy against `apps/api/app/` on every PR with a
+   pragmatic `[tool.mypy]` config (strict-optional on,
+   untyped-defs off).
 
 ## Open Decisions
 

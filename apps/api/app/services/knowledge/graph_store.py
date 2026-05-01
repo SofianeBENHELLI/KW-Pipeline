@@ -30,8 +30,8 @@ import base64
 import json
 import logging
 import threading
-from collections.abc import Iterable
-from typing import Protocol, runtime_checkable
+from collections.abc import Iterable, Mapping
+from typing import Any, Protocol, runtime_checkable
 
 from app.schemas.knowledge import (
     GraphEdge,
@@ -225,12 +225,12 @@ class InMemoryGraphStore:
             )
 
 
-def _version_id_from_properties(props: dict[str, object]) -> str | None:
+def _version_id_from_properties(props: Mapping[str, object]) -> str | None:
     value = props.get("version_id")
     return value if isinstance(value, str) else None
 
 
-def _document_id_from_properties(props: dict[str, object]) -> str | None:
+def _document_id_from_properties(props: Mapping[str, object]) -> str | None:
     value = props.get("document_id")
     return value if isinstance(value, str) else None
 
@@ -399,6 +399,11 @@ class Neo4jGraphStore:
             """,
             {"document_id": document_id},
         )
+        # Bolt ``Record`` objects return ``object`` typed values; the read
+        # query above shapes ``nodes``/``edges`` as homogeneous lists, so
+        # the cast to ``Any`` here matches the runtime contract.
+        nodes_raw: Any
+        edges_raw: Any
         nodes_raw, edges_raw = (rows[0]["nodes"], rows[0]["edges"]) if rows else ([], [])
         nodes = [_row_to_node(r) for r in nodes_raw]
         edges = [_edge_dict_to_edge(r) for r in edges_raw]
@@ -436,6 +441,11 @@ class Neo4jGraphStore:
             """,
             {"cursor": list(decoded), "limit": limit},
         )
+        # Bolt ``Record`` objects return ``object`` typed values; the read
+        # query above shapes ``nodes``/``edges`` as homogeneous lists, so
+        # the cast to ``Any`` here matches the runtime contract.
+        nodes_raw: Any
+        edges_raw: Any
         nodes_raw, edges_raw = (rows[0]["nodes"], rows[0]["edges"]) if rows else ([], [])
         nodes = [_row_to_node(r) for r in nodes_raw]
         edges = [_edge_dict_to_edge(r) for r in edges_raw]
@@ -474,35 +484,37 @@ _NODE_RESERVED_KEYS = frozenset({"id", "kind", "label"})
 _EDGE_RESERVED_KEYS = frozenset({"id", "kind"})
 
 
-def _row_to_node(row: dict[str, object] | object) -> GraphNode:
+def _row_to_node(row: Any) -> GraphNode:
     """Coerce a Neo4j Node (or dict) into our :class:`GraphNode`.
 
     Properties are flattened on write (see :meth:`Neo4jGraphStore.upsert_nodes`),
     so we reverse that here: ``id``/``kind``/``label`` are pulled out of the
     flat keyset and everything else becomes the original ``properties`` map.
     """
-    raw = dict(row) if isinstance(row, dict) else dict(row.items())  # type: ignore[union-attr]
+    # Bolt ``Node`` objects expose ``.items()`` but are not ``dict``; the
+    # isinstance branch handles both shapes without leaking driver types up.
+    raw = dict(row) if isinstance(row, dict) else dict(row.items())
     properties = {k: v for k, v in raw.items() if k not in _NODE_RESERVED_KEYS}
     return GraphNode(
         id=str(raw["id"]),
-        kind=raw["kind"],  # type: ignore[arg-type]
+        kind=raw["kind"],
         label=str(raw["label"]),
         properties=properties,
     )
 
 
-def _edge_dict_to_edge(row: dict[str, object]) -> GraphEdge:
+def _edge_dict_to_edge(row: Any) -> GraphEdge:
     """Coerce a projected edge dict (the shape returned by our find_subgraph
     Cypher: ``{id, kind, source_id, target_id, flat}``) into a :class:`GraphEdge`.
 
     ``flat`` is the relationship's full property map; the reserved keys go on
     the edge directly and the rest land back in ``properties``.
     """
-    flat = dict(row.get("flat") or {})  # type: ignore[arg-type]
+    flat = dict(row.get("flat") or {})
     properties = {k: v for k, v in flat.items() if k not in _EDGE_RESERVED_KEYS}
     return GraphEdge(
         id=str(row["id"]),
-        kind=row["kind"],  # type: ignore[arg-type]
+        kind=row["kind"],
         source_id=str(row["source_id"]),
         target_id=str(row["target_id"]),
         properties=properties,

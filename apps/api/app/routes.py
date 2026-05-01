@@ -2,7 +2,8 @@ import hashlib
 import json
 import logging
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
@@ -135,7 +136,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         file: UploadFile = File(...),
         document_id: str | None = None,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    ):
+    ) -> Any:
         settings = _request_settings()
         max_bytes = settings.max_upload_bytes
         allowed = settings.allowed_content_types
@@ -222,7 +223,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="list_documents",
         response_model=DocumentListResponse,
     )
-    def list_documents(limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None):
+    def list_documents(limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> Any:
         if limit < MIN_PAGE_LIMIT or limit > MAX_PAGE_LIMIT:
             raise HTTPException(
                 status_code=400,
@@ -247,7 +248,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="get_document",
         response_model=Document,
     )
-    def get_document(document_id: str):
+    def get_document(document_id: str) -> Any:
         document = services.documents.get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
@@ -262,7 +263,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    ):
+    ) -> Any:
         _route = "/documents/{document_id}/versions/{version_id}/extract"
         _req_hash = hash_json_body(
             None,
@@ -300,7 +301,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="get_extraction",
         response_model=RawExtraction,
     )
-    def get_extraction(document_id: str, version_id: str):
+    def get_extraction(document_id: str, version_id: str) -> Any:
         try:
             return services.extraction_jobs.get_raw_extraction(
                 document_id=document_id,
@@ -318,7 +319,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    ):
+    ) -> Any:
         _route = "/documents/{document_id}/versions/{version_id}/semantic"
         _req_hash = hash_json_body(
             None,
@@ -352,7 +353,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="get_semantic",
         response_model=SemanticDocument,
     )
-    def get_semantic_document(document_id: str, version_id: str):
+    def get_semantic_document(document_id: str, version_id: str) -> Any:
         try:
             return services.semantic_outputs.get(document_id=document_id, version_id=version_id)
         except KeyError as exc:
@@ -368,7 +369,7 @@ def build_router(services: PipelineServices) -> APIRouter:
             },
         },
     )
-    def get_markdown(document_id: str, version_id: str):
+    def get_markdown(document_id: str, version_id: str) -> Response:
         try:
             markdown = services.semantic_outputs.get_markdown(
                 document_id=document_id,
@@ -387,7 +388,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
-    ):
+    ) -> Any:
         return _record_review(
             document_id=document_id,
             version_id=version_id,
@@ -405,7 +406,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
-    ):
+    ) -> Any:
         return _record_review(
             document_id=document_id,
             version_id=version_id,
@@ -419,9 +420,9 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest,
-        mark,
-        cached_status,
-    ):
+        mark: Callable[..., Any],
+        cached_status: Literal["validated", "rejected"],
+    ) -> Any:
         try:
             version = services.documents.get_version(
                 document_id=document_id,
@@ -499,7 +500,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="get_document_graph",
         response_model=KnowledgeGraphProjection,
     )
-    def get_document_graph(document_id: str):
+    def get_document_graph(document_id: str) -> Any:
         """Knowledge graph projection for one document family (ADR-012)."""
         return services.graph_store.find_subgraph_for_document(document_id)
 
@@ -511,7 +512,7 @@ def build_router(services: PipelineServices) -> APIRouter:
     def get_knowledge_graph(
         limit: int = Query(default=DEFAULT_GRAPH_PAGE_LIMIT, ge=MIN_GRAPH_PAGE_LIMIT),
         cursor: str | None = None,
-    ):
+    ) -> Any:
         """Cursor-paginated walk of the catalog-wide projection (ADR-012)."""
         if limit > MAX_GRAPH_PAGE_LIMIT:
             raise HTTPException(

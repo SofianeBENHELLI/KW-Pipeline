@@ -12,6 +12,7 @@ python-docx is MIT-licensed; the dependency is pinned in
 from __future__ import annotations
 
 import io
+from typing import Any
 
 from docx import Document as load_docx
 
@@ -22,7 +23,7 @@ from app.services.storage_service import StorageService
 DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
-def _table_to_text(table) -> str:
+def _table_to_text(table: Any) -> str:
     """Render a python-docx table into a deterministic tab/newline blob."""
     return "\n".join("\t".join(cell.text for cell in row.cells) for row in table.rows)
 
