@@ -184,15 +184,32 @@ LLM integration tests against the real Anthropic API run behind
 
 ## Docker / local dev
 
-A new `docker/docker-compose.yml` lands in Phase 1. It defines:
+`docker/docker-compose.yml` (added in Phase 1b) defines:
 
-- `neo4j` — Neo4j Community 5.x, ports 7474 (browser) + 7687 (bolt).
-- `api` — the FastAPI app with `KW_NEO4J_*` env vars wired to the
-  neo4j service.
+- `neo4j` — Neo4j 5.23 Community, ports 7474 (browser) + 7687 (bolt),
+  named volume `neo4j_data`, healthcheck via `wget` against the
+  HTTP port.
+- `api` — the FastAPI app (built from `apps/api/Dockerfile`) with
+  `KW_KNOWLEDGE_LAYER_ENABLED=true` and `KW_NEO4J_*` env vars wired
+  to the neo4j service. `depends_on: neo4j (service_healthy)`.
 
-Running just `docker compose up neo4j` is enough to develop the
-knowledge layer locally; the API can run on the host as before.
-The full `docker compose up` is for end-to-end demos.
+There is intentionally no `web`/frontend service; the Vite dev server
+runs on the host (`npm run dev` from `apps/web/`).
+
+```sh
+# Just Neo4j (run the API on the host with `uvicorn`):
+docker compose -f docker/docker-compose.yml up -d neo4j
+
+# Full backend stack for end-to-end demos:
+docker compose -f docker/docker-compose.yml up
+
+# Run the integration tests once Neo4j is healthy:
+cd apps/api && \
+  KW_NEO4J_URI=bolt://localhost:7687 \
+  KW_NEO4J_USER=neo4j \
+  KW_NEO4J_PASSWORD=test_password_change_me \
+  pytest -m integration --override-ini="addopts=-ra --strict-markers --strict-config -m integration"
+```
 
 ## Out-of-scope for this architecture doc
 
