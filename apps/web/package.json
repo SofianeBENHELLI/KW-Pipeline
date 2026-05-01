@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "openapi:export-backend": "cd ../api && python scripts/export_openapi.py",
+    "openapi:generate": "openapi-typescript ../api/openapi.json -o src/api/generated/schema.ts",
+    "openapi:check": "openapi-typescript ../api/openapi.json -o /tmp/kw-schema.check.ts && diff -u src/api/generated/schema.ts /tmp/kw-schema.check.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -24,6 +27,8 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
+    "openapi-fetch": "^0.13.8",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"

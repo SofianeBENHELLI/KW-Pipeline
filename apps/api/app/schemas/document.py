@@ -2,9 +2,10 @@ from datetime import UTC, datetime
 from typing import Self
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.models.document import DocumentVersionStatus
+from app.schemas import APISchemaModel as BaseModel
 
 
 def utc_now() -> datetime:
@@ -47,3 +48,14 @@ class Document(BaseModel):
             latest_version_id=version.id,
             versions=[version],
         )
+
+
+class DocumentListResponse(BaseModel):
+    """Cursor-paginated page of documents returned by ``GET /documents``."""
+
+    items: list[Document]
+    next_cursor: str | None = None
+
+
+class HealthResponse(BaseModel):
+    status: str

@@ -1,134 +1,42 @@
 /**
- * TypeScript interfaces derived from the Harvester API response models.
+ * Public API type aliases for Orbital.
  *
- * Keep these in sync with:
- *   apps/api/app/schemas/document.py
- *   apps/api/app/schemas/extraction.py
- *   apps/api/app/schemas/semantic_document.py
+ * These are thin re-exports of types generated from the Harvester OpenAPI
+ * schema (see `generated/schema.ts`). Do NOT hand-edit shapes here — change
+ * the FastAPI Pydantic models and regenerate (see
+ * `docs/workflows/openapi_codegen.md`).
+ *
+ * The alias layer exists so consumers can import stable names like
+ * `ApiDocument` instead of `components["schemas"]["Document"]` everywhere.
  */
+
+import type { components } from "./generated/schema";
+
+type Schemas = components["schemas"];
 
 // ─── Document / Version ────────────────────────────────────────────────────
 
-export type DocumentVersionStatus =
-  | "UPLOADED"
-  | "HASHED"
-  | "DUPLICATE_DETECTED"
-  | "STORED"
-  | "EXTRACTING"
-  | "EXTRACTED"
-  | "SEMANTIC_READY"
-  | "NEEDS_REVIEW"
-  | "VALIDATED"
-  | "REJECTED"
-  | "FAILED";
-
-export interface ApiDocumentVersion {
-  id: string;
-  document_id: string;
-  version_number: number;
-  filename: string;
-  content_type: string;
-  file_size: number;
-  sha256: string;
-  storage_uri: string;
-  status: DocumentVersionStatus;
-  duplicate_of_version_id: string | null;
-  failure_reason: string | null;
-  reviewer_note: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-}
-
-export interface ApiDocument {
-  id: string;
-  original_filename: string;
-  latest_version_id: string;
-  created_at: string;
-  versions: ApiDocumentVersion[];
-}
-
-export interface ListDocumentsResponse {
-  items: ApiDocument[];
-  next_cursor: string | null;
-}
+export type ApiDocument = Schemas["Document"];
+export type ApiDocumentVersion = Schemas["DocumentVersion"];
+export type DocumentVersionStatus = Schemas["DocumentVersionStatus"];
+export type ListDocumentsResponse = Schemas["DocumentListResponse"];
 
 // ─── Extraction ─────────────────────────────────────────────────────────────
 
-export interface ApiSourceReference {
-  id: string;
-  document_version_id: string;
-  section_id: string;
-  page_number: number | null;
-  line_start: number | null;
-  line_end: number | null;
-  snippet: string;
-}
+export type ApiSourceReference = Schemas["SourceReference"];
+export type ApiRawSection = Schemas["RawSection"];
+export type ApiRawExtraction = Schemas["RawExtraction"];
 
-export interface ApiRawSection {
-  id: string;
-  heading: string;
-  text: string;
-  source_reference_ids: string[];
-  page_number: number | null;
-  bbox: [number, number, number, number] | null;
-  parser_metadata: Record<string, string>;
-}
+// ─── Semantic Document ──────────────────────────────────────────────────────
 
-export interface ApiRawExtraction {
-  id: string;
-  document_version_id: string;
-  parser_name: string;
-  parser_version: string;
-  text: string;
-  sections: ApiRawSection[];
-  source_references: ApiSourceReference[];
-  warnings: string[];
-  created_at: string;
-}
+export type ApiDocumentProfile = Schemas["DocumentProfile"];
+export type ApiSemanticSection = Schemas["SemanticSection"];
+export type ApiSemanticAsset = Schemas["SemanticAsset"];
+export type ApiSemanticDocument = Schemas["SemanticDocument"];
 
-// ─── Semantic Document ───────────────────────────────────────────────────────
-
-export type ReviewStatus = "needs_review" | "source_backed" | "validated" | "rejected";
-export type ValidationStatus = "needs_review" | "validated" | "rejected";
-
-export interface ApiDocumentProfile {
-  title: string;
-  document_type: string;
-  purpose: string | null;
-  audience: string | null;
-  executive_summary: string | null;
-}
-
-export interface ApiSemanticSection {
-  id: string;
-  heading: string;
-  text: string;
-  source_reference_ids: string[];
-}
-
-export interface ApiSemanticAsset {
-  id: string;
-  type: string;
-  text: string;
-  confidence: number;
-  review_status: ReviewStatus;
-  source_reference_ids: string[];
-}
-
-export interface ApiSemanticDocument {
-  id: string;
-  document_version_id: string;
-  schema_version: "v0.1";
-  document_profile: ApiDocumentProfile;
-  sections: ApiSemanticSection[];
-  assets: ApiSemanticAsset[];
-  warnings: string[];
-  source_references: Record<string, unknown>[];
-  validation_status: ValidationStatus;
-  markdown: string | null;
-  created_at: string;
-}
+export type ReviewStatus = ApiSemanticAsset["review_status"];
+export type ValidationStatus = ApiSemanticDocument["validation_status"];
 
 // ─── Upload response ─────────────────────────────────────────────────────────
-// POST /documents/upload returns a DocumentVersion (schemas/document.py)
+// POST /documents/upload returns a DocumentVersion.
 export type ApiUploadResponse = ApiDocumentVersion;

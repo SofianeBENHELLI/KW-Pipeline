@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
+
+from app.schemas import APISchemaModel as BaseModel
 
 ReviewStatus = Literal["needs_review", "source_backed", "validated", "rejected"]
 ValidationStatus = Literal["needs_review", "validated", "rejected"]
