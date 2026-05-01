@@ -17,6 +17,7 @@ from app.models.document import (
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
+from app.services.migrations import _run_migrations
 from app.services.semantic_schema_loader import load_semantic_document
 
 ReviewedStatus = DocumentVersionStatus  # narrowed to VALIDATED | REJECTED at the call site
@@ -309,7 +310,22 @@ class SQLiteCatalogStore:
     def __init__(self, database_path: Path | str):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        # Use isolation_level=None (manual / autocommit mode) for migrations
+        # so Python's sqlite3 module does not issue implicit COMMITs before
+        # DDL statements, which would break SAVEPOINT-based rollback.
+        conn = sqlite3.connect(self.database_path, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        try:
+            # WAL is per-database and survives restart, so set once here.
+            # WAL allows a writer + readers concurrently and reduces
+            # `database is locked` errors during the eventual extraction
+            # worker / API request overlap.
+            conn.execute("PRAGMA journal_mode = WAL")
+            _run_migrations(conn)
+        finally:
+            conn.close()
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         # Excluding rows where `duplicate_of_version_id IS NOT NULL` matches
@@ -574,86 +590,6 @@ class SQLiteCatalogStore:
 
     def get_semantic_document(self, version_id: str) -> SemanticDocument:
         return load_semantic_document(self.get_semantic_document_payload(version_id))
-
-    def _initialize(self) -> None:
-        with self._connect() as connection:
-            # WAL is per-database and survives restart, so set once here.
-            # WAL allows a writer + readers concurrently and reduces
-            # `database is locked` errors during the eventual extraction
-            # worker / API request overlap.
-            connection.execute("PRAGMA journal_mode = WAL")
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS documents (
-                    id TEXT PRIMARY KEY,
-                    original_filename TEXT NOT NULL,
-                    latest_version_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS document_versions (
-                    id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL,
-                    version_number INTEGER NOT NULL,
-                    filename TEXT NOT NULL,
-                    content_type TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    storage_uri TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    duplicate_of_version_id TEXT,
-                    failure_reason TEXT,
-                    reviewer_note TEXT,
-                    reviewed_at TEXT,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (document_id) REFERENCES documents(id)
-                )
-                """
-            )
-            # Add review columns to pre-existing databases that were created
-            # before reviewer_note / reviewed_at were introduced. SQLite does
-            # not support `ADD COLUMN IF NOT EXISTS`, so we inspect first.
-            existing_columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(document_versions)").fetchall()
-            }
-            if "reviewer_note" not in existing_columns:
-                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewer_note TEXT")
-            if "reviewed_at" not in existing_columns:
-                connection.execute("ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT")
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_document_versions_sha256
-                ON document_versions (sha256)
-                """
-            )
-            # Generated artefacts: one row per version, holding the full
-            # Pydantic JSON payload. document_version_id is the PK because
-            # each version has at most one extraction and at most one
-            # semantic document; re-extraction overwrites in place.
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS raw_extractions (
-                    document_version_id TEXT PRIMARY KEY,
-                    payload TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
-                )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS semantic_documents (
-                    document_version_id TEXT PRIMARY KEY,
-                    payload TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (document_version_id) REFERENCES document_versions(id)
-                )
-                """
-            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
