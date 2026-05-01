@@ -1,14 +1,17 @@
-import { latestVersion, type PipelineDocument } from "../../domain/document";
+import type { ApiDocument } from "../../api/types";
+import { latestVersion } from "../../domain/document";
 import { StatusBadge } from "../../ui/StatusBadge";
 
 interface PipelineWidgetProps {
-  documents: PipelineDocument[];
+  documents: ApiDocument[];
   selectedDocumentId: string;
+  onSelectDocument: (id: string) => void;
 }
 
 export function PipelineWidget({
   documents,
   selectedDocumentId,
+  onSelectDocument,
 }: PipelineWidgetProps) {
   const pendingReview = documents.filter(
     (document) => latestVersion(document).status === "NEEDS_REVIEW",
@@ -43,25 +46,30 @@ export function PipelineWidget({
       </div>
 
       <div className="document-list">
-        {documents.map((document) => {
-          const version = latestVersion(document);
-          const selected = document.id === selectedDocumentId;
+        {documents.length === 0 ? (
+          <p className="muted">No documents yet.</p>
+        ) : (
+          documents.map((document) => {
+            const version = latestVersion(document);
+            const selected = document.id === selectedDocumentId;
 
-          return (
-            <button
-              className={selected ? "document-row selected" : "document-row"}
-              type="button"
-              key={document.id}
-              aria-pressed={selected}
-            >
-              <span>
-                <strong>{document.original_filename}</strong>
-                <small>v{version.version_number}</small>
-              </span>
-              <StatusBadge status={version.status} />
-            </button>
-          );
-        })}
+            return (
+              <button
+                className={selected ? "document-row selected" : "document-row"}
+                type="button"
+                key={document.id}
+                aria-pressed={selected}
+                onClick={() => onSelectDocument(document.id)}
+              >
+                <span>
+                  <strong>{document.original_filename}</strong>
+                  <small>v{version.version_number}</small>
+                </span>
+                <StatusBadge status={version.status} />
+              </button>
+            );
+          })
+        )}
       </div>
     </section>
   );

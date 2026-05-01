@@ -1,0 +1,253 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ApiError,
+  extractVersion,
+  getDocument,
+  getExtraction,
+  getMarkdown,
+  getSemantic,
+  listDocuments,
+  rejectVersion,
+  uploadDocument,
+  validateVersion,
+} from "./client";
+import type {
+  ApiDocument,
+  ApiRawExtraction,
+  ApiSemanticDocument,
+  ListDocumentsResponse,
+} from "./types";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function makeJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function makeTextResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/markdown" },
+  });
+}
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+const FIXTURE_VERSION = {
+  id: "ver-001",
+  document_id: "doc-001",
+  version_number: 1,
+  filename: "test.txt",
+  content_type: "text/plain",
+  file_size: 100,
+  sha256: "abc123",
+  storage_uri: "file://test",
+  status: "STORED" as const,
+  duplicate_of_version_id: null,
+  failure_reason: null,
+  reviewer_note: null,
+  reviewed_at: null,
+  created_at: "2026-05-01T00:00:00Z",
+};
+
+const FIXTURE_DOCUMENT: ApiDocument = {
+  id: "doc-001",
+  original_filename: "test.txt",
+  latest_version_id: "ver-001",
+  created_at: "2026-05-01T00:00:00Z",
+  versions: [FIXTURE_VERSION],
+};
+
+const FIXTURE_LIST: ListDocumentsResponse = {
+  items: [FIXTURE_DOCUMENT],
+  next_cursor: null,
+};
+
+const FIXTURE_EXTRACTION: ApiRawExtraction = {
+  id: "ext-001",
+  document_version_id: "ver-001",
+  parser_name: "PlainTextParser",
+  parser_version: "1.0",
+  text: "Hello world",
+  sections: [],
+  source_references: [],
+  warnings: [],
+  created_at: "2026-05-01T00:00:00Z",
+};
+
+const FIXTURE_SEMANTIC: ApiSemanticDocument = {
+  id: "sem-001",
+  document_version_id: "ver-001",
+  schema_version: "v0.1",
+  document_profile: {
+    title: "Test Document",
+    document_type: "unknown",
+    purpose: null,
+    audience: null,
+    executive_summary: null,
+  },
+  sections: [],
+  assets: [],
+  warnings: [],
+  source_references: [],
+  validation_status: "needs_review",
+  markdown: "# Test Document\n\nHello world",
+  created_at: "2026-05-01T00:00:00Z",
+};
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+describe("API client — happy paths", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = typeof input === "string" ? input : input.toString();
+
+        if (url.match(/\/documents\?/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_LIST));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/extraction$/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/semantic$/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/markdown$/)) {
+          return Promise.resolve(makeTextResponse("# Test\n"));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/extract$/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/validate$/)) {
+          return Promise.resolve(makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "validated" }));
+        }
+        if (url.match(/\/documents\/doc-001\/versions\/ver-001\/reject$/)) {
+          return Promise.resolve(makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "rejected" }));
+        }
+        if (url.match(/\/documents\/doc-001$/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_DOCUMENT));
+        }
+        if (url.match(/\/documents\/upload$/)) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_VERSION));
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("listDocuments returns paginated items", async () => {
+    const result = await listDocuments();
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe("doc-001");
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("listDocuments forwards limit and cursor as query params", async () => {
+    await listDocuments(10, "token123");
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, ...unknown[]];
+    expect(url).toContain("limit=10");
+    expect(url).toContain("cursor=token123");
+  });
+
+  it("getDocument returns a full document", async () => {
+    const doc = await getDocument("doc-001");
+    expect(doc.id).toBe("doc-001");
+    expect(doc.versions).toHaveLength(1);
+  });
+
+  it("getExtraction returns raw extraction", async () => {
+    const ext = await getExtraction("doc-001", "ver-001");
+    expect(ext.text).toBe("Hello world");
+    expect(ext.parser_name).toBe("PlainTextParser");
+  });
+
+  it("extractVersion triggers extraction via POST", async () => {
+    const ext = await extractVersion("doc-001", "ver-001");
+    expect(ext.id).toBe("ext-001");
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("POST");
+  });
+
+  it("getSemantic returns semantic document", async () => {
+    const sem = await getSemantic("doc-001", "ver-001");
+    expect(sem.validation_status).toBe("needs_review");
+    expect(sem.document_profile.title).toBe("Test Document");
+  });
+
+  it("getMarkdown returns markdown text", async () => {
+    const md = await getMarkdown("doc-001", "ver-001");
+    expect(md).toBe("# Test\n");
+  });
+
+  it("validateVersion sends POST and returns updated semantic", async () => {
+    const sem = await validateVersion("doc-001", "ver-001", "LGTM");
+    expect(sem.validation_status).toBe("validated");
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ reviewer_note: "LGTM" });
+  });
+
+  it("rejectVersion sends POST and returns updated semantic", async () => {
+    const sem = await rejectVersion("doc-001", "ver-001");
+    expect(sem.validation_status).toBe("rejected");
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ reviewer_note: null });
+  });
+
+  it("uploadDocument sends multipart form data", async () => {
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    const version = await uploadDocument(file);
+    expect(version.id).toBe("ver-001");
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(init.body).toBeInstanceOf(FormData);
+  });
+});
+
+describe("API client — error paths", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("throws ApiError with status and detail on non-OK JSON response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({ detail: "Document not found." }, 404),
+    );
+    await expect(getDocument("missing")).rejects.toBeInstanceOf(ApiError);
+    try {
+      await getDocument("missing");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(404);
+      expect(apiErr.detail).toBe("Document not found.");
+    }
+  });
+
+  it("uses statusText as fallback when response body is not JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Internal Server Error", { status: 500, statusText: "Internal Server Error" }),
+    );
+    await expect(listDocuments()).rejects.toMatchObject({
+      status: 500,
+      detail: "Internal Server Error",
+    });
+  });
+
+  it("propagates network errors as-is", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(listDocuments()).rejects.toThrow("Failed to fetch");
+  });
+
+  it("getVersion rejects with a clear not-implemented message", async () => {
+    const { getVersion } = await import("./client");
+    await expect(getVersion("doc-001", "ver-001")).rejects.toThrow(/not yet implemented/i);
+  });
+});
