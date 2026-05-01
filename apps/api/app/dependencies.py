@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +27,7 @@ from app.services.storage_service import (
     InMemoryStorageService,
     StorageService,
 )
+from app.settings import Settings
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,13 @@ class PipelineServices:
     # set; otherwise None and the route layer treats entity extraction
     # as disabled — Phase 1a behaviour is preserved.
     entity_extractor: EntityExtractor | None = None
+    # Snapshot of the typed settings used to construct this container
+    # (issue #43). Routes read settings *fresh per request* via
+    # ``Settings()`` so per-test ``monkeypatch.setenv`` is observable;
+    # this field exists so deployment-time configuration (e.g. a
+    # programmatically-constructed Settings) can be threaded through
+    # ``build_services(settings=...)``.
+    settings: Settings = field(default_factory=Settings)
 
 
 def _build_parser_registry() -> ParserRegistry:
@@ -79,26 +86,25 @@ def _build_parser_registry() -> ParserRegistry:
     )
 
 
-def _maybe_build_entity_extractor() -> EntityExtractor | None:
+def _maybe_build_entity_extractor(settings: Settings | None = None) -> EntityExtractor | None:
     """Build the LLM-driven entity extractor if enabled (ADR-013).
 
-    Returns ``None`` unless **both** ``KW_KNOWLEDGE_LAYER_ENABLED`` is
-    truthy **and** ``ANTHROPIC_API_KEY`` is set in the environment.
-    The Phase 1a-only path (graph projection without entities) is
-    preserved when the API key is absent so contributors who don't
-    have an Anthropic account can still run the knowledge layer
-    end-to-end against the in-memory graph store.
+    Returns ``None`` unless **both** the knowledge-layer kill switch is
+    truthy **and** the Anthropic API key is set. The Phase 1a-only path
+    (graph projection without entities) is preserved when the API key
+    is absent so contributors who don't have an Anthropic account can
+    still run the knowledge layer end-to-end against the in-memory
+    graph store.
+
+    All env reads flow through :class:`app.settings.Settings` (issue
+    #43); the legacy unprefixed ``ANTHROPIC_API_KEY`` keeps working
+    via :class:`pydantic.AliasChoices`.
     """
-    enabled = os.environ.get("KW_KNOWLEDGE_LAYER_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not enabled or not api_key:
+    settings = settings or Settings()
+    if not settings.knowledge_layer_enabled or not settings.anthropic_api_key.strip():
         return None
-    model = os.environ.get("KW_ANTHROPIC_MODEL", "").strip() or None
+    api_key = settings.anthropic_api_key.strip()
+    model = settings.anthropic_model.strip() or None
     llm = (
         AnthropicLLMClient(api_key=api_key, model=model)
         if model
@@ -107,37 +113,33 @@ def _maybe_build_entity_extractor() -> EntityExtractor | None:
     return EntityExtractor(llm=llm)
 
 
-def _maybe_build_knowledge_layer() -> tuple[GraphStore, KnowledgeProjector | None]:
-    """Build the knowledge graph store + projector based on env vars.
+def _maybe_build_knowledge_layer(
+    settings: Settings | None = None,
+) -> tuple[GraphStore, KnowledgeProjector | None]:
+    """Build the knowledge graph store + projector based on settings.
 
     Reads ``KW_KNOWLEDGE_LAYER_ENABLED`` and the ``KW_NEO4J_*`` family
-    at process start. The defaults — knowledge layer disabled, in-memory
-    store — preserve the existing pipeline's behaviour: no Neo4j needed
-    to run the API or its tests.
+    via :class:`app.settings.Settings`. The defaults — knowledge layer
+    disabled, in-memory store — preserve the existing pipeline's
+    behaviour: no Neo4j needed to run the API or its tests.
 
     Returns the active ``GraphStore`` (always non-None so the read
     routes have something to query, even if it's empty) plus an
     optional ``KnowledgeProjector`` (``None`` when the layer is
     disabled).
     """
-    enabled = os.environ.get("KW_KNOWLEDGE_LAYER_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not enabled:
+    settings = settings or Settings()
+    if not settings.knowledge_layer_enabled:
         return InMemoryGraphStore(), None
 
-    uri = os.environ.get("KW_NEO4J_URI", "").strip()
-    user = os.environ.get("KW_NEO4J_USER", "").strip()
-    password = os.environ.get("KW_NEO4J_PASSWORD", "")
+    uri = settings.neo4j_uri.strip()
+    user = settings.neo4j_user.strip()
     if uri and user:
         store: GraphStore = Neo4jGraphStore(
             uri=uri,
             user=user,
-            password=password,
-            database=os.environ.get("KW_NEO4J_DATABASE", "neo4j"),
+            password=settings.neo4j_password,
+            database=settings.neo4j_database or "neo4j",
         )
     else:
         # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` without Neo4j config still
@@ -147,15 +149,21 @@ def _maybe_build_knowledge_layer() -> tuple[GraphStore, KnowledgeProjector | Non
     return store, KnowledgeProjector(graph_store=store)
 
 
-def build_services() -> PipelineServices:
-    """Create fresh in-memory services for tests and ephemeral demos."""
+def build_services(settings: Settings | None = None) -> PipelineServices:
+    """Create fresh in-memory services for tests and ephemeral demos.
+
+    Accepts an optional ``settings`` so callers (typically deployment
+    wiring, not tests) can pass an already-validated configuration.
+    Defaults to ``Settings()``, which reads the current process env.
+    """
+    settings = settings or Settings()
     storage = InMemoryStorageService()
     documents = DocumentService(storage=storage)
     parsers = _build_parser_registry()
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
-    graph_store, knowledge_projector = _maybe_build_knowledge_layer()
+    graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -172,12 +180,17 @@ def build_services() -> PipelineServices:
         idempotency=InMemoryIdempotencyStore(),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(),
+        entity_extractor=_maybe_build_entity_extractor(settings),
+        settings=settings,
     )
 
 
-def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> PipelineServices:
+def build_persistent_services(
+    data_dir: Path | str = ".kw-pipeline",
+    settings: Settings | None = None,
+) -> PipelineServices:
     """Create local persistent services backed by SQLite and filesystem storage."""
+    settings = settings or Settings()
     root = Path(data_dir)
     storage = FileSystemStorageService(root=root / "raw")
     documents = DocumentService(
@@ -188,7 +201,7 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
     semantic_extractor = SemanticExtractor(enrichers=[])
     markdown_generator = MarkdownGenerator()
-    graph_store, knowledge_projector = _maybe_build_knowledge_layer()
+    graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -205,5 +218,6 @@ def build_persistent_services(data_dir: Path | str = ".kw-pipeline") -> Pipeline
         idempotency=SQLiteIdempotencyStore(root / "idempotency.sqlite3"),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(),
+        entity_extractor=_maybe_build_entity_extractor(settings),
+        settings=settings,
     )

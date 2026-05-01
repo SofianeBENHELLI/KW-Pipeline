@@ -1,21 +1,21 @@
-import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import PipelineServices, build_persistent_services, build_services
 from app.routes import build_router
+from app.settings import Settings
 
 
 def _allowed_origins() -> list[str]:
-    """Parse the ``CORS_ALLOWED_ORIGINS`` env var into an explicit allowlist.
+    """Parse the CORS allowlist from the typed settings model.
 
     Returns an empty list when the variable is unset or blank, which means the
-    API responds to no cross-origin requests until an operator opts in. The
-    inline ``os.environ.get`` is intentional pending issue #43 (Pydantic
-    Settings)."""
-    raw = os.environ.get("CORS_ALLOWED_ORIGINS", "")
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    API responds to no cross-origin requests until an operator opts in.
+    Reads are routed through :class:`app.settings.Settings` (issue #43);
+    ``KW_CORS_ALLOWED_ORIGINS`` is the canonical name and the legacy
+    ``CORS_ALLOWED_ORIGINS`` keeps working as a Pydantic alias.
+    """
+    return Settings().cors_allowed_origins
 
 
 def create_app(

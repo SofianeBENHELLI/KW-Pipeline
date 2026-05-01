@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import os
 import tempfile
 from collections.abc import Iterator
 
@@ -21,6 +20,7 @@ from app.services.knowledge.graph_store import (
     DEFAULT_GRAPH_PAGE_LIMIT,
     MAX_GRAPH_PAGE_LIMIT,
 )
+from app.settings import Settings
 
 log = logging.getLogger(__name__)
 MIN_GRAPH_PAGE_LIMIT = 1
@@ -31,12 +31,6 @@ MIN_GRAPH_PAGE_LIMIT = 1
 DEFAULT_PAGE_LIMIT = 50
 MIN_PAGE_LIMIT = 1
 MAX_PAGE_LIMIT = 200
-
-# Default upload guardrails. These mirror the values used by the production
-# deployment until Pydantic Settings (#43) lands and replaces the ad-hoc
-# `os.environ.get` reads at request time.
-DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MiB
-DEFAULT_ALLOWED_CONTENT_TYPES = "text/plain"
 
 # Streaming read granularity for the upload route. Matches the storage
 # service's write granularity so peak resident memory during upload is one
@@ -49,26 +43,17 @@ _UPLOAD_READ_CHUNK_SIZE = 8 * 1024 * 1024
 _SPOOL_ROLLOVER_BYTES = 1 * 1024 * 1024
 
 
-def _max_upload_bytes() -> int:
-    """Read MAX_UPLOAD_BYTES from the environment at request time.
+def _request_settings() -> Settings:
+    """Construct a fresh :class:`Settings` for one request.
 
-    Read on every request so tests can `monkeypatch.setenv` per case. Falls
-    back to ``DEFAULT_MAX_UPLOAD_BYTES`` when the env var is unset.
+    Settings are read per-request rather than cached at app startup so a
+    test that calls ``monkeypatch.setenv("MAX_UPLOAD_BYTES", ...)`` and
+    issues a request immediately afterwards observes the new value.
+    Pydantic Settings construction is cheap (no I/O, just an env-var
+    walk), so the overhead is negligible compared with the work the
+    upload route already does per call.
     """
-    raw = os.environ.get("MAX_UPLOAD_BYTES")
-    if raw is None or raw == "":
-        return DEFAULT_MAX_UPLOAD_BYTES
-    return int(raw)
-
-
-def _allowed_content_types() -> set[str]:
-    """Read ALLOWED_CONTENT_TYPES from the environment at request time.
-
-    The env var is a comma-separated list. Empty entries are dropped so a
-    trailing comma does not silently allow ``""``.
-    """
-    raw = os.environ.get("ALLOWED_CONTENT_TYPES", DEFAULT_ALLOWED_CONTENT_TYPES)
-    return {entry.strip() for entry in raw.split(",") if entry.strip()}
+    return Settings()
 
 
 class ReviewRequest(BaseModel):
@@ -151,8 +136,9 @@ def build_router(services: PipelineServices) -> APIRouter:
         document_id: str | None = None,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
-        max_bytes = _max_upload_bytes()
-        allowed = _allowed_content_types()
+        settings = _request_settings()
+        max_bytes = settings.max_upload_bytes
+        allowed = settings.allowed_content_types
 
         # Strip any media-type parameters (e.g. `; charset=utf-8`) before
         # comparing against the allowlist — RFC 7231 lets clients tack them
