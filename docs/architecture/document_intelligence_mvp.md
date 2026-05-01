@@ -8,12 +8,19 @@ lineage, validation status, and failures visible instead of hiding uncertainty.
 
 ## Non-Goals
 
-- Chatbot UI.
+- Chatbot / RAG / GraphRAG UI (Phase 3 — separate ADR).
 - AURA interface.
 - Vector search.
-- Knowledge graph.
 - MCP integration.
 - Silent semantic enrichment without review.
+
+The original "knowledge graph" non-goal was retired in 2026-05 by
+[ADR-012](../adr/ADR-012-knowledge-graph-layer.md): a knowledge graph
+layer is now in scope as an **opt-in**, **post-review** projection of
+validated documents. It does not bypass the review gate (graph
+projection runs as a side-effect of `mark_validated`, never before),
+and the layer is dormant unless `KW_KNOWLEDGE_LAYER_ENABLED=true`. See
+[`knowledge_layer.md`](knowledge_layer.md).
 
 ## System Slices
 
@@ -75,5 +82,14 @@ Document versions move through these states:
   source lineage is available.
 - Missing lineage must be surfaced as a warning.
 - Unsupported semantic claims must be marked `needs_review`.
-- LLM assistance may be added later only behind a clean interface and must not
-  bypass schema validation.
+- LLM assistance plugs in via the `SemanticEnricher` Protocol
+  (ADR-009) and the `LLMClient` Protocol (ADR-013); both forbid
+  bypassing schema validation. The `SemanticExtractor` re-validates
+  every enricher output and forces `review_status="needs_review"`.
+- **Nothing without provenance reaches the knowledge graph.** Phase 2
+  entity-extraction triples without `source_reference_ids` are dropped
+  to `warnings`. Graph edges always carry a `source_reference_id`.
+- Knowledge-layer side-effects of validation **never roll back the
+  catalog**. A graph or LLM outage logs and is retried later; the
+  SQLite catalog is the source of truth for "this version is
+  validated".

@@ -1,8 +1,9 @@
 # KW Pipeline
 
 KW Pipeline is a document intelligence MVP focused on auditable ingestion,
-deterministic parsing, governed semantic extraction, and reviewable Markdown
-outputs.
+deterministic parsing, governed semantic extraction, reviewable Markdown
+outputs, and an opt-in **knowledge graph + LLM-powered entity layer** that
+sits *behind* the human review gate.
 
 The first implementation target is intentionally narrow:
 
@@ -15,9 +16,19 @@ The first implementation target is intentionally narrow:
 - generate one Markdown asset per document version;
 - keep all unverified semantic claims in `needs_review`.
 
-See `docs/architecture/document_intelligence_mvp.md` for the initial contract
-and `docs/roadmap/mvp_backlog_review.md` for the current backlog review and
-remaining-work plan.
+After a version is `VALIDATED` by a reviewer, the optional **knowledge
+layer** (ADR-012, ADR-013) projects it into a graph of
+`Document → Version → Section` nodes (Phase 1) and — when an
+Anthropic API key is configured — extracts typed `(:Entity)` nodes with
+section-level citations (Phase 2). Every graph edge carries a
+`source_reference_id`; nothing without provenance ever lands in the graph.
+
+See [`docs/architecture/document_intelligence_mvp.md`](docs/architecture/document_intelligence_mvp.md)
+for the core ingestion contract,
+[`docs/architecture/knowledge_layer.md`](docs/architecture/knowledge_layer.md)
+for the graph + chat surface,
+and [`docs/roadmap/mvp_backlog_review.md`](docs/roadmap/mvp_backlog_review.md)
+for the current backlog and remaining-work plan.
 
 ## Development
 
@@ -62,3 +73,42 @@ Persistent mode creates:
 - `.kw-pipeline/raw/`
 
 Delete `.kw-pipeline/` to reset local MVP state.
+
+## Knowledge Layer (Optional)
+
+The knowledge layer is **opt-in** and disabled by default. With no env vars
+set, the existing pipeline behaves exactly as it did before — every existing
+test still passes, no Neo4j, no LLM calls. To enable it locally:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d neo4j
+export KW_KNOWLEDGE_LAYER_ENABLED=true
+export KW_NEO4J_URI=bolt://localhost:7687
+export KW_NEO4J_USER=neo4j
+export KW_NEO4J_PASSWORD=test_password_change_me
+# Phase 2 (entity extraction) — also requires:
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Validating a document then projects it into the graph as a fire-and-log
+side-effect; the projection is reachable via
+`GET /documents/{document_id}/graph` and
+`GET /knowledge/graph` (cursor-paginated). Orbital's review workspace
+includes a `<KnowledgeGraphView />` panel that renders the projection
+through `@neo4j-nvl/react`.
+
+| Env var | Purpose | Default |
+|---|---|---|
+| `KW_KNOWLEDGE_LAYER_ENABLED` | Master kill-switch (must be `true` to enable anything below) | unset → disabled |
+| `KW_NEO4J_URI` | `bolt://...` connection string for the graph store | unset → in-memory store |
+| `KW_NEO4J_USER` / `KW_NEO4J_PASSWORD` / `KW_NEO4J_DATABASE` | Auth + DB name | unset / unset / `neo4j` |
+| `ANTHROPIC_API_KEY` | Required for Phase 2 entity extraction | unset → Phase 2 disabled |
+| `KW_LLM_MODEL` | Claude model id | `claude-sonnet-4-5` |
+
+The knowledge-layer surface is documented end-to-end in
+[`docs/architecture/knowledge_layer.md`](docs/architecture/knowledge_layer.md).
+Architecture decisions:
+
+- [ADR-012 — Knowledge graph layer behind the review gate](docs/adr/ADR-012-knowledge-graph-layer.md)
+- [ADR-013 — LLM provider (Anthropic, no LangChain)](docs/adr/ADR-013-llm-provider-and-no-langchain.md)
+- [ADR-014 — Entity extraction prompt and cost guardrails](docs/adr/ADR-014-entity-extraction-prompt-and-cost.md)
