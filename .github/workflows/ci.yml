@@ -98,6 +98,52 @@ jobs:
             apps/api/pytest-junit.xml
           if-no-files-found: warn
 
+  openapi-contract:
+    name: OpenAPI contract (snapshot + generated types)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+
+      - name: Install API package
+        working-directory: apps/api
+        run: pip install -e .
+
+      - name: Regenerate OpenAPI snapshot
+        working-directory: apps/api
+        run: python scripts/export_openapi.py /tmp/openapi.fresh.json
+
+      - name: Diff committed snapshot vs fresh export
+        working-directory: apps/api
+        run: |
+          if ! diff -u openapi.json /tmp/openapi.fresh.json; then
+            echo "::error::openapi.json is stale. Run 'python scripts/export_openapi.py' from apps/api/ and commit." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Diff committed schema.ts vs fresh generation
+        working-directory: apps/web
+        run: |
+          if ! npm run openapi:check; then
+            echo "::error::src/api/generated/schema.ts is stale. Run 'npm run openapi:generate' from apps/web/ and commit." >&2
+            exit 1
+          fi
+
   frontend:
     name: Frontend (vitest, node 22)
     runs-on: ubuntu-latest

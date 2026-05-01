@@ -9,6 +9,9 @@ from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.models.document import DocumentVersionStatus
+from app.schemas.document import Document, DocumentListResponse, DocumentVersion, HealthResponse
+from app.schemas.extraction import RawExtraction
+from app.schemas.semantic_document import SemanticDocument
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import IdempotencyStore, hash_json_body
@@ -125,11 +128,15 @@ def build_router(services: PipelineServices) -> APIRouter:
     """Register Harvester HTTP routes against a concrete service container."""
     router = APIRouter()
 
-    @router.get("/health")
+    @router.get("/health", operation_id="health", response_model=HealthResponse)
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @router.post("/documents/upload")
+    @router.post(
+        "/documents/upload",
+        operation_id="upload_document",
+        response_model=DocumentVersion,
+    )
     async def upload_document(
         file: UploadFile = File(...),
         document_id: str | None = None,
@@ -215,7 +222,11 @@ def build_router(services: PipelineServices) -> APIRouter:
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.get("/documents")
+    @router.get(
+        "/documents",
+        operation_id="list_documents",
+        response_model=DocumentListResponse,
+    )
     def list_documents(limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None):
         if limit < MIN_PAGE_LIMIT or limit > MAX_PAGE_LIMIT:
             raise HTTPException(
@@ -236,14 +247,22 @@ def build_router(services: PipelineServices) -> APIRouter:
             ) from exc
         return {"items": items, "next_cursor": next_cursor}
 
-    @router.get("/documents/{document_id}")
+    @router.get(
+        "/documents/{document_id}",
+        operation_id="get_document",
+        response_model=Document,
+    )
     def get_document(document_id: str):
         document = services.documents.get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
         return document
 
-    @router.post("/documents/{document_id}/versions/{version_id}/extract")
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/extract",
+        operation_id="extract_version",
+        response_model=RawExtraction,
+    )
     def extract_document(
         document_id: str,
         version_id: str,
@@ -281,7 +300,11 @@ def build_router(services: PipelineServices) -> APIRouter:
         except ExtractionFailed as exc:
             raise HTTPException(status_code=422, detail=exc.reason) from exc
 
-    @router.get("/documents/{document_id}/versions/{version_id}/extraction")
+    @router.get(
+        "/documents/{document_id}/versions/{version_id}/extraction",
+        operation_id="get_extraction",
+        response_model=RawExtraction,
+    )
     def get_extraction(document_id: str, version_id: str):
         try:
             return services.extraction_jobs.get_raw_extraction(
@@ -291,7 +314,11 @@ def build_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.post("/documents/{document_id}/versions/{version_id}/semantic")
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/semantic",
+        operation_id="generate_semantic",
+        response_model=SemanticDocument,
+    )
     def generate_semantic_document(
         document_id: str,
         version_id: str,
@@ -325,14 +352,27 @@ def build_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.get("/documents/{document_id}/versions/{version_id}/semantic")
+    @router.get(
+        "/documents/{document_id}/versions/{version_id}/semantic",
+        operation_id="get_semantic",
+        response_model=SemanticDocument,
+    )
     def get_semantic_document(document_id: str, version_id: str):
         try:
             return services.semantic_outputs.get(document_id=document_id, version_id=version_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.get("/documents/{document_id}/versions/{version_id}/markdown")
+    @router.get(
+        "/documents/{document_id}/versions/{version_id}/markdown",
+        operation_id="get_markdown",
+        responses={
+            200: {
+                "content": {"text/markdown": {"schema": {"type": "string"}}},
+                "description": "Generated Markdown for the version.",
+            },
+        },
+    )
     def get_markdown(document_id: str, version_id: str):
         try:
             markdown = services.semantic_outputs.get_markdown(
@@ -343,7 +383,11 @@ def build_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(content=markdown, media_type="text/markdown")
 
-    @router.post("/documents/{document_id}/versions/{version_id}/validate")
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/validate",
+        operation_id="validate_version",
+        response_model=SemanticDocument,
+    )
     def validate_version(
         document_id: str,
         version_id: str,
@@ -357,7 +401,11 @@ def build_router(services: PipelineServices) -> APIRouter:
             cached_status="validated",
         )
 
-    @router.post("/documents/{document_id}/versions/{version_id}/reject")
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/reject",
+        operation_id="reject_version",
+        response_model=SemanticDocument,
+    )
     def reject_version(
         document_id: str,
         version_id: str,

@@ -1,11 +1,19 @@
 /**
- * Harvester API client — thin fetch wrapper with typed helpers.
+ * Harvester API client — typed wrapper over `openapi-fetch`.
  *
- * Base URL is read from VITE_API_BASE_URL at build time (with a sensible
- * local-dev default). No external HTTP library is required — native fetch
- * is used throughout.
+ * Path strings, methods, path parameters, and request/response shapes are
+ * all enforced at compile time against `generated/schema.ts`. To wire a
+ * new endpoint, add it to the FastAPI app, regenerate types (see
+ * `docs/workflows/openapi_codegen.md`), and add a thin function below.
+ *
+ * The base URL comes from VITE_API_BASE_URL at build time, with a
+ * sensible local-dev fallback. No external HTTP library beyond the tiny
+ * `openapi-fetch` package is used — it's a thin layer over native fetch.
  */
 
+import createClient from "openapi-fetch";
+
+import type { paths } from "./generated/schema";
 import type {
   ApiDocument,
   ApiDocumentVersion,
@@ -15,13 +23,20 @@ import type {
   ListDocumentsResponse,
 } from "./types";
 
-// ─── Base URL ────────────────────────────────────────────────────────────────
+// ─── Base URL + transport ────────────────────────────────────────────────────
 
-// VITE_API_BASE_URL is injected at build time via Vite. Falls back to the
-// local-dev default when the env var is not set.
 const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-// ─── Low-level helpers ───────────────────────────────────────────────────────
+// Delegate to `globalThis.fetch` at call time (rather than letting
+// openapi-fetch capture a reference at construction). This keeps test
+// spies on `globalThis.fetch` effective even though the client is
+// created at module load.
+const http = createClient<paths>({
+  baseUrl: BASE_URL,
+  fetch: (...args) => globalThis.fetch(...args),
+});
+
+// ─── Errors ──────────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   constructor(
@@ -33,34 +48,44 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, init);
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const body = (await response.json()) as { detail?: string };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // ignore JSON parse errors — keep the statusText fallback
-    }
-    throw new ApiError(response.status, detail);
+/**
+ * Build an ApiError from a non-OK fetch Response. Used by call sites that
+ * bypass openapi-fetch (the multipart upload path).
+ */
+async function asApiError(response: Response): Promise<ApiError> {
+  let detail = response.statusText;
+  try {
+    const body = (await response.clone().json()) as { detail?: string };
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // Non-JSON or empty body — keep the statusText fallback.
   }
-  return response.json() as Promise<T>;
+  return new ApiError(response.status, detail);
 }
 
-async function requestText(path: string, init?: RequestInit): Promise<string> {
-  const response = await fetch(`${BASE_URL}${path}`, init);
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const body = (await response.json()) as { detail?: string };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // ignore
-    }
-    throw new ApiError(response.status, detail);
+/**
+ * Unwrap a typed openapi-fetch `{ data, error, response }` result.
+ *
+ * On success, return `data`. On failure, build an `ApiError` from the
+ * already-parsed `error` body (openapi-fetch consumes the response stream,
+ * so we can't re-read it) and surface the FastAPI `detail` when present.
+ * Falls back to `response.statusText` for non-JSON error bodies.
+ */
+function unwrap<T>(result: {
+  data?: T;
+  error?: unknown;
+  response: Response;
+}): T {
+  if (result.data !== undefined) return result.data;
+  const { response, error } = result;
+  let detail = response.statusText;
+  if (error && typeof error === "object" && "detail" in error) {
+    const candidate = (error as { detail?: unknown }).detail;
+    if (typeof candidate === "string") detail = candidate;
+  } else if (typeof error === "string" && error.length > 0) {
+    detail = error;
   }
-  return response.text();
+  throw new ApiError(response.status, detail);
 }
 
 // ─── Document endpoints ──────────────────────────────────────────────────────
@@ -69,38 +94,50 @@ async function requestText(path: string, init?: RequestInit): Promise<string> {
  * GET /documents
  * Returns one page of catalog entries. Pass `cursor` to advance pages.
  */
-export function listDocuments(
+export async function listDocuments(
   limit = 50,
   cursor?: string,
 ): Promise<ListDocumentsResponse> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) params.set("cursor", cursor);
-  return request<ListDocumentsResponse>(`/documents?${params.toString()}`);
+  return unwrap(
+    await http.GET("/documents", {
+      params: { query: { limit, ...(cursor ? { cursor } : {}) } },
+    }),
+  );
 }
 
 /**
  * GET /documents/{document_id}
  * Returns a single document with all its versions.
  */
-export function getDocument(documentId: string): Promise<ApiDocument> {
-  return request<ApiDocument>(`/documents/${encodeURIComponent(documentId)}`);
+export async function getDocument(documentId: string): Promise<ApiDocument> {
+  return unwrap(
+    await http.GET("/documents/{document_id}", {
+      params: { path: { document_id: documentId } },
+    }),
+  );
 }
 
 /**
  * POST /documents/upload
  * Streams a file to the backend and returns the created DocumentVersion.
+ *
+ * NOTE: openapi-fetch's typed body helpers don't model multipart/form-data
+ * bodies cleanly, so we drop down to native fetch here. Path and response
+ * shape stay pinned via the imported response type.
  */
-export function uploadDocument(
+export async function uploadDocument(
   file: File,
   documentId?: string,
 ): Promise<ApiUploadResponse> {
   const form = new FormData();
   form.append("file", file);
   if (documentId) form.append("document_id", documentId);
-  return request<ApiUploadResponse>("/documents/upload", {
+  const response = await fetch(`${BASE_URL}/documents/upload`, {
     method: "POST",
     body: form,
   });
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as ApiUploadResponse;
 }
 
 // ─── Version endpoints ───────────────────────────────────────────────────────
@@ -108,9 +145,9 @@ export function uploadDocument(
 /**
  * GET /documents/{document_id}/versions/{version_id}
  *
- * NOTE: The backend does not currently expose a dedicated
- * GET /documents/{document_id}/versions/{version_id} route. Callers that
- * need a single version should use getDocument() and filter locally.
+ * NOTE: The backend does not currently expose a dedicated single-version
+ * route. Callers that need a single version should use getDocument() and
+ * filter locally.
  *
  * @throws {Error} "not yet implemented" to make the gap visible at runtime.
  */
@@ -132,13 +169,14 @@ export function getVersion(
  * POST /documents/{document_id}/versions/{version_id}/extract
  * Triggers raw extraction for a stored document version.
  */
-export function extractVersion(
+export async function extractVersion(
   documentId: string,
   versionId: string,
 ): Promise<ApiRawExtraction> {
-  return request<ApiRawExtraction>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/extract`,
-    { method: "POST" },
+  return unwrap(
+    await http.POST("/documents/{document_id}/versions/{version_id}/extract", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+    }),
   );
 }
 
@@ -146,12 +184,14 @@ export function extractVersion(
  * GET /documents/{document_id}/versions/{version_id}/extraction
  * Returns cached raw extraction JSON.
  */
-export function getExtraction(
+export async function getExtraction(
   documentId: string,
   versionId: string,
 ): Promise<ApiRawExtraction> {
-  return request<ApiRawExtraction>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/extraction`,
+  return unwrap(
+    await http.GET("/documents/{document_id}/versions/{version_id}/extraction", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+    }),
   );
 }
 
@@ -161,13 +201,14 @@ export function getExtraction(
  * POST /documents/{document_id}/versions/{version_id}/semantic
  * Generates (or returns cached) semantic output.
  */
-export function generateSemantic(
+export async function generateSemantic(
   documentId: string,
   versionId: string,
 ): Promise<ApiSemanticDocument> {
-  return request<ApiSemanticDocument>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/semantic`,
-    { method: "POST" },
+  return unwrap(
+    await http.POST("/documents/{document_id}/versions/{version_id}/semantic", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+    }),
   );
 }
 
@@ -175,26 +216,36 @@ export function generateSemantic(
  * GET /documents/{document_id}/versions/{version_id}/semantic
  * Returns cached semantic JSON.
  */
-export function getSemantic(
+export async function getSemantic(
   documentId: string,
   versionId: string,
 ): Promise<ApiSemanticDocument> {
-  return request<ApiSemanticDocument>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/semantic`,
+  return unwrap(
+    await http.GET("/documents/{document_id}/versions/{version_id}/semantic", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+    }),
   );
 }
 
 /**
  * GET /documents/{document_id}/versions/{version_id}/markdown
  * Returns generated Markdown as plain text.
+ *
+ * NOTE: openapi-fetch defaults to JSON parsing, so we use a custom parser
+ * here to read the response body as text.
  */
-export function getMarkdown(
+export async function getMarkdown(
   documentId: string,
   versionId: string,
 ): Promise<string> {
-  return requestText(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/markdown`,
+  const result = await http.GET(
+    "/documents/{document_id}/versions/{version_id}/markdown",
+    {
+      params: { path: { document_id: documentId, version_id: versionId } },
+      parseAs: "text",
+    },
   );
+  return unwrap(result as { data?: string; error?: unknown; response: Response });
 }
 
 // ─── Review endpoints ─────────────────────────────────────────────────────────
@@ -202,35 +253,31 @@ export function getMarkdown(
 /**
  * POST /documents/{document_id}/versions/{version_id}/validate
  */
-export function validateVersion(
+export async function validateVersion(
   documentId: string,
   versionId: string,
   reviewerNote?: string,
 ): Promise<ApiSemanticDocument> {
-  return request<ApiSemanticDocument>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/validate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reviewer_note: reviewerNote ?? null }),
-    },
+  return unwrap(
+    await http.POST("/documents/{document_id}/versions/{version_id}/validate", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+      body: { reviewer_note: reviewerNote ?? null },
+    }),
   );
 }
 
 /**
  * POST /documents/{document_id}/versions/{version_id}/reject
  */
-export function rejectVersion(
+export async function rejectVersion(
   documentId: string,
   versionId: string,
   reviewerNote?: string,
 ): Promise<ApiSemanticDocument> {
-  return request<ApiSemanticDocument>(
-    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/reject`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reviewer_note: reviewerNote ?? null }),
-    },
+  return unwrap(
+    await http.POST("/documents/{document_id}/versions/{version_id}/reject", {
+      params: { path: { document_id: documentId, version_id: versionId } },
+      body: { reviewer_note: reviewerNote ?? null },
+    }),
   );
 }

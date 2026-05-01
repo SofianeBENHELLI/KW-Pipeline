@@ -18,12 +18,32 @@ Requires Node 22 LTS.
 ```bash
 cd apps/web
 npm install
-npm run dev        # vite dev server on http://localhost:5173
-npm run build      # tsc -b && vite build, emits dist/
-npm run preview    # serve the production build locally
-npm test           # vitest run (unit + component)
-npm run typecheck  # tsc -b --noEmit
+npm run dev               # vite dev server on http://localhost:5173
+npm run build             # tsc -b && vite build, emits dist/
+npm run preview           # serve the production build locally
+npm test                  # vitest run (unit + component)
+npm run typecheck         # tsc -b --noEmit
+
+# OpenAPI codegen — see docs/workflows/openapi_codegen.md
+npm run openapi:export-backend   # regenerate apps/api/openapi.json (needs Python)
+npm run openapi:generate         # regenerate src/api/generated/schema.ts
+npm run openapi:check            # CI-style staleness check
 ```
+
+## Generated API types
+
+`src/api/generated/schema.ts` is generated from `apps/api/openapi.json`
+by `openapi-typescript`. Do not hand-edit it. The public alias layer at
+`src/api/types.ts` re-exports stable names (`ApiDocument`, etc.); feature
+code imports from there. The fetch client in `src/api/client.ts` is a
+thin layer over [`openapi-fetch`](https://openapi-ts.dev/openapi-fetch),
+which compile-time-checks paths, methods, path params, and response
+shapes against the generated `paths` interface.
+
+When the backend contract changes, regenerate both files and commit them
+together. CI fails if either is stale. See
+[`docs/workflows/openapi_codegen.md`](../../docs/workflows/openapi_codegen.md)
+for the full workflow.
 
 ## Layout
 

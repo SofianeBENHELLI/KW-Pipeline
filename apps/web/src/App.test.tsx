@@ -46,11 +46,18 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
+// `openapi-fetch` invokes `fetch` with a Request object (not a URL string).
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 describe("App", () => {
   beforeEach(() => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (input: RequestInfo | URL): Promise<Response> => {
-        const url = typeof input === "string" ? input : input.toString();
+        const url = urlOf(input);
 
         if (url.includes("/documents?")) {
           return Promise.resolve(makeJsonResponse(FIXTURE_LIST));

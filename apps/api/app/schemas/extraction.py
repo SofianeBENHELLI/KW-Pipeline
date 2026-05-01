@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas import APISchemaModel as BaseModel
 
 
 def utc_now() -> datetime:

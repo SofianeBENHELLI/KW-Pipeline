@@ -100,11 +100,19 @@ const FIXTURE_SEMANTIC: ApiSemanticDocument = {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
+// `openapi-fetch` invokes `fetch` with a Request object (not a URL string),
+// so tests read the URL/method/body off the Request.
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 describe("API client — happy paths", () => {
   beforeEach(() => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (input: RequestInfo | URL): Promise<Response> => {
-        const url = typeof input === "string" ? input : input.toString();
+        const url = urlOf(input);
 
         if (url.match(/\/documents\?/)) {
           return Promise.resolve(makeJsonResponse(FIXTURE_LIST));
@@ -151,7 +159,8 @@ describe("API client — happy paths", () => {
 
   it("listDocuments forwards limit and cursor as query params", async () => {
     await listDocuments(10, "token123");
-    const [url] = vi.mocked(fetch).mock.calls[0] as [string, ...unknown[]];
+    const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    const url = urlOf(input);
     expect(url).toContain("limit=10");
     expect(url).toContain("cursor=token123");
   });
@@ -171,8 +180,8 @@ describe("API client — happy paths", () => {
   it("extractVersion triggers extraction via POST", async () => {
     const ext = await extractVersion("doc-001", "ver-001");
     expect(ext.id).toBe("ext-001");
-    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(init.method).toBe("POST");
+    const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    expect((input as Request).method).toBe("POST");
   });
 
   it("getSemantic returns semantic document", async () => {
@@ -189,23 +198,27 @@ describe("API client — happy paths", () => {
   it("validateVersion sends POST and returns updated semantic", async () => {
     const sem = await validateVersion("doc-001", "ver-001", "LGTM");
     expect(sem.validation_status).toBe("validated");
-    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ reviewer_note: "LGTM" });
+    const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    const req = input as Request;
+    expect(req.method).toBe("POST");
+    expect(await req.clone().json()).toEqual({ reviewer_note: "LGTM" });
   });
 
   it("rejectVersion sends POST and returns updated semantic", async () => {
     const sem = await rejectVersion("doc-001", "ver-001");
     expect(sem.validation_status).toBe("rejected");
-    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ reviewer_note: null });
+    const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    const req = input as Request;
+    expect(req.method).toBe("POST");
+    expect(await req.clone().json()).toEqual({ reviewer_note: null });
   });
 
   it("uploadDocument sends multipart form data", async () => {
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
     const version = await uploadDocument(file);
     expect(version.id).toBe("ver-001");
+    // uploadDocument bypasses openapi-fetch (multipart), calling fetch
+    // directly with (url, init).
     const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(init.body).toBeInstanceOf(FormData);
   });
