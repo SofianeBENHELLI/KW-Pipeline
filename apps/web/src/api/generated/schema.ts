@@ -55,6 +55,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Graph
+         * @description Knowledge graph projection for one document family (ADR-012).
+         */
+        get: operations["get_document_graph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/extract": {
         parameters: {
             query?: never;
@@ -175,6 +195,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph
+         * @description Cursor-paginated walk of the catalog-wide projection (ADR-012).
+         */
+        get: operations["get_knowledge_graph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -276,6 +316,58 @@ export interface components {
          * @enum {string}
          */
         DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED";
+        /**
+         * GraphEdge
+         * @description One directed edge in the knowledge graph projection.
+         *
+         *     ``source_id`` and ``target_id`` reference :class:`GraphNode.id`
+         *     values. Phase 2 ``has_entity`` edges additionally carry a
+         *     ``source_reference_id`` in ``properties`` pointing at a row in the
+         *     catalog's ``source_references`` table; ``part_of`` edges have no
+         *     such citation requirement.
+         */
+        GraphEdge: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "part_of" | "has_entity";
+            /** Properties */
+            properties: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Source Id */
+            source_id: string;
+            /** Target Id */
+            target_id: string;
+        };
+        /**
+         * GraphNode
+         * @description One node in the knowledge graph projection.
+         *
+         *     ``id`` is stable across projections — for ``document`` and
+         *     ``version`` nodes it matches the catalog row ID; for ``section``
+         *     nodes it matches ``SemanticSection.id``; for ``entity`` nodes
+         *     (Phase 2) it is a deterministic hash of (text, type) so re-runs
+         *     converge on the same node.
+         */
+        GraphNode: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "document" | "version" | "section" | "entity";
+            /** Label */
+            label: string;
+            /** Properties */
+            properties: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -285,6 +377,60 @@ export interface components {
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /**
+         * KnowledgeGraphPage
+         * @description Cursor-paginated page across all projected documents.
+         *
+         *     Used by ``GET /knowledge/graph`` to walk the catalog's projection
+         *     in deterministic order. ``next_cursor`` follows the same opaque
+         *     convention as :class:`DocumentListResponse` — clients pass it
+         *     back verbatim to advance.
+         */
+        KnowledgeGraphPage: {
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+        };
+        /**
+         * KnowledgeGraphProjection
+         * @description Subgraph for one document family — nodes and edges that the
+         *     projector wrote on the most recent ``VALIDATED`` transition.
+         *
+         *     The projection is deterministic with respect to its inputs: the
+         *     same ``Document`` + ``DocumentVersion`` + ``SemanticDocument`` will
+         *     always produce the same nodes and edges (modulo ``generated_at``).
+         *     Re-projecting is safe — upserts are idempotent.
+         */
+        KnowledgeGraphProjection: {
+            /** Document Id */
+            document_id: string;
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Version Id */
+            version_id: string;
         };
         /**
          * RawExtraction
@@ -569,6 +715,37 @@ export interface operations {
             };
         };
     };
+    get_document_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeGraphProjection"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     extract_version: {
         parameters: {
             query?: never;
@@ -822,6 +999,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeGraphPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
