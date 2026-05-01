@@ -3,8 +3,20 @@
 Phase 1 builds a deterministic node-and-edge skeleton: one
 ``Document`` node per family, one ``Version`` node per validated
 version, one ``Section`` node per ``SemanticSection`` of that
-version, and ``PART_OF`` edges connecting them. No LLM, no
-entities — those land in Phase 2 (ADR-013).
+version, and ``PART_OF`` edges connecting them.
+
+Phase 2 (ADR-012 §4 + ADR-013) adds :meth:`KnowledgeProjector.project_entities`:
+given an :class:`~app.schemas.knowledge.EntityExtractionResult`, it
+upserts ``(:Entity)`` nodes plus ``HAS_ENTITY`` edges that carry a
+``source_reference_id`` in their properties. Every edge has a
+citation — ADR-009's needs-review gate, applied to graph edges.
+
+Entity-node id choice: the id is a deterministic hash of
+``(subject_type, normalized_subject)`` so two sections referencing
+"ISO 9001" merge into one canonical node. This makes cross-document
+queries possible ("which versions cite ISO 9001?") at the cost of
+needing reference-counted cleanup in :meth:`GraphStore.delete_subgraph_for_version`
+— see the in-memory implementation for the pattern.
 
 The projector is invoked as a fire-and-log side-effect of the
 ``NEEDS_REVIEW → VALIDATED`` route handler in
@@ -19,10 +31,15 @@ section renames or removals don't leave orphans.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from app.schemas.document import Document, DocumentVersion
-from app.schemas.knowledge import GraphEdge, GraphNode
+from app.schemas.knowledge import (
+    EntityExtractionResult,
+    GraphEdge,
+    GraphNode,
+)
 from app.schemas.semantic_document import SemanticDocument, SemanticSection
 from app.services.knowledge.graph_store import GraphStore
 
@@ -147,6 +164,128 @@ class KnowledgeProjector:
             for section in semantic.sections
         ]
         return [version_edge, *section_edges]
+
+    def project_entities(self, result: EntityExtractionResult) -> None:
+        """Upsert ``(:Entity)`` nodes + ``HAS_ENTITY`` edges from one
+        extraction pass.
+
+        Idempotent: re-running with the same input is a no-op modulo
+        the ``HAS_ENTITY`` edge timestamps. Note we do NOT call
+        :meth:`GraphStore.delete_subgraph_for_version` here — that is
+        already called by :meth:`project` before this method runs.
+        Calling it twice would purge the section nodes we just wrote.
+
+        Triples that did not pass the extractor's source-reference
+        validation never reach this method (they live in
+        ``result.warnings``). Defence in depth: we still skip any
+        triple here whose ``source_reference_ids`` is empty, so a
+        misconfigured extractor cannot push uncited edges into the
+        graph.
+        """
+        nodes: list[GraphNode] = []
+        edges: list[GraphEdge] = []
+        seen_node_ids: set[str] = set()
+
+        for triple in result.triples:
+            if not triple.source_reference_ids:
+                # Defensive guard: schema enforces min_length=1, but
+                # belt-and-braces if a future caller bypasses Pydantic.
+                log.warning(
+                    "knowledge.entity_projection.uncited_triple_skipped",
+                    extra={
+                        "document_id": result.document_id,
+                        "version_id": result.version_id,
+                        "subject": triple.subject,
+                    },
+                )
+                continue
+
+            subject_id = _entity_id(triple.subject, triple.subject_type)
+            object_id = _entity_id(triple.object, triple.object_type)
+            if subject_id not in seen_node_ids:
+                nodes.append(_entity_node(triple.subject, triple.subject_type, subject_id))
+                seen_node_ids.add(subject_id)
+            if object_id not in seen_node_ids:
+                nodes.append(_entity_node(triple.object, triple.object_type, object_id))
+                seen_node_ids.add(object_id)
+
+            # One HAS_ENTITY edge per cited reference. The source-ref
+            # id lives on the edge so the audit trail is per-citation;
+            # querying "which references support X relates_to Y?"
+            # walks edges, not properties.
+            for ref_id in triple.source_reference_ids:
+                edge_id = (
+                    f"{result.version_id}:{triple.source_section_id}:"
+                    f"{subject_id}->{triple.predicate}->{object_id}:{ref_id}"
+                )
+                edges.append(
+                    GraphEdge(
+                        id=edge_id,
+                        kind="has_entity",
+                        source_id=subject_id,
+                        target_id=object_id,
+                        properties={
+                            "document_id": result.document_id,
+                            "version_id": result.version_id,
+                            "section_id": triple.source_section_id,
+                            "predicate": triple.predicate,
+                            "confidence": triple.confidence,
+                            "source_reference_id": ref_id,
+                        },
+                    )
+                )
+
+        if not nodes and not edges:
+            return
+
+        # NB: entity nodes do NOT carry version_id in properties even
+        # though we want them tracked per-version for cleanup. We pass
+        # a synthetic ``version_id`` property purely for the in-memory
+        # store's reverse-index bookkeeping; on re-projection it is
+        # used by ``delete_subgraph_for_version`` reference counting.
+        # The original subject/type live on the node for queries.
+        for node in nodes:
+            node.properties["version_id"] = result.version_id
+            node.properties["document_id"] = result.document_id
+
+        self._graph_store.upsert_nodes(nodes)
+        self._graph_store.upsert_edges(edges)
+
+        log.info(
+            "knowledge.entity_projection.written",
+            extra={
+                "document_id": result.document_id,
+                "version_id": result.version_id,
+                "store": getattr(self._graph_store, "name", "unknown"),
+                "entity_node_count": len(nodes),
+                "has_entity_edge_count": len(edges),
+                "warning_count": len(result.warnings),
+                "token_usage": result.token_usage,
+            },
+        )
+
+
+def _entity_id(text: str, entity_type: str) -> str:
+    """Stable hash of ``(type, text)`` so canonical entities merge.
+
+    Lowercases and trims whitespace before hashing so trivial casing
+    differences ("ISO 9001" vs "iso 9001") collapse into one node.
+    """
+    normalized = f"{entity_type.strip().lower()}::{text.strip().lower()}"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"entity-{digest}"
+
+
+def _entity_node(subject: str, subject_type: str, node_id: str) -> GraphNode:
+    return GraphNode(
+        id=node_id,
+        kind="entity",
+        label=subject,
+        properties={
+            "subject": subject,
+            "subject_type": subject_type,
+        },
+    )
 
 
 def _section_node(

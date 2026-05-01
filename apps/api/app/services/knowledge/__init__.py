@@ -17,16 +17,26 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.graph_store import (
     GraphStore,
     InMemoryGraphStore,
     Neo4jGraphStore,
 )
+from app.services.knowledge.llm_client import (
+    AnthropicLLMClient,
+    FakeLLMClient,
+    LLMClient,
+)
 from app.services.knowledge.projector import KnowledgeProjector
 
 __all__ = [
+    "AnthropicLLMClient",
+    "EntityExtractor",
+    "FakeLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
     "KnowledgeProjector",
+    "LLMClient",
     "Neo4jGraphStore",
 ]

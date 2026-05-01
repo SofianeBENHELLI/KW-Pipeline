@@ -82,6 +82,51 @@ class KnowledgeGraphProjection(BaseModel):
     generated_at: datetime = Field(default_factory=_utc_now)
 
 
+class EntityTriple(BaseModel):
+    """One ``(subject, predicate, object)`` triple emitted by the LLM.
+
+    Phase 2 (ADR-012 §4 + ADR-013) populates the knowledge graph by
+    asking the model to read a validated ``SemanticSection`` and emit
+    triples with citations. The triple lands as two ``(:Entity)`` nodes
+    plus a ``HAS_ENTITY``-style relation only if ``source_reference_ids``
+    is non-empty — the equivalent of ADR-009's "force needs_review"
+    audit gate, applied to graph edges. No edge enters the graph
+    without provenance.
+    """
+
+    subject: str
+    subject_type: str
+    predicate: str
+    object: str
+    object_type: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    source_section_id: str
+    # `min_length=1` enforces the "no edge without a citation" gate at
+    # the schema level. Triples missing citations are appended to
+    # ``EntityExtractionResult.warnings`` by the extractor instead of
+    # being constructed at all.
+    source_reference_ids: list[str] = Field(min_length=1)
+
+
+class EntityExtractionResult(BaseModel):
+    """Aggregated output of one entity-extraction pass over a version.
+
+    Carries the validated triples plus warnings (for triples the
+    extractor dropped — missing citations, citations not in the
+    section's source-reference set, prompt-injection lines stripped
+    from input) and per-pass token usage so the caller can log a cost
+    line per validation.
+    """
+
+    schema_version: Literal["v0.1"] = "v0.1"
+    document_id: str
+    version_id: str
+    triples: list[EntityTriple] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    generated_at: datetime = Field(default_factory=_utc_now)
+
+
 class KnowledgeGraphPage(BaseModel):
     """Cursor-paginated page across all projected documents.
 
