@@ -28,6 +28,11 @@ dependencies = [
   "uvicorn==0.30.6",
 ]
 
+[project.scripts]
+# ``kw-demo`` boots ``uvicorn app.main:app`` with the demo-friendly
+# defaults baked in (issue #130). See ``app/demo.py``.
+kw-demo = "app.demo:main"
+
 [project.optional-dependencies]
 test = [
   "fpdf2>=2.7",

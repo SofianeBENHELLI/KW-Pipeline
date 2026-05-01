@@ -49,4 +49,21 @@ def create_app(
     return app
 
 
-app = create_app()
+def _build_app() -> FastAPI:
+    """Pick in-memory vs persistent wiring based on the env-driven settings.
+
+    Used only for the module-level ``app`` symbol that uvicorn imports
+    via ``app.main:app`` (issue #130 — demo MVP startup path). The
+    programmatic ``create_app(persistent=True)`` route the test suite
+    and ``docs/architecture/persistence.md`` exercise is unchanged: this
+    helper exists exclusively so a presenter can flip ``KW_PERSISTENT=true``
+    in the environment instead of editing Python.
+    """
+    settings = Settings()
+    return create_app(
+        persistent=settings.persistent,
+        data_dir=settings.data_dir,
+    )
+
+
+app = _build_app()

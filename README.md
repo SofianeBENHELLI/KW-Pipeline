@@ -55,6 +55,31 @@ npm test
 npm run build
 ```
 
+## Local demo
+
+For a one-paste presenter walkthrough that survives API restarts and accepts
+the demo dataset (text, PDF, DOCX) out of the box, set the demo env vars and
+run uvicorn against the module-level app:
+
+```bash
+KW_PERSISTENT=true \
+KW_CORS_ALLOWED_ORIGINS=http://localhost:5173 \
+KW_ALLOWED_CONTENT_TYPES=text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+.venv312/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir apps/api
+```
+
+Or, after `pip install -e 'apps/api[test]'`, the bundled console script wraps
+the same defaults:
+
+```bash
+.venv312/bin/kw-demo
+```
+
+`KW_PERSISTENT=true` flips the module-level `app` to the SQLite + filesystem
+services; persistent state lives under `.kw-pipeline/` (see below). Delete
+that directory to reset demo state. The Vite dev server in `apps/web` reaches
+the API at `http://localhost:8000` and is allowlisted by the CORS env var.
+
 ## Local Persistence
 
 The API can run with in-memory services for tests or local persistent services
