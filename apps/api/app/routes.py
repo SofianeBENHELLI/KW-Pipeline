@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -10,7 +11,7 @@ from app.dependencies import PipelineServices
 from app.models.document import DocumentVersionStatus
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
-from app.services.idempotency_store import IdempotencyStore, hash_bytes, hash_json_body
+from app.services.idempotency_store import IdempotencyStore, hash_json_body
 
 # Cursor pagination guardrails for `GET /documents`. The default page size
 # matches the in-memory store's typical working set; the max ceiling keeps
@@ -157,6 +158,10 @@ def build_router(services: PipelineServices) -> APIRouter:
         # total crosses ``max_bytes``, so a 51 MB body never materialises.
         with tempfile.SpooledTemporaryFile(max_size=_SPOOL_ROLLOVER_BYTES, mode="w+b") as spool:
             total = 0
+            # Hash chunks as they stream in so the request fingerprint costs
+            # nothing beyond the existing read loop — reading the spool back
+            # into a `bytes` would defeat the streaming-memory budget.
+            hasher = hashlib.sha256() if idempotency_key else None
             while True:
                 chunk = await file.read(_UPLOAD_READ_CHUNK_SIZE)
                 if not chunk:
@@ -167,18 +172,15 @@ def build_router(services: PipelineServices) -> APIRouter:
                         status_code=413,
                         detail=f"Upload exceeds limit of {max_bytes} bytes",
                     )
+                if hasher is not None:
+                    hasher.update(chunk)
                 spool.write(chunk)
             if total == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty.")
             spool.seek(0)
-            file_bytes = spool.read()
-            spool.seek(0)
 
-            # Idempotency check: use SHA-256 of the uploaded bytes as the
-            # request fingerprint. This reuses the same hash the document
-            # service will compute, so no extra pass over the data is needed.
             _route = "/documents/upload"
-            _req_hash = hash_bytes(file_bytes)
+            _req_hash = hasher.hexdigest() if hasher is not None else ""
             cached = _check_idempotency(
                 store=services.idempotency,
                 idempotency_key=idempotency_key,

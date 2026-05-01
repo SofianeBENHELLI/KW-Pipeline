@@ -19,10 +19,9 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
-
 
 # ---------------------------------------------------------------------------
 # Shared data type
@@ -95,11 +94,11 @@ class InMemoryIdempotencyStore:
             request_hash=request_hash,
             response_status=response_status,
             response_json=response_json,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
 
     def purge_expired(self, ttl_hours: int = 24) -> int:
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=ttl_hours)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=ttl_hours)
         expired = [k for k, v in self._entries.items() if v.created_at < cutoff]
         for k in expired:
             del self._entries[k]
@@ -145,7 +144,7 @@ class SQLiteIdempotencyStore:
         response_status: int,
         response_json: str,
     ) -> None:
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -162,7 +161,7 @@ class SQLiteIdempotencyStore:
             )
 
     def purge_expired(self, ttl_hours: int = 24) -> int:
-        cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=ttl_hours)).isoformat()
+        cutoff = (datetime.now(tz=UTC) - timedelta(hours=ttl_hours)).isoformat()
         with self._connect() as connection:
             cursor = connection.execute(
                 "DELETE FROM idempotency_keys WHERE created_at < ?",

@@ -8,9 +8,8 @@ Covers:
 - Direct unit tests for IdempotencyStore: get/put/expiry.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
@@ -21,7 +20,6 @@ from app.services.idempotency_store import (
     hash_bytes,
     hash_json_body,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,7 +41,11 @@ def _upload(client, content: bytes = b"Policy title\nReview required", key: str 
     )
 
 
-def _do_full_pipeline(client, content: bytes = b"Policy title\nReview required", key: str | None = None):
+def _do_full_pipeline(
+    client,
+    content: bytes = b"Policy title\nReview required",
+    key: str | None = None,
+):
     """Upload → extract → semantic, returning all three responses."""
     upload_resp = _upload(client, content=content, key=key)
     assert upload_resp.status_code == 200
@@ -114,7 +116,7 @@ class TestInMemoryIdempotencyStore:
 
         store._entries[("key-old", "/r")] = dc_replace(
             old_stored,
-            created_at=datetime.now(tz=timezone.utc) - timedelta(hours=48),
+            created_at=datetime.now(tz=UTC) - timedelta(hours=48),
         )
 
         removed = store.purge_expired(ttl_hours=24)
@@ -166,7 +168,7 @@ class TestSQLiteIdempotencyStore:
         store.put("key-new", "/r", "h", 200, '{}')
 
         # Back-date the old row directly in SQLite.
-        cutoff_ts = (datetime.now(tz=timezone.utc) - timedelta(hours=48)).isoformat()
+        cutoff_ts = (datetime.now(tz=UTC) - timedelta(hours=48)).isoformat()
         conn = sqlite3.connect(db)
         conn.execute(
             "UPDATE idempotency_keys SET created_at = ? WHERE key = ?",
@@ -332,12 +334,12 @@ class TestIdempotencyOnExtract:
         doc_id, ver_id = upload["document_id"], upload["id"]
 
         first = client.post(f"/documents/{doc_id}/versions/{ver_id}/extract")
-        # Second call without a key hits the service again; the service
-        # is idempotent itself for extract (re-extracts and returns).
+        # Without a key, the second call goes through the lifecycle FSM and
+        # rejects re-extraction with 409 Conflict, exactly as before this PR.
         second = client.post(f"/documents/{doc_id}/versions/{ver_id}/extract")
 
         assert first.status_code == 200
-        assert second.status_code == 200
+        assert second.status_code == 409
 
 
 # ---------------------------------------------------------------------------

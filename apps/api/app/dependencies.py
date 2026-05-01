@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.services.catalog_store import SQLiteCatalogStore
@@ -37,7 +37,7 @@ class PipelineServices:
     semantic_extractor: SemanticExtractor
     markdown_generator: MarkdownGenerator
     semantic_outputs: SemanticOutputService
-    idempotency: IdempotencyStore
+    idempotency: IdempotencyStore = field(default_factory=InMemoryIdempotencyStore)
 
 
 def _build_parser_registry() -> ParserRegistry:
