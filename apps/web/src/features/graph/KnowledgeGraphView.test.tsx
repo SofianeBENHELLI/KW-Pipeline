@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KnowledgeGraphView } from "./KnowledgeGraphView";
 import type { ApiKnowledgeGraphProjection } from "../../api/types";
@@ -82,7 +82,7 @@ describe("KnowledgeGraphView", () => {
   });
 
   it("shows a loading state while the projection is being fetched", async () => {
-    let resolveFetch: ((value: Response) => void) | null = null;
+    let resolveFetch: (value: Response) => void = () => undefined;
     const pending = new Promise<Response>((resolve) => {
       resolveFetch = resolve;
     });
@@ -94,7 +94,7 @@ describe("KnowledgeGraphView", () => {
 
     // Let the test finish cleanly so React doesn't complain about an
     // unresolved act(...) update.
-    resolveFetch?.(makeJsonResponse(FIXTURE_PROJECTION));
+    resolveFetch(makeJsonResponse(FIXTURE_PROJECTION));
     await screen.findByTestId("nvl-stub");
   });
 
