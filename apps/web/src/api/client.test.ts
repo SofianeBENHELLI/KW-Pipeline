@@ -217,8 +217,11 @@ describe("API client — error paths", () => {
   });
 
   it("throws ApiError with status and detail on non-OK JSON response", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      makeJsonResponse({ detail: "Document not found." }, 404),
+    // Use mockImplementation so each call gets a fresh Response — Response
+    // bodies are single-use streams and mockResolvedValue would reuse the
+    // same already-consumed body on the second call.
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(makeJsonResponse({ detail: "Document not found." }, 404)),
     );
     await expect(getDocument("missing")).rejects.toBeInstanceOf(ApiError);
     try {
