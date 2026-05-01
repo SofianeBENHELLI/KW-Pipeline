@@ -1,14 +1,17 @@
+import hashlib
+import json
 import os
 import tempfile
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Body, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.models.document import DocumentVersionStatus
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
+from app.services.idempotency_store import IdempotencyStore, hash_json_body
 
 # Cursor pagination guardrails for `GET /documents`. The default page size
 # matches the in-memory store's typical working set; the max ceiling keeps
@@ -62,6 +65,62 @@ class ReviewRequest(BaseModel):
     reviewer_note: str | None = None
 
 
+def _check_idempotency(
+    *,
+    store: IdempotencyStore,
+    idempotency_key: str | None,
+    route: str,
+    request_hash: str,
+) -> Response | None:
+    """Check the idempotency store for a cached response.
+
+    Returns a ``Response`` object if the request is a replay (caller should
+    return it directly), or ``None`` if the request should proceed normally.
+
+    Raises ``HTTPException(422)`` when the key is reused with a different
+    request body.
+    """
+    if idempotency_key is None:
+        return None
+
+    stored = store.get(idempotency_key, route)
+    if stored is None:
+        return None
+
+    if stored.request_hash != request_hash:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key reused with different request body",
+        )
+
+    # Return the cached response byte-identical to the original.
+    return Response(
+        content=stored.response_json,
+        status_code=stored.response_status,
+        media_type="application/json",
+    )
+
+
+def _store_idempotency(
+    *,
+    store: IdempotencyStore,
+    idempotency_key: str | None,
+    route: str,
+    request_hash: str,
+    result: object,
+) -> None:
+    """Persist a successful response in the idempotency store if a key is present."""
+    if idempotency_key is None:
+        return
+    store.put(
+        key=idempotency_key,
+        route=route,
+        request_hash=request_hash,
+        response_status=200,
+        response_json=json.dumps(result, default=str),
+    )
+
+
 def build_router(services: PipelineServices) -> APIRouter:
     """Register Harvester HTTP routes against a concrete service container."""
     router = APIRouter()
@@ -74,6 +133,7 @@ def build_router(services: PipelineServices) -> APIRouter:
     async def upload_document(
         file: UploadFile = File(...),
         document_id: str | None = None,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
         max_bytes = _max_upload_bytes()
         allowed = _allowed_content_types()
@@ -98,6 +158,10 @@ def build_router(services: PipelineServices) -> APIRouter:
         # total crosses ``max_bytes``, so a 51 MB body never materialises.
         with tempfile.SpooledTemporaryFile(max_size=_SPOOL_ROLLOVER_BYTES, mode="w+b") as spool:
             total = 0
+            # Hash chunks as they stream in so the request fingerprint costs
+            # nothing beyond the existing read loop — reading the spool back
+            # into a `bytes` would defeat the streaming-memory budget.
+            hasher = hashlib.sha256() if idempotency_key else None
             while True:
                 chunk = await file.read(_UPLOAD_READ_CHUNK_SIZE)
                 if not chunk:
@@ -108,10 +172,23 @@ def build_router(services: PipelineServices) -> APIRouter:
                         status_code=413,
                         detail=f"Upload exceeds limit of {max_bytes} bytes",
                     )
+                if hasher is not None:
+                    hasher.update(chunk)
                 spool.write(chunk)
             if total == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty.")
             spool.seek(0)
+
+            _route = "/documents/upload"
+            _req_hash = hasher.hexdigest() if hasher is not None else ""
+            cached = _check_idempotency(
+                store=services.idempotency,
+                idempotency_key=idempotency_key,
+                route=_route,
+                request_hash=_req_hash,
+            )
+            if cached is not None:
+                return cached
 
             def _iter_chunks() -> Iterator[bytes]:
                 while True:
@@ -121,12 +198,20 @@ def build_router(services: PipelineServices) -> APIRouter:
                     yield block
 
             try:
-                return services.documents.upload_stream(
+                result = services.documents.upload_stream(
                     filename=file.filename or "untitled",
                     content_type=raw_content_type,
                     chunks=_iter_chunks(),
                     document_id=document_id,
                 )
+                _store_idempotency(
+                    store=services.idempotency,
+                    idempotency_key=idempotency_key,
+                    route=_route,
+                    request_hash=_req_hash,
+                    result=result.model_dump(mode="json"),
+                )
+                return result
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -159,9 +244,36 @@ def build_router(services: PipelineServices) -> APIRouter:
         return document
 
     @router.post("/documents/{document_id}/versions/{version_id}/extract")
-    def extract_document(document_id: str, version_id: str):
+    def extract_document(
+        document_id: str,
+        version_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        _route = "/documents/{document_id}/versions/{version_id}/extract"
+        _req_hash = hash_json_body(
+            None,
+            path_params={"document_id": document_id, "version_id": version_id},
+        )
+        cached = _check_idempotency(
+            store=services.idempotency,
+            idempotency_key=idempotency_key,
+            route=_route,
+            request_hash=_req_hash,
+        )
+        if cached is not None:
+            return cached
         try:
-            return services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+            result = services.extraction_jobs.extract(
+                document_id=document_id, version_id=version_id
+            )
+            _store_idempotency(
+                store=services.idempotency,
+                idempotency_key=idempotency_key,
+                route=_route,
+                request_hash=_req_hash,
+                result=result.model_dump(mode="json"),
+            )
+            return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -180,11 +292,36 @@ def build_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.post("/documents/{document_id}/versions/{version_id}/semantic")
-    def generate_semantic_document(document_id: str, version_id: str):
+    def generate_semantic_document(
+        document_id: str,
+        version_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        _route = "/documents/{document_id}/versions/{version_id}/semantic"
+        _req_hash = hash_json_body(
+            None,
+            path_params={"document_id": document_id, "version_id": version_id},
+        )
+        cached = _check_idempotency(
+            store=services.idempotency,
+            idempotency_key=idempotency_key,
+            route=_route,
+            request_hash=_req_hash,
+        )
+        if cached is not None:
+            return cached
         try:
-            return services.semantic_outputs.generate(
+            result = services.semantic_outputs.generate(
                 document_id=document_id, version_id=version_id
             )
+            _store_idempotency(
+                store=services.idempotency,
+                idempotency_key=idempotency_key,
+                route=_route,
+                request_hash=_req_hash,
+                result=result.model_dump(mode="json"),
+            )
+            return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
