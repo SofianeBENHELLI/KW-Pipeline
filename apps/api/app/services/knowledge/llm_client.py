@@ -114,18 +114,35 @@ class AnthropicLLMClient:
         self._model = model
         self._max_tokens = max_tokens
 
-    def complete_with_tool(  # pragma: no cover - exercised behind pytest -m llm_integration
+    def complete_with_tool(
         self,
         *,
         system: str,
         user: str,
         tool_schema: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, int]]:
+        """Run one structured-output call against Anthropic.
+
+        Per ADR-014 §2, the static ``system`` block is wrapped as a
+        single content block with ``cache_control: {"type":
+        "ephemeral"}`` so repeat calls hit Anthropic's prompt cache.
+        Caching is implicit — every call earns the cache treatment;
+        the entity-extraction system prompt is invariant across all
+        sections of all documents, which is exactly the shape the
+        cache amortizes. The user portion stays in ``messages`` and
+        is *not* cached, since it varies per section.
+        """
         tool_name = "emit_structured"
         response = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
-            system=system,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=[{"role": "user", "content": user}],
             tools=[
                 {
