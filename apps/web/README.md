@@ -57,13 +57,20 @@ apps/web/
 └── src/
     ├── App.tsx
     ├── App.test.tsx
+    ├── api/
+    │   ├── client.ts            # typed openapi-fetch wrapper
+    │   ├── types.ts             # public alias re-exports
+    │   └── generated/schema.ts  # generated; do not hand-edit
     ├── domain/
     │   └── document.ts
     ├── features/
     │   ├── pipeline/
     │   │   └── PipelineWidget.tsx
-    │   └── review/
-    │       └── ReviewWorkspace.tsx
+    │   ├── review/
+    │   │   └── ReviewWorkspace.tsx
+    │   └── graph/
+    │       ├── KnowledgeGraphView.tsx   # @neo4j-nvl/react wrapper
+    │       └── index.ts
     ├── fixtures/
     │   └── sampleDocuments.ts
     ├── main.tsx
@@ -77,8 +84,15 @@ apps/web/
 
 - `domain/` mirrors backend API shapes and lifecycle statuses.
 - `features/pipeline/` owns the compact dashboard widget experience.
-- `features/review/` owns the expanded document review workspace.
-- `fixtures/` provides API-shaped sample data until live HTTP hooks land.
+- `features/review/` owns the expanded document review workspace
+  (the audit surface — the reviewer's home).
+- `features/graph/` owns the optional knowledge-graph view
+  (`<KnowledgeGraphView />` wrapping `@neo4j-nvl/react`). Mounted in
+  the review workspace; renders an empty-state when the document has
+  no projection yet (knowledge layer disabled or version not
+  validated). See
+  [`docs/architecture/knowledge_layer.md`](../../docs/architecture/knowledge_layer.md).
+- `fixtures/` provides API-shaped sample data for tests.
 - `ui/` contains shared presentation primitives such as status badges.
 
 ## Notes
@@ -94,3 +108,7 @@ apps/web/
   without changing the React app.
 - Keep branding behind a small theme layer so official 3DEXPERIENCE /
   Dassault Systemes tokens can replace local defaults later.
+- `@neo4j-nvl/base` is heavyweight (canvas-based graph layout) — current
+  bundle is ~2 MB / 600 KB gz. A planned follow-up wraps the graph slice
+  in `React.lazy` so reviewers who never open the graph tab don't pay
+  the cost.

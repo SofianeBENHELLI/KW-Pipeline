@@ -140,8 +140,39 @@ re-running DDL against a schema that is already in the target state.
 Never renumber or remove existing entries — doing so would break databases
 that have already recorded those IDs.
 
+## Optional Knowledge Graph Store
+
+A second persistence boundary lives in `app.services.knowledge.graph_store`
+and is dormant by default. When the knowledge layer is enabled (via
+`KW_KNOWLEDGE_LAYER_ENABLED`), validated documents project into a graph
+through a `GraphStore` Protocol; see
+[`knowledge_layer.md`](knowledge_layer.md) and
+[ADR-012](../adr/ADR-012-knowledge-graph-layer.md).
+
+Implementations:
+
+- `InMemoryGraphStore`: deterministic, dict-backed. Used by all default
+  unit tests so `pytest` works without Docker or a live database.
+- `Neo4jGraphStore`: Neo4j 5.x via the official `neo4j` Python driver.
+  Lazy-imported so the module loads even where the driver isn't
+  installed; constructed only when `KW_NEO4J_URI` is configured.
+
+The graph store stores nodes/edges with **flat properties** (no nested
+maps; Neo4j only accepts primitives or arrays of primitives as property
+values). Round-trip preserves the public `GraphNode`/`GraphEdge` shape
+by treating `id`/`kind`/`label` (nodes) and `id`/`kind` (edges) as
+reserved keys.
+
+Local development brings up Neo4j alongside the API via
+`docker compose -f docker/docker-compose.yml up -d neo4j`. Integration
+tests live in `apps/api/tests/integration/` and run behind
+`pytest -m integration`.
+
 ## Current Limits
 
 - SQLite is for local MVP usage, not the final production database.
 - Migration callables are plain Python functions; SQL-file based migrations
   are not supported yet.
+- Neo4j is the only `GraphStore` impl today; the Protocol is small enough
+  that a future swap (Kuzu, Apache AGE, etc.) is a service-layer change,
+  not a system rewrite.
