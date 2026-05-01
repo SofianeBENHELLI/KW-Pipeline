@@ -37,17 +37,33 @@ section text. Sanitization strips lines starting with `### system:`,
 `llm-graph-builder`'s `sanitize_additional_instruction` defends
 against — and warns when any line is dropped.
 
-### 2. Prompt caching: deferred to Phase 2.1
+### 2. Prompt caching: implemented (PR #TBD)
 
-Anthropic's prompt-caching feature would let us mark the static
-system prompt and tool schema with `cache_control: {"type":
-"ephemeral"}` and amortize ~400 tokens of static framing across
-calls within a 5-minute window — a ~5-15% cost saving depending on
-section count. Phase 2 ships **without** caching to keep the first
-cut auditable. `AnthropicLLMClient.complete_with_tool` already
-records `cache_read_input_tokens` and `cache_creation_input_tokens`
-in the returned usage dict, so enabling caching is a one-line
-change in Phase 2.1 once we have a baseline telemetry sample.
+Anthropic's prompt-caching feature lets us mark the static system
+prompt with `cache_control: {"type": "ephemeral"}` and amortize ~400
+tokens of static framing across calls within a 5-minute window — a
+~5-15% cost saving depending on section count.
+
+**Implementation note (Phase 2.1):**
+`AnthropicLLMClient.complete_with_tool` now sends the system prompt
+as a single text content block carrying
+`cache_control: {"type": "ephemeral"}`:
+
+```python
+system=[
+    {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+]
+```
+
+Caching is implicit — every call from the entity extractor earns
+the cache treatment, which is the right default because the system
+prompt is invariant across all sections of all documents. The
+user-prompt portion stays in `messages` and is *not* cached
+(varies per section). `FakeLLMClient` is unchanged — tests still
+pass `system` as a plain `str`. The
+`cache_read_input_tokens` / `cache_creation_input_tokens` counters
+already surfaced in the usage dict from Phase 2 confirm the cache
+takes effect in production.
 
 ### 3. Budget guardrails
 
