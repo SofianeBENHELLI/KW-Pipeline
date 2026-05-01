@@ -106,9 +106,17 @@ These are mechanical wins that build directly on what just landed:
    `MAX_UPLOAD_BYTES`, `ALLOWED_CONTENT_TYPES`, `CORS_ALLOWED_ORIGINS`,
    and `ANTHROPIC_API_KEY` keep working as `pydantic.AliasChoices`
    aliases so existing deployments need no change.
-4. **`#42` structured logging / audit trail.** The knowledge-layer
-   side-effects already log `knowledge.projection.written` /
-   `knowledge.projection.failed`; #42 turns those into structured JSON.
+4. ~~**`#42` structured logging / audit trail.**~~ Done — every
+   significant lifecycle moment now emits a named event with a
+   consistent `extra={...}` payload (`document.uploaded`,
+   `document.status_changed`, `extraction.{started,succeeded,failed}`,
+   `semantic.{generated,cached}`, `review.{validated,rejected}`,
+   `idempotency.replayed`, plus the existing
+   `knowledge.projection.{written,failed}` and the new
+   `knowledge.entity_extraction.completed`). `KW_LOG_FORMAT=json`
+   flips the formatter to one JSON object per line for production
+   containers; default `text` keeps local tracebacks readable. See
+   `docs/architecture/logging.md`.
 
 ### 2. 3DEXPERIENCE widget readiness
 

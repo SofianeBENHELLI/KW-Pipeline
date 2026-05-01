@@ -90,6 +90,14 @@ def _check_idempotency(
             detail="Idempotency-Key reused with different request body",
         )
 
+    log.info(
+        "idempotency.replayed",
+        extra={
+            "route": route,
+            "idempotency_key": idempotency_key,
+            "response_status": stored.response_status,
+        },
+    )
     # Return the cached response byte-identical to the original.
     return Response(
         content=stored.response_json,
@@ -483,6 +491,16 @@ def build_router(services: PipelineServices) -> APIRouter:
                         semantic=result,
                     )
                     services.knowledge_projector.project_entities(extraction_result)
+                    log.info(
+                        "knowledge.entity_extraction.completed",
+                        extra={
+                            "document_id": document_id,
+                            "version_id": version_id,
+                            "triple_count": len(extraction_result.triples),
+                            "warning_count": len(extraction_result.warnings),
+                            "token_usage": extraction_result.token_usage,
+                        },
+                    )
                 except Exception:
                     log.exception(
                         "knowledge.entity_extraction.failed",
