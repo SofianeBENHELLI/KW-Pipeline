@@ -14,8 +14,10 @@ Last reviewed: 2026-05-01 (post knowledge-layer pivot).
   `@neo4j-nvl/base` dominates; lazy code-split is a planned follow-up).
 - Ruff: passed.
 - Python compileall: passed.
-- Known dependency advisory: `npm audit --audit-level=moderate` reports the
-  Vite/esbuild development-server advisory; tracked in issue #79.
+- Vite/esbuild development-server advisory (issue #79) resolved by bumping
+  to Vite 6.4.2 + Vitest 3.2.4. `npm audit --audit-level=moderate` no longer
+  reports any Vite/esbuild advisories; the remaining lodash/uuid advisories
+  are transitive through `@neo4j-nvl/*` and are tracked separately.
 
 ## Code Audit Summary
 
@@ -112,8 +114,9 @@ These are mechanical wins that build directly on what just landed:
 1. **`#78` widget embedding + brand token adapter.** The graph and
    review surfaces both need to fit a small container. Open decisions:
    first 3DEXPERIENCE container size, auth/context model.
-2. **`#79` Vite/esbuild audit remediation.** Larger jump now that NVL
-   is in the bundle.
+2. ~~**`#79` Vite/esbuild audit remediation.**~~ Resolved: Vite 5.4.21 →
+   6.4.2 + Vitest 2.1.9 → 3.2.4. Lodash/uuid advisories transitive through
+   `@neo4j-nvl/*` remain and need a separate NVL bump.
 
 ### 3. Phase 3 — chat surface (deferred until Phase 2 has been used in anger)
 
