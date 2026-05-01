@@ -1,6 +1,6 @@
 # MVP Backlog Review
 
-Last reviewed: 2026-04-30
+Last reviewed: 2026-05-01
 
 ## Current Health
 
@@ -33,29 +33,15 @@ The frontend is currently a structured scaffold:
 
 ## Backlog Hygiene Findings
 
-Some early issues are still open even though current `main` appears to satisfy
-most or all of their original acceptance criteria. These should be reviewed and
-closed or rewritten so the backlog stays trustworthy:
+**2026-05-01 hygiene pass (issue #81) complete.** All 12 candidate issues
+were resolved:
 
-- #1 Blueprint architecture docs.
-- #2 Upload/catalog/hash/duplicate detection.
-- #4 Raw extraction worker slice.
-- #5 Semantic JSON and Markdown generation.
-- #9 Raw extraction and Markdown retrieval endpoints.
-- #13 Ruff/pre-commit/repo hygiene.
-- #17 Persist extraction, semantic JSON, and Markdown artifacts.
-- #19 Upload safety policy.
-- #28 CI action version bump.
-- #57 SQLite pragmas/WAL/foreign keys.
-- #61 SQLite duplicate hash lookup.
+- #1, #2, #4, #5, #9, #13, #17, #19, #28, #57, #61 — closed as **completed**
+  (acceptance criteria fully satisfied on `main`).
+- #18 — closed as **superseded** by #63 (real schema migration system).
 
-Issue #18 is partly superseded by #63. If #63 is the real migration-system
-work, #18 should be closed as superseded or narrowed to the exact remaining
-backend-MVP migration requirement.
-
-Issue #75 is an open PR covering #58 plus parser-registry cleanup. Review and
-merge or close it before starting adjacent parser-registry work to avoid
-conflicts.
+The backlog is now clean. No further triage needed from the original
+hygiene list.
 
 ## Missing Items Added
 
@@ -69,22 +55,25 @@ The 2026-04-30 audit added these missing backlog items:
 
 ## Recommended Work Order
 
-### 1. Finish active audit fixes
+### 1. (Done) Active audit fixes
 
-1. Review PR #75.
-2. Decide whether to merge it or replace it with a smaller branch.
-3. Close or update #58 based on that decision.
+PR #75 merged as commit `e15bf69` (closes #58 — reject whitespace-only
+uploads + wire ParserRegistry).
 
-Why: it touches parser dispatch and whitespace-only extraction behavior, which
-are close to the current extraction lifecycle code.
+### 2. (Done) Clean stale backlog state
 
-### 2. Clean stale backlog state
+Hygiene pass completed on 2026-05-01 (issue #81). Closed 11 completed issues
+and superseded 1. See "Backlog Hygiene Findings" above.
 
-Review the backlog hygiene list above and close issues that are already done.
-For issues that are only partly done, rewrite the body around the remaining
-acceptance criteria.
+**Recent closes since the 2026-04-30 audit doc:**
 
-Why: too many open-but-complete issues hide the real next work.
+| Commit | Issue | What it closes |
+|---|---|---|
+| `e15bf69` | #58 | Reject whitespace-only uploads + wire ParserRegistry |
+| `dc0b7ca` | #49 | SemanticEnricher Protocol and ADR-009 |
+| `d1c3e92` | #46 | DOCX parser via python-docx |
+| `67fa258` | #41 | Stream uploads and SHA-256 |
+| `d252c67` | #38 | Cursor pagination on GET /documents |
 
 ### 3. Make Orbital live
 
@@ -113,10 +102,10 @@ After Orbital can use the current API, prioritize:
 
 1. #63 real schema migration system.
 2. #60 idempotency keys for write endpoints.
-3. #38 pagination for `GET /documents`.
-4. #41 streaming upload/hash.
-5. #42 structured audit trail.
-6. #43 Pydantic Settings.
+3. #42 structured audit trail.
+4. #43 Pydantic Settings.
+
+(#38 pagination and #41 streaming upload are already done on main.)
 
 Why: these are the robustness and scale items most likely to hurt once a UI is
 driving the API repeatedly.
