@@ -135,16 +135,8 @@ def _node(
     onto the version being deleted.
     """
     full_id = f"{ns}-{node_id}"
-    doc = (
-        f"{ns}-{document_id}"
-        if document_id
-        else ("" if document_id == "" else f"{ns}-doc-A")
-    )
-    ver = (
-        f"{ns}-{version_id}"
-        if version_id
-        else ("" if version_id == "" else f"{ns}-ver-A")
-    )
+    doc = f"{ns}-{document_id}" if document_id else ("" if document_id == "" else f"{ns}-doc-A")
+    ver = f"{ns}-{version_id}" if version_id else ("" if version_id == "" else f"{ns}-ver-A")
     return GraphNode(
         id=full_id,
         kind=kind,
@@ -161,11 +153,7 @@ def _edge(
     target: str,
     version_id: str | None = None,
 ) -> GraphEdge:
-    ver = (
-        f"{ns}-{version_id}"
-        if version_id
-        else ("" if version_id == "" else f"{ns}-ver-A")
-    )
+    ver = f"{ns}-{version_id}" if version_id else ("" if version_id == "" else f"{ns}-ver-A")
     return GraphEdge(
         id=f"{ns}-{edge_id}",
         kind="part_of",
