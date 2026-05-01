@@ -1,20 +1,29 @@
 import hashlib
 import json
+import logging
 import os
 import tempfile
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Body, File, Header, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentListResponse, DocumentVersion, HealthResponse
 from app.schemas.extraction import RawExtraction
+from app.schemas.knowledge import KnowledgeGraphPage, KnowledgeGraphProjection
 from app.schemas.semantic_document import SemanticDocument
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import IdempotencyStore, hash_json_body
+from app.services.knowledge.graph_store import (
+    DEFAULT_GRAPH_PAGE_LIMIT,
+    MAX_GRAPH_PAGE_LIMIT,
+)
+
+log = logging.getLogger(__name__)
+MIN_GRAPH_PAGE_LIMIT = 1
 
 # Cursor pagination guardrails for `GET /documents`. The default page size
 # matches the in-memory store's typical working set; the max ceiling keeps
@@ -443,7 +452,7 @@ def build_router(services: PipelineServices) -> APIRouter:
                 version_id=version_id,
                 reviewer_note=request.reviewer_note,
             )
-            return services.semantic_outputs.record_validation(
+            result = services.semantic_outputs.record_validation(
                 document_id=document_id,
                 version_id=version_id,
                 status=cached_status,
@@ -452,5 +461,58 @@ def build_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        # Knowledge layer side-effect (ADR-012). Fire-and-log: a graph
+        # outage must not roll back validation. The catalog is already
+        # the authoritative record; the graph catches up via
+        # re-projection or out-of-band reconciliation.
+        if cached_status == "validated" and services.knowledge_projector is not None:
+            try:
+                document = services.documents.get_document(document_id)
+                if document is not None:
+                    services.knowledge_projector.project(
+                        document=document,
+                        version=version,
+                        semantic=result,
+                    )
+            except Exception:
+                log.exception(
+                    "knowledge.projection.failed",
+                    extra={"document_id": document_id, "version_id": version_id},
+                )
+
+        return result
+
+    @router.get(
+        "/documents/{document_id}/graph",
+        operation_id="get_document_graph",
+        response_model=KnowledgeGraphProjection,
+    )
+    def get_document_graph(document_id: str):
+        """Knowledge graph projection for one document family (ADR-012)."""
+        return services.graph_store.find_subgraph_for_document(document_id)
+
+    @router.get(
+        "/knowledge/graph",
+        operation_id="get_knowledge_graph",
+        response_model=KnowledgeGraphPage,
+    )
+    def get_knowledge_graph(
+        limit: int = Query(default=DEFAULT_GRAPH_PAGE_LIMIT, ge=MIN_GRAPH_PAGE_LIMIT),
+        cursor: str | None = None,
+    ):
+        """Cursor-paginated walk of the catalog-wide projection (ADR-012)."""
+        if limit > MAX_GRAPH_PAGE_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"limit must be between {MIN_GRAPH_PAGE_LIMIT} "
+                    f"and {MAX_GRAPH_PAGE_LIMIT}; got {limit}."
+                ),
+            )
+        try:
+            return services.graph_store.find_subgraph(limit=limit, cursor=cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return router

@@ -6,6 +6,10 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.115.6",
   "jinja2==3.1.6",
+  # Bolt driver for the optional knowledge layer (ADR-012). Tiny package;
+  # `Neo4jGraphStore` is lazy-imported, so unit tests against the in-memory
+  # fake do not exercise it. The driver is dormant until KW_NEO4J_URI is set.
+  "neo4j>=5.23",
   "pdfplumber>=0.11",
   "pydantic==2.10.6",
   "python-docx>=1.1",
@@ -25,7 +29,11 @@ test = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not integration and not llm_integration'"
+markers = [
+  "integration: requires a running external service (e.g. Neo4j); opt-in via -m integration",
+  "llm_integration: hits a real LLM API; opt-in via -m llm_integration",
+]
 
 [tool.coverage.run]
 source = ["app"]

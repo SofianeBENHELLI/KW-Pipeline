@@ -263,6 +263,117 @@
         "title": "DocumentVersionStatus",
         "type": "string"
       },
+      "GraphEdge": {
+        "description": "One directed edge in the knowledge graph projection.\n\n``source_id`` and ``target_id`` reference :class:`GraphNode.id`\nvalues. Phase 2 ``has_entity`` edges additionally carry a\n``source_reference_id`` in ``properties`` pointing at a row in the\ncatalog's ``source_references`` table; ``part_of`` edges have no\nsuch citation requirement.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "part_of",
+              "has_entity"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source_id",
+          "target_id",
+          "properties"
+        ],
+        "title": "GraphEdge",
+        "type": "object"
+      },
+      "GraphNode": {
+        "description": "One node in the knowledge graph projection.\n\n``id`` is stable across projections — for ``document`` and\n``version`` nodes it matches the catalog row ID; for ``section``\nnodes it matches ``SemanticSection.id``; for ``entity`` nodes\n(Phase 2) it is a deterministic hash of (text, type) so re-runs\nconverge on the same node.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "version",
+              "section",
+              "entity"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Properties",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "properties"
+        ],
+        "title": "GraphNode",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -287,6 +398,98 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "KnowledgeGraphPage": {
+        "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "nodes",
+          "edges",
+          "next_cursor"
+        ],
+        "title": "KnowledgeGraphPage",
+        "type": "object"
+      },
+      "KnowledgeGraphProjection": {
+        "description": "Subgraph for one document family — nodes and edges that the\nprojector wrote on the most recent ``VALIDATED`` transition.\n\nThe projection is deterministic with respect to its inputs: the\nsame ``Document`` + ``DocumentVersion`` + ``SemanticDocument`` will\nalways produce the same nodes and edges (modulo ``generated_at``).\nRe-projecting is safe — upserts are idempotent.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "document_id",
+          "version_id",
+          "nodes",
+          "edges",
+          "generated_at"
+        ],
+        "title": "KnowledgeGraphProjection",
         "type": "object"
       },
       "RawExtraction": {
@@ -899,6 +1102,46 @@
         "summary": "Get Document"
       }
     },
+    "/documents/{document_id}/graph": {
+      "get": {
+        "description": "Knowledge graph projection for one document family (ADR-012).",
+        "operationId": "get_document_graph",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeGraphProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Graph"
+      }
+    },
     "/documents/{document_id}/versions/{version_id}/extract": {
       "post": {
         "operationId": "extract_version",
@@ -1302,6 +1545,64 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/knowledge/graph": {
+      "get": {
+        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).",
+        "operationId": "get_knowledge_graph",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeGraphPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Graph"
       }
     }
   }
