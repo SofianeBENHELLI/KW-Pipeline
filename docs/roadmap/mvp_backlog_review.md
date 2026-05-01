@@ -100,11 +100,12 @@ These are mechanical wins that build directly on what just landed:
 2. **Phase 2.1 — prompt caching.** Wire `cache_control: {"type":
    "ephemeral"}` per ADR-014 §2 to the static system block of the
    entity-extraction prompt. Token-cost reductions on repeat sections.
-3. **`#43` Pydantic Settings.** Replace the `os.environ.get` reads
-   for `KW_*` and `ANTHROPIC_API_KEY` with a settings model. Also
-   normalises the env-var prefix story (existing `MAX_UPLOAD_BYTES`,
-   `ALLOWED_CONTENT_TYPES`, `CORS_ALLOWED_ORIGINS` are unprefixed; the
-   knowledge-layer ones are `KW_`).
+3. ~~**`#43` Pydantic Settings.**~~ Done — all env reads now flow
+   through `app.settings.Settings` (`pydantic_settings.BaseSettings`).
+   `KW_*` is the canonical prefix; the historical unprefixed
+   `MAX_UPLOAD_BYTES`, `ALLOWED_CONTENT_TYPES`, `CORS_ALLOWED_ORIGINS`,
+   and `ANTHROPIC_API_KEY` keep working as `pydantic.AliasChoices`
+   aliases so existing deployments need no change.
 4. **`#42` structured logging / audit trail.** The knowledge-layer
    side-effects already log `knowledge.projection.written` /
    `knowledge.projection.failed`; #42 turns those into structured JSON.

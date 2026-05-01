@@ -139,19 +139,26 @@ Implications:
 
 ## Configuration surface
 
-The knowledge layer is opt-in via environment variables. Until
-Pydantic Settings (#43) lands, these are read with the same
-`os.environ.get` pattern the rest of the codebase uses.
+The knowledge layer is opt-in via environment variables. All env-var
+reads — both knowledge-layer settings and the older upload / CORS
+guardrails — flow through `app.settings.Settings` (#43, a thin
+`pydantic_settings.BaseSettings` subclass). The `KW_` prefix is the
+canonical name; legacy unprefixed names are accepted as
+`pydantic.AliasChoices` so existing deployments keep working without a
+config rewrite.
 
-| Env var | Purpose | Default |
-|---|---|---|
-| `KW_NEO4J_URI` | `bolt://...` connection string | unset (layer disabled) |
-| `KW_NEO4J_USER` | Auth username | unset |
-| `KW_NEO4J_PASSWORD` | Auth password | unset |
-| `KW_NEO4J_DATABASE` | Neo4j database name | `neo4j` |
-| `ANTHROPIC_API_KEY` | LLM access | unset (Phases 2+ disabled) |
-| `KW_LLM_MODEL` | Claude model id | `claude-sonnet-4-5` |
-| `KW_KNOWLEDGE_LAYER_ENABLED` | Master kill-switch | `false` |
+| Env var (canonical) | Legacy alias | Purpose | Default |
+|---|---|---|---|
+| `KW_NEO4J_URI` | — | `bolt://...` connection string | unset (layer disabled) |
+| `KW_NEO4J_USER` | — | Auth username | unset |
+| `KW_NEO4J_PASSWORD` | — | Auth password | unset |
+| `KW_NEO4J_DATABASE` | — | Neo4j database name | `neo4j` |
+| `KW_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` | LLM access | unset (Phases 2+ disabled) |
+| `KW_ANTHROPIC_MODEL` | `KW_LLM_MODEL` | Claude model id | SDK default (`claude-sonnet-4-5`) |
+| `KW_KNOWLEDGE_LAYER_ENABLED` | — | Master kill-switch | `false` |
+| `KW_MAX_UPLOAD_BYTES` | `MAX_UPLOAD_BYTES` | Upload byte ceiling | `52428800` (50 MiB) |
+| `KW_ALLOWED_CONTENT_TYPES` | `ALLOWED_CONTENT_TYPES` | MIME allowlist (CSV) | `text/plain` |
+| `KW_CORS_ALLOWED_ORIGINS` | `CORS_ALLOWED_ORIGINS` | CORS allowlist (CSV) | empty (no cross-origin) |
 
 When `KW_KNOWLEDGE_LAYER_ENABLED=false`, all five graph + chat
 endpoints return `503 Service Unavailable` with a `detail` explaining

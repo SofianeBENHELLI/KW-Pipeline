@@ -1,0 +1,231 @@
+"""Tests for the typed configuration surface (issue #43).
+
+The :class:`app.settings.Settings` model is the single read point for
+every env var the API consumes. These tests pin the contract that
+mattered for the migration:
+
+- Defaults match the legacy hard-coded fallbacks (50 MiB upload, the
+  ``text/plain`` content-type allowlist, an empty CORS allowlist, the
+  knowledge layer disabled).
+- Both the canonical ``KW_*`` name and the historical unprefixed name
+  resolve to the same field via :class:`pydantic.AliasChoices`, so
+  existing deployments that still set ``MAX_UPLOAD_BYTES`` etc. keep
+  working.
+- The CSV-parsing properties trim whitespace and drop empty entries —
+  a trailing comma must not silently allow ``""``.
+- The ``knowledge_layer_enabled`` truthiness contract matches the
+  pre-#43 ``_maybe_build_knowledge_layer`` helper.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.settings import Settings
+
+# Every env var the Settings model reads. Each test isolates itself by
+# clearing the relevant subset; this list keeps the cleanup loop honest.
+_ALL_VARS = [
+    # Upload
+    "KW_MAX_UPLOAD_BYTES",
+    "MAX_UPLOAD_BYTES",
+    "KW_ALLOWED_CONTENT_TYPES",
+    "ALLOWED_CONTENT_TYPES",
+    # CORS
+    "KW_CORS_ALLOWED_ORIGINS",
+    "CORS_ALLOWED_ORIGINS",
+    # Knowledge layer
+    "KW_KNOWLEDGE_LAYER_ENABLED",
+    "KW_NEO4J_URI",
+    "KW_NEO4J_USER",
+    "KW_NEO4J_PASSWORD",
+    "KW_NEO4J_DATABASE",
+    # LLM
+    "KW_ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "KW_ANTHROPIC_MODEL",
+    "KW_LLM_MODEL",
+]
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip every settings-related env var before each test.
+
+    The contributor's shell env is unpredictable; pinning a clean slate
+    is the only way to assert defaults without spurious failures.
+    """
+    for name in _ALL_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+class TestDefaults:
+    def test_defaults_match_legacy_fallbacks(self) -> None:
+        s = Settings()
+        # Upload guardrails — the same numbers the old hard-coded
+        # ``DEFAULT_MAX_UPLOAD_BYTES`` / ``DEFAULT_ALLOWED_CONTENT_TYPES``
+        # carried in routes.py.
+        assert s.max_upload_bytes == 50 * 1024 * 1024
+        assert s.allowed_content_types == {"text/plain"}
+        # Empty CORS allowlist by default — the legacy helper returned
+        # ``[]`` which made the API reject every cross-origin request
+        # until an operator opted in.
+        assert s.cors_allowed_origins == []
+        # Knowledge layer off by default.
+        assert s.knowledge_layer_enabled is False
+        assert s.neo4j_uri == ""
+        assert s.neo4j_database == "neo4j"
+        # LLM credentials unset by default.
+        assert s.anthropic_api_key == ""
+        assert s.anthropic_model == ""
+
+
+class TestUploadGuardrails:
+    def test_kw_prefixed_max_upload_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_MAX_UPLOAD_BYTES", "1024")
+        assert Settings().max_upload_bytes == 1024
+
+    def test_legacy_unprefixed_max_upload_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Existing deployments set the unprefixed name; that must keep working."""
+        monkeypatch.setenv("MAX_UPLOAD_BYTES", "2048")
+        assert Settings().max_upload_bytes == 2048
+
+    def test_kw_prefixed_wins_over_legacy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When both names are set, the prefixed canonical name takes priority."""
+        monkeypatch.setenv("KW_MAX_UPLOAD_BYTES", "111")
+        monkeypatch.setenv("MAX_UPLOAD_BYTES", "999")
+        assert Settings().max_upload_bytes == 111
+
+    def test_kw_prefixed_allowed_content_types(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_ALLOWED_CONTENT_TYPES", "text/plain,application/pdf")
+        assert Settings().allowed_content_types == {"text/plain", "application/pdf"}
+
+    def test_legacy_allowed_content_types(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ALLOWED_CONTENT_TYPES", "application/json")
+        assert Settings().allowed_content_types == {"application/json"}
+
+    def test_allowed_content_types_strips_and_drops_empty(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Trailing commas and stray whitespace must not introduce ``""``."""
+        monkeypatch.setenv(
+            "KW_ALLOWED_CONTENT_TYPES",
+            "  text/plain , ,application/json,",
+        )
+        assert Settings().allowed_content_types == {"text/plain", "application/json"}
+
+
+class TestCors:
+    def test_kw_prefixed_cors_allowlist(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "KW_CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,https://orbital.example.com",
+        )
+        assert Settings().cors_allowed_origins == [
+            "http://localhost:5173",
+            "https://orbital.example.com",
+        ]
+
+    def test_legacy_cors_allowlist(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+        assert Settings().cors_allowed_origins == ["http://localhost:5173"]
+
+    def test_cors_allowlist_drops_blanks_and_trims(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            "CORS_ALLOWED_ORIGINS",
+            " http://a.example.com , , https://b.example.com,",
+        )
+        assert Settings().cors_allowed_origins == [
+            "http://a.example.com",
+            "https://b.example.com",
+        ]
+
+    def test_blank_cors_value_yields_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A literally empty env var must not allow a blank-string origin."""
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "")
+        assert Settings().cors_allowed_origins == []
+
+
+class TestKnowledgeLayer:
+    @pytest.mark.parametrize("flag", ["1", "true", "TRUE", "yes", "on", "On"])
+    def test_truthy_values_enable_layer(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        flag: str,
+    ) -> None:
+        monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", flag)
+        assert Settings().knowledge_layer_enabled is True
+
+    @pytest.mark.parametrize("flag", ["", "0", "false", "no", "off", "maybe"])
+    def test_falsy_values_keep_layer_off(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        flag: str,
+    ) -> None:
+        monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", flag)
+        assert Settings().knowledge_layer_enabled is False
+
+    def test_neo4j_block_pulled_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_NEO4J_URI", "bolt://example:7687")
+        monkeypatch.setenv("KW_NEO4J_USER", "neo4j")
+        monkeypatch.setenv("KW_NEO4J_PASSWORD", "secret")
+        monkeypatch.setenv("KW_NEO4J_DATABASE", "kw")
+
+        s = Settings()
+        assert s.neo4j_uri == "bolt://example:7687"
+        assert s.neo4j_user == "neo4j"
+        assert s.neo4j_password == "secret"
+        assert s.neo4j_database == "kw"
+
+
+class TestLLMCredentials:
+    def test_kw_prefixed_anthropic_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "sk-kw")
+        assert Settings().anthropic_api_key == "sk-kw"
+
+    def test_legacy_anthropic_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The unprefixed ``ANTHROPIC_API_KEY`` is the SDK's own canonical
+        name and many deploy tools surface only that label — keep it as
+        a Pydantic alias so we don't break existing setups."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-legacy")
+        assert Settings().anthropic_api_key == "sk-legacy"
+
+    def test_kw_prefixed_wins_over_legacy_anthropic_api_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "sk-kw")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-legacy")
+        assert Settings().anthropic_api_key == "sk-kw"
+
+    def test_anthropic_model_via_kw_anthropic_model(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Historical name used by ``dependencies.py`` since Phase 2."""
+        monkeypatch.setenv("KW_ANTHROPIC_MODEL", "claude-haiku-4-5")
+        assert Settings().anthropic_model == "claude-haiku-4-5"
+
+    def test_anthropic_model_via_kw_llm_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The architecture doc advertises ``KW_LLM_MODEL`` — that alias must work."""
+        monkeypatch.setenv("KW_LLM_MODEL", "claude-sonnet-4-5")
+        assert Settings().anthropic_model == "claude-sonnet-4-5"
+
+
+class TestProgrammaticConstruction:
+    """``populate_by_name=True`` lets tests construct a Settings directly
+    by field name without going through environment variables."""
+
+    def test_construct_by_field_name(self) -> None:
+        s = Settings(
+            max_upload_bytes=99,
+            allowed_content_types_csv="text/markdown",
+            cors_allowed_origins_csv="https://x.example.com",
+        )
+        assert s.max_upload_bytes == 99
+        assert s.allowed_content_types == {"text/markdown"}
+        assert s.cors_allowed_origins == ["https://x.example.com"]

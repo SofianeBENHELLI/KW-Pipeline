@@ -18,6 +18,10 @@ dependencies = [
   "neo4j>=5.23",
   "pdfplumber>=0.11",
   "pydantic==2.10.6",
+  # Settings model that wraps `os.environ` reads behind a typed object
+  # (issue #43). Pulls `python-dotenv` transitively but the repo does
+  # not load `.env` files; settings are sourced from process env.
+  "pydantic-settings>=2.6",
   "python-docx>=1.1",
   "python-multipart>=0.0.9",
   "pyyaml>=6.0",
