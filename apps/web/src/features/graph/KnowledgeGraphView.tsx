@@ -77,7 +77,7 @@ interface KnowledgeGraphViewProps {
   documentId: string | null;
 }
 
-export function KnowledgeGraphView({ documentId }: KnowledgeGraphViewProps) {
+export default function KnowledgeGraphView({ documentId }: KnowledgeGraphViewProps) {
   const [projection, setProjection] = useState<ApiKnowledgeGraphProjection | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
