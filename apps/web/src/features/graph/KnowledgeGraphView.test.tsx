@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { KnowledgeGraphView } from "./KnowledgeGraphView";
+import KnowledgeGraphView from "./KnowledgeGraphView";
 import type { ApiKnowledgeGraphProjection } from "../../api/types";
 
 // Replace the real NVL renderer with a stub. jsdom can't render the canvas/SVG
