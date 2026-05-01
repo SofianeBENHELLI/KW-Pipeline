@@ -40,3 +40,10 @@ export type ValidationStatus = ApiSemanticDocument["validation_status"];
 // ─── Upload response ─────────────────────────────────────────────────────────
 // POST /documents/upload returns a DocumentVersion.
 export type ApiUploadResponse = ApiDocumentVersion;
+
+// ─── Knowledge graph ─────────────────────────────────────────────────────────
+
+export type ApiGraphNode = Schemas["GraphNode"];
+export type ApiGraphEdge = Schemas["GraphEdge"];
+export type ApiKnowledgeGraphProjection = Schemas["KnowledgeGraphProjection"];
+export type ApiKnowledgeGraphPage = Schemas["KnowledgeGraphPage"];

@@ -3,6 +3,7 @@ import type { ApiDocument, ApiRawExtraction, ApiSemanticDocument } from "../../a
 import { ApiError, getExtraction, getSemantic, rejectVersion, validateVersion } from "../../api/client";
 import { latestVersion } from "../../domain/document";
 import { StatusBadge } from "../../ui/StatusBadge";
+import { KnowledgeGraphView } from "../graph";
 
 interface ReviewWorkspaceProps {
   document: ApiDocument;
@@ -169,6 +170,8 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
             <pre>{semantic?.markdown ?? "Markdown preview is not available."}</pre>
           )}
         </article>
+
+        <KnowledgeGraphView documentId={documentId} />
       </div>
 
       <footer className="review-actions" aria-label="Review actions">
