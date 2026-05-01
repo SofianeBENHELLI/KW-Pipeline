@@ -1,173 +1,152 @@
 # MVP Backlog Review
 
-Last reviewed: 2026-05-01 (post knowledge-layer pivot).
+Last reviewed: 2026-05-01 (post knowledge-layer pivot + audit pass).
 
 ## Current Health
 
-- Backend default tests: **456 passed** (1 deselected — `llm_integration`
-  marker), coverage **95.16%**.
-- Backend integration tests: **5 passing** against a real Neo4j 5.23
-  Community service container in CI (`pytest -m integration`).
-- Frontend tests: **22 passed** (Vitest + Testing Library; Phase 1c added
-  `<KnowledgeGraphView />` cases).
-- Frontend production build: passed (bundle 2.0 MB / 600 KB gz —
-  `@neo4j-nvl/base` dominates; lazy code-split is a planned follow-up).
+- Backend default tests: **506 passed**, 1 deselected (`llm_integration` marker), coverage **95.31%**.
+- Backend integration tests: **5 passing** against a real Neo4j 5.23 Community service container in CI (`pytest -m integration`).
+- Frontend tests: **22 passed** (Vitest + Testing Library; `<KnowledgeGraphView />` covered).
+- Frontend production build: passed. Initial JS dropped to **53 KB gz** after the lazy-split (#114); the graph chunk loads only when the panel mounts.
 - Ruff: passed.
-- Python compileall: passed.
-- Vite/esbuild development-server advisory (issue #79) resolved by bumping
-  to Vite 6.4.2 + Vitest 3.2.4. `npm audit --audit-level=moderate` no longer
-  reports any Vite/esbuild advisories; the remaining lodash/uuid advisories
-  are transitive through `@neo4j-nvl/*` and are tracked separately.
+- Mypy: clean (34 source files, 0 errors).
+- Vite/esbuild dev-server advisory (#79) resolved by the Vite 6.4.2 + Vitest 3.2.4 bump. The remaining `npm audit` advisories are transitive lodash/uuid through `@neo4j-nvl/*` and need a separate NVL bump.
 
 ## Code Audit Summary
 
 The backend is no longer just an in-memory MVP:
 
-- SQLite persistence covers catalog, raw extraction, semantic JSON, and
-  Markdown payloads.
-- Semantic payloads have schema-version loading/migration policy.
-- Lifecycle transitions are enforced through the FSM.
+- SQLite persistence covers catalog, raw extraction, semantic JSON, and Markdown payloads.
+- Semantic payloads have schema-version loading/migration policy (ADR-008).
+- Lifecycle transitions are enforced through the FSM with a server-side concurrent-write guard on the SQL `WHERE` predicate.
 - Upload guardrails cover size and content-type allowlisting.
-- CORS is configurable for Orbital local development.
-- Cursor pagination on `GET /documents` (#38), streaming SHA-256 uploads
-  (#41), idempotency keys (#60), and the openapi-codegen pipeline (#80)
-  are all live on `main`.
+- All env-var configuration flows through a typed `Settings(BaseSettings)` model (#43).
+- Structured JSON logging available via `KW_LOG_FORMAT=json` with a documented event catalogue (#42).
+- `python-typecheck` (mypy) job in CI alongside ruff and pytest (#44).
+- Cursor pagination on `GET /documents` (#38), streaming SHA-256 uploads (#41), idempotency keys (#60), and the openapi-codegen pipeline (#80) are all live on `main`.
 
-The frontend is now driving the live API:
+The frontend is driving the live API:
 
-- Compact pipeline widget + expanded review workspace render real data
-  via the typed `openapi-fetch` client (#77, #80).
-- A new `<KnowledgeGraphView />` panel (#111 / Phase 1c) is mounted in the
-  review workspace and reads the projection from
-  `GET /documents/{id}/graph`.
+- Compact pipeline widget + expanded review workspace render real data via the typed `openapi-fetch` client (#77, #80).
+- `<KnowledgeGraphView />` panel in the review workspace reads from `GET /documents/{id}/graph`.
+- Bundle is split: `@neo4j-nvl/base` ships only when the graph panel mounts.
 
 The **knowledge layer** has shipped end-to-end behind opt-in env vars:
 
 - Phase 0 (#108): ADR-012, ADR-013, architecture overview.
-- Phase 1a (#109): `GraphStore` Protocol + in-memory + Neo4j impls,
-  `KnowledgeProjector`, two read endpoints, full unit-test contract.
-- Phase 1b (#110): Docker compose (`docker/docker-compose.yml` with
-  Neo4j 5.23 Community + the API), CI integration job. The integration
-  job caught **two real Phase 1a Cypher bugs** the in-memory tests
-  couldn't see; both fixed in the same PR.
-- Phase 1c (#111): `<KnowledgeGraphView />` wrapping `@neo4j-nvl/react`.
-- Phase 2 (#112): `LLMClient` Protocol + Anthropic impl + `EntityExtractor`
-  with section-level citation enforcement; ADR-014 covers prompt design
-  and cost guardrails.
+- Phase 1a (#109): `GraphStore` Protocol + in-memory + Neo4j impls, `KnowledgeProjector`, two read endpoints, full unit-test contract.
+- Phase 1b (#110): Docker compose (`docker/docker-compose.yml` with Neo4j 5.23 Community + the API), CI integration job. The integration job caught two real Phase 1a Cypher bugs the in-memory tests couldn't see; both fixed in the same PR.
+- Phase 1c (#111): `<KnowledgeGraphView />` wrapping `@neo4j-nvl/react`. Lazy-split on top in #114.
+- Phase 2 (#112): `LLMClient` Protocol + Anthropic impl + `EntityExtractor` with section-level citation enforcement; ADR-014 covers prompt design and cost guardrails.
+- Phase 2.1 (#115): Anthropic prompt caching for the entity extractor.
+
+## Audit findings — 2026-05-01
+
+A code-walk audit produced a punch-list. The bulk of findings are now tracked as new tickets:
+
+| # | Title | Bucket |
+|---|---|---|
+| #120 | Backend — Register `install_error_handlers` in `create_app` (custom error envelope is dormant) | Correctness |
+| #121 | Frontend — `ReviewWorkspace` and `PipelineWidget` have no component tests | Test gap |
+| #122 | Frontend — Add request-level abort + dedup on review actions | Correctness |
+| #123 | Frontend — Accessibility pass on review surface and pipeline widget | UX / a11y |
+| #124 | Backend — Reconciliation endpoint for missed knowledge-layer projection / entity extraction | Robustness |
+| #125 | Frontend — Bundle size budget + visualizer in CI | Tooling / performance |
+
+**Audit claims that turned out to be false alarms** (verified in code, no ticket filed):
+
+- `InMemoryGraphStore` thread-safety: a `threading.RLock()` is initialized in `__init__` and used in every mutating method (`apps/api/app/services/knowledge/graph_store.py:121`).
+- `project_entities` null-deref risk: `_maybe_build_entity_extractor` only returns non-None when `_maybe_build_knowledge_layer` returns a non-None projector, so the route's existing guard on `entity_extractor is not None` implicitly covers `knowledge_projector is not None`. Worth a defensive assert at some point but not a real bug.
 
 ## Backlog Hygiene Findings
 
-**2026-05-01 hygiene pass (issue #81) complete.** All 12 candidate issues
-were resolved:
+**2026-05-01 hygiene pass (issue #81) complete.** All 12 candidate issues were resolved.
 
-- #1, #2, #4, #5, #9, #13, #17, #19, #28, #57, #61 — closed as **completed**
-  (acceptance criteria fully satisfied on `main`).
-- #18 — closed as **superseded** by #63 (real schema migration system).
-
-The backlog is now clean. No further triage needed from the original
-hygiene list.
-
-## Closed since the 2026-04-30 audit doc
+**Issues closed since the 2026-04-30 audit doc:**
 
 | PR / Commit | Closes | Description |
 |---|---|---|
-| `#107` / `9b1e1ec` | #80 | OpenAPI codegen pipeline + typed openapi-fetch client |
-| `#108` / `d1297fa` | (no issue — pivot ADRs) | Knowledge-layer Phase 0 |
-| `#109` / `0f7130d` | (Phase 1a) | Graph projection backend |
-| `#110` / `5ba8f5f` | (Phase 1b) | Docker compose + integration CI |
-| `#111` / `4db392b` | (Phase 1c) | Frontend graph view |
-| `#112` / `313ddd0` | #48 (in spirit) | LLM-driven entity extraction |
-| `#106` / `9fc1462` | #45 | PDF parser via pdfplumber (ADR-010) |
-| `#104` / `25cb005` | #77 | Wire Orbital workbench to Harvester API |
-| `#105` / `b556780` | #63 | Real schema migration system |
-| `#103` / `66ae52d` | #60 | Idempotency keys on POST endpoints |
-| `e15bf69` | #58 | Reject whitespace-only uploads + wire ParserRegistry |
-| `dc0b7ca` | #49 | SemanticEnricher Protocol and ADR-009 |
-| `d1c3e92` | #46 | DOCX parser via python-docx |
-| `67fa258` | #41 | Stream uploads and SHA-256 |
-| `d252c67` | #38 | Cursor pagination on GET /documents |
+| `#119` | #44 | Add mypy static type checking to CI |
+| `#118` | #42 | Structured logging and per-action audit trail |
+| `#117` | #43 | Configuration via Pydantic Settings |
+| `#116` | #79 | Clear Vite/esbuild dev-server audit advisory |
+| `#115` | (Phase 2.1) | Prompt caching for the entity extractor |
+| `#114` | (NVL bundle split) | Lazy-load the knowledge-graph view |
+| `#113` | (docs) | Catch up with the knowledge-layer pivot |
+| `#112` | #48 (in spirit) | LLM-driven entity extraction |
+| `#111` | (Phase 1c) | Frontend graph view |
+| `#110` | (Phase 1b) | Docker compose + integration CI |
+| `#109` | (Phase 1a) | Graph projection backend |
+| `#108` | (no issue — pivot ADRs) | Knowledge-layer Phase 0 |
+| `#107` | #80 | OpenAPI codegen pipeline + typed openapi-fetch client |
+| `#106` | #45 | PDF parser via pdfplumber (ADR-010) |
+| `#105` | #63 | Real schema migration system |
+| `#104` | #77 | Wire Orbital workbench to Harvester API |
+| `#103` | #60 | Idempotency keys on POST endpoints |
 
 ## Recommended Work Order (now)
 
-### 1. Knowledge layer follow-ups
+### 1. Audit-driven follow-ups (small, isolated, mechanical)
 
-These are mechanical wins that build directly on what just landed:
-
-1. **Lazy code-split the graph slice.** `apps/web/src/features/graph/`
-   should `React.lazy(() => import("./KnowledgeGraphView"))` so reviewers
-   who never open the graph tab don't pay the 600 KB-gz NVL cost.
-   Small, isolated PR.
-2. **Phase 2.1 — prompt caching.** Wire `cache_control: {"type":
-   "ephemeral"}` per ADR-014 §2 to the static system block of the
-   entity-extraction prompt. Token-cost reductions on repeat sections.
-3. ~~**`#43` Pydantic Settings.**~~ Done — all env reads now flow
-   through `app.settings.Settings` (`pydantic_settings.BaseSettings`).
-   `KW_*` is the canonical prefix; the historical unprefixed
-   `MAX_UPLOAD_BYTES`, `ALLOWED_CONTENT_TYPES`, `CORS_ALLOWED_ORIGINS`,
-   and `ANTHROPIC_API_KEY` keep working as `pydantic.AliasChoices`
-   aliases so existing deployments need no change.
-4. ~~**`#42` structured logging / audit trail.**~~ Done — every
-   significant lifecycle moment now emits a named event with a
-   consistent `extra={...}` payload (`document.uploaded`,
-   `document.status_changed`, `extraction.{started,succeeded,failed}`,
-   `semantic.{generated,cached}`, `review.{validated,rejected}`,
-   `idempotency.replayed`, plus the existing
-   `knowledge.projection.{written,failed}` and the new
-   `knowledge.entity_extraction.completed`). `KW_LOG_FORMAT=json`
-   flips the formatter to one JSON object per line for production
-   containers; default `text` keeps local tracebacks readable. See
-   `docs/architecture/logging.md`.
+1. **#120** — Register error handlers in `create_app`. ~30 LOC + 1 test + OpenAPI re-snapshot.
+2. **#125** — Bundle visualizer + size budget in CI. Mechanical.
+3. **#121** — Add `ReviewWorkspace` and `PipelineWidget` tests. Adds ~10 cases.
+4. **#122** — Abort + dedup on review actions. ~80 LOC + tests.
+5. **#123** — A11y pass + axe-core dev gate. Adds devDep, fixes ~6 sites.
+6. **#124** — Reconciliation endpoint. The biggest item in this group; needs a small admin route + a detection query + an integration test.
 
 ### 2. 3DEXPERIENCE widget readiness
 
-1. **`#78` widget embedding + brand token adapter.** The graph and
-   review surfaces both need to fit a small container. Open decisions:
-   first 3DEXPERIENCE container size, auth/context model.
-2. ~~**`#79` Vite/esbuild audit remediation.**~~ Resolved: Vite 5.4.21 →
-   6.4.2 + Vitest 2.1.9 → 3.2.4. Lodash/uuid advisories transitive through
-   `@neo4j-nvl/*` remain and need a separate NVL bump.
+1. **#78** widget embedding + brand token adapter. Open product decisions: first 3DEXPERIENCE container size, auth/context model. Bundle budget from #125 lands first.
+2. Lodash/uuid advisories transitive through `@neo4j-nvl/*` — needs an NVL version bump or a fork. Probably one ticket below.
 
 ### 3. Phase 3 — chat surface (deferred until Phase 2 has been used in anger)
 
 Per ADR-012 §3 last row + a Phase 3 ADR (TBD):
 
-1. Embedding model + vector index decision (deferred to a Phase 3 ADR;
-   either a remote embeddings endpoint or local sentence-transformers).
-2. `chat_service.py` with mode dispatch (RAG / GraphRAG / Hybrid). The
-   mode taxonomy comes from `neo4j-labs/llm-graph-builder/backend/src/QA_integration.py`
-   but reimplemented directly against the Anthropic SDK (no LangChain).
+1. Embedding model + vector index decision (deferred to a Phase 3 ADR; either a remote embeddings endpoint or local sentence-transformers).
+2. `chat_service.py` with mode dispatch (RAG / GraphRAG / Hybrid). The mode taxonomy comes from `neo4j-labs/llm-graph-builder/backend/src/QA_integration.py` but reimplemented directly against the Anthropic SDK (no LangChain).
 3. `<ChatPanel />` + `<ChatModeToggle />` in `apps/web/src/features/chat/`.
 
-### 4. Robustness items still queued
+### 4. Robustness and operations
 
-After the knowledge-layer work settles:
+1. **#40** async parser queue + background jobs. More important now that validation has an LLM hop.
+2. **#47** OCR for scanned PDFs.
+3. **#20** revisit Docling (rejected at MVP per ADR-010, future evaluator).
+4. **#82** bulk document loading.
+5. **#87** retry / reprocess for failed uploads (overlaps with #124; consolidate scope).
+6. **#96** runtime metrics, readiness probes, ingestion SLAs (depends on the structured-logs from #118 / #42).
 
-1. `#40` async parser queue + background jobs (becomes more important
-   once entity extraction adds an LLM hop to validation).
-2. Real parsers beyond PDF/DOCX/plain text: `#47` (OCR), `#20`
-   (Docling integration was rejected for the MVP — ADR-010 — but a
-   future evaluator).
-3. ~~`#44` mypy/pyright in CI.~~ Closed: `python-typecheck`
-   job runs mypy against `apps/api/app/` on every PR with a
-   pragmatic `[tool.mypy]` config (strict-optional on,
-   untyped-defs off).
+### 5. Governance, security, and multi-tenant
+
+These were filed during a forward-looking sweep and aren't urgent today, but they are real obligations once the platform has more than one consumer:
+
+- **#83** auth + 3DEXPERIENCE user context.
+- **#85** malware scanning and quarantine.
+- **#84** retention / purge policy.
+- **#91** workspace / project scoping.
+- **#92** sensitive-data detection + redaction.
+- **#94** backup / restore / DR.
+
+### 6. Knowledge / handoff
+
+- **#22** canonical knowledge-asset taxonomy (Phase 2 emits triples; #22 is the schema for what triples mean across documents).
+- **#23** chunking + RAG export package — Phase 3 prerequisite.
+- **#90** export validated assets and downstream handoff package.
+
+### 7. Quality + DX
+
+- **#66** strengthen test shape (assert contracts, not just exercise).
+- **#24** golden document fixtures + regression snapshots.
+- **#51** repo cleanup (unused deps, LICENSE, OpenAPI metadata).
+- **#26** structured ingestion / extraction event logs — superseded by #42 in part; this issue still has scope around persisting events to a table (vs. the logger).
+- **#93** customer demo dataset + end-to-end smoke script.
 
 ## Open Decisions
 
-- Should duplicate bytes uploaded without `document_id` create a new
-  family or attach to the original family? Issue #59 says the current
-  behavior is wrong, but product semantics should be confirmed before
-  changing it.
-- Should review status and semantic validation status be committed in
-  one catalog transaction? The route now avoids the obvious
-  partial-mutation path, but a stronger service-level transaction may
-  be warranted later — especially with the new knowledge-layer side
-  effects in the same handler.
-- Should unsupported content types fail during upload only, extraction
-  only, or both? Current behavior supports configurable upload
-  allowlists and parser registry failure at extraction time.
-- What is the first 3DEXPERIENCE container size and authentication /
-  context model? This drives `#78` and the graph view's compact mode.
-- Phase 3 chat: which embedding provider? OpenAI text-embedding-3,
-  Anthropic when available, or a local sentence-transformers model?
-  Drives the deployment footprint.
+- Should duplicate bytes uploaded without `document_id` create a new family or attach to the original family? Issue #59 says the current behavior is wrong, but product semantics should be confirmed before changing it.
+- Should review status and semantic validation status be committed in one catalog transaction? The route now avoids the obvious partial-mutation path, but a stronger service-level transaction may be warranted later — especially with the new knowledge-layer side effects in the same handler. (Tracked partially by #124.)
+- Should unsupported content types fail during upload only, extraction only, or both? Current behavior supports configurable upload allowlists and parser registry failure at extraction time.
+- What is the first 3DEXPERIENCE container size and authentication / context model? This drives `#78` and the graph view's compact mode.
+- Phase 3 chat: which embedding provider? OpenAI text-embedding-3, Anthropic when available, or a local sentence-transformers model? Drives the deployment footprint.
+- Reconciliation surface (#124): admin HTTP endpoint or CLI script?
