@@ -244,17 +244,28 @@ def test_persistent_review_decision_survives_restart(tmp_path):
     assert version.reviewed_at is not None
 
 
-def test_sqlite_initialize_adds_review_columns_to_legacy_schema(tmp_path):
-    """Databases created before reviewer_note / reviewed_at existed must be
-    forward-migrated automatically the next time SQLiteCatalogStore is built."""
+def test_sqlite_migration_0002_adds_review_columns_to_partial_schema(tmp_path):
+    """Migration 0002 must add ``reviewer_note`` / ``reviewed_at`` to a
+    database that has the base tables but was created before those columns
+    were introduced.  This exercises the migration system's handling of an
+    intermediate schema state (0001 applied, 0002 not yet applied)."""
     import sqlite3
 
     from app.services.catalog_store import SQLiteCatalogStore
 
-    db_path = tmp_path / "legacy.sqlite3"
-    legacy = sqlite3.connect(db_path)
-    legacy.executescript(
+    db_path = tmp_path / "partial.sqlite3"
+
+    # Manually create the database with only migration 0001 recorded and
+    # the base tables present, but WITHOUT reviewer_note / reviewed_at.
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
         """
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE schema_migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_migrations VALUES ('0001_initial', '2026-01-01T00:00:00+00:00');
         CREATE TABLE documents (
             id TEXT PRIMARY KEY,
             original_filename TEXT NOT NULL,
@@ -275,11 +286,23 @@ def test_sqlite_initialize_adds_review_columns_to_legacy_schema(tmp_path):
             failure_reason TEXT,
             created_at TEXT NOT NULL
         );
+        CREATE INDEX idx_document_versions_sha256 ON document_versions (sha256);
+        CREATE TABLE raw_extractions (
+            document_version_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE semantic_documents (
+            document_version_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """
     )
-    legacy.commit()
-    legacy.close()
+    conn.commit()
+    conn.close()
 
+    # Instantiating the store must run migration 0002, adding the columns.
     SQLiteCatalogStore(db_path)
 
     inspector = sqlite3.connect(db_path)
