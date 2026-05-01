@@ -284,9 +284,17 @@ class Neo4jGraphStore:
     # same input is a no-op; this is the contract the projector relies
     # on for safe re-projection.
 
+    # Neo4j only accepts primitive property values (or arrays of primitives) —
+    # nested dicts cannot be stored as a single property. So we *flatten*
+    # ``properties`` onto the node/relationship using ``SET n += row.props``,
+    # and reverse the flattening on read by treating ``id``/``kind``/``label``
+    # as reserved keys and everything else as the original ``properties`` map.
+    # Read paths project relationships explicitly because Bolt's Relationship
+    # objects don't carry start/end node ids without an extra query.
+
     def upsert_nodes(self, nodes: Iterable[GraphNode]) -> None:
         rows = [
-            {"id": n.id, "kind": n.kind, "label": n.label, "properties": n.properties}
+            {"id": n.id, "kind": n.kind, "label": n.label, "props": dict(n.properties)}
             for n in nodes
         ]
         if not rows:
@@ -296,8 +304,8 @@ class Neo4jGraphStore:
             UNWIND $rows AS row
             MERGE (n:KnowledgeNode {id: row.id})
             SET n.kind = row.kind,
-                n.label = row.label,
-                n.properties = row.properties
+                n.label = row.label
+            SET n += row.props
             """,
             {"rows": rows},
         )
@@ -309,7 +317,7 @@ class Neo4jGraphStore:
                 "kind": e.kind,
                 "source_id": e.source_id,
                 "target_id": e.target_id,
-                "properties": e.properties,
+                "props": dict(e.properties),
             }
             for e in edges
         ]
@@ -321,8 +329,8 @@ class Neo4jGraphStore:
             MATCH (s:KnowledgeNode {id: row.source_id})
             MATCH (t:KnowledgeNode {id: row.target_id})
             MERGE (s)-[r:KNOWLEDGE_EDGE {id: row.id}]->(t)
-            SET r.kind = row.kind,
-                r.properties = row.properties
+            SET r.kind = row.kind
+            SET r += row.props
             """,
             {"rows": rows},
         )
@@ -330,8 +338,7 @@ class Neo4jGraphStore:
     def delete_subgraph_for_version(self, *, document_id: str, version_id: str) -> None:
         self._write(
             """
-            MATCH (n:KnowledgeNode)
-            WHERE n.properties.version_id = $version_id
+            MATCH (n:KnowledgeNode {version_id: $version_id})
             DETACH DELETE n
             """,
             {"version_id": version_id},
@@ -341,16 +348,23 @@ class Neo4jGraphStore:
         rows = self._read(
             """
             MATCH (n:KnowledgeNode)
-            WHERE n.id = $document_id OR n.properties.document_id = $document_id
-            OPTIONAL MATCH (n)-[r:KNOWLEDGE_EDGE]->(m:KnowledgeNode)
-            WHERE m.id = $document_id OR m.properties.document_id = $document_id
-            RETURN collect(DISTINCT n) AS nodes, collect(DISTINCT r) AS edges
+            WHERE n.id = $document_id OR n.document_id = $document_id
+            WITH collect(DISTINCT n) AS doc_nodes
+            UNWIND doc_nodes AS n
+            OPTIONAL MATCH (n)-[r:KNOWLEDGE_EDGE]-(m:KnowledgeNode)
+            WHERE m IN doc_nodes
+            RETURN doc_nodes AS nodes,
+                   [edge IN collect(DISTINCT r) WHERE edge IS NOT NULL |
+                       {id: edge.id, kind: edge.kind,
+                        source_id: startNode(edge).id,
+                        target_id: endNode(edge).id,
+                        flat: properties(edge)}] AS edges
             """,
             {"document_id": document_id},
         )
         nodes_raw, edges_raw = (rows[0]["nodes"], rows[0]["edges"]) if rows else ([], [])
         nodes = [_row_to_node(r) for r in nodes_raw]
-        edges = [_row_to_edge(r) for r in edges_raw if r is not None]
+        edges = [_edge_dict_to_edge(r) for r in edges_raw]
         version_id = ""
         for n in nodes:
             if n.kind == "version":
@@ -373,14 +387,21 @@ class Neo4jGraphStore:
             MATCH (n:KnowledgeNode)
             WHERE [n.kind, n.id] > $cursor
             WITH n ORDER BY n.kind, n.id LIMIT $limit
+            WITH collect(DISTINCT n) AS page_nodes
+            UNWIND page_nodes AS n
             OPTIONAL MATCH (n)-[r:KNOWLEDGE_EDGE]-(m:KnowledgeNode)
-            RETURN collect(DISTINCT n) AS nodes, collect(DISTINCT r) AS edges
+            RETURN page_nodes AS nodes,
+                   [edge IN collect(DISTINCT r) WHERE edge IS NOT NULL |
+                       {id: edge.id, kind: edge.kind,
+                        source_id: startNode(edge).id,
+                        target_id: endNode(edge).id,
+                        flat: properties(edge)}] AS edges
             """,
             {"cursor": list(decoded), "limit": limit},
         )
         nodes_raw, edges_raw = (rows[0]["nodes"], rows[0]["edges"]) if rows else ([], [])
         nodes = [_row_to_node(r) for r in nodes_raw]
-        edges = [_row_to_edge(r) for r in edges_raw if r is not None]
+        edges = [_edge_dict_to_edge(r) for r in edges_raw]
         next_cursor: str | None = None
         if len(nodes) == limit:
             last = nodes[-1]
@@ -412,24 +433,40 @@ class Neo4jGraphStore:
             return [dict(record) for record in session.run(cypher, params)]
 
 
+_NODE_RESERVED_KEYS = frozenset({"id", "kind", "label"})
+_EDGE_RESERVED_KEYS = frozenset({"id", "kind"})
+
+
 def _row_to_node(row: dict[str, object] | object) -> GraphNode:
-    """Coerce a Neo4j Node-like record into our :class:`GraphNode`."""
+    """Coerce a Neo4j Node (or dict) into our :class:`GraphNode`.
+
+    Properties are flattened on write (see :meth:`Neo4jGraphStore.upsert_nodes`),
+    so we reverse that here: ``id``/``kind``/``label`` are pulled out of the
+    flat keyset and everything else becomes the original ``properties`` map.
+    """
     raw = dict(row) if isinstance(row, dict) else dict(row.items())  # type: ignore[union-attr]
+    properties = {k: v for k, v in raw.items() if k not in _NODE_RESERVED_KEYS}
     return GraphNode(
         id=str(raw["id"]),
         kind=raw["kind"],  # type: ignore[arg-type]
         label=str(raw["label"]),
-        properties=dict(raw.get("properties") or {}),
+        properties=properties,
     )
 
 
-def _row_to_edge(row: dict[str, object] | object) -> GraphEdge:
-    """Coerce a Neo4j Relationship-like record into our :class:`GraphEdge`."""
-    raw = dict(row) if isinstance(row, dict) else dict(row.items())  # type: ignore[union-attr]
+def _edge_dict_to_edge(row: dict[str, object]) -> GraphEdge:
+    """Coerce a projected edge dict (the shape returned by our find_subgraph
+    Cypher: ``{id, kind, source_id, target_id, flat}``) into a :class:`GraphEdge`.
+
+    ``flat`` is the relationship's full property map; the reserved keys go on
+    the edge directly and the rest land back in ``properties``.
+    """
+    flat = dict(row.get("flat") or {})  # type: ignore[arg-type]
+    properties = {k: v for k, v in flat.items() if k not in _EDGE_RESERVED_KEYS}
     return GraphEdge(
-        id=str(raw["id"]),
-        kind=raw["kind"],  # type: ignore[arg-type]
-        source_id=str(raw["source_id"]),
-        target_id=str(raw["target_id"]),
-        properties=dict(raw.get("properties") or {}),
+        id=str(row["id"]),
+        kind=row["kind"],  # type: ignore[arg-type]
+        source_id=str(row["source_id"]),
+        target_id=str(row["target_id"]),
+        properties=properties,
     )
