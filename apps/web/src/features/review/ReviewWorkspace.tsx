@@ -1,15 +1,32 @@
 import { useEffect, useState } from "react";
 import type { ApiDocument, ApiRawExtraction, ApiSemanticDocument } from "../../api/types";
-import { ApiError, getExtraction, getSemantic, rejectVersion, validateVersion } from "../../api/client";
+import {
+  ApiError,
+  getExtraction,
+  getSemantic,
+  rejectVersion,
+  validateVersion,
+} from "../../api/client";
 import { latestVersion } from "../../domain/document";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
+import { ReviewActions } from "./ReviewActions";
 
 interface ReviewWorkspaceProps {
   document: ApiDocument;
+  loadingSelected?: boolean;
+  refreshError?: string | null;
+  lastMutationAt?: number;
+  onMutationCompleted?: () => void | Promise<void>;
 }
 
-export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
+export function ReviewWorkspace({
+  document,
+  loadingSelected = false,
+  refreshError = null,
+  lastMutationAt = 0,
+  onMutationCompleted,
+}: ReviewWorkspaceProps) {
   const version = latestVersion(document);
   const documentId = document.id;
   const versionId = version.id;
@@ -23,6 +40,9 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
 
+  // Re-run on mutations so extracted/semantic blobs reflect the latest
+  // server state. `lastMutationAt` is bumped by the parent's
+  // useDocumentCatalog hook after every successful action.
   useEffect(() => {
     let cancelled = false;
     setExtraction(null);
@@ -70,7 +90,7 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, versionId]);
+  }, [documentId, versionId, lastMutationAt]);
 
   function handleReview(action: "validate" | "reject") {
     setReviewLoading(true);
@@ -78,11 +98,18 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
 
     const fn = action === "validate" ? validateVersion : rejectVersion;
     fn(documentId, versionId, reviewerNote || undefined)
-      .then((updated) => {
+      .then(async (updated) => {
         setSemantic(updated);
+        if (onMutationCompleted) await onMutationCompleted();
       })
       .catch((err: unknown) => {
-        setReviewError(err instanceof Error ? err.message : "Review action failed.");
+        const message =
+          err instanceof ApiError
+            ? err.detail
+            : err instanceof Error
+              ? err.message
+              : "Review action failed.";
+        setReviewError(message);
       })
       .finally(() => {
         setReviewLoading(false);
@@ -101,8 +128,27 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
             Version {version.version_number} &mdash; SHA-256 {version.sha256.slice(0, 12)}
           </p>
         </div>
-        <StatusBadge status={version.status} />
+        <div className="workspace-header-meta">
+          {loadingSelected ? (
+            <span
+              className="refresh-indicator"
+              role="status"
+              aria-live="polite"
+              aria-label="Refreshing document"
+            >
+              <span className="spinner" aria-hidden="true" /> Refreshing…
+            </span>
+          ) : null}
+          <StatusBadge status={version.status} />
+        </div>
       </header>
+
+      {refreshError ? (
+        <div className="notice warning" role="alert">
+          <strong>Refresh failed</strong>
+          <span>{refreshError}</span>
+        </div>
+      ) : null}
 
       {version.failure_reason ? (
         <div className="notice danger" role="status">
@@ -117,6 +163,15 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
           <span>{detailError}</span>
         </div>
       ) : null}
+
+      <ReviewActions
+        documentId={documentId}
+        versionId={versionId}
+        status={version.status}
+        onMutationCompleted={async () => {
+          if (onMutationCompleted) await onMutationCompleted();
+        }}
+      />
 
       <div className="workspace-grid">
         <article className="panel">
@@ -171,7 +226,11 @@ export function ReviewWorkspace({ document }: ReviewWorkspaceProps) {
           )}
         </article>
 
-        <KnowledgeGraphView documentId={documentId} />
+        {/* `refreshKey` is the coordination seam with the graph slice
+            (issue #133) — the sibling agent owns the receiving end and
+            uses the prop to refetch on every successful mutation. */}
+        {/* @ts-expect-error refreshKey prop will be typed by the graph slice */}
+        <KnowledgeGraphView documentId={documentId} refreshKey={lastMutationAt} />
       </div>
 
       <footer className="review-actions" aria-label="Review actions">
