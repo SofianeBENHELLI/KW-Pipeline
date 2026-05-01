@@ -26,9 +26,7 @@ def _applied_ids(db_path) -> list[str]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            "SELECT id FROM schema_migrations ORDER BY applied_at, id"
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM schema_migrations ORDER BY applied_at, id").fetchall()
         return [row["id"] for row in rows]
     finally:
         conn.close()
@@ -56,9 +54,7 @@ def test_fresh_db_schema_migrations_table_exists(tmp_path):
     SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
 
     conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
-    tables = {
-        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     assert "schema_migrations" in tables
 
@@ -68,9 +64,7 @@ def test_fresh_db_all_business_tables_exist(tmp_path):
     SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
 
     conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
-    tables = {
-        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     expected = {"documents", "document_versions", "raw_extractions", "semantic_documents"}
     assert expected.issubset(tables)
@@ -348,8 +342,6 @@ def test_failing_migration_rolls_back_and_id_not_inserted(tmp_path, monkeypatch)
 
     # The partial DDL inside _boom must have been rolled back.
     conn2 = sqlite3.connect(db_path)
-    tables = {
-        row[0] for row in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    tables = {row[0] for row in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn2.close()
     assert "should_not_exist" not in tables

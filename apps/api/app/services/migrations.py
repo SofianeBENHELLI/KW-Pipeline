@@ -183,9 +183,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if not applied:
         existing_tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         if _LEGACY_TABLES.issubset(existing_tables):
             now = datetime.now(UTC).isoformat()
