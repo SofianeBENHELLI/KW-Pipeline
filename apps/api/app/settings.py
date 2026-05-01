@@ -20,6 +20,8 @@ existing deployments keep working without a config rewrite. Prefer the
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -132,6 +134,31 @@ class Settings(BaseSettings):
         description=(
             "Claude model id override. Empty means use the SDK's default "
             "(currently ``claude-sonnet-4-5``)."
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # Logging (issue #42). ``json`` is the production / container shape
+    # that the on-call workflow greps; ``text`` is the stdlib default
+    # used for local development to keep tracebacks human-readable.
+    # ------------------------------------------------------------------
+    log_format: Literal["json", "text"] = Field(
+        default="text",
+        validation_alias=AliasChoices("KW_LOG_FORMAT"),
+        description=(
+            "Log line shape. ``text`` (default) uses stdlib's "
+            "human-readable formatter for local dev; ``json`` emits one "
+            "machine-parseable JSON object per line, suitable for "
+            "container deployments where logs are scraped."
+        ),
+    )
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("KW_LOG_LEVEL"),
+        description=(
+            "Root logger level name. Standard Python logging level "
+            "names (``DEBUG``/``INFO``/``WARNING``/``ERROR``/"
+            "``CRITICAL``); case-insensitive."
         ),
     )
 

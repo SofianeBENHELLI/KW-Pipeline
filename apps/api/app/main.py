@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import PipelineServices, build_persistent_services, build_services
+from app.logging_config import configure_logging
 from app.routes import build_router
 from app.settings import Settings
 
@@ -28,6 +29,12 @@ def create_app(
     app = FastAPI(title="KW Pipeline Harvester API", version="0.1.0")
     if services is None:
         services = build_persistent_services(data_dir) if persistent else build_services()
+
+    # Install the structured-logging handler once per app instance
+    # (issue #42). ``configure_logging`` is idempotent — replacing the
+    # root handler — so test suites that build many ``create_app``
+    # instances in one process don't produce duplicate log lines.
+    configure_logging(services.settings)
 
     app.state.services = services
     app.add_middleware(

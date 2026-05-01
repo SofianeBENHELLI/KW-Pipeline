@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -12,6 +13,8 @@ from app.services.catalog_store import (
 )
 from app.services.hash_service import compute_sha256
 from app.services.storage_service import StorageService, safe_storage_key
+
+log = logging.getLogger(__name__)
 
 
 class DocumentService:
@@ -42,12 +45,14 @@ class DocumentService:
         produce a ``DUPLICATE_DETECTED`` version pointing at the original.
         """
         if document_id is None:
-            return self._upload_new_family(filename, content_type, content)
-
-        existing_document = self.catalog.get_document(document_id)
-        if existing_document is None:
-            raise KeyError("Document not found.")
-        return self._append_new_version(existing_document, filename, content_type, content)
+            version = self._upload_new_family(filename, content_type, content)
+        else:
+            existing_document = self.catalog.get_document(document_id)
+            if existing_document is None:
+                raise KeyError("Document not found.")
+            version = self._append_new_version(existing_document, filename, content_type, content)
+        _log_uploaded(version)
+        return version
 
     def upload_stream(
         self,
@@ -118,6 +123,7 @@ class DocumentService:
             self.catalog.save_document_with_version(document=document, version=version)
         else:
             self.catalog.append_version_to_document(document_id=target_document.id, version=version)
+        _log_uploaded(version)
         return version
 
     def _upload_new_family(
@@ -244,14 +250,23 @@ class DocumentService:
         raises ``ValueError`` and the catalog is left untouched. ``mark_failed``,
         ``mark_validated``, and ``mark_rejected`` enforce their own preconditions
         and bypass this helper deliberately.
+
+        Every successful FSM move emits a ``document.status_changed``
+        audit event (issue #42); call sites that bypass this helper
+        (``mark_failed``/``_record_review``) emit the same event from
+        their own paths so a grep for the event name returns every
+        transition the catalog recorded.
         """
         version = self.catalog.get_version(document_id=document_id, version_id=version_id)
         assert_transition(version.status, status)
-        return self.catalog.update_version_status(
+        previous = version.status
+        updated = self.catalog.update_version_status(
             document_id=document_id,
             version_id=version_id,
             status=status,
         )
+        _log_status_changed(updated, previous=previous)
+        return updated
 
     def mark_failed(
         self,
@@ -260,11 +275,14 @@ class DocumentService:
         reason: str,
     ) -> DocumentVersion:
         """Mark a version FAILED and persist the human-readable failure reason."""
-        return self.catalog.update_version_failure(
+        previous = self.catalog.get_version(document_id=document_id, version_id=version_id).status
+        updated = self.catalog.update_version_failure(
             document_id=document_id,
             version_id=version_id,
             reason=reason,
         )
+        _log_status_changed(updated, previous=previous)
+        return updated
 
     def mark_semantic_ready(self, document_id: str, version_id: str) -> DocumentVersion:
         """Mark generated semantic output as requiring human review."""
@@ -314,10 +332,65 @@ class DocumentService:
                 f"Version is in {version.status.value}, not NEEDS_REVIEW; "
                 f"cannot transition to {target_status.value}."
             )
-        return self.catalog.update_version_review(
+        previous = version.status
+        updated = self.catalog.update_version_review(
             document_id=document_id,
             version_id=version_id,
             status=target_status,
             reviewer_note=reviewer_note,
             reviewed_at=datetime.now(UTC),
         )
+        _log_status_changed(updated, previous=previous)
+        if target_status == DocumentVersionStatus.VALIDATED:
+            log.info(
+                "review.validated",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "reviewer_note": reviewer_note,
+                },
+            )
+        else:
+            log.info(
+                "review.rejected",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "reviewer_note": reviewer_note,
+                },
+            )
+        return updated
+
+
+def _log_uploaded(version: DocumentVersion) -> None:
+    """Emit a ``document.uploaded`` audit event for a fresh version."""
+    log.info(
+        "document.uploaded",
+        extra={
+            "document_id": version.document_id,
+            "version_id": version.id,
+            "version_number": version.version_number,
+            "sha256": version.sha256,
+            "bytes": version.file_size,
+            "content_type": version.content_type,
+            "filename": version.filename,
+            "is_duplicate": (version.status == DocumentVersionStatus.DUPLICATE_DETECTED),
+        },
+    )
+
+
+def _log_status_changed(
+    version: DocumentVersion,
+    *,
+    previous: DocumentVersionStatus,
+) -> None:
+    """Emit a ``document.status_changed`` audit event for an FSM move."""
+    log.info(
+        "document.status_changed",
+        extra={
+            "document_id": version.document_id,
+            "version_id": version.id,
+            "from": previous.value,
+            "to": version.status.value,
+        },
+    )

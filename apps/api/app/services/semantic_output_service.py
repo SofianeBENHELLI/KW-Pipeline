@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 from app.schemas.semantic_document import SemanticDocument
@@ -6,6 +7,8 @@ from app.services.extraction_job_service import ExtractionJobService
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_schema_loader import load_semantic_document
+
+log = logging.getLogger(__name__)
 
 
 class SemanticOutputService:
@@ -32,7 +35,16 @@ class SemanticOutputService:
         """Generate semantic output once and return persisted output afterward."""
         try:
             payload = self.documents.catalog.get_semantic_document_payload(version_id)
-            return load_semantic_document(payload)
+            cached = load_semantic_document(payload)
+            log.info(
+                "semantic.cached",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "section_count": len(cached.sections),
+                },
+            )
+            return cached
         except KeyError:
             pass  # nothing cached yet — generate below
 
@@ -49,6 +61,14 @@ class SemanticOutputService:
         )
         self.documents.catalog.save_semantic_document(version_id, semantic)
         self.documents.mark_semantic_ready(document_id=document_id, version_id=version_id)
+        log.info(
+            "semantic.generated",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "section_count": len(semantic.sections),
+            },
+        )
         return semantic
 
     def get(self, document_id: str, version_id: str) -> SemanticDocument:

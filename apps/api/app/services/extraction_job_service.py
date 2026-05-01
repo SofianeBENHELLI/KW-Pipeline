@@ -1,7 +1,11 @@
+import logging
+
 from app.models.document import DocumentVersionStatus
 from app.schemas.extraction import RawExtraction
 from app.services.document_parser import ParserRegistry
 from app.services.document_service import DocumentService
+
+log = logging.getLogger(__name__)
 
 
 class ExtractionFailed(Exception):
@@ -38,6 +42,15 @@ class ExtractionJobService:
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
         if version.status == DocumentVersionStatus.DUPLICATE_DETECTED:
             raise ValueError("Duplicate versions are not extracted independently.")
+        log.info(
+            "extraction.started",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "content_type": version.content_type,
+                "bytes_in": version.file_size,
+            },
+        )
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTING)
         try:
             parser = self.parsers.for_content_type(version.content_type)
@@ -48,19 +61,57 @@ class ExtractionJobService:
                 else f"No parser for content_type: {version.content_type}"
             )
             self.documents.mark_failed(document_id, version_id, reason)
+            log.warning(
+                "extraction.failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "parser_name": None,
+                    "failure_reason": reason,
+                },
+            )
             raise ExtractionFailed(reason) from exc
+        parser_name = type(parser).__name__
         try:
             raw_extraction = parser.parse(version=version, storage=self.documents.storage)
         except Exception as exc:
-            reason = f"{type(parser).__name__}: {exc}"
+            reason = f"{parser_name}: {exc}"
             self.documents.mark_failed(document_id, version_id, reason)
+            log.warning(
+                "extraction.failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "parser_name": parser_name,
+                    "failure_reason": reason,
+                },
+            )
             raise ExtractionFailed(reason) from exc
         if not raw_extraction.source_references:
-            reason = f"{type(parser).__name__}: No extractable content"
+            reason = f"{parser_name}: No extractable content"
             self.documents.mark_failed(document_id, version_id, reason)
+            log.warning(
+                "extraction.failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "parser_name": parser_name,
+                    "failure_reason": reason,
+                },
+            )
             raise ExtractionFailed(reason)
         self.documents.catalog.save_raw_extraction(version_id, raw_extraction)
         self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
+        log.info(
+            "extraction.succeeded",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "parser_name": parser_name,
+                "bytes_in": version.file_size,
+                "sections_out": len(raw_extraction.source_references),
+            },
+        )
         return raw_extraction
 
     def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
