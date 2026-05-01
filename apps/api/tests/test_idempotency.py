@@ -107,8 +107,8 @@ class TestInMemoryIdempotencyStore:
 
     def test_purge_expired_removes_old_entries(self):
         store = InMemoryIdempotencyStore()
-        store.put("key-old", "/r", "h", 200, '{}')
-        store.put("key-new", "/r", "h", 200, '{}')
+        store.put("key-old", "/r", "h", 200, "{}")
+        store.put("key-new", "/r", "h", 200, "{}")
 
         # Back-date the old entry by injecting directly.
         old_stored = store._entries[("key-old", "/r")]
@@ -126,7 +126,7 @@ class TestInMemoryIdempotencyStore:
 
     def test_purge_expired_zero_when_nothing_old(self):
         store = InMemoryIdempotencyStore()
-        store.put("key-1", "/r", "h", 200, '{}')
+        store.put("key-1", "/r", "h", 200, "{}")
 
         removed = store.purge_expired(ttl_hours=24)
         assert removed == 0
@@ -164,8 +164,8 @@ class TestSQLiteIdempotencyStore:
 
         db = tmp_path / "idem.sqlite3"
         store = SQLiteIdempotencyStore(db)
-        store.put("key-old", "/r", "h", 200, '{}')
-        store.put("key-new", "/r", "h", 200, '{}')
+        store.put("key-old", "/r", "h", 200, "{}")
+        store.put("key-new", "/r", "h", 200, "{}")
 
         # Back-date the old row directly in SQLite.
         cutoff_ts = (datetime.now(tz=UTC) - timedelta(hours=48)).isoformat()
@@ -376,12 +376,8 @@ class TestIdempotencyOnSemantic:
         upload_a = _upload(client, content=b"Semantic Doc A").json()
         upload_b = _upload(client, content=b"Semantic Doc B").json()
 
-        client.post(
-            f"/documents/{upload_a['document_id']}/versions/{upload_a['id']}/extract"
-        )
-        client.post(
-            f"/documents/{upload_b['document_id']}/versions/{upload_b['id']}/extract"
-        )
+        client.post(f"/documents/{upload_a['document_id']}/versions/{upload_a['id']}/extract")
+        client.post(f"/documents/{upload_b['document_id']}/versions/{upload_b['id']}/extract")
 
         first = client.post(
             f"/documents/{upload_a['document_id']}/versions/{upload_a['id']}/semantic",
