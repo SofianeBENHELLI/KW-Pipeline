@@ -126,9 +126,25 @@ def _node(
     document_id: str | None = None,
     version_id: str | None = None,
 ) -> GraphNode:
+    """Build a namespaced ``GraphNode`` for an integration test.
+
+    ``version_id=""`` means "no version" (e.g. document nodes) — distinct
+    from ``None`` which means "use the default ``ver-A``". The same
+    distinction applies to ``document_id``. Without this care the
+    ``delete_subgraph_for_version`` test bucket-sorts the document node
+    onto the version being deleted.
+    """
     full_id = f"{ns}-{node_id}"
-    doc = f"{ns}-{document_id}" if document_id else f"{ns}-doc-A"
-    ver = f"{ns}-{version_id}" if version_id else f"{ns}-ver-A"
+    doc = (
+        f"{ns}-{document_id}"
+        if document_id
+        else ("" if document_id == "" else f"{ns}-doc-A")
+    )
+    ver = (
+        f"{ns}-{version_id}"
+        if version_id
+        else ("" if version_id == "" else f"{ns}-ver-A")
+    )
     return GraphNode(
         id=full_id,
         kind=kind,
@@ -145,12 +161,17 @@ def _edge(
     target: str,
     version_id: str | None = None,
 ) -> GraphEdge:
+    ver = (
+        f"{ns}-{version_id}"
+        if version_id
+        else ("" if version_id == "" else f"{ns}-ver-A")
+    )
     return GraphEdge(
         id=f"{ns}-{edge_id}",
         kind="part_of",
         source_id=f"{ns}-{source}",
         target_id=f"{ns}-{target}",
-        properties={"version_id": f"{ns}-{version_id}" if version_id else f"{ns}-ver-A"},
+        properties={"version_id": ver},
     )
 
 
