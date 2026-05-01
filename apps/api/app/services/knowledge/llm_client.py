@@ -92,7 +92,7 @@ class AnthropicLLMClient:
 
     name: str = "anthropic"
 
-    def __init__(
+    def __init__(  # pragma: no cover - exercised behind pytest -m llm_integration
         self,
         *,
         api_key: str,
@@ -103,7 +103,7 @@ class AnthropicLLMClient:
         if client is None:
             try:
                 import anthropic  # noqa: PLC0415
-            except ImportError as exc:  # pragma: no cover - defensive
+            except ImportError as exc:
                 raise RuntimeError(
                     "AnthropicLLMClient requires the `anthropic` package. "
                     "Install with `pip install anthropic` or use FakeLLMClient "
@@ -114,7 +114,7 @@ class AnthropicLLMClient:
         self._model = model
         self._max_tokens = max_tokens
 
-    def complete_with_tool(
+    def complete_with_tool(  # pragma: no cover - exercised behind pytest -m llm_integration
         self,
         *,
         system: str,
