@@ -251,6 +251,8 @@ class TestAuditTrail:
         )
 
         record = next(r for r in caplog.records if r.getMessage() == "document.uploaded")
+        # ``filename`` is reserved by stdlib LogRecord (it's the source-file
+        # of the log call), so the upload event uses ``document_filename``.
         for key in (
             "document_id",
             "version_id",
@@ -258,12 +260,12 @@ class TestAuditTrail:
             "sha256",
             "bytes",
             "content_type",
-            "filename",
+            "document_filename",
             "is_duplicate",
         ):
             assert hasattr(record, key), f"missing key: {key}"
         assert record.is_duplicate is False
-        assert record.filename == "policy.txt"
+        assert record.document_filename == "policy.txt"
 
     def test_idempotency_replay_logs_event(self, caplog):
         client = _client()

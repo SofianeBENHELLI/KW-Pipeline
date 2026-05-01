@@ -363,7 +363,14 @@ class DocumentService:
 
 
 def _log_uploaded(version: DocumentVersion) -> None:
-    """Emit a ``document.uploaded`` audit event for a fresh version."""
+    """Emit a ``document.uploaded`` audit event for a fresh version.
+
+    ``filename`` is renamed to ``document_filename`` in the ``extra`` map
+    because ``filename`` is a reserved ``LogRecord`` attribute — passing it
+    in ``extra`` raises ``KeyError: "Attempt to overwrite 'filename' in
+    LogRecord"`` at log time. Same caveat for any other reserved name
+    (see ``app.logging_config._RESERVED_RECORD_ATTRS``).
+    """
     log.info(
         "document.uploaded",
         extra={
@@ -373,7 +380,7 @@ def _log_uploaded(version: DocumentVersion) -> None:
             "sha256": version.sha256,
             "bytes": version.file_size,
             "content_type": version.content_type,
-            "filename": version.filename,
+            "document_filename": version.filename,
             "is_duplicate": (version.status == DocumentVersionStatus.DUPLICATE_DETECTED),
         },
     )

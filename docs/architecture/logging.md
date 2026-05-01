@@ -40,7 +40,7 @@ Every line in JSON mode is a single object on stdout:
   "sha256": "0a31…",
   "bytes": 1842,
   "content_type": "text/plain",
-  "filename": "policy.txt",
+  "document_filename": "policy.txt",
   "is_duplicate": false
 }
 ```
@@ -58,7 +58,7 @@ All events listed below are emitted at `INFO` unless noted otherwise.
 
 | Event                       | Trigger                                       | Keys                                                                                                          |
 | --------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `document.uploaded`         | A `DocumentVersion` is persisted              | `document_id`, `version_id`, `version_number`, `sha256`, `bytes`, `content_type`, `filename`, `is_duplicate`  |
+| `document.uploaded`         | A `DocumentVersion` is persisted              | `document_id`, `version_id`, `version_number`, `sha256`, `bytes`, `content_type`, `document_filename`, `is_duplicate`  |
 | `document.status_changed`   | Any FSM move on a version                     | `document_id`, `version_id`, `from`, `to`                                                                     |
 | `review.validated`          | Reviewer accepts                              | `document_id`, `version_id`, `reviewer_note`                                                                  |
 | `review.rejected`           | Reviewer rejects                              | `document_id`, `version_id`, `reviewer_note`                                                                  |
