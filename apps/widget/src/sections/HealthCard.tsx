@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
-import { ApiError, getHealth } from "../api/client";
+import { ApiError, getHealthWithLatency } from "../api/client";
+import { SectionHeader } from "../components/SectionHeader";
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -11,7 +12,7 @@ interface Props {
 
 type State =
   | { kind: "loading" }
-  | { kind: "ok"; status: string; version?: string }
+  | { kind: "ok"; status: string; version?: string; latencyMs: number }
   | { kind: "err"; message: string };
 
 export const HealthCard: React.FC<Props> = ({ apiBaseUrl, refreshTick }) => {
@@ -23,12 +24,17 @@ export const HealthCard: React.FC<Props> = ({ apiBaseUrl, refreshTick }) => {
 
     const fetchOnce = async () => {
       try {
-        const health = await getHealth({
+        const { health, latencyMs } = await getHealthWithLatency({
           baseUrl: apiBaseUrl,
           signal: controller.signal,
         });
         if (!cancelled) {
-          setState({ kind: "ok", status: health.status, version: health.version });
+          setState({
+            kind: "ok",
+            status: health.status,
+            version: health.version,
+            latencyMs,
+          });
         }
       } catch (error) {
         if (cancelled) return;
@@ -52,30 +58,40 @@ export const HealthCard: React.FC<Props> = ({ apiBaseUrl, refreshTick }) => {
   }, [apiBaseUrl, refreshTick]);
 
   return (
-    <section className="kw-card" aria-label="Backend health">
-      <h3 className="kw-card__title">Backend</h3>
-      <div className="kw-row">
-        <span
-          className={
-            state.kind === "ok"
-              ? "kw-dot kw-dot--ok"
-              : state.kind === "err"
-                ? "kw-dot kw-dot--err"
-                : "kw-dot"
-          }
-          aria-hidden="true"
-        />
-        {state.kind === "loading" && <span className="kw-status">Checking…</span>}
-        {state.kind === "ok" && (
-          <span className="kw-status">
-            {state.status}
-            {state.version ? ` · ${state.version}` : ""}
-          </span>
-        )}
-        {state.kind === "err" && <span className="kw-error">{state.message}</span>}
-      </div>
-      <div className="kw-status" style={{ marginTop: 4 }}>
-        {apiBaseUrl}
+    <section className="kw-section" aria-label="Backend health">
+      <SectionHeader icon="pulse" title="Backend health" meta="auto · 30s" />
+
+      {state.kind === "loading" && (
+        <div className="kw-statline">
+          <span className="kw-status">Checking…</span>
+        </div>
+      )}
+
+      {state.kind === "ok" && (
+        <div className="kw-statline">
+          <span className="kw-statline__word kw-statline__word--ok">{state.status}</span>
+          <span className="kw-statline__sep">·</span>
+          <span className="kw-mono">{state.version ?? "—"}</span>
+          <span className="kw-statline__sep">·</span>
+          <span className="kw-mono kw-mono--ok">{state.latencyMs} ms</span>
+        </div>
+      )}
+
+      {state.kind === "err" && (
+        <div className="kw-statline">
+          <span className="kw-statline__word kw-statline__word--err">unreachable</span>
+        </div>
+      )}
+
+      {state.kind === "err" && (
+        <div className="kw-error" style={{ marginBottom: 8 }}>
+          {state.message}
+        </div>
+      )}
+
+      <div className="kw-url-chip">
+        <span className="kw-url-chip__label">API</span>
+        <span className="kw-url-chip__value">{apiBaseUrl}</span>
       </div>
     </section>
   );

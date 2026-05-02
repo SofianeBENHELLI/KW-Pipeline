@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 
 import { ApiError, getKnowledgeGraph } from "../api/client";
+import { Icon } from "../components/icons";
+import { SectionHeader } from "../components/SectionHeader";
 
 interface Props {
   apiBaseUrl: string;
@@ -12,6 +14,7 @@ interface Counts {
   edges: number;
   byKind: Record<string, number>;
   truncated: boolean;
+  pagesWalked: number;
 }
 
 type State =
@@ -21,6 +24,10 @@ type State =
 
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 10;
+
+function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
+}
 
 export const KnowledgeSummary: React.FC<Props> = ({ apiBaseUrl, refreshTick }) => {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -57,7 +64,13 @@ export const KnowledgeSummary: React.FC<Props> = ({ apiBaseUrl, refreshTick }) =
         if (!cancelled) {
           setState({
             kind: "ok",
-            counts: { nodes, edges, byKind, truncated: cursor !== null },
+            counts: {
+              nodes,
+              edges,
+              byKind,
+              truncated: cursor !== null,
+              pagesWalked: pages,
+            },
           });
         }
       } catch (error) {
@@ -80,35 +93,49 @@ export const KnowledgeSummary: React.FC<Props> = ({ apiBaseUrl, refreshTick }) =
     };
   }, [apiBaseUrl, refreshTick]);
 
+  const meta =
+    state.kind === "ok"
+      ? `walked ${state.counts.pagesWalked} ${state.counts.pagesWalked === 1 ? "page" : "pages"} · ${formatNumber(state.counts.nodes)} nodes`
+      : undefined;
+
   return (
-    <section className="kw-card" aria-label="Knowledge layer">
-      <h3 className="kw-card__title">Knowledge layer</h3>
+    <section className="kw-section" aria-label="Knowledge layer">
+      <SectionHeader icon="graph" title="Knowledge layer" meta={meta} />
+
       {state.kind === "loading" && <div className="kw-status">Loading…</div>}
       {state.kind === "err" && <div className="kw-error">{state.message}</div>}
+
       {state.kind === "ok" && (
         <>
-          <div className="kw-counts">
-            <div className="kw-counts__item">
-              <span className="kw-counts__num">{state.counts.nodes}</span>
-              <span className="kw-counts__label">Nodes</span>
+          <div className="kw-kg-hero">
+            <div className="kw-kg-hero__stat">
+              <div className="kw-kg-hero__num">{formatNumber(state.counts.nodes)}</div>
+              <div className="kw-kg-hero__lbl">Nodes</div>
             </div>
-            <div className="kw-counts__item">
-              <span className="kw-counts__num">{state.counts.edges}</span>
-              <span className="kw-counts__label">Edges</span>
+            <div className="kw-kg-hero__stat">
+              <div className="kw-kg-hero__num">{formatNumber(state.counts.edges)}</div>
+              <div className="kw-kg-hero__lbl">Edges</div>
             </div>
-            {Object.entries(state.counts.byKind)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 4)
-              .map(([kind, count]) => (
-                <div key={kind} className="kw-counts__item">
-                  <span className="kw-counts__num">{count}</span>
-                  <span className="kw-counts__label">{kind}</span>
-                </div>
-              ))}
           </div>
+
+          {Object.keys(state.counts.byKind).length > 0 && (
+            <div className="kw-kg-grid">
+              {Object.entries(state.counts.byKind)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([kind, count]) => (
+                  <div key={kind} className="kw-kg-tile">
+                    <span className="kw-kg-tile__num">{formatNumber(count)}</span>
+                    <span className="kw-kg-tile__lbl">{kind}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+
           {state.counts.truncated && (
-            <div className="kw-status" style={{ marginTop: 4 }}>
-              Showing first {MAX_PAGES * PAGE_LIMIT} nodes — graph is larger.
+            <div className="kw-kg-note">
+              <Icon name="info" size={12} />
+              Showing first {formatNumber(MAX_PAGES * PAGE_LIMIT)} nodes — graph is larger.
             </div>
           )}
         </>
