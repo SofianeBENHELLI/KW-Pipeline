@@ -27,6 +27,29 @@ re-projection or out-of-band reconciliation.
 Re-projecting the same version is safe — :meth:`KnowledgeProjector.project`
 deletes the version's prior subgraph before upserting the new one, so
 section renames or removals don't leave orphans.
+
+Projection stages
+-----------------
+
+:meth:`KnowledgeProjector.project` is a thin orchestrator that
+delegates to a sequence of stage methods. Each stage returns the
+``(nodes, edges)`` it contributes; the orchestrator concatenates them
+and writes the result in a single delete-then-upsert pass so the
+"validated → graph" transition stays atomic from the caller's point of
+view.
+
+* :meth:`project_document_structure` — Document/Version/Section nodes
+  + PART_OF edges. The Phase 1 baseline.
+* :meth:`project_chunks` — chunk nodes (no-op skeleton; lane B fills).
+* :meth:`project_chunk_relations` — chunk → section / chunk → chunk
+  edges (no-op skeleton; lane B fills).
+* :meth:`project_topics` — topic nodes + section/chunk attachments
+  (no-op skeleton; lane B fills).
+
+:meth:`project_entities` is *not* part of this orchestration — it is
+invoked separately by the route handler after ``project()`` returns,
+because it consumes a different upstream artifact
+(:class:`EntityExtractionResult`) produced by the entity extractor.
 """
 
 from __future__ import annotations
@@ -68,6 +91,13 @@ class KnowledgeProjector:
         Existing nodes/edges for ``version.id`` are removed first, so
         re-projecting after a section rename does not leave orphan
         section nodes.
+
+        This method is a thin orchestrator: it validates the
+        ``version`` ↔ ``semantic`` pairing, runs each projection stage
+        in order, then writes the accumulated nodes/edges in one
+        delete-then-upsert pass. New stages plug in by returning their
+        ``(nodes, edges)`` from a stage method below — no orchestration
+        changes needed.
         """
         if version.id != semantic.document_version_id:
             raise ValueError(
@@ -75,8 +105,17 @@ class KnowledgeProjector:
                 f"{version.id} (got {semantic.document_version_id})."
             )
 
-        nodes = self._build_nodes(document=document, version=version, semantic=semantic)
-        edges = self._build_edges(document=document, version=version, semantic=semantic)
+        nodes: list[GraphNode] = []
+        edges: list[GraphEdge] = []
+
+        for stage_nodes, stage_edges in (
+            self.project_document_structure(document=document, version=version, semantic=semantic),
+            self.project_chunks(document=document, version=version, semantic=semantic),
+            self.project_chunk_relations(document=document, version=version, semantic=semantic),
+            self.project_topics(document=document, version=version, semantic=semantic),
+        ):
+            nodes.extend(stage_nodes)
+            edges.extend(stage_edges)
 
         self._graph_store.delete_subgraph_for_version(
             document_id=document.id,
@@ -96,13 +135,29 @@ class KnowledgeProjector:
             },
         )
 
+    # ------------------------------------------------------------------
+    # Projection stages
+    #
+    # Each stage is a pure function of its inputs: it returns the
+    # ``(nodes, edges)`` it contributes and never touches the graph
+    # store directly. The orchestrator above owns the single
+    # delete-then-upsert write.
+    # ------------------------------------------------------------------
+
     @staticmethod
-    def _build_nodes(
+    def project_document_structure(
         *,
         document: Document,
         version: DocumentVersion,
         semantic: SemanticDocument,
-    ) -> list[GraphNode]:
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Phase 1 skeleton: Document/Version/Section + PART_OF edges.
+
+        This is the byte-for-byte projection that has shipped since
+        ADR-012 §3. Anything that depends on a stable Phase 1 wire
+        contract (frontend graph panel, validation tests) reads from
+        here.
+        """
         document_node = GraphNode(
             id=document.id,
             kind="document",
@@ -130,15 +185,8 @@ class KnowledgeProjector:
             _section_node(version=version, document=document, section=section)
             for section in semantic.sections
         ]
-        return [document_node, version_node, *section_nodes]
+        nodes: list[GraphNode] = [document_node, version_node, *section_nodes]
 
-    @staticmethod
-    def _build_edges(
-        *,
-        document: Document,
-        version: DocumentVersion,
-        semantic: SemanticDocument,
-    ) -> list[GraphEdge]:
         version_edge = GraphEdge(
             id=f"{version.id}->part_of->{document.id}",
             kind="part_of",
@@ -163,7 +211,53 @@ class KnowledgeProjector:
             )
             for section in semantic.sections
         ]
-        return [version_edge, *section_edges]
+        edges: list[GraphEdge] = [version_edge, *section_edges]
+
+        return nodes, edges
+
+    @staticmethod
+    def project_chunks(
+        *,
+        document: Document,  # noqa: ARG004 — placeholder for lane B
+        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
+        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Project chunk nodes — *skeleton, filled by lane B (#141/#142)*.
+
+        Returns empty lists today. The signature is fixed so #144 can
+        wire the chunker into the orchestrator without touching
+        :meth:`project`.
+        """
+        return [], []
+
+    @staticmethod
+    def project_chunk_relations(
+        *,
+        document: Document,  # noqa: ARG004 — placeholder for lane B
+        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
+        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Project chunk → section / chunk → chunk edges — *skeleton*.
+
+        Returns empty lists today. Lane B (#141/#142) fills this with
+        ``BELONGS_TO`` / ``NEXT_CHUNK`` style edges; the integration PR
+        (#144) feeds it the chunk artefacts.
+        """
+        return [], []
+
+    @staticmethod
+    def project_topics(
+        *,
+        document: Document,  # noqa: ARG004 — placeholder for lane B
+        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
+        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Project topic nodes + attachments — *skeleton, filled by lane B*.
+
+        Returns empty lists today. Topics attach to sections (and later
+        to chunks) via ``ABOUT`` edges in the v0.2 wire contract.
+        """
+        return [], []
 
     def project_entities(self, result: EntityExtractionResult) -> None:
         """Upsert ``(:Entity)`` nodes + ``HAS_ENTITY`` edges from one
