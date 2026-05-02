@@ -27,7 +27,27 @@ def create_app(
     data_dir: str = ".kw-pipeline",
 ) -> FastAPI:
     """Create a Harvester API app with isolated pipeline services."""
-    app = FastAPI(title="KW Pipeline Harvester API", version="0.1.0")
+    app = FastAPI(
+        title="KW Pipeline Harvester API",
+        version="0.1.0",
+        description=(
+            "Auditable document-intelligence pipeline. Endpoints cover "
+            "upload, hashing, duplicate detection, parsing, semantic-JSON "
+            "generation, reviewer validate/reject, and an optional "
+            "knowledge-graph projection (ADR-012). Every claim and edge "
+            "carries provenance via `source_reference_id`. "
+            "See `docs/architecture/document_intelligence_mvp.md` for the "
+            "ingestion contract and `docs/architecture/api_contract.md` "
+            "for the public response shapes."
+        ),
+        contact={
+            "name": "KW Pipeline",
+            "url": "https://github.com/SofianeBENHELLI/KW-Pipeline",
+        },
+        # `license_info` intentionally unset until the LICENSE-file
+        # decision (issue #51) is made. Adding it here is a one-line
+        # follow-up once the repo carries a LICENSE file.
+    )
     if services is None:
         services = build_persistent_services(data_dir) if persistent else build_services()
 
