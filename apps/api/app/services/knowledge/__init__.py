@@ -35,6 +35,12 @@ from app.services.knowledge.llm_client import (
     LLMClient,
 )
 from app.services.knowledge.projector import KnowledgeProjector
+from app.services.knowledge.reconciliation import (
+    DriftedVersion,
+    KnowledgeLayerDisabled,
+    ReconciliationOutcome,
+    ReconciliationService,
+)
 from app.services.knowledge.topic_clustering import (
     Topic,
     TopicAssignment,
@@ -48,13 +54,17 @@ __all__ = [
     "ChunkRelation",
     "ChunkRelationKind",
     "ChunkRelationService",
+    "DriftedVersion",
     "EntityExtractor",
     "FakeLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
+    "KnowledgeLayerDisabled",
     "KnowledgeProjector",
     "LLMClient",
     "Neo4jGraphStore",
+    "ReconciliationOutcome",
+    "ReconciliationService",
     "Topic",
     "TopicAssignment",
     "TopicClusteringService",
