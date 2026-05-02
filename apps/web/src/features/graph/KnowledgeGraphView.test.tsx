@@ -515,7 +515,9 @@ describe("KnowledgeGraphView (Demo KG / Lane D)", () => {
     fireEvent.click(chunkButton);
 
     const detail = await screen.findByTestId("graph-detail-node");
-    expect(within(detail).getByText("Audit plan")).toBeInTheDocument();
+    // "Audit plan" appears in both the Label and Heading rows of the
+    // detail dl, so assert via getAllByText rather than getByText.
+    expect(within(detail).getAllByText("Audit plan").length).toBeGreaterThan(0);
     expect(within(detail).getByText(/topic-aaaa1111/)).toBeInTheDocument();
     expect(within(detail).getByText(/audit, supplier, quality/i)).toBeInTheDocument();
   });
