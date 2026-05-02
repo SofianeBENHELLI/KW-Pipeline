@@ -391,6 +391,177 @@ describe("ReviewWorkspace — reviewer note accessibility", () => {
   });
 });
 
+describe("ReviewWorkspace — per-action busy state", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows 'Validating…' on the Validate button while in flight, Reject stays 'Reject'", async () => {
+    let resolveValidate: (response: Response) => void = () => {};
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.endsWith("/semantic")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        if (url.endsWith("/validate")) {
+          return new Promise<Response>((resolve) => {
+            resolveValidate = resolve;
+          });
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+    await waitFor(() => {
+      expect(screen.getByText("needs_review")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Validate$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^Validating…$/i }),
+      ).toHaveAttribute("aria-busy", "true");
+    });
+    // Reject keeps its idle label and is NOT marked aria-busy.
+    expect(screen.getByRole("button", { name: /^Reject$/i })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+
+    resolveValidate(
+      makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "validated" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("validated")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Rejecting…' on the Reject button while in flight, Validate stays 'Validate'", async () => {
+    let resolveReject: (response: Response) => void = () => {};
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.endsWith("/semantic")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        if (url.endsWith("/reject")) {
+          return new Promise<Response>((resolve) => {
+            resolveReject = resolve;
+          });
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+    await waitFor(() => {
+      expect(screen.getByText("needs_review")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Reject$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^Rejecting…$/i }),
+      ).toHaveAttribute("aria-busy", "true");
+    });
+    expect(screen.getByRole("button", { name: /^Validate$/i })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+
+    resolveReject(
+      makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "rejected" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("rejected")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("ReviewWorkspace — abort detail loader on document switch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("switching to a different document aborts the in-flight detail fetches and never poisons the new selection", async () => {
+    // Capture controllers per call so we can assert they were aborted.
+    const seenSignals: AbortSignal[] = [];
+    const docBExtraction = {
+      ...FIXTURE_EXTRACTION,
+      id: "ext-002",
+      document_version_id: "ver-002",
+      text: "DOC B TEXT",
+    };
+
+    // openapi-fetch passes a Request object as the first arg, with
+    // `signal` embedded on it (not as a separate `init` arg). Read it
+    // off the Request to assert against AbortController behavior.
+    function signalOf(input: RequestInfo | URL): AbortSignal | undefined {
+      return input instanceof Request ? input.signal : undefined;
+    }
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        const signal = signalOf(input);
+        if (signal) seenSignals.push(signal);
+
+        // Doc A's extraction never resolves naturally — only abort
+        // can settle it. Doc B's extraction resolves immediately.
+        if (url.includes("/doc-001/") && url.endsWith("/extraction")) {
+          return new Promise<Response>((_, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          });
+        }
+        if (url.includes("/doc-002/") && url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse(docBExtraction));
+        }
+        if (url.endsWith("/semantic")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    const docA = makeDocument("NEEDS_REVIEW");
+    const docB: ApiDocument = {
+      ...makeDocument("NEEDS_REVIEW"),
+      id: "doc-002",
+      original_filename: "doc-b.txt",
+      latest_version_id: "ver-002",
+      versions: [
+        {
+          ...makeDocument("NEEDS_REVIEW").versions[0],
+          id: "ver-002",
+          document_id: "doc-002",
+          filename: "doc-b.txt",
+        },
+      ],
+    };
+
+    const { rerender } = render(<ReviewWorkspace document={docA} />);
+    // Wait until docA's fetch is in flight.
+    await waitFor(() => expect(seenSignals.length).toBeGreaterThan(0));
+
+    rerender(<ReviewWorkspace document={docB} />);
+
+    // Doc B's extraction text appears.
+    await waitFor(() => {
+      expect(screen.getByText("DOC B TEXT")).toBeInTheDocument();
+    });
+    // Doc A's text never reaches the DOM because its fetch was aborted.
+    expect(screen.queryByText("DOC A TEXT")).toBeNull();
+
+    // The first signal (doc A's) is aborted.
+    expect(seenSignals[0].aborted).toBe(true);
+  });
+});
+
 describe("ReviewWorkspace — refresh indicator", () => {
   afterEach(() => vi.restoreAllMocks());
 

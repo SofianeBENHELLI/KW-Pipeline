@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApiDocument, ApiRawExtraction, ApiSemanticDocument } from "../../api/types";
 import {
   ApiError,
@@ -37,14 +37,24 @@ export function ReviewWorkspace({
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [reviewerNote, setReviewerNote] = useState("");
-  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState<"validate" | "reject" | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // Dedup guard against rapid double-clicks. The disabled-button state
+  // is the primary defence; this ref is the belt-and-braces second
+  // layer that guarantees only one in-flight handler per (version,
+  // action) pair, even if a synthetic event slips through (e.g. tests
+  // dispatching two clicks before React re-renders the disabled state).
+  const inFlightActionsRef = useRef<Set<string>>(new Set());
 
   // Re-run on mutations so extracted/semantic blobs reflect the latest
   // server state. `lastMutationAt` is bumped by the parent's
-  // useDocumentCatalog hook after every successful action.
+  // useDocumentCatalog hook after every successful action. The
+  // AbortController short-circuits in-flight detail fetches when the
+  // user switches to a different document — without it, the old fetch
+  // can resolve into the new selection and overwrite the right data.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setExtraction(null);
     setSemantic(null);
     setLoadingDetails(true);
@@ -55,20 +65,28 @@ export function ReviewWorkspace({
     async function fetchDetails() {
       try {
         const [ext, sem] = await Promise.allSettled([
-          getExtraction(documentId, versionId),
-          getSemantic(documentId, versionId),
+          getExtraction(documentId, versionId, { signal: controller.signal }),
+          getSemantic(documentId, versionId, { signal: controller.signal }),
         ]);
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
 
         setExtraction(ext.status === "fulfilled" ? ext.value : null);
         setSemantic(sem.status === "fulfilled" ? sem.value : null);
 
-        // Surface a non-404 error to the user
+        // Surface a non-404 error to the user. Aborted fetches throw
+        // DOMException("AbortError"); ignore them.
+        function isAbortError(reason: unknown): boolean {
+          return reason instanceof DOMException && reason.name === "AbortError";
+        }
         const firstError =
-          (ext.status === "rejected" && !(ext.reason instanceof ApiError && ext.reason.status === 404)
+          (ext.status === "rejected" &&
+          !isAbortError(ext.reason) &&
+          !(ext.reason instanceof ApiError && ext.reason.status === 404)
             ? ext.reason
             : null) ??
-          (sem.status === "rejected" && !(sem.reason instanceof ApiError && sem.reason.status === 404)
+          (sem.status === "rejected" &&
+          !isAbortError(sem.reason) &&
+          !(sem.reason instanceof ApiError && sem.reason.status === 404)
             ? sem.reason
             : null);
 
@@ -78,22 +96,26 @@ export function ReviewWorkspace({
           );
         }
       } catch (err: unknown) {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setDetailError(err instanceof Error ? err.message : "Failed to load document details.");
         }
       } finally {
-        if (!cancelled) setLoadingDetails(false);
+        if (!controller.signal.aborted) setLoadingDetails(false);
       }
     }
 
     void fetchDetails();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [documentId, versionId, lastMutationAt]);
 
   function handleReview(action: "validate" | "reject") {
-    setReviewLoading(true);
+    const dedupKey = `${versionId}:${action}`;
+    if (inFlightActionsRef.current.has(dedupKey)) return;
+    inFlightActionsRef.current.add(dedupKey);
+
+    setReviewBusy(action);
     setReviewError(null);
 
     const fn = action === "validate" ? validateVersion : rejectVersion;
@@ -112,11 +134,12 @@ export function ReviewWorkspace({
         setReviewError(message);
       })
       .finally(() => {
-        setReviewLoading(false);
+        inFlightActionsRef.current.delete(dedupKey);
+        setReviewBusy(null);
       });
   }
 
-  const canReview = version.status === "NEEDS_REVIEW" && !reviewLoading;
+  const canReview = version.status === "NEEDS_REVIEW" && reviewBusy === null;
 
   return (
     <section className="workspace" aria-labelledby="workspace-title">
@@ -258,17 +281,19 @@ export function ReviewWorkspace({
             className="secondary-button"
             type="button"
             disabled={!canReview}
+            aria-busy={reviewBusy === "reject"}
             onClick={() => handleReview("reject")}
           >
-            Reject
+            {reviewBusy === "reject" ? "Rejecting…" : "Reject"}
           </button>
           <button
             className="primary-button"
             type="button"
             disabled={!canReview}
+            aria-busy={reviewBusy === "validate"}
             onClick={() => handleReview("validate")}
           >
-            Validate
+            {reviewBusy === "validate" ? "Validating…" : "Validate"}
           </button>
         </div>
       </footer>
