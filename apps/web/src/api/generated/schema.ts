@@ -321,10 +321,20 @@ export interface components {
          * @description One directed edge in the knowledge graph projection.
          *
          *     ``source_id`` and ``target_id`` reference :class:`GraphNode.id`
-         *     values. Phase 2 ``has_entity`` edges additionally carry a
-         *     ``source_reference_id`` in ``properties`` pointing at a row in the
-         *     catalog's ``source_references`` table; ``part_of`` edges have no
-         *     such citation requirement.
+         *     values. Provenance requirements depend on ``kind``:
+         *
+         *     - **structural** (``part_of``, ``has_version``, ``has_chunk``,
+         *       ``belongs_to``) — no citation required; the edge itself is the
+         *       provenance.
+         *     - **deterministic semantic** (``related_to``, ``shares_keyword``,
+         *       ``same_topic_as``) — must carry ``source_chunk_ids`` (the two
+         *       chunks that produced the relation), ``reason`` (human-readable
+         *       explanation), and ``shared_keywords`` in ``properties``. See
+         *       :class:`ChunkRelationEdgeProperties`.
+         *     - **LLM** (``has_entity``) — must carry ``source_reference_id``
+         *       pointing at a row in the catalog's ``source_references`` table
+         *       (ADR-012 §4). Triples missing citations are dropped by the
+         *       extractor before edges are constructed.
          */
         GraphEdge: {
             /** Id */
@@ -333,10 +343,10 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "part_of" | "has_entity";
+            kind: "part_of" | "has_version" | "has_chunk" | "belongs_to" | "related_to" | "shares_keyword" | "same_topic_as" | "has_entity";
             /** Properties */
             properties: {
-                [key: string]: string | number | boolean | null;
+                [key: string]: string | number | boolean | string[] | null;
             };
             /** Source Id */
             source_id: string;
@@ -348,10 +358,12 @@ export interface components {
          * @description One node in the knowledge graph projection.
          *
          *     ``id`` is stable across projections — for ``document`` and
-         *     ``version`` nodes it matches the catalog row ID; for ``section``
-         *     nodes it matches ``SemanticSection.id``; for ``entity`` nodes
-         *     (Phase 2) it is a deterministic hash of (text, type) so re-runs
-         *     converge on the same node.
+         *     ``version`` nodes it matches the catalog row ID; for ``section`` /
+         *     ``chunk`` nodes it matches ``SemanticSection.id``; for ``topic``
+         *     nodes it is a deterministic id from the clustering service (see
+         *     :class:`TopicNodeProperties`); for ``entity`` nodes (Phase 2) it is
+         *     a deterministic hash of (text, type) so re-runs converge on the
+         *     same node.
          */
         GraphNode: {
             /** Id */
@@ -360,12 +372,12 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "document" | "version" | "section" | "entity";
+            kind: "document" | "version" | "section" | "chunk" | "topic" | "entity";
             /** Label */
             label: string;
             /** Properties */
             properties: {
-                [key: string]: string | number | boolean | null;
+                [key: string]: string | number | boolean | string[] | null;
             };
         };
         /** HTTPValidationError */
@@ -396,10 +408,10 @@ export interface components {
             nodes: components["schemas"]["GraphNode"][];
             /**
              * Schema Version
-             * @default v0.1
-             * @constant
+             * @default v0.2
+             * @enum {string}
              */
-            schema_version: "v0.1";
+            schema_version: "v0.1" | "v0.2";
         };
         /**
          * KnowledgeGraphProjection
@@ -425,10 +437,10 @@ export interface components {
             nodes: components["schemas"]["GraphNode"][];
             /**
              * Schema Version
-             * @default v0.1
-             * @constant
+             * @default v0.2
+             * @enum {string}
              */
-            schema_version: "v0.1";
+            schema_version: "v0.1" | "v0.2";
             /** Version Id */
             version_id: string;
         };
