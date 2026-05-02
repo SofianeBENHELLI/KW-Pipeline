@@ -356,10 +356,7 @@ def _export_graph_artifact(
     if not settings.knowledge_layer_enabled:
         _emit(
             emit,
-            (
-                "knowledge layer disabled, no graph artifact written "
-                f"({graph_out})"
-            ),
+            (f"knowledge layer disabled, no graph artifact written ({graph_out})"),
         )
         return {
             "skipped": True,
@@ -369,8 +366,7 @@ def _export_graph_artifact(
     response = client.get(f"/documents/{document_id}/graph")
     if response.status_code != 200:
         raise AssertionError(
-            "Graph export failed for "
-            f"{document_id}: HTTP {response.status_code}: {response.text}"
+            f"Graph export failed for {document_id}: HTTP {response.status_code}: {response.text}"
         )
     payload = response.json()
     _write_json(graph_out, payload)

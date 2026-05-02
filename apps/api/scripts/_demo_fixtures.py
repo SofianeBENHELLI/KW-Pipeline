@@ -51,9 +51,7 @@ def materialise_pdf(target: Path | None = None) -> Path:
         new_x="LMARGIN",
         new_y="NEXT",
     )
-    pdf.cell(
-        w=0, h=8, text="Submitted: 2026-04-22 by R. Devereaux", new_x="LMARGIN", new_y="NEXT"
-    )
+    pdf.cell(w=0, h=8, text="Submitted: 2026-04-22 by R. Devereaux", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(
         w=0,
         h=8,

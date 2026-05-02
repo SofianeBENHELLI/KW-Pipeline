@@ -81,7 +81,9 @@ def test_graph_out_skips_gracefully_when_knowledge_layer_disabled(tmp_path, monk
         emit=messages.append,
     )
 
-    assert "graph_export" in summary, "Runner should record graph-export status when --graph-out is set."
+    assert "graph_export" in summary, (
+        "Runner should record graph-export status when --graph-out is set."
+    )
     export = summary["graph_export"]
     assert export["skipped"] is True
     assert export["reason"] == "knowledge_layer_disabled"
