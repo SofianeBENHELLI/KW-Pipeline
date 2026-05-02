@@ -35,6 +35,12 @@ from app.services.knowledge.llm_client import (
     LLMClient,
 )
 from app.services.knowledge.projector import KnowledgeProjector
+from app.services.knowledge.topic_clustering import (
+    Topic,
+    TopicAssignment,
+    TopicClusteringService,
+    TopicMembership,
+)
 
 __all__ = [
     "AnthropicLLMClient",
@@ -49,4 +55,8 @@ __all__ = [
     "KnowledgeProjector",
     "LLMClient",
     "Neo4jGraphStore",
+    "Topic",
+    "TopicAssignment",
+    "TopicClusteringService",
+    "TopicMembership",
 ]
