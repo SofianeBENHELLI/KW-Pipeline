@@ -229,3 +229,17 @@ jobs:
 
       - name: Run vitest
         run: npx vitest run
+
+      - name: Production build
+        run: npx vite build
+
+      - name: Enforce bundle size budgets
+        run: npm run bundle:check
+
+      - name: Upload bundle visualizer treemap
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundle-visualizer
+          path: apps/web/dist/stats.html
+          if-no-files-found: warn
