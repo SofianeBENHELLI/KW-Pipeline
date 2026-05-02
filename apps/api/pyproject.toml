@@ -42,6 +42,16 @@ test = [
   "pytest-cov==6.0.0",
 ]
 
+# Restrict setuptools' flat-layout package discovery to the real
+# Python package. Without this, the new `fixtures/demo/` directory
+# (committed for the seed dataset, #131) would be auto-discovered
+# as a second top-level package and `pip install -e .` fails with
+# "Multiple top-level packages discovered". Tests / scripts /
+# fixtures are not Python packages and don't ship with the wheel.
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "scripts*", "fixtures*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
