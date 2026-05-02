@@ -109,18 +109,10 @@ class KnowledgeProjector:
         edges: list[GraphEdge] = []
 
         for stage_nodes, stage_edges in (
-            self.project_document_structure(
-                document=document, version=version, semantic=semantic
-            ),
-            self.project_chunks(
-                document=document, version=version, semantic=semantic
-            ),
-            self.project_chunk_relations(
-                document=document, version=version, semantic=semantic
-            ),
-            self.project_topics(
-                document=document, version=version, semantic=semantic
-            ),
+            self.project_document_structure(document=document, version=version, semantic=semantic),
+            self.project_chunks(document=document, version=version, semantic=semantic),
+            self.project_chunk_relations(document=document, version=version, semantic=semantic),
+            self.project_topics(document=document, version=version, semantic=semantic),
         ):
             nodes.extend(stage_nodes)
             edges.extend(stage_edges)
