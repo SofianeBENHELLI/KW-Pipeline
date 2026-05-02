@@ -32,6 +32,7 @@ if str(API_ROOT) not in sys.path:
 
 from app.main import create_app  # noqa: E402
 from app.services.parsers.docx import DOCX_CONTENT_TYPE  # noqa: E402
+from app.settings import Settings  # noqa: E402
 
 TEXT_CONTENT_TYPE = "text/plain"
 DEFAULT_FIXTURE_DIR = API_ROOT / "fixtures" / "customer_demo"
@@ -48,12 +49,24 @@ def run_customer_demo(
     data_dir: Path | str = DEFAULT_DATA_DIR,
     artifact_dir: Path | str = DEFAULT_ARTIFACT_DIR,
     reset: bool = False,
+    graph_out: Path | str | None = None,
     emit: Callable[[str], None] | None = print,
 ) -> dict[str, Any]:
-    """Run upload -> extraction -> semantic -> review for customer fixtures."""
+    """Run upload -> extraction -> semantic -> review for customer fixtures.
+
+    When ``graph_out`` is set, the runner additionally pulls the v0.x
+    knowledge-graph projection for the first validated document family and
+    writes the response JSON to that path. The actual richness of the
+    payload (chunks / topics / relations) is gated on issue #144 wiring
+    those into the projector — the runner just produces *something*
+    against the contract today. When the knowledge layer is disabled
+    (the default — ``KW_KNOWLEDGE_LAYER_ENABLED=false``) the runner logs
+    a graceful skip message and exits without writing any artifact.
+    """
     fixture_dir = Path(fixture_dir)
     data_dir = Path(data_dir)
     artifact_dir = Path(artifact_dir)
+    graph_out_path = Path(graph_out) if graph_out is not None else None
     _prepare_output_dirs(data_dir=data_dir, artifact_dir=artifact_dir, reset=reset)
     previous_allowlist = _ensure_demo_content_types()
 
@@ -70,6 +83,7 @@ def run_customer_demo(
             data_dir=data_dir,
             artifact_dir=artifact_dir,
             summary=summary,
+            graph_out=graph_out_path,
             emit=emit,
         )
     finally:
@@ -82,6 +96,7 @@ def _run_demo_inside_client(
     data_dir: Path,
     artifact_dir: Path,
     summary: dict[str, Any],
+    graph_out: Path | None,
     emit: Callable[[str], None] | None,
 ) -> dict[str, Any]:
     with TestClient(create_app(persistent=True, data_dir=str(data_dir))) as client:
@@ -193,6 +208,14 @@ def _run_demo_inside_client(
         _write_json(artifact_dir / "catalog.json", {"items": catalog})
         summary["catalog_document_count"] = len(catalog)
         summary["catalog_artifact"] = str(artifact_dir / "catalog.json")
+
+        if graph_out is not None:
+            summary["graph_export"] = _export_graph_artifact(
+                client=client,
+                document_id=supplier_v1["document_id"],
+                graph_out=graph_out,
+                emit=emit,
+            )
 
     _write_json(artifact_dir / "run_summary.json", summary)
     _emit(emit, f"Wrote demo artifacts to {artifact_dir}")
@@ -309,6 +332,57 @@ def _upload_bytes(
     if len(version["sha256"]) != 64:
         raise AssertionError(f"{filename} did not return a SHA-256 digest.")
     return version
+
+
+def _export_graph_artifact(
+    *,
+    client: TestClient,
+    document_id: str,
+    graph_out: Path,
+    emit: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    """Best-effort export of the v0.x knowledge-graph projection.
+
+    Issue #145 (partial). When the knowledge layer is disabled (the
+    default) we skip the export and log a graceful message rather than
+    failing the smoke run — the caller still exits 0. When the layer is
+    enabled, we GET ``/documents/{id}/graph`` for the first validated
+    document family and write the JSON to ``graph_out``. The actual
+    richness of the payload (chunks / topics / relations) is gated on
+    issue #144 wiring those into the projector; today the projection is
+    "documents + versions + sections + part_of edges".
+    """
+    settings = Settings()
+    if not settings.knowledge_layer_enabled:
+        _emit(
+            emit,
+            (
+                "knowledge layer disabled, no graph artifact written "
+                f"({graph_out})"
+            ),
+        )
+        return {
+            "skipped": True,
+            "reason": "knowledge_layer_disabled",
+            "path": str(graph_out),
+        }
+    response = client.get(f"/documents/{document_id}/graph")
+    if response.status_code != 200:
+        raise AssertionError(
+            "Graph export failed for "
+            f"{document_id}: HTTP {response.status_code}: {response.text}"
+        )
+    payload = response.json()
+    _write_json(graph_out, payload)
+    _emit(emit, f"Wrote graph artifact to {graph_out}")
+    return {
+        "skipped": False,
+        "path": str(graph_out),
+        "document_id": document_id,
+        "node_count": len(payload.get("nodes", [])),
+        "edge_count": len(payload.get("edges", [])),
+        "schema_version": payload.get("schema_version"),
+    }
 
 
 def _walk_catalog(*, client: TestClient, limit: int) -> list[dict[str, Any]]:
@@ -479,6 +553,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete the selected demo data and artifact directories before running.",
     )
+    parser.add_argument(
+        "--graph-out",
+        type=_path_arg,
+        default=None,
+        help=(
+            "Optional path to write the knowledge-graph projection JSON for "
+            "the first validated document family (GET /documents/{id}/graph). "
+            "When KW_KNOWLEDGE_LAYER_ENABLED=false (the default) the runner "
+            "logs a graceful skip and exits 0 without writing the file."
+        ),
+    )
     return parser
 
 
@@ -489,6 +574,7 @@ def main(argv: list[str] | None = None) -> int:
         data_dir=args.data_dir,
         artifact_dir=args.artifact_dir,
         reset=args.reset,
+        graph_out=args.graph_out,
     )
     print("")
     print("Customer demo smoke complete")

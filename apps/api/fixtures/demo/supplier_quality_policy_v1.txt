@@ -1,33 +1,43 @@
 Supplier Quality Policy
 Version 1.0 — Issued 2025-09-01
+Owner: Quality Director, Global Operations
 
 1. Purpose
-This policy defines the minimum quality requirements for materials and
-components supplied to the manufacturing line. Compliance is mandatory
-for every active supplier on the approved vendor list.
+This policy defines the minimum supplier quality requirements for materials
+and components delivered to the manufacturing line. Compliance is mandatory
+for every active supplier on the approved vendor list. The supplier scorecard
+program tracks adherence on a quarterly basis.
 
 2. Scope
-Applies to all direct-material suppliers. Indirect-services vendors are
-covered by a separate procurement policy and are out of scope here.
+This policy applies to all direct-material suppliers across the approved
+vendor list. Indirect-services vendors and logistics carriers are covered by
+a separate procurement policy and remain out of scope for supplier quality.
 
-3. Inspection
-Every inbound lot is sampled per AQL 2.5 and recorded in the receiving
-log. Lots that fail inspection are quarantined within 24 hours and the
-supplier is notified the same day.
+3. Inbound Inspection
+Every inbound supplier lot is sampled per AQL 2.5 acceptance criteria and the
+result is recorded in the receiving inspection log. Lots that fail inbound
+inspection are quarantined within twenty-four hours and the supplier is
+notified the same business day. Sampling plans follow ANSI/ASQ Z1.4.
 
-4. Non-conformance
-A non-conformance report is opened for every quarantined lot. Suppliers
-have ten business days to submit a containment plan and a root-cause
-corrective action.
+4. Non-Conformance
+A non-conformance report is opened for every quarantined supplier lot.
+Suppliers have ten business days to submit a containment plan and a
+root-cause corrective action against the non-conformance report. Repeat
+non-conformance from the same supplier triggers an escalation review.
 
-5. Audits
-Tier-1 suppliers are audited annually on site. Tier-2 suppliers receive
-a documentation-only audit every two years. Audit findings rated Major
-or Critical block further purchase orders until closed.
+5. Supplier Audits
+Tier-1 suppliers are audited annually on site against this supplier quality
+policy. Tier-2 suppliers receive a documentation-only audit every two years.
+Audit findings rated Major or Critical block further purchase orders to the
+supplier until the corrective action is closed and verified.
 
-6. Records
-All inspection, NCR, and audit records are retained for seven years in
-the quality management system.
+6. Records and Retention
+All inbound inspection records, non-conformance reports, and supplier audit
+findings are retained for seven years in the quality management system. The
+quality management system is the system of record for supplier quality
+evidence requested during external regulatory audits.
 
 7. Revisions
-This policy is reviewed annually by the quality director.
+This supplier quality policy is reviewed annually by the quality director and
+the head of supplier management. Revisions are tracked in the quality
+management system change log.

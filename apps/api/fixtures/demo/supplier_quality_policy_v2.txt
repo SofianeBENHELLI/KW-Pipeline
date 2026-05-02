@@ -1,39 +1,48 @@
 Supplier Quality Policy
 Version 2.0 — Issued 2026-03-15
+Owner: Quality Director, Global Operations
 
 1. Purpose
-This policy defines the minimum quality requirements for materials and
-components supplied to the manufacturing line. Compliance is mandatory
-for every active supplier on the approved vendor list and is verified
-on a continuous basis through the supplier scorecard program.
+This policy defines the minimum supplier quality requirements for materials
+and components delivered to the manufacturing line. Compliance is mandatory
+for every active supplier on the approved vendor list and is verified on a
+continuous basis through the supplier scorecard program.
 
 2. Scope
-Applies to all direct-material suppliers. Indirect-services vendors are
-covered by a separate procurement policy and are out of scope here.
+This policy applies to all direct-material suppliers across the approved
+vendor list. Indirect-services vendors and logistics carriers are covered by
+a separate procurement policy and remain out of scope for supplier quality.
+Contract manufacturers are now explicitly in scope for inbound inspection.
 
-3. Inspection
-Every inbound lot is sampled per AQL 1.5 and recorded in the receiving
-log. Lots that fail inspection are quarantined within 8 hours and the
-supplier is notified within the same shift. Repeat failures within a
-rolling 90-day window trigger an automatic 100% inspection regime.
+3. Inbound Inspection
+Every inbound supplier lot is sampled per AQL 1.5 acceptance criteria and the
+result is recorded in the receiving inspection log. Lots that fail inbound
+inspection are quarantined within eight hours and the supplier is notified
+within the same shift. Repeat inspection failures within a rolling ninety-day
+window trigger an automatic one-hundred-percent inspection regime.
 
-4. Non-conformance
-A non-conformance report is opened for every quarantined lot. Suppliers
-have five business days to submit a containment plan and ten business
-days to submit a root-cause corrective action with effectiveness
-verification.
+4. Non-Conformance
+A non-conformance report is opened for every quarantined supplier lot.
+Suppliers have five business days to submit a containment plan and ten
+business days to submit a root-cause corrective action with effectiveness
+verification against the non-conformance report. The corrective action must
+be reviewed by the supplier quality engineer of record.
 
-5. Audits
-Tier-1 suppliers are audited twice a year, alternating between on-site
-and remote. Tier-2 suppliers are audited annually. Audit findings rated
-Major or Critical block further purchase orders until the corrective
-action has passed an effectiveness check.
+5. Supplier Audits
+Tier-1 suppliers are audited twice a year against this supplier quality
+policy, alternating between on-site and remote audit modes. Tier-2 suppliers
+are audited annually. Audit findings rated Major or Critical block further
+purchase orders to the supplier until the corrective action has passed an
+effectiveness check.
 
-6. Records
-All inspection, NCR, and audit records are retained for ten years in
-the quality management system. Records are exported nightly to the
-corporate archive for disaster recovery.
+6. Records and Retention
+All inbound inspection records, non-conformance reports, and supplier audit
+findings are retained for ten years in the quality management system.
+Records are exported nightly to the corporate archive for disaster recovery.
+The quality management system remains the system of record for supplier
+quality evidence requested during external regulatory audits.
 
 7. Revisions
-This policy is reviewed every six months by the quality director and
-the head of supply chain.
+This supplier quality policy is reviewed every six months by the quality
+director and the head of supply chain. Revisions are tracked in the quality
+management system change log alongside the previous policy version.

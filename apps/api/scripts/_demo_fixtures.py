@@ -44,17 +44,59 @@ def materialise_pdf(target: Path | None = None) -> Path:
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", size=12)
-    pdf.cell(w=0, h=8, text="Change Request CR-2026-0142", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(w=0, h=8, text="Submitted: 2026-04-22", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(4)
-    pdf.set_font("Helvetica", size=10)
-    body = (
-        "Replace fastener bracket P/N 4471-A with revised P/N 4471-B "
-        "across line 3. Affects approx. 240 assemblies in WIP. "
-        "Quality and operations have signed off. Effectivity: next "
-        "production batch following approval."
+    pdf.cell(
+        w=0,
+        h=8,
+        text="Engineering Change Request CR-2026-0142",
+        new_x="LMARGIN",
+        new_y="NEXT",
     )
-    pdf.multi_cell(w=0, h=5, text=body)
+    pdf.cell(
+        w=0, h=8, text="Submitted: 2026-04-22 by R. Devereaux", new_x="LMARGIN", new_y="NEXT"
+    )
+    pdf.cell(
+        w=0,
+        h=8,
+        text="Affected program: Line 3 fastener bracket assembly",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+    pdf.set_font("Helvetica", size=10)
+    paragraphs = [
+        "1. Change summary",
+        (
+            "Replace the legacy fastener bracket part number 4471-A with the "
+            "revised fastener bracket part number 4471-B across the Line 3 "
+            "production cell. The revised bracket geometry corrects the bolt-pattern "
+            "fit issue identified during the Q1 engineering build review."
+        ),
+        "2. Affected hardware",
+        (
+            "The bracket change affects approximately 240 fastener assemblies "
+            "currently in work-in-process on Line 3. Engineering has confirmed "
+            "that all downstream torque specifications remain unchanged for the "
+            "revised bracket part number."
+        ),
+        "3. Cross-functional approval",
+        (
+            "Engineering, manufacturing operations, and supplier quality have "
+            "signed off on the revised bracket part number. The supplier "
+            "quality engineer flagged that incoming bracket lots from the "
+            "supplier must continue to be sampled per the receiving inspection "
+            "AQL, consistent with the Supplier Quality Policy."
+        ),
+        "4. Effectivity",
+        (
+            "Effectivity is the next production batch on Line 3 following "
+            "engineering change board approval. Assemblies already in "
+            "work-in-process retain the legacy bracket; mixed-bracket "
+            "assemblies are not permitted in any single production batch."
+        ),
+    ]
+    for paragraph in paragraphs:
+        pdf.multi_cell(w=0, h=5, text=paragraph)
+        pdf.ln(1)
     pdf.output(str(out))
     return out
 
@@ -72,16 +114,40 @@ def materialise_docx(target: Path | None = None) -> Path:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
     doc = Document()
-    doc.add_heading("Weekly Quality Review — 2026-04-15", level=1)
-    doc.add_paragraph("Attendees: J. Pak (chair), M. Ortega, R. Devereaux, S. Cho.")
+    doc.add_heading("Weekly Quality Review Meeting — 2026-04-15", level=1)
     doc.add_paragraph(
-        "Open NCRs: 7 (down from 11 last week). Two Major findings "
-        "remain past the 10-day containment window and have been "
-        "escalated to the supplier business review."
+        "Meeting type: weekly quality review meeting, manufacturing operations track."
     )
     doc.add_paragraph(
-        "Action: tighten AQL on lot 4471-* shipments to 1.5 until the "
-        "supplier closes the bracket-fit corrective action."
+        "Attendees: J. Pak (chair, quality director), M. Ortega (manufacturing "
+        "operations), R. Devereaux (engineering), S. Cho (supplier quality)."
+    )
+    doc.add_paragraph(
+        "Agenda item 1 — Open non-conformance reports. The team reviewed seven "
+        "open non-conformance reports from supplier lots, down from eleven the "
+        "previous week. Two Major findings remain past the ten-day containment "
+        "window from the Supplier Quality Policy and have been escalated to the "
+        "supplier business review."
+    )
+    doc.add_paragraph(
+        "Agenda item 2 — Receiving inspection trend. Inbound inspection AQL "
+        "trend on lot 4471 series shipments continues to trend toward AQL 1.5; "
+        "the supplier quality engineer recommended tightening the receiving "
+        "inspection plan to AQL 1.5 ahead of the policy revision."
+    )
+    doc.add_paragraph(
+        "Agenda item 3 — Engineering change linkage. Engineering provided an "
+        "update on engineering change request CR-2026-0142, which retires the "
+        "legacy fastener bracket part number 4471-A in favour of the revised "
+        "fastener bracket part number 4471-B on Line 3. The change board is "
+        "expected to approve the bracket change next week."
+    )
+    doc.add_paragraph(
+        "Action items. Action 1: supplier quality to publish a revised "
+        "non-conformance report containment standard. Action 2: manufacturing "
+        "operations to confirm Line 3 readiness for the revised fastener "
+        "bracket part number. Action 3: quality director to circulate the "
+        "updated Supplier Quality Policy draft for review."
     )
     doc.save(str(out))
     return out
