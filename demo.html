@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KW-Pipeline — demo dashboard</title>
+    <style>
+      :root {
+        --ds-blue-900: #001E2E;
+        --ds-blue-700: #005686;
+        --ds-blue-500: #1F8FBF;
+        --ds-blue-100: #E5F2F8;
+        --ds-bg:      #FFFFFF;
+        --ds-shell:   #F4F6F8;
+        --ds-ink-100: #F2F5F8;
+        --ds-ink-300: #C9D2DA;
+        --ds-ink-500: #7A8893;
+        --ds-ink-700: #3C4A55;
+        --ds-ink-900: #0E1B26;
+        --ds-success: #1F7A4A;
+        --ds-success-soft: #E5F4EC;
+        --ds-danger:  #B3261E;
+        --ds-danger-soft: #F8E2E0;
+        --ds-radius: 4px;
+        --ds-radius-pill: 999px;
+        --ds-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --ds-font: "DassaultSystemes", "Open Sans", -apple-system, BlinkMacSystemFont,
+                   "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: var(--ds-font);
+        font-size: 14px;
+        color: var(--ds-ink-900);
+        background: var(--ds-shell);
+        line-height: 1.5;
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px 24px 64px;
+      }
+      header.brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--ds-ink-300);
+        margin-bottom: 24px;
+      }
+      .mark {
+        width: 28px; height: 28px;
+        border-radius: 4px;
+        background: linear-gradient(135deg, var(--ds-blue-500), var(--ds-blue-700));
+        position: relative;
+        flex: 0 0 auto;
+      }
+      .mark::after {
+        content: "";
+        position: absolute;
+        inset: 6px;
+        border: 1.5px solid #fff;
+        border-radius: 1px;
+        transform: rotate(45deg);
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .subtitle {
+        margin: 2px 0 0;
+        font-size: 12px;
+        color: var(--ds-ink-500);
+      }
+      section.card {
+        background: var(--ds-bg);
+        border: 1px solid var(--ds-ink-300);
+        border-radius: var(--ds-radius);
+        padding: 16px 20px;
+        margin-bottom: 16px;
+      }
+      .card h2 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--ds-ink-500);
+        margin: 0 0 12px;
+        font-weight: 700;
+      }
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .service {
+        display: flex;
+        flex-direction: column;
+        padding: 14px 16px;
+        border: 1px solid var(--ds-ink-300);
+        border-radius: var(--ds-radius);
+        background: #F8FAFB;
+        gap: 8px;
+      }
+      .service-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .dot {
+        width: 10px; height: 10px;
+        border-radius: var(--ds-radius-pill);
+        background: var(--ds-ink-500);
+        flex: 0 0 auto;
+      }
+      .dot.ok  { background: var(--ds-success); box-shadow: 0 0 0 3px rgba(31, 122, 74, 0.15); }
+      .dot.err { background: var(--ds-danger);  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.15); }
+      .service-title { font-weight: 700; color: var(--ds-ink-900); }
+      .service-state {
+        font-size: 12px; color: var(--ds-ink-700);
+        font-family: var(--ds-mono);
+      }
+      .service-state.err { color: var(--ds-danger); }
+      .service-url {
+        font-size: 11px;
+        font-family: var(--ds-mono);
+        color: var(--ds-ink-500);
+      }
+      a.btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: var(--ds-radius);
+        background: var(--ds-blue-700);
+        color: #fff;
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 600;
+        align-self: flex-start;
+      }
+      a.btn:hover { background: var(--ds-blue-900); }
+      a.btn--ghost {
+        background: transparent;
+        color: var(--ds-blue-700);
+        border: 1px solid var(--ds-ink-300);
+      }
+      a.btn--ghost:hover { background: var(--ds-ink-100); }
+      .links {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .link-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border: 1px solid var(--ds-ink-300);
+        border-radius: var(--ds-radius);
+        background: var(--ds-bg);
+        text-decoration: none;
+        color: var(--ds-ink-900);
+      }
+      .link-row:hover {
+        background: var(--ds-ink-100);
+        border-color: var(--ds-blue-500);
+      }
+      .link-name {
+        font-weight: 600;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .link-meta {
+        font-family: var(--ds-mono);
+        font-size: 11px;
+        color: var(--ds-ink-500);
+      }
+      .link-arrow { color: var(--ds-ink-500); font-weight: 600; }
+      pre.cmd {
+        font-family: var(--ds-mono);
+        font-size: 12px;
+        background: var(--ds-ink-900);
+        color: #E8EEF3;
+        padding: 10px 14px;
+        border-radius: var(--ds-radius);
+        margin: 0;
+        overflow: auto;
+        white-space: pre;
+        position: relative;
+      }
+      .cmd-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .cmd-label {
+        font-size: 12px;
+        color: var(--ds-ink-700);
+        font-weight: 600;
+      }
+      button.copy {
+        font: inherit;
+        font-size: 11px;
+        padding: 4px 10px;
+        border: 1px solid var(--ds-ink-300);
+        background: var(--ds-bg);
+        border-radius: var(--ds-radius);
+        cursor: pointer;
+        color: var(--ds-ink-700);
+      }
+      button.copy:hover { background: var(--ds-ink-100); }
+      button.copy.copied { color: var(--ds-success); border-color: var(--ds-success); }
+      .step {
+        display: grid;
+        grid-template-columns: 32px 1fr;
+        gap: 14px;
+        align-items: start;
+        margin-bottom: 16px;
+      }
+      .step:last-child { margin-bottom: 0; }
+      .step-num {
+        width: 28px; height: 28px;
+        border-radius: var(--ds-radius-pill);
+        background: var(--ds-blue-100);
+        color: var(--ds-blue-700);
+        font-weight: 700;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+      }
+      .step-body { min-width: 0; }
+      .step-title {
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .step-hint {
+        font-size: 12px;
+        color: var(--ds-ink-500);
+        margin-bottom: 8px;
+      }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      footer {
+        margin-top: 24px;
+        font-size: 11px;
+        color: var(--ds-ink-500);
+        text-align: center;
+      }
+      footer a { color: var(--ds-blue-700); text-decoration: none; }
+      @media (max-width: 720px) {
+        .status-grid, .links { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <h1>KW-Pipeline — demo dashboard</h1>
+          <p class="subtitle">Two-step demo · live status · all the URLs in one place</p>
+        </div>
+      </header>
+
+      <!-- ── Live status ─────────────────────────────────────────── -->
+      <section class="card">
+        <h2>Live status</h2>
+        <div class="status-grid">
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="be-dot"></span>
+              <span class="service-title">Backend</span>
+            </div>
+            <div class="service-state" id="be-state">Checking…</div>
+            <div class="service-url">http://127.0.0.1:8000</div>
+            <a class="btn btn--ghost" href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">Open API docs ↗</a>
+          </div>
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="fe-dot"></span>
+              <span class="service-title">Widget preview</span>
+            </div>
+            <div class="service-state" id="fe-state">Checking…</div>
+            <div class="service-url">http://127.0.0.1:5174</div>
+            <a class="btn" href="http://127.0.0.1:5174" target="_blank" rel="noopener">Open widget ↗</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Two-step launch ────────────────────────────────────── -->
+      <section class="card">
+        <h2>Two-step launch</h2>
+
+        <div class="step">
+          <span class="step-num">1</span>
+          <div class="step-body">
+            <div class="step-title">Start the backend</div>
+            <div class="step-hint">
+              Boots uvicorn on <code>:8000</code>. First run creates a Python venv and installs <code>apps/api[test]</code> (~30 s); subsequent runs are ~2 s.
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-label">Terminal</span>
+              <button class="copy" data-copy="./scripts/demo-backend.sh">Copy</button>
+            </div>
+            <pre class="cmd">./scripts/demo-backend.sh</pre>
+            <div class="row" style="margin-top:8px;">
+              <span class="cmd-label">…or in Finder</span>
+              <span class="link-meta">double-click <code>Demo Backend.command</code> at the repo root</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-num">2</span>
+          <div class="step-body">
+            <div class="step-title">Start the frontend</div>
+            <div class="step-hint">
+              Boots Vite on <code>:5174</code> mounting the real widget. First run runs <code>npm install</code> (~20 s); subsequent runs are ~1 s.
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-label">Terminal</span>
+              <button class="copy" data-copy="./scripts/demo-frontend.sh">Copy</button>
+            </div>
+            <pre class="cmd">./scripts/demo-frontend.sh</pre>
+            <div class="row" style="margin-top:8px;">
+              <span class="cmd-label">…or in Finder</span>
+              <span class="link-meta">double-click <code>Demo Frontend.command</code> at the repo root</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Backend endpoints ──────────────────────────────────── -->
+      <section class="card">
+        <h2>Backend endpoints (port 8000)</h2>
+        <div class="links">
+          <a class="link-row" href="http://127.0.0.1:8000/health" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Health</div>
+              <div class="link-meta">GET /health</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+          <a class="link-row" href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Swagger UI</div>
+              <div class="link-meta">/docs</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+          <a class="link-row" href="http://127.0.0.1:8000/redoc" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">ReDoc</div>
+              <div class="link-meta">/redoc</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+          <a class="link-row" href="http://127.0.0.1:8000/openapi.json" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">OpenAPI spec</div>
+              <div class="link-meta">/openapi.json</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+          <a class="link-row" href="http://127.0.0.1:8000/documents?limit=25" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Documents (latest 25)</div>
+              <div class="link-meta">GET /documents</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+          <a class="link-row" href="http://127.0.0.1:8000/knowledge/graph?limit=200" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Knowledge graph (page 1)</div>
+              <div class="link-meta">GET /knowledge/graph</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- ── Frontend ───────────────────────────────────────────── -->
+      <section class="card">
+        <h2>Frontend (port 5174)</h2>
+        <div class="links">
+          <a class="link-row" href="http://127.0.0.1:5174" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">3DX KnowledgeForge widget</div>
+              <div class="link-meta">apps/widget/src — fluid layout, resize the window to test reflow</div>
+            </div>
+            <span class="link-arrow">→</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- ── Resources ──────────────────────────────────────────── -->
+      <section class="card">
+        <h2>Resources</h2>
+        <div class="links">
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Repository</div>
+              <div class="link-meta">SofianeBENHELLI/KW-Pipeline</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/README.md" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">README</div>
+              <div class="link-meta">main</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/tree/main/docs/adr" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Architecture decisions (ADRs)</div>
+              <div class="link-meta">docs/adr</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/apps/widget/docs/widget-spec.md" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Widget spec</div>
+              <div class="link-meta">apps/widget/docs/widget-spec.md</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/apps/widget/docs/ui-rebuild-plan.md" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">UI rebuild plan</div>
+              <div class="link-meta">apps/widget/docs/ui-rebuild-plan.md</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/issues" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Issues</div>
+              <div class="link-meta">backlog & bugs</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+        </div>
+      </section>
+
+      <footer>
+        Open this page any time:
+        <code>open demo.html</code> from the repo root, or bookmark
+        <code>file:///Users/&lt;you&gt;/.../KW-Pipeline/demo.html</code>.
+      </footer>
+    </div>
+
+    <script>
+      // ── Live status pings ─────────────────────────────────────
+      const POLL_MS = 5000;
+
+      async function probe(url) {
+        try {
+          const t0 = performance.now();
+          const r = await fetch(url, { cache: "no-store" });
+          const ms = Math.round(performance.now() - t0);
+          if (!r.ok) return { ok: false, ms, msg: `${r.status} ${r.statusText}` };
+          return { ok: true, ms };
+        } catch (err) {
+          return { ok: false, msg: "unreachable" };
+        }
+      }
+
+      function paint(prefix, result) {
+        const dot = document.getElementById(prefix + "-dot");
+        const state = document.getElementById(prefix + "-state");
+        if (result.ok) {
+          dot.className = "dot ok";
+          state.className = "service-state";
+          state.textContent = `ok · ${result.ms} ms`;
+        } else {
+          dot.className = "dot err";
+          state.className = "service-state err";
+          state.textContent = result.msg || "unreachable";
+        }
+      }
+
+      async function tick() {
+        const [be, fe] = await Promise.all([
+          probe("http://127.0.0.1:8000/health"),
+          // The Vite dev server doesn't expose JSON; a 200 on the root
+          // is enough to confirm it's alive.
+          probe("http://127.0.0.1:5174/"),
+        ]);
+        paint("be", be);
+        paint("fe", fe);
+      }
+
+      tick();
+      setInterval(tick, POLL_MS);
+
+      // ── Copy buttons ─────────────────────────────────────────
+      for (const btn of document.querySelectorAll("button.copy")) {
+        btn.addEventListener("click", async () => {
+          const text = btn.dataset.copy;
+          try {
+            await navigator.clipboard.writeText(text);
+            const original = btn.textContent;
+            btn.textContent = "Copied ✓";
+            btn.classList.add("copied");
+            setTimeout(() => {
+              btn.textContent = original;
+              btn.classList.remove("copied");
+            }, 1500);
+          } catch {
+            // Fallback: select-all so user can ⌘-C.
+            const range = document.createRange();
+            range.selectNodeContents(btn.previousElementSibling);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
