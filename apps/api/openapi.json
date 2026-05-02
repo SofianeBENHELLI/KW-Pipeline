@@ -961,6 +961,10 @@
       "url": "https://github.com/SofianeBENHELLI/KW-Pipeline"
     },
     "description": "Auditable document-intelligence pipeline. Endpoints cover upload, hashing, duplicate detection, parsing, semantic-JSON generation, reviewer validate/reject, and an optional knowledge-graph projection (ADR-012). Every claim and edge carries provenance via `source_reference_id`. See `docs/architecture/document_intelligence_mvp.md` for the ingestion contract and `docs/architecture/api_contract.md` for the public response shapes.",
+    "license": {
+      "name": "Proprietary — all rights reserved",
+      "url": "https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/LICENSE"
+    },
     "title": "KW Pipeline Harvester API",
     "version": "0.1.0"
   },
