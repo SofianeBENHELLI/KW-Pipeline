@@ -17,6 +17,12 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.chunk_relations import (
+    ChunkRecord,
+    ChunkRelation,
+    ChunkRelationKind,
+    ChunkRelationService,
+)
 from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.graph_store import (
     GraphStore,
@@ -32,6 +38,10 @@ from app.services.knowledge.projector import KnowledgeProjector
 
 __all__ = [
     "AnthropicLLMClient",
+    "ChunkRecord",
+    "ChunkRelation",
+    "ChunkRelationKind",
+    "ChunkRelationService",
     "EntityExtractor",
     "FakeLLMClient",
     "GraphStore",
