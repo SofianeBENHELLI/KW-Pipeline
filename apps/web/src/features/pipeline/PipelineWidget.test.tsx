@@ -234,6 +234,126 @@ describe("PipelineWidget", () => {
   });
 });
 
+describe("PipelineWidget — metric counts", () => {
+  function makeDoc(id: string, status: ApiDocument["versions"][number]["status"]): ApiDocument {
+    return {
+      ...FIXTURE_DOCUMENT,
+      id,
+      original_filename: `${id}.txt`,
+      latest_version_id: `${id}-v1`,
+      versions: [
+        {
+          ...FIXTURE_DOCUMENT.versions[0],
+          id: `${id}-v1`,
+          document_id: id,
+          status,
+        },
+      ],
+    };
+  }
+
+  it("renders zeroed metrics with an empty document list", () => {
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    const summary = screen.getByLabelText(/Pipeline status summary/i);
+    // All three metric tiles read 0 — no documents in any state.
+    expect(summary.textContent ?? "").toMatch(/Review\s*0/);
+    expect(summary.textContent ?? "").toMatch(/Failed\s*0/);
+    expect(summary.textContent ?? "").toMatch(/Duplicate\s*0/);
+  });
+
+  it("counts NEEDS_REVIEW, FAILED, and DUPLICATE_DETECTED separately", () => {
+    const docs: ApiDocument[] = [
+      makeDoc("a", "NEEDS_REVIEW"),
+      makeDoc("b", "NEEDS_REVIEW"),
+      makeDoc("c", "FAILED"),
+      makeDoc("d", "DUPLICATE_DETECTED"),
+      makeDoc("e", "DUPLICATE_DETECTED"),
+      makeDoc("f", "DUPLICATE_DETECTED"),
+      // STORED and VALIDATED must not contribute to any of the three.
+      makeDoc("g", "STORED"),
+      makeDoc("h", "VALIDATED"),
+    ];
+    render(
+      <PipelineWidget
+        documents={docs}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    const summary = screen.getByLabelText(/Pipeline status summary/i);
+    expect(summary.textContent ?? "").toMatch(/Review\s*2/);
+    expect(summary.textContent ?? "").toMatch(/Failed\s*1/);
+    expect(summary.textContent ?? "").toMatch(/Duplicate\s*3/);
+  });
+});
+
+describe("PipelineWidget — document row selection", () => {
+  it("clicking a document row calls onSelectDocument with that id", () => {
+    const docB: ApiDocument = {
+      ...FIXTURE_DOCUMENT,
+      id: "doc-002",
+      original_filename: "second.txt",
+      latest_version_id: "ver-002",
+      versions: [
+        {
+          ...FIXTURE_DOCUMENT.versions[0],
+          id: "ver-002",
+          document_id: "doc-002",
+        },
+      ],
+    };
+    const onSelectDocument = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT, docB]}
+        selectedDocumentId="doc-001"
+        onSelectDocument={onSelectDocument}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /second\.txt/i }));
+    expect(onSelectDocument).toHaveBeenCalledWith("doc-002");
+  });
+
+  it("the selected row exposes aria-pressed=true and others aria-pressed=false", () => {
+    const docB: ApiDocument = {
+      ...FIXTURE_DOCUMENT,
+      id: "doc-002",
+      original_filename: "second.txt",
+      latest_version_id: "ver-002",
+      versions: [
+        {
+          ...FIXTURE_DOCUMENT.versions[0],
+          id: "ver-002",
+          document_id: "doc-002",
+        },
+      ],
+    };
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT, docB]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /second\.txt/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /test\.txt/i }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
 describe("PipelineWidget — duplicate marker in row", () => {
   it("shows a 'Duplicate' marker on document rows whose latest version is a duplicate", () => {
     const dupeDoc: ApiDocument = {
