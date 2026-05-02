@@ -1,0 +1,8 @@
+Customer Success Renewal Brief
+Customer: Northstar Retail Group
+Renewal owner: Customer Success
+
+Northstar expanded usage from pilot stores to the regional operations team.
+The renewal risk is medium because procurement requires updated data handling language.
+The executive sponsor requested a Markdown-ready summary with source lineage for the legal review packet.
+The success plan recommends validating the semantic extraction before sharing renewal materials.

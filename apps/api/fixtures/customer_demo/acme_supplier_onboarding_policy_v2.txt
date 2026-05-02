@@ -1,0 +1,9 @@
+Acme Supplier Onboarding Policy
+Owner: Procurement Operations
+Audience: vendor managers, supplier success leads, and finance reviewers
+
+Suppliers must complete security screening before receiving production data.
+Finance approval is required before onboarding suppliers with annual spend above 50000 USD.
+All supplier records must include an accountable business owner, renewal date, and data classification.
+Exceptions must be reviewed by Legal, Security, and Finance within three business days.
+Quarterly supplier attestations are mandatory for suppliers handling regulated customer data.
