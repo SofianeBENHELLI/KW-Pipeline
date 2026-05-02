@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import KnowledgeGraphView from "./KnowledgeGraphView";
+import KnowledgeGraphView, { filterProjection } from "./KnowledgeGraphView";
 import type { ApiKnowledgeGraphProjection } from "../../api/types";
 
 // Replace the real NVL renderer with a stub. jsdom can't render the canvas/SVG
@@ -232,5 +232,330 @@ describe("KnowledgeGraphView", () => {
     const stub = await screen.findByTestId("nvl-stub");
     expect(stub.getAttribute("data-node-count")).toBe("3");
     expect(stub.getAttribute("data-rel-count")).toBe("2");
+  });
+});
+
+// ─── Demo KG (Lane D) — v0.2 fixtures ────────────────────────────────────────
+
+const ENRICHED_PROJECTION: ApiKnowledgeGraphProjection = {
+  document_id: "doc-001",
+  version_id: "ver-001",
+  schema_version: "v0.2",
+  generated_at: "2026-05-02T00:00:00Z",
+  nodes: [
+    { id: "doc-001", kind: "document", label: "policy.txt", properties: {} },
+    { id: "ver-001", kind: "version", label: "v1", properties: {} },
+    {
+      id: "alpha",
+      kind: "chunk",
+      label: "Audit plan",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "alpha",
+        section_id: "alpha",
+        heading: "Audit plan",
+        text_preview: "Quality audit programmes evaluate supplier performance.",
+        char_count: 120,
+        keywords: ["audit", "supplier", "quality"],
+        topic_id: "topic-aaaa1111",
+        source_reference_count: 2,
+      },
+    },
+    {
+      id: "beta",
+      kind: "chunk",
+      label: "Audit findings",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "beta",
+        section_id: "beta",
+        heading: "Audit findings",
+        text_preview: "Audit findings categorise supplier performance gaps.",
+        char_count: 95,
+        keywords: ["audit", "supplier", "findings"],
+        topic_id: "topic-aaaa1111",
+        source_reference_count: 1,
+      },
+    },
+    {
+      id: "topic-aaaa1111",
+      kind: "topic",
+      label: "Audit · Supplier",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        topic_id: "topic-aaaa1111",
+        label: "Audit · Supplier",
+        keywords: ["audit", "supplier", "quality"],
+        summary: "Cluster of 2 related chunks discussing audit, supplier.",
+        chunk_count: 2,
+        chunk_ids: ["alpha", "beta"],
+      },
+    },
+    {
+      id: "entity-iso9001",
+      kind: "entity",
+      label: "ISO 9001",
+      properties: { subject: "ISO 9001", subject_type: "STANDARD" },
+    },
+  ],
+  edges: [
+    {
+      id: "ver-001->part_of->doc-001",
+      source_id: "ver-001",
+      target_id: "doc-001",
+      kind: "part_of",
+      properties: { document_id: "doc-001", version_id: "ver-001" },
+    },
+    {
+      id: "alpha->part_of->ver-001",
+      source_id: "alpha",
+      target_id: "ver-001",
+      kind: "part_of",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "alpha",
+      },
+    },
+    {
+      id: "beta->part_of->ver-001",
+      source_id: "beta",
+      target_id: "ver-001",
+      kind: "part_of",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "beta",
+      },
+    },
+    {
+      id: "ver-001:alpha->same_topic_as->beta",
+      source_id: "alpha",
+      target_id: "beta",
+      kind: "same_topic_as",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        source_chunk_id: "alpha",
+        target_chunk_id: "beta",
+        score: 0.42,
+        reason: "Share 3 topic keywords: audit, supplier, quality.",
+        shared_keywords: ["audit", "quality", "supplier"],
+      },
+    },
+    {
+      id: "ver-001:alpha->belongs_to->topic-aaaa1111",
+      source_id: "alpha",
+      target_id: "topic-aaaa1111",
+      kind: "belongs_to",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "alpha",
+        topic_id: "topic-aaaa1111",
+        score: 1.0,
+      },
+    },
+    {
+      id: "ver-001:beta->belongs_to->topic-aaaa1111",
+      source_id: "beta",
+      target_id: "topic-aaaa1111",
+      kind: "belongs_to",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        chunk_id: "beta",
+        topic_id: "topic-aaaa1111",
+        score: 1.0,
+      },
+    },
+    {
+      id: "ver-001:alpha->has_entity->entity-iso9001",
+      source_id: "alpha",
+      target_id: "entity-iso9001",
+      kind: "has_entity",
+      properties: {
+        document_id: "doc-001",
+        version_id: "ver-001",
+        section_id: "alpha",
+        predicate: "REFERENCES",
+        confidence: 0.92,
+        source_reference_id: "src-1",
+      },
+    },
+  ],
+};
+
+describe("filterProjection", () => {
+  it("returns the input unchanged for the All filter", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "all");
+    expect(result.nodes).toEqual(ENRICHED_PROJECTION.nodes);
+    expect(result.edges).toEqual(ENRICHED_PROJECTION.edges);
+  });
+
+  it("Chunks filter keeps only chunk and topic nodes", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "chunks");
+    const kinds = new Set(result.nodes.map((n) => n.kind));
+    expect(kinds).toEqual(new Set(["chunk", "topic"]));
+  });
+
+  it("Topics filter shows topic nodes plus their member chunks and belongs_to edges", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "topics");
+    expect(new Set(result.nodes.map((n) => n.id))).toEqual(
+      new Set(["topic-aaaa1111", "alpha", "beta"]),
+    );
+    expect(result.edges.every((e) => e.kind === "belongs_to")).toBe(true);
+    expect(result.edges).toHaveLength(2);
+  });
+
+  it("Relations filter shows chunks and only deterministic semantic edges", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "relations");
+    expect(new Set(result.nodes.map((n) => n.kind))).toEqual(new Set(["chunk"]));
+    expect(result.edges).toHaveLength(1);
+    expect(result.edges[0].kind).toBe("same_topic_as");
+  });
+
+  it("Entities filter shows only entity nodes and has_entity edges", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "entities");
+    expect(result.nodes.map((n) => n.kind)).toEqual(["entity"]);
+    // The has_entity edge has source=alpha (chunk), so it's filtered out
+    // because alpha is not in the entities-only kept set. This is the
+    // correct semantic — entity-only view should not show edges that
+    // reference filtered-out nodes.
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it("Source-backed filter keeps nodes/edges with a source-reference imprint", () => {
+    const result = filterProjection(ENRICHED_PROJECTION, "source-backed");
+    // alpha and beta both have source_reference_count > 0; chunks survive.
+    const ids = new Set(result.nodes.map((n) => n.id));
+    expect(ids.has("alpha")).toBe(true);
+    expect(ids.has("beta")).toBe(true);
+    expect(ids.has("doc-001")).toBe(false);
+    expect(ids.has("topic-aaaa1111")).toBe(false);
+  });
+
+  it("does not crash on an empty projection", () => {
+    const empty = { nodes: [], edges: [] };
+    expect(filterProjection(empty, "all")).toEqual(empty);
+    expect(filterProjection(empty, "chunks")).toEqual(empty);
+    expect(filterProjection(empty, "topics")).toEqual(empty);
+    expect(filterProjection(empty, "relations")).toEqual(empty);
+    expect(filterProjection(empty, "entities")).toEqual(empty);
+    expect(filterProjection(empty, "source-backed")).toEqual(empty);
+  });
+});
+
+describe("KnowledgeGraphView (Demo KG / Lane D)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockEnrichedFetch() {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(makeJsonResponse(ENRICHED_PROJECTION)),
+    );
+  }
+
+  it("renders chunk and topic nodes in the canvas (#149)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+
+    const stub = await screen.findByTestId("nvl-stub");
+    // 2 document/version + 2 chunks + 1 topic + 1 entity + 1 future = 7
+    expect(stub.getAttribute("data-node-count")).toBe(
+      String(ENRICHED_PROJECTION.nodes.length),
+    );
+    expect(stub.getAttribute("data-rel-count")).toBe(
+      String(ENRICHED_PROJECTION.edges.length),
+    );
+  });
+
+  it("filters down to chunks-only when the Chunks toggle is pressed (#150)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const chunksButton = screen.getByRole("button", { name: /^chunks$/i });
+    fireEvent.click(chunksButton);
+
+    const stub = await screen.findByTestId("nvl-stub");
+    // chunks + topic = 3 nodes; the only edge with both endpoints in
+    // that set is the chunk→chunk same_topic_as.
+    expect(stub.getAttribute("data-node-count")).toBe("3");
+    expect(chunksButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("filters to relations only when the Relations toggle is pressed (#150)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    fireEvent.click(screen.getByRole("button", { name: /^relations$/i }));
+
+    const stub = await screen.findByTestId("nvl-stub");
+    expect(stub.getAttribute("data-node-count")).toBe("2");
+    expect(stub.getAttribute("data-rel-count")).toBe("1");
+  });
+
+  it("shows chunk details when a chunk node is clicked in the inspector (#151)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const nodeList = screen.getByTestId("graph-inspector-nodes");
+    const chunkButton = within(nodeList).getByRole("button", { name: /audit plan/i });
+    fireEvent.click(chunkButton);
+
+    const detail = await screen.findByTestId("graph-detail-node");
+    expect(within(detail).getByText("Audit plan")).toBeInTheDocument();
+    expect(within(detail).getByText(/topic-aaaa1111/)).toBeInTheDocument();
+    expect(within(detail).getByText(/audit, supplier, quality/i)).toBeInTheDocument();
+  });
+
+  it("shows relation details when a same_topic_as edge is clicked (#151)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const edgeList = screen.getByTestId("graph-inspector-edges");
+    const relationButton = within(edgeList).getByRole("button", {
+      name: /alpha → beta/,
+    });
+    fireEvent.click(relationButton);
+
+    const detail = await screen.findByTestId("graph-detail-edge");
+    expect(within(detail).getByText(/same topic/i)).toBeInTheDocument();
+    expect(within(detail).getByText(/0\.420/)).toBeInTheDocument();
+    expect(within(detail).getByText(/Share 3 topic keywords/)).toBeInTheDocument();
+    expect(within(detail).getByText(/audit, quality, supplier/i)).toBeInTheDocument();
+  });
+
+  it("clears the selection when the selected node is filtered out (#150)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const nodeList = screen.getByTestId("graph-inspector-nodes");
+    fireEvent.click(within(nodeList).getByRole("button", { name: /audit plan/i }));
+    expect(screen.getByTestId("graph-detail-node")).toBeInTheDocument();
+
+    // Switch to Entities — alpha is filtered out, so the detail should
+    // fall back to the empty-state hint.
+    fireEvent.click(screen.getByRole("button", { name: /^entities$/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("graph-detail-node")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/click a node or edge above/i)).toBeInTheDocument();
   });
 });
