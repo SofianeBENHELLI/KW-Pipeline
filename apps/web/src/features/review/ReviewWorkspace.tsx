@@ -227,10 +227,16 @@ export function ReviewWorkspace({
         </article>
 
         {/* `refreshKey` is the coordination seam with the graph slice
-            (issue #133) — the sibling agent owns the receiving end and
-            uses the prop to refetch on every successful mutation. */}
-        {/* @ts-expect-error refreshKey prop will be typed by the graph slice */}
-        <KnowledgeGraphView documentId={documentId} refreshKey={lastMutationAt} />
+            (issue #133) — `<KnowledgeGraphView>` re-fetches the projection
+            whenever this prop changes, so successful mutations elsewhere
+            in the workspace propagate into the graph view. `documentStatus`
+            lets the panel pick the right empty-state copy
+            (pre-validation vs knowledge-layer-disabled). */}
+        <KnowledgeGraphView
+          documentId={documentId}
+          documentStatus={version?.status ?? null}
+          refreshKey={lastMutationAt}
+        />
       </div>
 
       <footer className="review-actions" aria-label="Review actions">
