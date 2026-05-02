@@ -12,6 +12,11 @@ needs for a one-paste local demo:
   PDF, DOCX) is accepted without the operator pre-configuring it.
   ``<docx-mime>`` is
   ``application/vnd.openxmlformats-officedocument.wordprocessingml.document``.
+* ``KW_KNOWLEDGE_LAYER_ENABLED=true`` — turn on the v0.2 KG projection
+  so validated documents materialise chunks, topics, and deterministic
+  semantic relations against the in-memory ``GraphStore``. No Neo4j
+  required for the live presenter path; setting ``KW_NEO4J_URI``
+  separately switches to the Neo4j-backed store.
 
 Each value is set via ``os.environ.setdefault`` so a caller who
 already exported one of these is *not* overridden — useful when
@@ -34,4 +39,5 @@ def main() -> None:
         "text/plain,application/pdf,"
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+    os.environ.setdefault("KW_KNOWLEDGE_LAYER_ENABLED", "true")
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

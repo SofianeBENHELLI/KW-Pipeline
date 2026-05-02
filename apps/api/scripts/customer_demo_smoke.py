@@ -56,6 +56,7 @@ def run_customer_demo(
     artifact_dir = Path(artifact_dir)
     _prepare_output_dirs(data_dir=data_dir, artifact_dir=artifact_dir, reset=reset)
     previous_allowlist = _ensure_demo_content_types()
+    previous_kg = _ensure_knowledge_layer_enabled()
 
     summary: dict[str, Any] = {
         "fixture_dir": str(fixture_dir),
@@ -74,6 +75,7 @@ def run_customer_demo(
         )
     finally:
         _restore_content_types(previous_allowlist)
+        _restore_env("KW_KNOWLEDGE_LAYER_ENABLED", previous_kg)
 
 
 def _run_demo_inside_client(
@@ -104,6 +106,27 @@ def _run_demo_inside_client(
             )
         )
         _emit(emit, f"Validated supplier policy v1: {supplier_v1['sha256']}")
+
+        # Hero document for the Demo KG (#147): repeats supplier /
+        # ISO 9001 / audit / corrective-action / renewal-risk concepts
+        # across enough lines to produce visible chunks, topics, and
+        # chunk-to-chunk semantic edges.
+        hero = _upload_fixture(
+            client=client,
+            fixture_path=fixture_dir / "acme_quality_program_handbook.txt",
+            filename="acme_quality_program_handbook.txt",
+            content_type=TEXT_CONTENT_TYPE,
+        )
+        summary["processed_versions"].append(
+            _extract_generate_preview_and_validate(
+                client=client,
+                version=hero,
+                artifact_dir=artifact_dir,
+                key="quality_program_handbook",
+                reviewer_note="Validated quality program handbook for KG demo.",
+            )
+        )
+        _emit(emit, f"Validated quality program handbook: {hero['sha256']}")
 
         supplier_v2 = _upload_fixture(
             client=client,
@@ -194,6 +217,11 @@ def _run_demo_inside_client(
         summary["catalog_document_count"] = len(catalog)
         summary["catalog_artifact"] = str(artifact_dir / "catalog.json")
 
+    # Aggregate graph stats across every validated version so a presenter
+    # can read ``run_summary.json`` and see "13 chunks, 3 topics, 24
+    # relations" without opening individual artifacts.
+    summary["graph"] = _aggregate_graph_stats(summary["processed_versions"])
+
     _write_json(artifact_dir / "run_summary.json", summary)
     _emit(emit, f"Wrote demo artifacts to {artifact_dir}")
     return summary
@@ -256,6 +284,16 @@ def _extract_generate_preview_and_validate(
     if reviewed_version["status"] != "VALIDATED":
         raise AssertionError(f"Expected VALIDATED status, got {reviewed_version['status']}.")
 
+    # Demo KG (#145): export the graph projection alongside the
+    # extraction / semantic / Markdown artifacts so reviewers can
+    # eyeball chunks/topics/relations without spinning up the UI.
+    graph = _expect(
+        client.get(f"/documents/{document_id}/graph"),
+        f"graph {version['filename']}",
+    )
+    _write_json(artifact_dir / "graph" / f"{key}.json", graph)
+    graph_stats = _summarise_graph(graph)
+
     return {
         "key": key,
         "document_id": document_id,
@@ -269,6 +307,48 @@ def _extract_generate_preview_and_validate(
         "review_status": reviewed_version["status"],
         "semantic_validation_status": reviewed_semantic["validation_status"],
         "markdown_artifact": str(markdown_path),
+        "graph_artifact": str(artifact_dir / "graph" / f"{key}.json"),
+        "graph_stats": graph_stats,
+    }
+
+
+# Edge kinds that count as deterministic chunk-to-chunk semantic
+# relations. Mirrors lane B's relation service output. Kept module-
+# local to avoid a cross-package import in the script harness.
+_SEMANTIC_RELATION_KINDS: frozenset[str] = frozenset(
+    {"related_to", "shares_keyword", "same_topic_as"}
+)
+
+
+def _aggregate_graph_stats(processed: list[dict[str, Any]]) -> dict[str, int]:
+    """Sum per-version graph stats into a run-level snapshot."""
+    keys = ("node_count", "edge_count", "chunk_count", "topic_count", "relation_count")
+    totals = dict.fromkeys(keys, 0)
+    for entry in processed:
+        stats = entry.get("graph_stats") or {}
+        for key in keys:
+            totals[key] += int(stats.get(key, 0))
+    return totals
+
+
+def _summarise_graph(graph: dict[str, Any]) -> dict[str, int]:
+    """Count node kinds and relation edges for ``run_summary.json``.
+
+    Lane C's #146 smoke assertions read these counters; keep the keys
+    stable so a presenter can grep for ``"chunk_count": 0`` and
+    immediately spot a missing projection stage.
+    """
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    chunk_count = sum(1 for n in nodes if n.get("kind") == "chunk")
+    topic_count = sum(1 for n in nodes if n.get("kind") == "topic")
+    relation_count = sum(1 for e in edges if e.get("kind") in _SEMANTIC_RELATION_KINDS)
+    return {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "chunk_count": chunk_count,
+        "topic_count": topic_count,
+        "relation_count": relation_count,
     }
 
 
@@ -391,6 +471,27 @@ def _restore_content_types(previous: str | None) -> None:
         os.environ.pop("ALLOWED_CONTENT_TYPES", None)
     else:
         os.environ["ALLOWED_CONTENT_TYPES"] = previous
+
+
+def _ensure_knowledge_layer_enabled() -> str | None:
+    """Turn on the v0.2 KG projection for the smoke run.
+
+    The runner ships a knowledge-graph demo path (#145), so chunks /
+    topics / relations must be projected even when the host process
+    runs with the layer disabled by default. Same caller-pair pattern
+    as :func:`_ensure_demo_content_types` so we don't leak into
+    sibling tests.
+    """
+    previous = os.environ.get("KW_KNOWLEDGE_LAYER_ENABLED")
+    os.environ["KW_KNOWLEDGE_LAYER_ENABLED"] = "true"
+    return previous
+
+
+def _restore_env(name: str, previous: str | None) -> None:
+    if previous is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous
 
 
 def _prepare_output_dirs(*, data_dir: Path, artifact_dir: Path, reset: bool) -> None:

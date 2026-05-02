@@ -141,10 +141,12 @@ def test_kw_demo_main_sets_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("KW_PERSISTENT", "__sentinel__")
     monkeypatch.setenv("KW_CORS_ALLOWED_ORIGINS", "__sentinel__")
     monkeypatch.setenv("KW_ALLOWED_CONTENT_TYPES", "__sentinel__")
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "__sentinel__")
     # …then drop them so ``setdefault`` actually fires inside ``main``.
     del os.environ["KW_PERSISTENT"]
     del os.environ["KW_CORS_ALLOWED_ORIGINS"]
     del os.environ["KW_ALLOWED_CONTENT_TYPES"]
+    del os.environ["KW_KNOWLEDGE_LAYER_ENABLED"]
 
     runs: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
@@ -162,6 +164,7 @@ def test_kw_demo_main_sets_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None
     assert "application/pdf" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
     assert "wordprocessingml.document" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
     assert "text/plain" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
+    assert os.environ["KW_KNOWLEDGE_LAYER_ENABLED"] == "true"
     assert len(runs) == 1
     args, kwargs = runs[0]
     assert args == ("app.main:app",)
@@ -183,6 +186,7 @@ def test_kw_demo_main_does_not_override_preset_env(
         "KW_ALLOWED_CONTENT_TYPES",
         "text/plain",
     )
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "false")
 
     import os
 
@@ -197,3 +201,4 @@ def test_kw_demo_main_does_not_override_preset_env(
     assert os.environ["KW_PERSISTENT"] == "false"
     assert os.environ["KW_CORS_ALLOWED_ORIGINS"] == "https://demo.example.com"
     assert os.environ["KW_ALLOWED_CONTENT_TYPES"] == "text/plain"
+    assert os.environ["KW_KNOWLEDGE_LAYER_ENABLED"] == "false"
