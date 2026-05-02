@@ -17,6 +17,10 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.chunk_relation_service import (
+    ChunkRelationConfig,
+    ChunkRelationService,
+)
 from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.graph_store import (
     GraphStore,
@@ -29,9 +33,16 @@ from app.services.knowledge.llm_client import (
     LLMClient,
 )
 from app.services.knowledge.projector import KnowledgeProjector
+from app.services.knowledge.topic_clustering_service import (
+    TopicClusteringConfig,
+    TopicClusteringResult,
+    TopicClusteringService,
+)
 
 __all__ = [
     "AnthropicLLMClient",
+    "ChunkRelationConfig",
+    "ChunkRelationService",
     "EntityExtractor",
     "FakeLLMClient",
     "GraphStore",
@@ -39,4 +50,7 @@ __all__ = [
     "KnowledgeProjector",
     "LLMClient",
     "Neo4jGraphStore",
+    "TopicClusteringConfig",
+    "TopicClusteringResult",
+    "TopicClusteringService",
 ]
