@@ -63,7 +63,12 @@ def _make_semantic(
     )
 
 
-def test_project_writes_document_version_section_nodes_and_part_of_edges():
+def test_project_writes_document_version_chunk_nodes_and_part_of_edges():
+    """v0.2 baseline: Document, Version, Chunk nodes + PART_OF skeleton.
+
+    Sections-as-nodes were dropped in #144 — chunks (1:1 with
+    ``SemanticSection`` today) take their place.
+    """
     store: GraphStore = cast(GraphStore, InMemoryGraphStore())
     projector = KnowledgeProjector(graph_store=store)
 
@@ -83,18 +88,17 @@ def test_project_writes_document_version_section_nodes_and_part_of_edges():
     kinds = {(n.kind, n.id) for n in proj.nodes}
     assert ("document", document.id) in kinds
     assert ("version", version.id) in kinds
-    assert ("section", "s1") in kinds
-    assert ("section", "s2") in kinds
+    assert ("chunk", "s1") in kinds
+    assert ("chunk", "s2") in kinds
+    assert all(n.kind != "section" for n in proj.nodes)
 
-    # Three PART_OF edges: each section → version, version → document.
-    edge_pairs = {(e.source_id, e.target_id) for e in proj.edges}
-    assert edge_pairs == {
+    # Skeleton PART_OF edges: each chunk → version, version → document.
+    part_of_pairs = {(e.source_id, e.target_id) for e in proj.edges if e.kind == "part_of"}
+    assert part_of_pairs == {
         (version.id, document.id),
         ("s1", version.id),
         ("s2", version.id),
     }
-    for edge in proj.edges:
-        assert edge.kind == "part_of"
 
 
 def test_project_is_idempotent():
@@ -112,14 +116,16 @@ def test_project_is_idempotent():
     projector.project(document=document, version=version, semantic=semantic)
 
     page = store.find_subgraph(limit=20)
-    # 1 document + 1 version + 1 section = 3 nodes; no duplicates.
+    # 1 document + 1 version + 1 chunk = 3 nodes; no duplicates.
     assert len(page.nodes) == 3
+    # 1 PART_OF (version → document) + 1 PART_OF (chunk → version).
+    # Single chunk → no chunk-relation edges, no topic.
     assert len(page.edges) == 2
 
 
-def test_project_removes_orphan_section_on_rename():
+def test_project_removes_orphan_chunk_on_rename():
     """A version that drops a section between projections should not
-    leave the old section node behind."""
+    leave the old chunk node behind."""
     store = InMemoryGraphStore()
     projector = KnowledgeProjector(graph_store=store)
 
@@ -144,8 +150,8 @@ def test_project_removes_orphan_section_on_rename():
     projector.project(document=document, version=version, semantic=second)
 
     proj = store.find_subgraph_for_document(document.id)
-    section_ids = {n.id for n in proj.nodes if n.kind == "section"}
-    assert section_ids == {"s1"}, "Old section s2 must be deleted on re-projection"
+    chunk_ids = {n.id for n in proj.nodes if n.kind == "chunk"}
+    assert chunk_ids == {"s1"}, "Old chunk s2 must be deleted on re-projection"
 
 
 def test_project_rejects_mismatched_semantic_doc():
@@ -171,6 +177,112 @@ def test_in_memory_graph_store_implements_protocol():
     can use ``isinstance`` to assert conformance in tests."""
     store = InMemoryGraphStore()
     assert isinstance(store, GraphStore)
+
+
+def test_v0_2_projection_emits_chunks_topics_and_semantic_edges():
+    """End-to-end v0.2 contract (#144): a multi-section document with
+    overlapping content produces chunks, a topic, ``belongs_to``
+    membership edges, and chunk-to-chunk semantic edges. No section
+    nodes, no LLM dependency.
+    """
+    store: GraphStore = cast(GraphStore, InMemoryGraphStore())
+    projector = KnowledgeProjector(graph_store=store)
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(
+                id="alpha",
+                heading="Audit Plan",
+                text=(
+                    "Quality audit programmes evaluate supplier "
+                    "performance. The audit team reviews supplier "
+                    "records and supplier deliverables every quarter."
+                ),
+            ),
+            SemanticSection(
+                id="beta",
+                heading="Audit Findings",
+                text=(
+                    "Audit findings categorise supplier performance "
+                    "gaps. Each supplier programme tracks supplier "
+                    "corrective actions to closure."
+                ),
+            ),
+            SemanticSection(
+                id="gamma",
+                heading="Audit Closure",
+                text=(
+                    "Audit closure requires supplier corrective actions "
+                    "to be approved by the audit team."
+                ),
+            ),
+        ],
+    )
+
+    projector.project(document=document, version=version, semantic=semantic)
+    proj = store.find_subgraph_for_document(document.id)
+
+    kinds_by_id = {n.id: n.kind for n in proj.nodes}
+    assert kinds_by_id[document.id] == "document"
+    assert kinds_by_id[version.id] == "version"
+    assert kinds_by_id["alpha"] == "chunk"
+    assert kinds_by_id["beta"] == "chunk"
+    assert kinds_by_id["gamma"] == "chunk"
+
+    topic_nodes = [n for n in proj.nodes if n.kind == "topic"]
+    assert len(topic_nodes) == 1
+    topic = topic_nodes[0]
+    assert topic.id.startswith("topic-")
+    assert sorted(topic.properties["chunk_ids"]) == ["alpha", "beta", "gamma"]
+
+    edge_kinds = {e.kind for e in proj.edges}
+    assert "part_of" in edge_kinds
+    assert "belongs_to" in edge_kinds
+    # At least one chunk-to-chunk semantic edge (these are heavily
+    # overlapping audit paragraphs — the relation service produces
+    # ``same_topic_as`` edges between them).
+    assert edge_kinds & {"related_to", "shares_keyword", "same_topic_as"}
+
+    # Every belongs_to edge points from a chunk to the topic node.
+    membership_edges = [e for e in proj.edges if e.kind == "belongs_to"]
+    assert {e.source_id for e in membership_edges} == {"alpha", "beta", "gamma"}
+    assert {e.target_id for e in membership_edges} == {topic.id}
+
+    # Every chunk-relation edge carries the audit trail required by
+    # lane C's smoke contract (#146).
+    for edge in proj.edges:
+        if edge.kind in {"related_to", "shares_keyword", "same_topic_as"}:
+            assert edge.properties["reason"]
+            assert edge.properties["shared_keywords"]
+            assert 0.0 <= float(edge.properties["score"]) <= 1.0
+
+
+def test_v0_2_projection_works_without_anthropic_api_key(monkeypatch):
+    """Acceptance criterion: graph works after validation without
+    ``ANTHROPIC_API_KEY``. The deterministic path used by #144 has no
+    LLM dependency, so we just delete the env var and re-run.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    store: GraphStore = cast(GraphStore, InMemoryGraphStore())
+    projector = KnowledgeProjector(graph_store=store)
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="hello world"),
+            SemanticSection(id="s2", heading="B", text="goodbye world"),
+        ],
+    )
+
+    # Should not raise.
+    projector.project(document=document, version=version, semantic=semantic)
+    proj = store.find_subgraph_for_document(document.id)
+    assert any(n.kind == "chunk" for n in proj.nodes)
 
 
 def test_graph_node_and_edge_round_trip_through_store():

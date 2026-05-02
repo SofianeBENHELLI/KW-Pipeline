@@ -221,5 +221,5 @@ def test_disabled_extractor_preserves_phase_1a_behaviour():
     graph = client.get(f"/documents/{v['document_id']}/graph").json()
     kinds = {n["kind"] for n in graph["nodes"]}
     assert "entity" not in kinds
-    # Phase 1a nodes are still present.
-    assert {"document", "version", "section"} <= kinds
+    # v0.2 baseline nodes are still present (chunks replaced sections in #144).
+    assert {"document", "version", "chunk"} <= kinds
