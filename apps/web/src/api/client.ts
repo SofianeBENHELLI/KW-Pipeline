@@ -111,10 +111,14 @@ export async function listDocuments(
  * GET /documents/{document_id}
  * Returns a single document with all its versions.
  */
-export async function getDocument(documentId: string): Promise<ApiDocument> {
+export async function getDocument(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiDocument> {
   return unwrap(
     await http.GET("/documents/{document_id}", {
       params: { path: { document_id: documentId } },
+      signal: options.signal,
     }),
   );
 }
@@ -174,10 +178,12 @@ export function getVersion(
 export async function extractVersion(
   documentId: string,
   versionId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiRawExtraction> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/extract", {
       params: { path: { document_id: documentId, version_id: versionId } },
+      signal: options.signal,
     }),
   );
 }
@@ -189,10 +195,12 @@ export async function extractVersion(
 export async function getExtraction(
   documentId: string,
   versionId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiRawExtraction> {
   return unwrap(
     await http.GET("/documents/{document_id}/versions/{version_id}/extraction", {
       params: { path: { document_id: documentId, version_id: versionId } },
+      signal: options.signal,
     }),
   );
 }
@@ -206,10 +214,12 @@ export async function getExtraction(
 export async function generateSemantic(
   documentId: string,
   versionId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiSemanticDocument> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/semantic", {
       params: { path: { document_id: documentId, version_id: versionId } },
+      signal: options.signal,
     }),
   );
 }
@@ -221,10 +231,12 @@ export async function generateSemantic(
 export async function getSemantic(
   documentId: string,
   versionId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiSemanticDocument> {
   return unwrap(
     await http.GET("/documents/{document_id}/versions/{version_id}/semantic", {
       params: { path: { document_id: documentId, version_id: versionId } },
+      signal: options.signal,
     }),
   );
 }
@@ -259,11 +271,13 @@ export async function validateVersion(
   documentId: string,
   versionId: string,
   reviewerNote?: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiSemanticDocument> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/validate", {
       params: { path: { document_id: documentId, version_id: versionId } },
       body: { reviewer_note: reviewerNote ?? null },
+      signal: options.signal,
     }),
   );
 }
@@ -275,11 +289,13 @@ export async function rejectVersion(
   documentId: string,
   versionId: string,
   reviewerNote?: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiSemanticDocument> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/reject", {
       params: { path: { document_id: documentId, version_id: versionId } },
       body: { reviewer_note: reviewerNote ?? null },
+      signal: options.signal,
     }),
   );
 }
