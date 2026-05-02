@@ -3,16 +3,43 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeGraphView from "./KnowledgeGraphView";
 import type { ApiKnowledgeGraphProjection } from "../../api/types";
+import { MOCK_V0_2_PROJECTION } from "./__mocks__/v0_2_payload";
 
 // Replace the real NVL renderer with a stub. jsdom can't render the canvas/SVG
 // the real component draws into, so we assert against this marker instead and
 // keep the test fast/hermetic.
+//
+// The stub also renders the node captions / edge captions in inert
+// ``data-*`` attributes so v0.2 tests can assert that specific node
+// labels (``Chunk 1``, ``Eligibility & income``, …) and edge captions
+// (``has chunk``, ``belongs to``, ``shares keyword``) made it through
+// the adapter. Real NVL rendering still happens in the browser.
+interface NvlStubNode {
+  id: string;
+  captions: { value: string }[];
+  color: string;
+}
+interface NvlStubRel {
+  id: string;
+  captions: { value: string }[];
+  color: string;
+}
+
 vi.mock("@neo4j-nvl/react", () => ({
-  InteractiveNvlWrapper: (props: { nodes: unknown[]; rels: unknown[] }) => (
+  InteractiveNvlWrapper: (props: {
+    nodes: NvlStubNode[];
+    rels: NvlStubRel[];
+  }) => (
     <div
       data-testid="nvl-stub"
       data-node-count={props.nodes.length}
       data-rel-count={props.rels.length}
+      data-node-captions={props.nodes
+        .map((n) => n.captions.map((c) => c.value).join("|"))
+        .join(",")}
+      data-rel-captions={props.rels
+        .map((r) => r.captions.map((c) => c.value).join("|"))
+        .join(",")}
     />
   ),
 }));
@@ -232,5 +259,175 @@ describe("KnowledgeGraphView", () => {
     const stub = await screen.findByTestId("nvl-stub");
     expect(stub.getAttribute("data-node-count")).toBe("3");
     expect(stub.getAttribute("data-rel-count")).toBe("2");
+  });
+});
+
+// ─── v0.2: chunk / topic rendering via the mock data path ───────────────────
+
+describe("KnowledgeGraphView — v0.2 chunk/topic rendering", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders chunks and topics from the mock projection with the right captions", () => {
+    // Mock data path skips fetch entirely — guard against an
+    // accidental network call regressing into the live path.
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("fetch should not be called when mockData is provided");
+    });
+
+    render(
+      <KnowledgeGraphView documentId="doc-001" mockData={MOCK_V0_2_PROJECTION} />,
+    );
+
+    const stub = screen.getByTestId("nvl-stub");
+
+    // 1 doc + 1 ver + 1 sec + 4 chunks + 2 topics = 9 nodes.
+    // 6 structural + 4 belongs_to + 3 semantic = 13 edges.
+    expect(stub.getAttribute("data-node-count")).toBe("9");
+    expect(stub.getAttribute("data-rel-count")).toBe("13");
+
+    const captions = stub.getAttribute("data-node-captions") ?? "";
+    // Chunk and topic captions made it through the adapter — these are
+    // the user-visible node labels in the canvas.
+    expect(captions).toContain("Chunk 1");
+    expect(captions).toContain("Chunk 4");
+    expect(captions).toContain("Eligibility & income");
+    expect(captions).toContain("Application process");
+  });
+
+  it("renders belongs_to and shares_keyword edges with their captions", () => {
+    render(
+      <KnowledgeGraphView documentId="doc-001" mockData={MOCK_V0_2_PROJECTION} />,
+    );
+
+    const stub = screen.getByTestId("nvl-stub");
+    const relCaptions = stub.getAttribute("data-rel-captions") ?? "";
+
+    // belongs_to (chunk → topic) is rendered.
+    expect(relCaptions).toContain("belongs to");
+    // shares_keyword (chunk ↔ chunk via shared keywords) is rendered.
+    expect(relCaptions).toContain("shares keyword");
+    // has_chunk structural edges are rendered.
+    expect(relCaptions).toContain("has chunk");
+    // same_topic_as semantic edge is rendered.
+    expect(relCaptions).toContain("same topic");
+  });
+
+  it("legend reflects all six v0.2 node kinds", () => {
+    render(
+      <KnowledgeGraphView documentId="doc-001" mockData={MOCK_V0_2_PROJECTION} />,
+    );
+
+    const legend = screen.getByLabelText(/Node kind legend/i);
+    // Six kinds — every entry must be present so the legend stays
+    // exhaustive against ``GraphNodeKindV02``.
+    expect(legend).toHaveTextContent(/Document/);
+    expect(legend).toHaveTextContent(/Version/);
+    expect(legend).toHaveTextContent(/Section/);
+    expect(legend).toHaveTextContent(/Chunk/);
+    expect(legend).toHaveTextContent(/Topic/);
+    expect(legend).toHaveTextContent(/Entity/);
+  });
+
+  it("does not call fetch when mockData is provided", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      return Promise.reject(new Error("should not be called"));
+    });
+
+    render(
+      <KnowledgeGraphView documentId="doc-001" mockData={MOCK_V0_2_PROJECTION} />,
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // And the canvas (not the empty-state) is what's on screen.
+    expect(screen.getByTestId("knowledge-graph-canvas")).toBeInTheDocument();
+  });
+
+  it("clears the panel when documentId becomes null even with mockData set", () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("fetch should not be called");
+    });
+
+    render(
+      <KnowledgeGraphView documentId={null} mockData={MOCK_V0_2_PROJECTION} />,
+    );
+
+    expect(
+      screen.getByText(/Select a document to view its knowledge graph\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("nvl-stub")).not.toBeInTheDocument();
+  });
+});
+
+// ─── v0.2: typed property helpers ───────────────────────────────────────────
+
+describe("graph types helpers", () => {
+  it("asChunkNodeProperties returns typed view for chunk nodes only", async () => {
+    const mod = await import("./types");
+    const chunk = MOCK_V0_2_PROJECTION.nodes.find((n) => n.kind === "chunk");
+    const document = MOCK_V0_2_PROJECTION.nodes.find(
+      (n) => n.kind === "document",
+    );
+    expect(chunk).toBeDefined();
+    expect(document).toBeDefined();
+
+    // Cast through generated wire types — helpers accept the union
+    // ``AnyGraphNode`` and discriminate by ``kind`` at runtime.
+    const chunkProps = mod.asChunkNodeProperties(chunk!);
+    expect(chunkProps).toBeDefined();
+    expect(chunkProps?.index).toBe(0);
+    expect(chunkProps?.token_count).toBe(142);
+
+    expect(mod.asChunkNodeProperties(document!)).toBeUndefined();
+  });
+
+  it("asTopicNodeProperties returns typed view for topic nodes only", async () => {
+    const mod = await import("./types");
+    const topic = MOCK_V0_2_PROJECTION.nodes.find((n) => n.kind === "topic");
+    const chunk = MOCK_V0_2_PROJECTION.nodes.find((n) => n.kind === "chunk");
+    expect(topic).toBeDefined();
+
+    const props = mod.asTopicNodeProperties(topic!);
+    expect(props).toBeDefined();
+    expect(props?.size).toBe(2);
+    expect(props?.keywords).toContain("eligibility");
+
+    expect(mod.asTopicNodeProperties(chunk!)).toBeUndefined();
+  });
+
+  it("asChunkRelationEdgeProperties accepts the three semantic edge kinds", async () => {
+    const mod = await import("./types");
+    const sharesKeyword = MOCK_V0_2_PROJECTION.edges.find(
+      (e) => e.kind === "shares_keyword",
+    );
+    const belongsTo = MOCK_V0_2_PROJECTION.edges.find(
+      (e) => e.kind === "belongs_to",
+    );
+    expect(sharesKeyword).toBeDefined();
+
+    const props = mod.asChunkRelationEdgeProperties(sharesKeyword!);
+    expect(props).toBeDefined();
+    expect(props?.weight).toBe(0.5);
+    expect(props?.shared_keywords).toContain("eligibility");
+
+    // belongs_to is NOT a chunk-relation edge — it's a topic-membership edge.
+    expect(mod.asChunkRelationEdgeProperties(belongsTo!)).toBeUndefined();
+    expect(mod.asTopicMembershipEdgeProperties(belongsTo!)).toBeDefined();
+  });
+
+  it("asStructuralEdgeProperties accepts part_of / has_version / has_chunk only", async () => {
+    const mod = await import("./types");
+    const hasChunk = MOCK_V0_2_PROJECTION.edges.find(
+      (e) => e.kind === "has_chunk",
+    );
+    const sharesKeyword = MOCK_V0_2_PROJECTION.edges.find(
+      (e) => e.kind === "shares_keyword",
+    );
+    expect(hasChunk).toBeDefined();
+    expect(sharesKeyword).toBeDefined();
+
+    expect(mod.asStructuralEdgeProperties(hasChunk!)).toBeDefined();
+    expect(mod.asStructuralEdgeProperties(sharesKeyword!)).toBeUndefined();
   });
 });

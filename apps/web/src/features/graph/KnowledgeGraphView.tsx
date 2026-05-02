@@ -24,38 +24,90 @@
  * Refresh seam: `refreshKey` is bumped by the parent after a mutation
  * (validate, edit, …) lands. Changes to it re-issue the fetch; an in-flight
  * request from a previous `refreshKey` is dropped via the cancel flag.
+ *
+ * v0.2 schema: this view accepts both v0.1 and v0.2 payloads. The
+ * widened ``GraphNodeKindV02`` / ``GraphEdgeKindV02`` enums (see
+ * ``./types.ts``) drive the legend, color map, and edge styling. New
+ * v0.2 kinds (``chunk``, ``topic``, ``has_chunk``, ``belongs_to``,
+ * ``related_to``, ``shares_keyword``, ``same_topic_as``,
+ * ``has_version``) render with placeholder colors / strokes — refining
+ * the visual treatment is part of #150 and #151.
+ *
+ * Mock seam: until #144 plumbs chunks/topics through the live API,
+ * callers can pass ``mockData`` to render the demo fixture without
+ * hitting the network. The live data flow is unchanged when the prop
+ * is absent.
  */
 import { useEffect, useMemo, useState } from "react";
 import { InteractiveNvlWrapper } from "@neo4j-nvl/react";
 
 import { ApiError, getDocumentGraph } from "../../api/client";
 import type {
-  ApiGraphEdge,
-  ApiGraphNode,
   ApiKnowledgeGraphProjection,
   DocumentVersionStatus,
 } from "../../api/types";
+import type {
+  GraphEdgeKindV02,
+  GraphEdgeV02,
+  GraphNodeKindV02,
+  GraphNodeV02,
+  KnowledgeGraphProjectionV02,
+} from "./types";
+import { asGraphEdgeV02, asGraphNodeV02 } from "./types";
 
-// ─── Color palette (mirrors the kinds enum on GraphNode) ─────────────────────
+// ─── Color palette ──────────────────────────────────────────────────────────
 //
-// Keep these in sync with `KnowledgeGraphProjection` from the backend. The
-// hex values pull from the existing palette in styles.css so the legend
-// fits the rest of the workspace visually.
-const NODE_KIND_COLORS: Record<ApiGraphNode["kind"], string> = {
-  document: "#1867c9",  // --action
-  version: "#0f4f9e",   // --action-strong
-  section: "#147a45",   // --success
-  entity: "#9a6400",    // --warning
+// Mirrors all six v0.2 ``GraphNodeKindV02`` values. The first four hex
+// values pull from the existing palette in styles.css; ``chunk`` and
+// ``topic`` are the placeholder colors agreed in the lane handshake
+// (teal, purple) — refining them is #150 / #151's polish.
+const NODE_KIND_COLORS: Record<GraphNodeKindV02, string> = {
+  document: "#1867c9", // --action
+  version: "#0f4f9e", // --action-strong
+  section: "#147a45", // --success
+  chunk: "#2d8c8a", // placeholder teal
+  topic: "#7a4ec4", // placeholder purple
+  entity: "#9a6400", // --warning
 };
 
-const NODE_KIND_LABELS: Record<ApiGraphNode["kind"], string> = {
+const NODE_KIND_LABELS: Record<GraphNodeKindV02, string> = {
   document: "Document",
   version: "Version",
   section: "Section",
+  chunk: "Chunk",
+  topic: "Topic",
   entity: "Entity",
 };
 
-// ─── NVL adapter ─────────────────────────────────────────────────────────────
+// ─── Edge styling ───────────────────────────────────────────────────────────
+//
+// Each of the eight v0.2 ``GraphEdgeKindV02`` values gets a distinct
+// caption. Structural edges (``part_of``, ``has_version``,
+// ``has_chunk``) keep neutral grey; topic membership uses the topic
+// purple tint; semantic chunk relations take warmer hues so they read
+// as the "interesting" connections in the demo.
+//
+// NVL takes a single CSS color per relationship — no native dashed
+// strokes — so we encode the visual delta in the caption + color
+// pair. Refining stroke styles is part of #150 / #151.
+interface EdgeStyle {
+  color: string;
+  /** Caption shown next to the edge — keep short, the canvas is dense. */
+  caption: string;
+}
+
+const EDGE_KIND_STYLES: Record<GraphEdgeKindV02, EdgeStyle> = {
+  part_of: { color: "#94a3b8", caption: "part of" },
+  has_entity: { color: "#9a6400", caption: "has entity" },
+  has_version: { color: "#94a3b8", caption: "has version" },
+  has_chunk: { color: "#94a3b8", caption: "has chunk" },
+  belongs_to: { color: "#7a4ec4", caption: "belongs to" },
+  related_to: { color: "#c2410c", caption: "related to" },
+  shares_keyword: { color: "#c2410c", caption: "shares keyword" },
+  same_topic_as: { color: "#7a4ec4", caption: "same topic" },
+};
+
+// ─── NVL adapter ────────────────────────────────────────────────────────────
 
 interface NvlNode {
   id: string;
@@ -68,26 +120,39 @@ interface NvlRelationship {
   from: string;
   to: string;
   captions: { value: string }[];
+  color: string;
 }
 
-function toNvlNodes(nodes: ApiGraphNode[]): NvlNode[] {
+/** Default fallback color for any future node kind we don't know yet. */
+const UNKNOWN_NODE_COLOR = "#627085";
+/** Default fallback color for any future edge kind we don't know yet. */
+const UNKNOWN_EDGE_COLOR = "#94a3b8";
+
+function toNvlNodes(nodes: readonly GraphNodeV02[]): NvlNode[] {
   return nodes.map((node) => ({
     id: node.id,
     captions: [{ value: node.label }],
-    color: NODE_KIND_COLORS[node.kind] ?? "#627085",
+    // Index access via a runtime string is intentional: a v0.2 server
+    // is the source of truth, but a yet-to-be-known v0.3 kind must
+    // still render rather than crash the workspace.
+    color: NODE_KIND_COLORS[node.kind] ?? UNKNOWN_NODE_COLOR,
   }));
 }
 
-function toNvlRelationships(edges: ApiGraphEdge[]): NvlRelationship[] {
-  return edges.map((edge) => ({
-    id: edge.id,
-    from: edge.source_id,
-    to: edge.target_id,
-    captions: [{ value: edge.kind }],
-  }));
+function toNvlRelationships(edges: readonly GraphEdgeV02[]): NvlRelationship[] {
+  return edges.map((edge) => {
+    const style = EDGE_KIND_STYLES[edge.kind];
+    return {
+      id: edge.id,
+      from: edge.source_id,
+      to: edge.target_id,
+      captions: [{ value: style?.caption ?? edge.kind }],
+      color: style?.color ?? UNKNOWN_EDGE_COLOR,
+    };
+  });
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Component ──────────────────────────────────────────────────────────────
 
 interface KnowledgeGraphViewProps {
   documentId: string | null;
@@ -104,14 +169,58 @@ interface KnowledgeGraphViewProps {
    * unless `documentId` changes. See issue #129 for the wider plumbing.
    */
   refreshKey?: number;
+  /**
+   * Demo / Storybook seam: if provided, the view skips the live fetch
+   * and renders this projection directly. Used by the chunk/topic
+   * demo today — the live API path will replace it once #144 ships.
+   *
+   * When ``mockData`` is set, ``documentId`` is still required for
+   * the empty-state branch (``documentId === null``) so the parent
+   * can clear the panel; everything else is read from ``mockData``.
+   */
+  mockData?: KnowledgeGraphProjectionV02 | null;
+}
+
+/**
+ * Normalize a payload coming from either the live API (v0.1 typed) or
+ * the mock seam (v0.2 typed) to the v0.2 widened shape used internally.
+ *
+ * The ``as readonly any[]`` step exists to thread the union of
+ * heterogeneous array types (``ApiGraphNode[] | GraphNodeV02[]``)
+ * through ``.map`` without TypeScript's union-of-array narrowing
+ * tripping over the callback signature.
+ */
+function widenProjection(
+  projection: ApiKnowledgeGraphProjection | KnowledgeGraphProjectionV02,
+): KnowledgeGraphProjectionV02 {
+  const nodes = (projection.nodes as ReadonlyArray<Parameters<typeof asGraphNodeV02>[0]>).map(
+    asGraphNodeV02,
+  );
+  const edges = (projection.edges as ReadonlyArray<Parameters<typeof asGraphEdgeV02>[0]>).map(
+    asGraphEdgeV02,
+  );
+  return {
+    document_id: projection.document_id,
+    version_id: projection.version_id,
+    // The generated v0.1 schema reports ``schema_version: "v0.1"``; the
+    // mock fixture reports ``"v0.2"``. The widened union here is the
+    // forward-compatible literal.
+    schema_version: projection.schema_version,
+    generated_at: projection.generated_at,
+    nodes,
+    edges,
+  };
 }
 
 export default function KnowledgeGraphView({
   documentId,
   documentStatus = null,
   refreshKey = 0,
+  mockData = null,
 }: KnowledgeGraphViewProps) {
-  const [projection, setProjection] = useState<ApiKnowledgeGraphProjection | null>(null);
+  const [projection, setProjection] = useState<KnowledgeGraphProjectionV02 | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Local counter used solely to re-issue the fetch when the user clicks
@@ -127,6 +236,15 @@ export default function KnowledgeGraphView({
       return;
     }
 
+    // Mock seam: skip the live fetch entirely. The mock fixture is
+    // already in v0.2 shape, so widening is a no-op.
+    if (mockData) {
+      setProjection(widenProjection(mockData));
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -134,7 +252,7 @@ export default function KnowledgeGraphView({
 
     getDocumentGraph(documentId)
       .then((data) => {
-        if (!cancelled) setProjection(data);
+        if (!cancelled) setProjection(widenProjection(data));
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -155,7 +273,7 @@ export default function KnowledgeGraphView({
     // `refreshKey` (parent-driven) and `retryAttempt` (local) both re-issue
     // the fetch; whichever changes last wins, and the cancel flag drops
     // any in-flight result from the previous attempt.
-  }, [documentId, refreshKey, retryAttempt]);
+  }, [documentId, refreshKey, retryAttempt, mockData]);
 
   const nvlNodes = useMemo(
     () => (projection ? toNvlNodes(projection.nodes) : []),
@@ -237,12 +355,12 @@ export default function KnowledgeGraphView({
   );
 }
 
-// ─── Legend ──────────────────────────────────────────────────────────────────
+// ─── Legend ─────────────────────────────────────────────────────────────────
 
 function GraphLegend() {
   return (
     <ul className="graph-legend" aria-label="Node kind legend">
-      {(Object.keys(NODE_KIND_COLORS) as ApiGraphNode["kind"][]).map((kind) => (
+      {(Object.keys(NODE_KIND_COLORS) as GraphNodeKindV02[]).map((kind) => (
         <li key={kind}>
           <span
             className="graph-legend-swatch"
