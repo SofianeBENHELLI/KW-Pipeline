@@ -1,0 +1,18 @@
+{
+  "filename": "acme_contract_review_memo.docx",
+  "paragraphs": [
+    "Contract Review Memo",
+    "Customer: Acme Manufacturing",
+    "Prepared by: Revenue Operations",
+    "The customer requested a governed summary of renewal blockers before legal review.",
+    "Data processing language must be checked against the current security addendum.",
+    "Payment terms above net 45 require finance approval before signature."
+  ],
+  "tables": [
+    [
+      ["Clause", "Decision", "Reviewer"],
+      ["Data processing addendum", "Needs privacy review", "Legal"],
+      ["Payment terms", "Needs finance approval", "Finance"]
+    ]
+  ]
+}
