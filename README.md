@@ -30,7 +30,14 @@ for the graph + chat surface,
 and [`docs/roadmap/mvp_backlog_review.md`](docs/roadmap/mvp_backlog_review.md)
 for the current backlog and remaining-work plan.
 
-## Development
+## Quick start
+
+- **Run tests** → [Run tests](#run-tests) (backend pytest + frontend vitest)
+- **Run locally** → [Run locally](#run-locally) (backend uvicorn + frontend Vite dev server)
+- **Run the customer demo** → [Local demo](#local-demo)
+- **Browse the API** → after starting the backend, open http://localhost:8000/docs
+
+## Run tests
 
 Create a Python 3.12 virtual environment and install the API package with test
 dependencies:
@@ -53,6 +60,23 @@ cd apps/web
 npm ci
 npm test
 npm run build
+```
+
+## Run locally
+
+Backend on http://localhost:8000:
+
+```bash
+.venv312/bin/python -m uvicorn app.main:app --reload --app-dir apps/api
+```
+
+Frontend on http://localhost:5173 (talks to the backend; allow it via
+`KW_CORS_ALLOWED_ORIGINS` — see [Local demo](#local-demo) for the full
+incantation):
+
+```bash
+cd apps/web
+npm run dev
 ```
 
 ## Local demo
