@@ -1,3 +1,16 @@
+# Pre-commit hooks for KW-Pipeline.
+#
+# One-time setup per clone:
+#
+#     pip install pre-commit
+#     pre-commit install
+#
+# After that, `git commit` runs the hooks below against staged files
+# and aborts the commit on any finding. Run against the whole repo at
+# any time with:
+#
+#     pre-commit run --all-files
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12
@@ -5,3 +18,13 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  # Secret-leak detection. Public repo → a real API key in source is
+  # the worst-case leak. `apps/api/app/settings.py` defaults every
+  # secret to the empty string and reads from env vars; gitleaks is
+  # the runtime check that the structure is honoured. Custom rules
+  # and allowlists live in `.gitleaks.toml` at repo root.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks

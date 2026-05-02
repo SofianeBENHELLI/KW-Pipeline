@@ -37,6 +37,37 @@ for the current backlog and remaining-work plan.
 - **Run the customer demo** → [Local demo](#local-demo)
 - **Browse the API** → after starting the backend, open http://localhost:8000/docs
 
+## Pre-commit hooks
+
+The repo ships a [`.pre-commit-config.yaml`](.pre-commit-config.yaml)
+with two hook sets:
+
+- **ruff** (format + autofix) — keeps the Python style consistent.
+- **gitleaks** (secret-leak detection) — blocks commits that contain
+  API keys or other credential shapes. Custom rules and allowlists
+  live in [`.gitleaks.toml`](.gitleaks.toml).
+
+One-time setup per clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+After that, `git commit` runs the hooks on staged files and aborts on
+any finding. Run them against the whole repo at any time with:
+
+```bash
+pre-commit run --all-files
+```
+
+Secret-leak guarantee: `apps/api/app/settings.py` defaults every
+credential field to the empty string and reads from environment
+variables; the gitleaks hook is the runtime check that this structure
+is honoured. Real keys belong in your local `.env`
+(see [`.env.example`](.env.example) once it lands) or in your
+deployment secrets manager — never in source.
+
 ## Run tests
 
 Create a Python 3.12 virtual environment and install the API package with test
