@@ -174,6 +174,8 @@ through `@neo4j-nvl/react`.
 | `KW_NEO4J_USER` / `KW_NEO4J_PASSWORD` / `KW_NEO4J_DATABASE` | Auth + DB name | unset / unset / `neo4j` |
 | `ANTHROPIC_API_KEY` | Required for Phase 2 entity extraction | unset → Phase 2 disabled |
 | `KW_LLM_MODEL` | Claude model id | `claude-sonnet-4-5` |
+| `VOYAGE_API_KEY` | Required for Phase 3 vector embeddings (ADR-015) | unset → Phase 3 vector mode disabled |
+| `KW_EMBEDDING_MODEL` | Voyage embedding model id | `voyage-3` |
 
 The knowledge-layer surface is documented end-to-end in
 [`docs/architecture/knowledge_layer.md`](docs/architecture/knowledge_layer.md).
@@ -182,3 +184,4 @@ Architecture decisions:
 - [ADR-012 — Knowledge graph layer behind the review gate](docs/adr/ADR-012-knowledge-graph-layer.md)
 - [ADR-013 — LLM provider (Anthropic, no LangChain)](docs/adr/ADR-013-llm-provider-and-no-langchain.md)
 - [ADR-014 — Entity extraction prompt and cost guardrails](docs/adr/ADR-014-entity-extraction-prompt-and-cost.md)
+- [ADR-015 — Embedding provider (Voyage AI) for Phase 3](docs/adr/ADR-015-embedding-provider.md)

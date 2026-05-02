@@ -25,6 +25,12 @@ dependencies = [
   "python-multipart>=0.0.9",
   "pyyaml>=6.0",
   "uvicorn==0.30.6",
+  # Voyage AI SDK for the optional knowledge layer Phase 3 embeddings
+  # (ADR-015). Imported lazily by `VoyageEmbeddingClient`; unit tests
+  # use `FakeEmbeddingClient` so the SDK is never called in the default
+  # suite. The client refuses to construct without `VOYAGE_API_KEY`,
+  # so this dep is dormant unless a deployment opts in.
+  "voyageai>=0.2",
 ]
 
 [project.scripts]
@@ -54,10 +60,11 @@ exclude = ["tests*", "scripts*", "fixtures*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config -m 'not integration and not llm_integration'"
+addopts = "-ra --strict-markers --strict-config -m 'not integration and not llm_integration and not embedding_integration'"
 markers = [
   "integration: requires a running external service (e.g. Neo4j); opt-in via -m integration",
   "llm_integration: hits a real LLM API; opt-in via -m llm_integration",
+  "embedding_integration: hits a real embedding API (Voyage); opt-in via -m embedding_integration",
 ]
 
 [tool.coverage.run]
@@ -106,5 +113,5 @@ disallow_incomplete_defs = true
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["neo4j.*", "anthropic.*", "pdfplumber.*", "docx.*", "fpdf.*", "yaml"]
+module = ["neo4j.*", "anthropic.*", "voyageai.*", "pdfplumber.*", "docx.*", "fpdf.*", "yaml"]
 ignore_missing_imports = true
