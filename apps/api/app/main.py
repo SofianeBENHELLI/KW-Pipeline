@@ -44,9 +44,10 @@ def create_app(
             "name": "KW Pipeline",
             "url": "https://github.com/SofianeBENHELLI/KW-Pipeline",
         },
-        # `license_info` intentionally unset until the LICENSE-file
-        # decision (issue #51) is made. Adding it here is a one-line
-        # follow-up once the repo carries a LICENSE file.
+        license_info={
+            "name": "Proprietary — all rights reserved",
+            "url": "https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/LICENSE",
+        },
     )
     if services is None:
         services = build_persistent_services(data_dir) if persistent else build_services()
