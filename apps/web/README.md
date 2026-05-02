@@ -108,7 +108,36 @@ apps/web/
   without changing the React app.
 - Keep branding behind a small theme layer so official 3DEXPERIENCE /
   Dassault Systemes tokens can replace local defaults later.
-- `@neo4j-nvl/base` is heavyweight (canvas-based graph layout) — current
-  bundle is ~2 MB / 600 KB gz. A planned follow-up wraps the graph slice
-  in `React.lazy` so reviewers who never open the graph tab don't pay
-  the cost.
+- `@neo4j-nvl/base` is heavyweight (canvas-based graph layout) — ~2 MB
+  raw / ~600 KB gz. The graph slice is wrapped in `React.lazy` (see
+  [`src/features/graph/index.tsx`](src/features/graph/index.tsx)) and
+  pinned to a dedicated `graph` chunk via `manualChunks` in
+  [`vite.config.ts`](vite.config.ts), so reviewers who never open the
+  graph tab don't pay the cost.
+
+## Bundle budget
+
+Bundle size is enforced in CI (issue #125). Budgets live in
+[`bundle-budgets.json`](bundle-budgets.json) and are checked by
+[`scripts/check-bundle-size.mjs`](scripts/check-bundle-size.mjs) after
+`vite build`. Each emitted JS chunk in `dist/assets/` is matched against
+a pattern; the script fails if any chunk exceeds its gzip budget or if a
+`required: true` pattern has no matching asset (likely meaning the
+chunk was renamed and the budget needs updating with intent).
+
+Current budgets:
+
+| Pattern | Label | Max gz |
+|---|---|---|
+| `^index-.*\.js$` | Initial app chunk | 80 KB |
+| `^graph-.*\.js$` | Graph vendor (NVL + d3), lazy | 650 KB |
+| `^KnowledgeGraphView-.*\.js$` | Graph component, lazy | 80 KB |
+
+Run locally with `npm run build && npm run bundle:check`. The
+`vite build` step also writes a treemap to `dist/stats.html` via
+[`rollup-plugin-visualizer`](https://github.com/btd/rollup-plugin-visualizer);
+in CI the same file is uploaded as the `bundle-visualizer` artifact.
+
+When you legitimately need more headroom, raise the relevant budget in
+the same PR that adds the weight, with a one-line note in the PR
+description on why.

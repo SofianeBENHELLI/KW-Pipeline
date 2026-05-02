@@ -1,0 +1,23 @@
+{
+  "_comment": "Per-asset gzip budgets enforced in CI (#125). See README.md → 'Bundle budget'. Update with intent only, not as a reflex when CI complains.",
+  "budgets": [
+    {
+      "pattern": "^index-.*\\.js$",
+      "label": "Initial app chunk",
+      "maxGzipKB": 80,
+      "required": true
+    },
+    {
+      "pattern": "^graph-.*\\.js$",
+      "label": "Graph vendor chunk (NVL + d3)",
+      "maxGzipKB": 650,
+      "required": true
+    },
+    {
+      "pattern": "^KnowledgeGraphView-.*\\.js$",
+      "label": "Graph component chunk (lazy)",
+      "maxGzipKB": 80,
+      "required": true
+    }
+  ]
+}

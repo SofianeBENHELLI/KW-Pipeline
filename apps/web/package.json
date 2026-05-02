@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "openapi:export-backend": "cd ../api && python scripts/export_openapi.py",
     "openapi:generate": "openapi-typescript ../api/openapi.json -o src/api/generated/schema.ts",
-    "openapi:check": "openapi-typescript ../api/openapi.json -o /tmp/kw-schema.check.ts && diff -u src/api/generated/schema.ts /tmp/kw-schema.check.ts"
+    "openapi:check": "openapi-typescript ../api/openapi.json -o /tmp/kw-schema.check.ts && diff -u src/api/generated/schema.ts /tmp/kw-schema.check.ts",
+    "bundle:check": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@neo4j-nvl/base": "^0.3.6",
@@ -31,6 +32,7 @@
     "jsdom": "^25.0.1",
     "openapi-fetch": "^0.13.8",
     "openapi-typescript": "^7.13.0",
+    "rollup-plugin-visualizer": "^5.12.0",
     "typescript": "^5.6.3",
     "vite": "^6.4.2",
     "vitest": "^3.2.4"
