@@ -323,7 +323,7 @@ describe("PipelineWidget — document row selection", () => {
     expect(onSelectDocument).toHaveBeenCalledWith("doc-002");
   });
 
-  it("the selected row exposes aria-pressed=true and others aria-pressed=false", () => {
+  it("the selected row exposes aria-current=page and others have no aria-current", () => {
     const docB: ApiDocument = {
       ...FIXTURE_DOCUMENT,
       id: "doc-002",
@@ -347,10 +347,12 @@ describe("PipelineWidget — document row selection", () => {
 
     expect(
       screen.getByRole("button", { name: /second\.txt/i }),
-    ).toHaveAttribute("aria-pressed", "true");
+    ).toHaveAttribute("aria-current", "page");
+    // Non-selected rows should not carry the attribute at all (rather
+    // than aria-current="false") — the latter has different semantics.
     expect(
       screen.getByRole("button", { name: /test\.txt/i }),
-    ).toHaveAttribute("aria-pressed", "false");
+    ).not.toHaveAttribute("aria-current");
   });
 });
 

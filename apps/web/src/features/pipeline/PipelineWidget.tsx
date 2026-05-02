@@ -169,7 +169,7 @@ export function PipelineWidget({
                 className={selected ? "document-row selected" : "document-row"}
                 type="button"
                 key={document.id}
-                aria-pressed={selected}
+                aria-current={selected ? "page" : undefined}
                 onClick={() => onSelectDocument(document.id)}
               >
                 <span>

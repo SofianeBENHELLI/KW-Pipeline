@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import axe from "axe-core";
 import App from "./App";
 import type { ApiDocument, ListDocumentsResponse } from "./api/types";
 
@@ -131,6 +132,61 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByText(/No documents found/i)).toBeInTheDocument();
     });
+  });
+
+  it("error state surfaces a Retry button that re-runs the catalog fetch", async () => {
+    let attempts = 0;
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.includes("/documents?")) {
+          attempts += 1;
+          if (attempts === 1) {
+            return Promise.reject(new Error("Network error"));
+          }
+          return Promise.resolve(makeJsonResponse(FIXTURE_LIST));
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load documents/i)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /KW Pipeline/i }),
+      ).toBeInTheDocument();
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("has no axe-core a11y violations on the loaded review surface", async () => {
+    const { container } = render(<App />);
+
+    // Wait for initial load + detail load to settle so axe sees the
+    // full reviewer surface, not the loading state.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /KW Pipeline/i })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/No extraction output is available\./i)).toBeInTheDocument();
+    });
+
+    // color-contrast needs a real layout engine; jsdom can't compute
+    // it. Region requires a <main>/<nav> hierarchy our shell already
+    // provides via <main aria-label>. Keep the rest at default.
+    const results = await axe.run(container, {
+      rules: {
+        "color-contrast": { enabled: false },
+      },
+    });
+    expect(results.violations).toEqual([]);
   });
 
   it("refetches the selected document and re-renders the status badge after validate", async () => {

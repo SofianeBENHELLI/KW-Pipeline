@@ -269,9 +269,12 @@ export function ReviewWorkspace({
             <span>{reviewError}</span>
           </div>
         ) : null}
+        <label className="reviewer-note-label" htmlFor="reviewer-note">
+          Reviewer note
+        </label>
         <textarea
-          placeholder="Reviewer note"
-          aria-label="Reviewer note"
+          id="reviewer-note"
+          placeholder="Optional context for the audit trail"
           value={reviewerNote}
           onChange={(e) => setReviewerNote(e.target.value)}
           disabled={!canReview}

@@ -205,6 +205,13 @@ export default function App() {
         <div className="notice danger" role="alert">
           <strong>Failed to load documents</strong>
           <span>{message}</span>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => void refreshAll()}
+          >
+            Retry
+          </button>
         </div>
       </main>
     );
