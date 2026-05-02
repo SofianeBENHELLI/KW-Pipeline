@@ -37,6 +37,37 @@ for the current backlog and remaining-work plan.
 - **Run the customer demo** → [Local demo](#local-demo)
 - **Browse the API** → after starting the backend, open http://localhost:8000/docs
 
+## Pre-commit hooks
+
+The repo ships a [`.pre-commit-config.yaml`](.pre-commit-config.yaml)
+with two hook sets:
+
+- **ruff** (format + autofix) — keeps the Python style consistent.
+- **gitleaks** (secret-leak detection) — blocks commits that contain
+  API keys or other credential shapes. Custom rules and allowlists
+  live in [`.gitleaks.toml`](.gitleaks.toml).
+
+One-time setup per clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+After that, `git commit` runs the hooks on staged files and aborts on
+any finding. Run them against the whole repo at any time with:
+
+```bash
+pre-commit run --all-files
+```
+
+Secret-leak guarantee: `apps/api/app/settings.py` defaults every
+credential field to the empty string and reads from environment
+variables; the gitleaks hook is the runtime check that this structure
+is honoured. Real keys belong in your local `.env`
+(see [`.env.example`](.env.example) once it lands) or in your
+deployment secrets manager — never in source.
+
 ## Run tests
 
 Create a Python 3.12 virtual environment and install the API package with test
@@ -174,6 +205,8 @@ through `@neo4j-nvl/react`.
 | `KW_NEO4J_USER` / `KW_NEO4J_PASSWORD` / `KW_NEO4J_DATABASE` | Auth + DB name | unset / unset / `neo4j` |
 | `ANTHROPIC_API_KEY` | Required for Phase 2 entity extraction | unset → Phase 2 disabled |
 | `KW_LLM_MODEL` | Claude model id | `claude-sonnet-4-5` |
+| `VOYAGE_API_KEY` | Required for Phase 3 vector embeddings (ADR-015) | unset → Phase 3 vector mode disabled |
+| `KW_EMBEDDING_MODEL` | Voyage embedding model id | `voyage-3` |
 
 The knowledge-layer surface is documented end-to-end in
 [`docs/architecture/knowledge_layer.md`](docs/architecture/knowledge_layer.md).
@@ -182,3 +215,4 @@ Architecture decisions:
 - [ADR-012 — Knowledge graph layer behind the review gate](docs/adr/ADR-012-knowledge-graph-layer.md)
 - [ADR-013 — LLM provider (Anthropic, no LangChain)](docs/adr/ADR-013-llm-provider-and-no-langchain.md)
 - [ADR-014 — Entity extraction prompt and cost guardrails](docs/adr/ADR-014-entity-extraction-prompt-and-cost.md)
+- [ADR-015 — Embedding provider (Voyage AI) for Phase 3](docs/adr/ADR-015-embedding-provider.md)
