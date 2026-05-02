@@ -154,6 +154,49 @@ describe("PipelineWidget", () => {
     expect(screen.getByText(/Unsupported file type\./)).toBeInTheDocument();
   });
 
+  it("renders the API remediation hint when the server supplies one (#97)", async () => {
+    // The new public error envelope (issue #97) carries `error.remediation`
+    // — the frontend's notice banner surfaces it under the message.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(
+        {
+          error: {
+            code: "KW_UPLOAD_UNSUPPORTED_TYPE",
+            message: "Content type 'application/octet-stream' is not allowed.",
+            status: 415,
+            retryable: false,
+            remediation:
+              "Re-upload the file with one of the allowed content types, or ask an operator to widen the KW_ALLOWED_CONTENT_TYPES allowlist.",
+          },
+          detail: "Content type 'application/octet-stream' is not allowed.",
+        },
+        415,
+      ),
+    );
+
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["data"], "notes.bin", { type: "application/octet-stream" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/Content type .* is not allowed\./),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/KW_ALLOWED_CONTENT_TYPES allowlist/),
+    ).toBeInTheDocument();
+  });
+
   it("rejects empty files locally without making a network call", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       makeJsonResponse(UPLOAD_RESPONSE),
@@ -174,7 +217,11 @@ describe("PipelineWidget", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
-    expect(screen.getByText(/empty/i)).toBeInTheDocument();
+    expect(screen.getByText(/The selected file is empty\./i)).toBeInTheDocument();
+    // The remediation copy is also surfaced for the user.
+    expect(
+      screen.getByText(/non-empty file and try again/i),
+    ).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Respons
 from pydantic import BaseModel
 
 from app.dependencies import PipelineServices
+from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentListResponse, DocumentVersion, HealthResponse
 from app.schemas.extraction import RawExtraction
@@ -86,9 +87,16 @@ def _check_idempotency(
         return None
 
     if stored.request_hash != request_hash:
-        raise HTTPException(
+        raise ApiError(
             status_code=422,
-            detail="Idempotency-Key reused with different request body",
+            code=ErrorCode.IDEMPOTENCY_REPLAY,
+            message="Idempotency-Key reused with different request body",
+            retryable=False,
+            remediation=(
+                "Pick a fresh Idempotency-Key for the new request, or "
+                "re-send exactly the same body to replay the cached "
+                "response."
+            ),
         )
 
     log.info(
@@ -156,10 +164,17 @@ def build_router(services: PipelineServices) -> APIRouter:
         bare_content_type = raw_content_type.split(";")[0].strip()
         if bare_content_type not in allowed:
             allowed_list = ", ".join(sorted(allowed))
-            raise HTTPException(
+            raise ApiError(
                 status_code=415,
-                detail=(
+                code=ErrorCode.UPLOAD_UNSUPPORTED_TYPE,
+                message=(
                     f"Content type '{bare_content_type}' is not allowed. Allowed: {allowed_list}"
+                ),
+                retryable=False,
+                remediation=(
+                    "Re-upload the file with one of the allowed content "
+                    "types, or ask an operator to widen the "
+                    "KW_ALLOWED_CONTENT_TYPES allowlist."
                 ),
             )
 
@@ -179,15 +194,32 @@ def build_router(services: PipelineServices) -> APIRouter:
                     break
                 total += len(chunk)
                 if total > max_bytes:
-                    raise HTTPException(
+                    raise ApiError(
                         status_code=413,
-                        detail=f"Upload exceeds limit of {max_bytes} bytes",
+                        code=ErrorCode.UPLOAD_TOO_LARGE,
+                        message=f"Upload exceeds limit of {max_bytes} bytes",
+                        retryable=False,
+                        remediation=(
+                            "Compress the file or split it into smaller "
+                            "pieces before re-uploading. The current "
+                            f"limit is {max_bytes} bytes (configurable via "
+                            "MAX_UPLOAD_BYTES)."
+                        ),
                     )
                 if hasher is not None:
                     hasher.update(chunk)
                 spool.write(chunk)
             if total == 0:
-                raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+                raise ApiError(
+                    status_code=400,
+                    code=ErrorCode.UPLOAD_EMPTY,
+                    message="Uploaded file is empty.",
+                    retryable=False,
+                    remediation=(
+                        "Pick a file that has content and re-upload. The "
+                        "byte stream we received was zero-length."
+                    ),
+                )
             spool.seek(0)
 
             _route = "/documents/upload"
@@ -455,7 +487,17 @@ def build_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.LIFECYCLE_CONFLICT,
+                message=str(exc),
+                retryable=False,
+                remediation=(
+                    "The version's lifecycle status doesn't permit this "
+                    "transition. Refresh the document and re-evaluate the "
+                    "available actions."
+                ),
+            ) from exc
 
         # Knowledge layer side-effect (ADR-012). Fire-and-log: a graph
         # outage must not roll back validation. The catalog is already
