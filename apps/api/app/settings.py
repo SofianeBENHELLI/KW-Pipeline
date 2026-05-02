@@ -83,6 +83,32 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Demo / local persistence startup (issue #130)
+    # ------------------------------------------------------------------
+    persistent: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KW_PERSISTENT"),
+        description=(
+            "When truthy, the module-level ``app`` in :mod:`app.main` "
+            "boots with the SQLite + filesystem services rooted at "
+            "``data_dir`` instead of the default in-memory wiring. "
+            "Programmatic ``create_app(persistent=True)`` callers are "
+            "unaffected; this switch only governs the env-driven "
+            "uvicorn entry point used by the local demo. Defaults to "
+            "``False`` so the test suite keeps booting in-memory."
+        ),
+    )
+    data_dir: str = Field(
+        default=".kw-pipeline",
+        validation_alias=AliasChoices("KW_DATA_DIR"),
+        description=(
+            "Filesystem root for persistent demo state. Holds the "
+            "SQLite catalog and the raw-file storage tree. Reset the "
+            "demo by deleting this directory."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Knowledge layer (ADR-012). Already prefixed historically.
     # ------------------------------------------------------------------
     knowledge_layer_enabled_raw: str = Field(

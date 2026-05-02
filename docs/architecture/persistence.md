@@ -61,6 +61,9 @@ from app.main import create_app
 app = create_app(persistent=True, data_dir=".kw-pipeline")
 ```
 
+For the env-driven demo entry point (`KW_PERSISTENT=true` + `kw-demo`),
+see the "Local demo" section in the top-level [`README.md`](../../README.md).
+
 Default persistent layout:
 
 ```text
