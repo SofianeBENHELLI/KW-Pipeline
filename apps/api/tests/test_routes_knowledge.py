@@ -98,11 +98,23 @@ def test_validate_route_projects_into_graph(client_with_projector):
     assert graph_resp.status_code == 200
     payload = graph_resp.json()
     kinds = {n["kind"] for n in payload["nodes"]}
-    assert {"document", "version", "section"} <= kinds
+    assert {"document", "version", "chunk"} <= kinds
+    assert "section" not in kinds, "v0.2 dropped section nodes (#144)"
     assert payload["document_id"] == v["document_id"]
     assert payload["version_id"] == v["id"]
-    # PART_OF edges connect everything in Phase 1.
-    assert all(e["kind"] == "part_of" for e in payload["edges"])
+    # Allowed structural and deterministic edge kinds in v0.2. Entity
+    # / has_entity stays Phase 2 (off without ANTHROPIC_API_KEY).
+    edge_kinds = {e["kind"] for e in payload["edges"]}
+    assert edge_kinds <= {
+        "part_of",
+        "has_chunk",
+        "has_version",
+        "belongs_to",
+        "related_to",
+        "shares_keyword",
+        "same_topic_as",
+    }
+    assert "part_of" in edge_kinds
 
 
 def test_reject_route_does_not_project(client_with_projector):

@@ -1,9 +1,13 @@
 """Project a validated ``SemanticDocument`` into the knowledge graph.
 
-Phase 1 builds a deterministic node-and-edge skeleton: one
-``Document`` node per family, one ``Version`` node per validated
-version, one ``Section`` node per ``SemanticSection`` of that
-version, and ``PART_OF`` edges connecting them.
+The v0.2 projection (Demo KG, #144) builds a deterministic
+``Document → Version → Chunk`` skeleton and enriches it with
+``Chunk -belongs_to-> Topic`` membership edges and the deterministic
+chunk-to-chunk semantic edges (``related_to`` / ``shares_keyword`` /
+``same_topic_as``). Section nodes from the v0.1 baseline are gone —
+chunks (one per ``SemanticSection``) take their place — see the
+contract doc at ``docs/architecture/knowledge_graph_payload.md`` for
+the rationale.
 
 Phase 2 (ADR-012 §4 + ADR-013) adds :meth:`KnowledgeProjector.project_entities`:
 given an :class:`~app.schemas.knowledge.EntityExtractionResult`, it
@@ -12,11 +16,12 @@ upserts ``(:Entity)`` nodes plus ``HAS_ENTITY`` edges that carry a
 citation — ADR-009's needs-review gate, applied to graph edges.
 
 Entity-node id choice: the id is a deterministic hash of
-``(subject_type, normalized_subject)`` so two sections referencing
+``(subject_type, normalized_subject)`` so two chunks referencing
 "ISO 9001" merge into one canonical node. This makes cross-document
 queries possible ("which versions cite ISO 9001?") at the cost of
-needing reference-counted cleanup in :meth:`GraphStore.delete_subgraph_for_version`
-— see the in-memory implementation for the pattern.
+needing reference-counted cleanup in
+:meth:`GraphStore.delete_subgraph_for_version` — see the in-memory
+implementation for the pattern.
 
 The projector is invoked as a fire-and-log side-effect of the
 ``NEEDS_REVIEW → VALIDATED`` route handler in
@@ -31,20 +36,24 @@ section renames or removals don't leave orphans.
 Projection stages
 -----------------
 
-:meth:`KnowledgeProjector.project` is a thin orchestrator that
-delegates to a sequence of stage methods. Each stage returns the
-``(nodes, edges)`` it contributes; the orchestrator concatenates them
-and writes the result in a single delete-then-upsert pass so the
-"validated → graph" transition stays atomic from the caller's point of
-view.
+:meth:`KnowledgeProjector.project` is a thin orchestrator that runs
+lane B's chunk-relation and topic-clustering services once, then
+delegates to a sequence of stage methods that turn the precomputed
+artifacts into nodes/edges. The orchestrator concatenates the stage
+output and writes the result in a single delete-then-upsert pass so
+the "validated → graph" transition stays atomic from the caller's
+point of view.
 
-* :meth:`project_document_structure` — Document/Version/Section nodes
-  + PART_OF edges. The Phase 1 baseline.
-* :meth:`project_chunks` — chunk nodes (no-op skeleton; lane B fills).
-* :meth:`project_chunk_relations` — chunk → section / chunk → chunk
-  edges (no-op skeleton; lane B fills).
-* :meth:`project_topics` — topic nodes + section/chunk attachments
-  (no-op skeleton; lane B fills).
+* :meth:`project_document_structure` — Document + Version nodes plus
+  the ``Version -part_of-> Document`` edge.
+* :meth:`project_chunks` — Chunk nodes plus
+  ``Chunk -part_of-> Version``.
+* :meth:`project_chunk_relations` — deterministic semantic edges from
+  :class:`ChunkRelationService` (``related_to`` / ``shares_keyword``
+  / ``same_topic_as``).
+* :meth:`project_topics` — Topic nodes plus
+  ``Chunk -belongs_to-> Topic`` membership edges from
+  :class:`TopicClusteringService`.
 
 :meth:`project_entities` is *not* part of this orchestration — it is
 invoked separately by the route handler after ``project()`` returns,
@@ -56,15 +65,30 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Sequence
 
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.knowledge import (
+    ChunkNodeProperties,
+    ChunkRelationEdgeProperties,
     EntityExtractionResult,
     GraphEdge,
     GraphNode,
+    StructuralEdgeProperties,
+    TopicMembershipEdgeProperties,
+    TopicNodeProperties,
 )
-from app.schemas.semantic_document import SemanticDocument, SemanticSection
+from app.schemas.semantic_document import SemanticDocument
+from app.services.knowledge.chunk_relations import (
+    ChunkRecord,
+    ChunkRelation,
+    ChunkRelationService,
+)
 from app.services.knowledge.graph_store import GraphStore
+from app.services.knowledge.topic_clustering import (
+    TopicAssignment,
+    TopicClusteringService,
+)
 
 log = logging.getLogger(__name__)
 
@@ -76,8 +100,19 @@ class KnowledgeProjector:
     requests; it carries no per-request state.
     """
 
-    def __init__(self, graph_store: GraphStore) -> None:
+    def __init__(
+        self,
+        graph_store: GraphStore,
+        *,
+        chunk_relation_service: ChunkRelationService | None = None,
+        topic_clustering_service: TopicClusteringService | None = None,
+    ) -> None:
         self._graph_store = graph_store
+        # Lane B (#141/#142) services. Defaulting them keeps wiring
+        # changes outside this module trivial — call sites just pass a
+        # ``GraphStore`` as before.
+        self._chunk_relation_service = chunk_relation_service or ChunkRelationService()
+        self._topic_clustering_service = topic_clustering_service or TopicClusteringService()
 
     def project(
         self,
@@ -86,18 +121,24 @@ class KnowledgeProjector:
         version: DocumentVersion,
         semantic: SemanticDocument,
     ) -> None:
-        """Idempotently write the projection for one validated version.
+        """Idempotently write the v0.2 projection for one validated
+        version.
 
         Existing nodes/edges for ``version.id`` are removed first, so
         re-projecting after a section rename does not leave orphan
-        section nodes.
+        chunk nodes.
 
-        This method is a thin orchestrator: it validates the
-        ``version`` ↔ ``semantic`` pairing, runs each projection stage
-        in order, then writes the accumulated nodes/edges in one
-        delete-then-upsert pass. New stages plug in by returning their
-        ``(nodes, edges)`` from a stage method below — no orchestration
-        changes needed.
+        Orchestrator responsibilities:
+
+        1. Validate the ``version`` ↔ ``semantic`` pairing.
+        2. Run lane B's chunk relation + topic clustering services
+           once, deterministically, on the semantic document.
+        3. Run each projection stage with the precomputed lane-B
+           artifacts, concatenate ``(nodes, edges)``, and write in a
+           single delete-then-upsert pass.
+
+        Stages stay pure — they receive everything they need by
+        keyword argument and never touch the graph store.
         """
         if version.id != semantic.document_version_id:
             raise ValueError(
@@ -105,14 +146,24 @@ class KnowledgeProjector:
                 f"{version.id} (got {semantic.document_version_id})."
             )
 
+        chunks = self._chunk_relation_service.chunks_for(semantic)
+        relations = self._chunk_relation_service.relations_for(chunks)
+        assignment = self._topic_clustering_service.cluster(chunks, relations)
+        chunk_to_topic = {m.chunk_id: m.topic_id for m in assignment.memberships}
+
         nodes: list[GraphNode] = []
         edges: list[GraphEdge] = []
 
         for stage_nodes, stage_edges in (
             self.project_document_structure(document=document, version=version, semantic=semantic),
-            self.project_chunks(document=document, version=version, semantic=semantic),
-            self.project_chunk_relations(document=document, version=version, semantic=semantic),
-            self.project_topics(document=document, version=version, semantic=semantic),
+            self.project_chunks(
+                document=document,
+                version=version,
+                chunks=chunks,
+                chunk_to_topic=chunk_to_topic,
+            ),
+            self.project_chunk_relations(document=document, version=version, relations=relations),
+            self.project_topics(document=document, version=version, assignment=assignment),
         ):
             nodes.extend(stage_nodes)
             edges.extend(stage_edges)
@@ -132,6 +183,9 @@ class KnowledgeProjector:
                 "store": getattr(self._graph_store, "name", "unknown"),
                 "node_count": len(nodes),
                 "edge_count": len(edges),
+                "chunk_count": len(chunks),
+                "topic_count": len(assignment.topics),
+                "chunk_relation_count": len(relations),
             },
         )
 
@@ -151,12 +205,13 @@ class KnowledgeProjector:
         version: DocumentVersion,
         semantic: SemanticDocument,
     ) -> tuple[list[GraphNode], list[GraphEdge]]:
-        """Phase 1 skeleton: Document/Version/Section + PART_OF edges.
+        """v0.2 skeleton: Document and Version nodes + the
+        ``Version -part_of-> Document`` edge.
 
-        This is the byte-for-byte projection that has shipped since
-        ADR-012 §3. Anything that depends on a stable Phase 1 wire
-        contract (frontend graph panel, validation tests) reads from
-        here.
+        Section nodes from the v0.1 baseline are gone; chunks
+        (:meth:`project_chunks`) take their place per the contract
+        doc's "Should section nodes be removed once chunk is in place?"
+        question, resolved here as part of #144.
         """
         document_node = GraphNode(
             id=document.id,
@@ -181,83 +236,156 @@ class KnowledgeProjector:
                 "validation_status": semantic.validation_status,
             },
         )
-        section_nodes = [
-            _section_node(version=version, document=document, section=section)
-            for section in semantic.sections
-        ]
-        nodes: list[GraphNode] = [document_node, version_node, *section_nodes]
-
         version_edge = GraphEdge(
             id=f"{version.id}->part_of->{document.id}",
             kind="part_of",
             source_id=version.id,
             target_id=document.id,
-            properties={
-                "document_id": document.id,
-                "version_id": version.id,
-            },
+            properties=StructuralEdgeProperties(
+                document_id=document.id,
+                version_id=version.id,
+            ).model_dump(),
         )
-        section_edges = [
-            GraphEdge(
-                id=f"{section.id}->part_of->{version.id}",
-                kind="part_of",
-                source_id=section.id,
-                target_id=version.id,
-                properties={
-                    "document_id": document.id,
-                    "version_id": version.id,
-                    "section_id": section.id,
-                },
-            )
-            for section in semantic.sections
-        ]
-        edges: list[GraphEdge] = [version_edge, *section_edges]
-
-        return nodes, edges
+        return [document_node, version_node], [version_edge]
 
     @staticmethod
     def project_chunks(
         *,
-        document: Document,  # noqa: ARG004 — placeholder for lane B
-        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
-        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+        document: Document,
+        version: DocumentVersion,
+        chunks: Sequence[ChunkRecord],
+        chunk_to_topic: dict[str, str],
     ) -> tuple[list[GraphNode], list[GraphEdge]]:
-        """Project chunk nodes — *skeleton, filled by lane B (#141/#142)*.
+        """Emit one ``chunk`` node per :class:`ChunkRecord` plus the
+        ``Chunk -part_of-> Version`` skeleton edge.
 
-        Returns empty lists today. The signature is fixed so #144 can
-        wire the chunker into the orchestrator without touching
-        :meth:`project`.
+        ``chunk_to_topic`` is read for the ``topic_id`` field on the
+        chunk node properties — the topic itself is emitted by
+        :meth:`project_topics`. Chunks with no topic membership get
+        ``topic_id = None``.
         """
-        return [], []
+        nodes: list[GraphNode] = []
+        edges: list[GraphEdge] = []
+        for chunk in chunks:
+            text_preview = (chunk.text or "").strip().replace("\n", " ")
+            if len(text_preview) > 200:
+                text_preview = text_preview[:199].rstrip() + "…"
+            nodes.append(
+                GraphNode(
+                    id=chunk.chunk_id,
+                    kind="chunk",
+                    label=chunk.heading or "Untitled chunk",
+                    properties=ChunkNodeProperties(
+                        document_id=document.id,
+                        version_id=version.id,
+                        chunk_id=chunk.chunk_id,
+                        section_id=chunk.section_id,
+                        heading=chunk.heading,
+                        text_preview=text_preview or None,
+                        char_count=chunk.char_count,
+                        keywords=list(chunk.keywords),
+                        topic_id=chunk_to_topic.get(chunk.chunk_id),
+                    ).model_dump(),
+                )
+            )
+            edges.append(
+                GraphEdge(
+                    id=f"{chunk.chunk_id}->part_of->{version.id}",
+                    kind="part_of",
+                    source_id=chunk.chunk_id,
+                    target_id=version.id,
+                    properties=StructuralEdgeProperties(
+                        document_id=document.id,
+                        version_id=version.id,
+                        chunk_id=chunk.chunk_id,
+                        section_id=chunk.section_id,
+                    ).model_dump(),
+                )
+            )
+        return nodes, edges
 
     @staticmethod
     def project_chunk_relations(
         *,
-        document: Document,  # noqa: ARG004 — placeholder for lane B
-        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
-        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+        document: Document,
+        version: DocumentVersion,
+        relations: Sequence[ChunkRelation],
     ) -> tuple[list[GraphNode], list[GraphEdge]]:
-        """Project chunk → section / chunk → chunk edges — *skeleton*.
-
-        Returns empty lists today. Lane B (#141/#142) fills this with
-        ``BELONGS_TO`` / ``NEXT_CHUNK`` style edges; the integration PR
-        (#144) feeds it the chunk artefacts.
+        """Emit one deterministic semantic edge per
+        :class:`ChunkRelation`. The edge ``kind`` mirrors the relation
+        kind (``related_to`` / ``shares_keyword`` / ``same_topic_as``);
+        properties carry the audit trail (``score``, ``reason``,
+        ``shared_keywords``, ``source_chunk_id``, ``target_chunk_id``)
+        per the v0.2 contract.
         """
-        return [], []
+        edges = [
+            GraphEdge(
+                id=(
+                    f"{version.id}:{relation.source_chunk_id}->"
+                    f"{relation.kind}->{relation.target_chunk_id}"
+                ),
+                kind=relation.kind,
+                source_id=relation.source_chunk_id,
+                target_id=relation.target_chunk_id,
+                properties=ChunkRelationEdgeProperties(
+                    document_id=document.id,
+                    version_id=version.id,
+                    source_chunk_id=relation.source_chunk_id,
+                    target_chunk_id=relation.target_chunk_id,
+                    score=relation.score,
+                    reason=relation.reason,
+                    shared_keywords=list(relation.shared_keywords),
+                ).model_dump(),
+            )
+            for relation in relations
+        ]
+        return [], edges
 
     @staticmethod
     def project_topics(
         *,
-        document: Document,  # noqa: ARG004 — placeholder for lane B
-        version: DocumentVersion,  # noqa: ARG004 — placeholder for lane B
-        semantic: SemanticDocument,  # noqa: ARG004 — placeholder for lane B
+        document: Document,
+        version: DocumentVersion,
+        assignment: TopicAssignment,
     ) -> tuple[list[GraphNode], list[GraphEdge]]:
-        """Project topic nodes + attachments — *skeleton, filled by lane B*.
-
-        Returns empty lists today. Topics attach to sections (and later
-        to chunks) via ``ABOUT`` edges in the v0.2 wire contract.
+        """Emit one ``topic`` node per cluster plus the
+        ``Chunk -belongs_to-> Topic`` membership edges.
         """
-        return [], []
+        nodes = [
+            GraphNode(
+                id=topic.topic_id,
+                kind="topic",
+                label=topic.label,
+                properties=TopicNodeProperties(
+                    document_id=document.id,
+                    version_id=version.id,
+                    topic_id=topic.topic_id,
+                    label=topic.label,
+                    keywords=list(topic.keywords),
+                    summary=topic.summary,
+                    chunk_count=len(topic.chunk_ids),
+                    chunk_ids=list(topic.chunk_ids),
+                ).model_dump(),
+            )
+            for topic in assignment.topics
+        ]
+        edges = [
+            GraphEdge(
+                id=(f"{version.id}:{membership.chunk_id}->belongs_to->{membership.topic_id}"),
+                kind="belongs_to",
+                source_id=membership.chunk_id,
+                target_id=membership.topic_id,
+                properties=TopicMembershipEdgeProperties(
+                    document_id=document.id,
+                    version_id=version.id,
+                    chunk_id=membership.chunk_id,
+                    topic_id=membership.topic_id,
+                    score=membership.score,
+                ).model_dump(),
+            )
+            for membership in assignment.memberships
+        ]
+        return nodes, edges
 
     def project_entities(self, result: EntityExtractionResult) -> None:
         """Upsert ``(:Entity)`` nodes + ``HAS_ENTITY`` edges from one
@@ -378,25 +506,5 @@ def _entity_node(subject: str, subject_type: str, node_id: str) -> GraphNode:
         properties={
             "subject": subject,
             "subject_type": subject_type,
-        },
-    )
-
-
-def _section_node(
-    *,
-    version: DocumentVersion,
-    document: Document,
-    section: SemanticSection,
-) -> GraphNode:
-    return GraphNode(
-        id=section.id,
-        kind="section",
-        label=section.heading or "Untitled section",
-        properties={
-            "document_id": document.id,
-            "version_id": version.id,
-            "section_id": section.id,
-            "heading": section.heading,
-            "source_reference_count": len(section.source_reference_ids),
         },
     )
