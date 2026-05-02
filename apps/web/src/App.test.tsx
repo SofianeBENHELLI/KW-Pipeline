@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { ApiDocument, ListDocumentsResponse } from "./api/types";
@@ -130,6 +130,93 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/No documents found/i)).toBeInTheDocument();
+    });
+  });
+
+  it("refetches the selected document and re-renders the status badge after validate", async () => {
+    const SEMANTIC = {
+      id: "sem-001",
+      document_version_id: "ver-policy-002",
+      schema_version: "v0.1",
+      document_profile: {
+        title: "Policy",
+        document_type: "unknown",
+        purpose: null,
+        audience: null,
+        executive_summary: null,
+      },
+      sections: [],
+      assets: [],
+      warnings: [],
+      source_references: [],
+      validation_status: "needs_review" as const,
+      markdown: "",
+      created_at: "2026-04-30T08:42:00Z",
+    };
+
+    // Two list responses: first the original NEEDS_REVIEW doc, then a
+    // VALIDATED version after the validate POST. Sequencing makes the
+    // second list call resolve to the updated fixture.
+    let getDocumentCalls = 0;
+    let validateCalled = false;
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        const method = (input as Request).method ?? "GET";
+        const validatedDoc: ApiDocument = {
+          ...FIXTURE_DOCUMENT,
+          versions: [{ ...FIXTURE_VERSION, status: "VALIDATED" as const }],
+        };
+        const validatedList: ListDocumentsResponse = {
+          items: [validatedDoc],
+          next_cursor: null,
+        };
+
+        if (url.includes("/documents?")) {
+          return Promise.resolve(
+            makeJsonResponse(validateCalled ? validatedList : FIXTURE_LIST),
+          );
+        }
+        if (url.match(/\/documents\/doc-policy-001$/)) {
+          getDocumentCalls += 1;
+          return Promise.resolve(makeJsonResponse(validatedDoc));
+        }
+        if (url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+        }
+        if (url.endsWith("/semantic") && method === "GET") {
+          return Promise.resolve(makeJsonResponse(SEMANTIC));
+        }
+        if (url.endsWith("/validate")) {
+          validateCalled = true;
+          return Promise.resolve(
+            makeJsonResponse({ ...SEMANTIC, validation_status: "validated" }),
+          );
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /KW Pipeline/i })).toBeInTheDocument();
+    });
+
+    // Initial NEEDS_REVIEW state — wait for semantic to load (validate
+    // becomes clickable when version is NEEDS_REVIEW).
+    const validate = await screen.findByRole("button", { name: /^Validate$/i });
+    fireEvent.click(validate);
+
+    // After validate, App should call getDocument(id) to refresh the
+    // selected document — verify the call landed and the status badge
+    // updated to "Validated".
+    await waitFor(() => {
+      expect(getDocumentCalls).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("Validated").length).toBeGreaterThan(0);
     });
   });
 });
