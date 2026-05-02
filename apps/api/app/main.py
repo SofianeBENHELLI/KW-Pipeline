@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import PipelineServices, build_persistent_services, build_services
+from app.errors import install_error_handlers
 from app.logging_config import configure_logging
 from app.routes import build_router
 from app.settings import Settings
@@ -44,6 +45,13 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # Issue #120 — wrap raised HTTPExceptions into the public error
+    # envelope defined in ``app.errors``. The legacy ``detail`` field is
+    # preserved alongside ``error.{code,message,status}`` so existing
+    # clients and tests don't break.
+    install_error_handlers(app)
+
     app.include_router(build_router(services))
 
     return app
