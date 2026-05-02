@@ -45,6 +45,8 @@ const NODE_KIND_COLORS: Record<ApiGraphNode["kind"], string> = {
   document: "#1867c9",  // --action
   version: "#0f4f9e",   // --action-strong
   section: "#147a45",   // --success
+  chunk: "#2d8c8a",     // placeholder teal — lane D (#149/#150/#151) refines
+  topic: "#7a4ec4",     // placeholder purple — lane D refines
   entity: "#9a6400",    // --warning
 };
 
@@ -52,6 +54,8 @@ const NODE_KIND_LABELS: Record<ApiGraphNode["kind"], string> = {
   document: "Document",
   version: "Version",
   section: "Section",
+  chunk: "Chunk",
+  topic: "Topic",
   entity: "Entity",
 };
 
