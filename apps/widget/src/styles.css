@@ -1,14 +1,65 @@
+/* 3DX KnowledgeForge — Dassault Systèmes-aligned visual layer.
+ *
+ * Token system per `apps/widget/docs/widget-spec.md` §9. Hex values
+ * for the brand blues + semantic colours are best-faith candidates
+ * pending confirmation against the 2026 internal DS brand book; once
+ * confirmed, replace the marked values in the `:root` block below.
+ *
+ * Two layers in this file:
+ *   1. `:root` — design tokens (`--ds-*`). Override these to retheme.
+ *      A future brand-token adapter (issue #78) will rewrite them at
+ *      runtime from 3DEXPERIENCE platform tokens.
+ *   2. `.kw-*` — component classes. These reference tokens only;
+ *      they do not bake in colours or radii directly.
+ */
+
 :root {
-  --kw-fg: #0f172a;
-  --kw-fg-muted: #475569;
-  --kw-bg: #ffffff;
-  --kw-surface: #f8fafc;
-  --kw-border: #e2e8f0;
-  --kw-accent: #2563eb;
-  --kw-ok: #16a34a;
-  --kw-warn: #d97706;
-  --kw-err: #dc2626;
-  --kw-radius: 6px;
+  /* ── Brand foundation — 3DS Blue (verify against brand book) ──── */
+  --ds-blue-900: #001E2E;
+  --ds-blue-700: #005686;   /* primary action accent */
+  --ds-blue-500: #1F8FBF;   /* link / focus / interactive accent */
+  --ds-blue-100: #E5F2F8;   /* tinted surface, soft chip background */
+
+  /* ── Neutrals ─────────────────────────────────────────────────── */
+  --ds-bg:        #FFFFFF;
+  --ds-ink-100:   #F2F5F8;
+  --ds-ink-300:   #C9D2DA;
+  --ds-ink-500:   #7A8893;
+  --ds-ink-700:   #3C4A55;
+  --ds-ink-900:   #0E1B26;
+
+  /* ── Semantic — recoloured to harmonise with 3DS Blue (verify) ── */
+  --ds-success:        #1F7A4A;
+  --ds-success-soft:   #E5F4EC;
+  --ds-warning:        #B26A00;
+  --ds-warning-soft:   #FBEFD8;
+  --ds-danger:         #B3261E;
+  --ds-danger-soft:    #F8E2E0;
+  /* `--ds-info` reuses the brand-blue family. */
+
+  /* ── Shape & metrics ──────────────────────────────────────────── */
+  --ds-radius:         4px;
+  --ds-radius-pill:    999px;
+
+  /* ── Typography ───────────────────────────────────────────────── */
+  --ds-font: "DassaultSystemes", "Open Sans", -apple-system, BlinkMacSystemFont,
+             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* ── Backwards-compat aliases ─────────────────────────────────── *
+   * Kept so any inline style or future component referencing the
+   * legacy `--kw-*` tokens still resolves. New code should use the
+   * `--ds-*` names directly. Remove once no caller depends on these.
+   */
+  --kw-fg:        var(--ds-ink-900);
+  --kw-fg-muted:  var(--ds-ink-700);
+  --kw-bg:        var(--ds-bg);
+  --kw-surface:   var(--ds-ink-100);
+  --kw-border:    var(--ds-ink-300);
+  --kw-accent:    var(--ds-blue-700);
+  --kw-ok:        var(--ds-success);
+  --kw-warn:      var(--ds-warning);
+  --kw-err:       var(--ds-danger);
+  --kw-radius:    var(--ds-radius);
 }
 
 * { box-sizing: border-box; }
@@ -16,11 +67,13 @@
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--ds-font);
   font-size: 13px;
-  color: var(--kw-fg);
-  background: var(--kw-bg);
+  color: var(--ds-ink-900);
+  background: var(--ds-bg);
 }
+
+/* ── Tile shell ────────────────────────────────────────────────── */
 
 .kw-widget {
   display: flex;
@@ -28,17 +81,26 @@ body {
   height: 100%;
   padding: 8px 10px 12px;
   gap: 8px;
+  /* Optional 2 px brand accent at the very top. Subtle; reads as DS
+   * without dominating the tile. Comment out the border-top line to
+   * remove it. */
+  border-top: 2px solid var(--ds-blue-700);
 }
 
 .kw-widget__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--kw-border);
+  border-bottom: 1px solid var(--ds-ink-300);
   padding-bottom: 6px;
 }
 
-.kw-widget__title { font-weight: 600; font-size: 14px; }
+.kw-widget__title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ds-ink-900);
+  letter-spacing: -0.005em;
+}
 
 .kw-widget__settings-btn {
   background: transparent;
@@ -46,9 +108,14 @@ body {
   font-size: 16px;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: var(--kw-radius);
+  border-radius: var(--ds-radius);
+  color: var(--ds-ink-700);
 }
-.kw-widget__settings-btn:hover { background: var(--kw-surface); }
+.kw-widget__settings-btn:hover { background: var(--ds-ink-100); color: var(--ds-ink-900); }
+.kw-widget__settings-btn:focus-visible {
+  outline: 2px solid var(--ds-blue-500);
+  outline-offset: 1px;
+}
 
 .kw-widget__body {
   display: flex;
@@ -57,59 +124,85 @@ body {
   overflow: auto;
 }
 
+/* ── Card primitive ────────────────────────────────────────────── */
+
 .kw-card {
-  border: 1px solid var(--kw-border);
-  border-radius: var(--kw-radius);
-  background: var(--kw-surface);
+  border: 1px solid var(--ds-ink-300);
+  border-radius: var(--ds-radius);
+  background: var(--ds-ink-100);
   padding: 8px 10px;
 }
 .kw-card__title {
-  font-weight: 600;
+  font-weight: 700;
   margin: 0 0 6px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--kw-fg-muted);
+  color: var(--ds-ink-700);
 }
 
 .kw-row { display: flex; align-items: center; gap: 6px; }
 
+/* ── Status dot (Backend health) ───────────────────────────────── */
+
 .kw-dot {
   display: inline-block;
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--kw-fg-muted);
+  background: var(--ds-ink-500);
 }
-.kw-dot--ok   { background: var(--kw-ok); }
-.kw-dot--warn { background: var(--kw-warn); }
-.kw-dot--err  { background: var(--kw-err); }
+.kw-dot--ok   { background: var(--ds-success); }
+.kw-dot--warn { background: var(--ds-warning); }
+.kw-dot--err  { background: var(--ds-danger); }
 
-.kw-status { font-size: 11px; color: var(--kw-fg-muted); }
-.kw-error  { color: var(--kw-err); font-size: 12px; }
+.kw-status { font-size: 11px; color: var(--ds-ink-500); }
+.kw-error  { color: var(--ds-danger); font-size: 12px; }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
 
 .kw-btn {
   font: inherit;
   padding: 4px 10px;
-  border: 1px solid var(--kw-border);
-  background: var(--kw-bg);
-  border-radius: var(--kw-radius);
+  border: 1px solid var(--ds-ink-300);
+  background: var(--ds-bg);
+  border-radius: var(--ds-radius);
   cursor: pointer;
+  color: var(--ds-ink-900);
 }
-.kw-btn:hover:not(:disabled) { background: var(--kw-surface); }
+.kw-btn:hover:not(:disabled) { background: var(--ds-ink-100); }
+.kw-btn:focus-visible {
+  outline: 2px solid var(--ds-blue-500);
+  outline-offset: 1px;
+}
 .kw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .kw-btn--primary {
-  background: var(--kw-accent);
-  border-color: var(--kw-accent);
+  background: var(--ds-blue-700);
+  border-color: var(--ds-blue-700);
   color: #fff;
 }
-.kw-btn--primary:hover:not(:disabled) { filter: brightness(1.05); }
+.kw-btn--primary:hover:not(:disabled) {
+  background: var(--ds-blue-900);
+  border-color: var(--ds-blue-900);
+}
+
+/* ── Input ─────────────────────────────────────────────────────── */
 
 .kw-input {
   font: inherit;
   padding: 4px 8px;
-  border: 1px solid var(--kw-border);
-  border-radius: var(--kw-radius);
+  border: 1px solid var(--ds-ink-300);
+  border-radius: var(--ds-radius);
   width: 100%;
+  background: var(--ds-bg);
+  color: var(--ds-ink-900);
 }
+.kw-input:focus-visible {
+  outline: 2px solid var(--ds-blue-500);
+  outline-offset: 1px;
+  border-color: var(--ds-blue-500);
+}
+
+/* ── Documents list ────────────────────────────────────────────── */
 
 .kw-doc-list {
   list-style: none;
@@ -125,27 +218,32 @@ body {
   gap: 6px;
   align-items: center;
   padding: 4px 6px;
-  border-radius: var(--kw-radius);
+  border-radius: var(--ds-radius);
   font-size: 12px;
 }
-.kw-doc-list__item:hover { background: var(--kw-bg); }
+.kw-doc-list__item:hover { background: var(--ds-bg); }
 .kw-doc-list__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kw-doc-list__meta { font-size: 11px; color: var(--kw-fg-muted); }
+.kw-doc-list__meta { font-size: 11px; color: var(--ds-ink-500); }
+
+/* ── Status badges ─────────────────────────────────────────────── */
 
 .kw-badge {
   display: inline-block;
   font-size: 10px;
   padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--kw-border);
-  color: var(--kw-fg-muted);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-ink-300);
+  color: var(--ds-ink-700);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  font-weight: 600;
 }
-.kw-badge--ok   { background: #dcfce7; color: #166534; }
-.kw-badge--warn { background: #fef3c7; color: #92400e; }
-.kw-badge--err  { background: #fee2e2; color: #991b1b; }
-.kw-badge--info { background: #dbeafe; color: #1e40af; }
+.kw-badge--ok   { background: var(--ds-success-soft); color: var(--ds-success); }
+.kw-badge--warn { background: var(--ds-warning-soft); color: var(--ds-warning); }
+.kw-badge--err  { background: var(--ds-danger-soft);  color: var(--ds-danger);  }
+.kw-badge--info { background: var(--ds-blue-100);     color: var(--ds-blue-700); }
+
+/* ── Knowledge counts ──────────────────────────────────────────── */
 
 .kw-counts {
   display: flex;
@@ -153,8 +251,20 @@ body {
   flex-wrap: wrap;
 }
 .kw-counts__item { display: flex; flex-direction: column; }
-.kw-counts__num { font-size: 18px; font-weight: 600; }
-.kw-counts__label { font-size: 10px; color: var(--kw-fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.kw-counts__num   {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ds-ink-900);
+  line-height: 1.1;
+}
+.kw-counts__label {
+  font-size: 10px;
+  color: var(--ds-ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Upload card ───────────────────────────────────────────────── */
 
 .kw-upload {
   display: flex;
@@ -186,16 +296,18 @@ body {
 }
 .kw-upload__file-input { display: none; }
 
+/* ── Settings panel ────────────────────────────────────────────── */
+
 .kw-settings {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--kw-border);
-  border-radius: var(--kw-radius);
-  background: var(--kw-bg);
+  border: 1px solid var(--ds-ink-300);
+  border-radius: var(--ds-radius);
+  background: var(--ds-bg);
 }
 .kw-settings__row { display: flex; gap: 6px; align-items: center; }
-.kw-settings__label { font-weight: 600; font-size: 12px; }
-.kw-settings__hint { font-size: 11px; color: var(--kw-fg-muted); }
+.kw-settings__label { font-weight: 700; font-size: 12px; color: var(--ds-ink-900); }
+.kw-settings__hint { font-size: 11px; color: var(--ds-ink-500); }
 .kw-settings__actions { display: flex; gap: 6px; justify-content: flex-end; }
