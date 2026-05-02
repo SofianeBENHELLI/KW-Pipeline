@@ -8,15 +8,17 @@
 PYTHON ?= python3
 API_DIR := apps/api
 WEB_DIR := apps/web
+WIDGET_DIR := apps/widget
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help demo-smoke demo-api demo-web demo-neo4j demo-graph
+.PHONY: help demo-smoke demo-api demo-web demo-widget demo-neo4j demo-graph
 
 help:
 	@echo "KW-Pipeline demo targets:"
 	@echo "  make demo-smoke   Run the customer demo smoke pipeline (no browser)"
 	@echo "  make demo-api     Start the API with kg-demo defaults (kw-demo)"
 	@echo "  make demo-web     Start the Vite dev server for Orbital"
+	@echo "  make demo-widget  Start the 3DX KnowledgeForge widget dev server (https://localhost:8081)"
 	@echo "  make demo-neo4j   Bring up the optional Neo4j store via docker compose"
 	@echo "  make demo-graph   Alias of demo-neo4j"
 	@echo ""
@@ -38,6 +40,13 @@ demo-api:
 # `kw-demo` already configures CORS so this just works.
 demo-web:
 	cd $(WEB_DIR) && npm run dev
+
+# Path 2 — 3DEXPERIENCE widget dev server on https://localhost:8081/widget.
+# Requires the @widget-lab npm registry token configured in `~/.npmrc`
+# (see apps/widget/README.md). `kw-demo` includes the widget origin in
+# its default CORS allowlist so this just works against `make demo-api`.
+demo-widget:
+	cd $(WIDGET_DIR) && npm install && npm start
 
 # Path 3 (optional) — bring up Neo4j so KW_NEO4J_URI=bolt://localhost:7687
 # can drive the projector against a real graph database.
