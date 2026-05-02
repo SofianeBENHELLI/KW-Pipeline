@@ -268,6 +268,129 @@ describe("ReviewWorkspace — actions trigger backend calls", () => {
   });
 });
 
+describe("ReviewWorkspace — reject path", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Reject calls /reject, updates the semantic state, and notifies the parent", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        calls.push(`${(input as Request).method ?? "GET"} ${url}`);
+        if (url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.endsWith("/semantic")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        if (url.endsWith("/reject")) {
+          return Promise.resolve(
+            makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "rejected" }),
+          );
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    const onMutationCompleted = vi.fn();
+    render(
+      <ReviewWorkspace
+        document={makeDocument("NEEDS_REVIEW")}
+        onMutationCompleted={onMutationCompleted}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("needs_review")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Reject$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("rejected")).toBeInTheDocument();
+    });
+    expect(
+      calls.some((entry) => entry.startsWith("POST") && entry.endsWith("/reject")),
+    ).toBe(true);
+    expect(onMutationCompleted).toHaveBeenCalled();
+  });
+});
+
+describe("ReviewWorkspace — review action concurrency", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("clicking Validate twice in flight only fires one /validate request", async () => {
+    const validateCalls: string[] = [];
+    let resolveValidate: (response: Response) => void = () => {};
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.endsWith("/extraction")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+        }
+        if (url.endsWith("/semantic")) {
+          return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+        }
+        if (url.endsWith("/validate")) {
+          validateCalls.push(url);
+          return new Promise<Response>((resolve) => {
+            resolveValidate = resolve;
+          });
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("needs_review")).toBeInTheDocument();
+    });
+    const validate = screen.getByRole("button", { name: /^Validate$/i });
+    fireEvent.click(validate);
+
+    // Second click while the first request is still in flight — must be
+    // a no-op because the button is disabled. Asserting on the disabled
+    // attribute is the contract; the duplicate click cannot reach the
+    // handler.
+    await waitFor(() => expect(validate).toBeDisabled());
+    fireEvent.click(validate);
+
+    expect(validateCalls.length).toBe(1);
+
+    // Drain the pending request so the test cleanly tears down.
+    resolveValidate(
+      makeJsonResponse({ ...FIXTURE_SEMANTIC, validation_status: "validated" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("validated")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("ReviewWorkspace — reviewer note accessibility", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("textarea is reachable by its accessible name", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({ detail: "Not found" }, 404),
+    );
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+
+    const textarea = screen.getByLabelText(/Reviewer note/i);
+    expect(textarea.tagName).toBe("TEXTAREA");
+    expect(textarea).toBeEnabled();
+  });
+
+  it("textarea is disabled when the version is not in NEEDS_REVIEW", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({ detail: "Not found" }, 404),
+    );
+    render(<ReviewWorkspace document={makeDocument("VALIDATED")} />);
+
+    expect(screen.getByLabelText(/Reviewer note/i)).toBeDisabled();
+  });
+});
+
 describe("ReviewWorkspace — refresh indicator", () => {
   afterEach(() => vi.restoreAllMocks());
 
