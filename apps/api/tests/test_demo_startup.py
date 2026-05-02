@@ -160,7 +160,7 @@ def test_kw_demo_main_sets_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None
     demo.main()
 
     assert os.environ["KW_PERSISTENT"] == "true"
-    assert os.environ["KW_CORS_ALLOWED_ORIGINS"] == "http://localhost:5173"
+    assert os.environ["KW_CORS_ALLOWED_ORIGINS"] == "http://localhost:5173,https://localhost:8081"
     assert "application/pdf" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
     assert "wordprocessingml.document" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
     assert "text/plain" in os.environ["KW_ALLOWED_CONTENT_TYPES"]
