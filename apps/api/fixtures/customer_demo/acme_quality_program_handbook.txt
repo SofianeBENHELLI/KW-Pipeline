@@ -1,0 +1,13 @@
+Acme Quality Program Handbook
+Acme operates an ISO 9001 quality management system across all engineering operations.
+ISO 9001 conformance is verified through annual audits performed by an accredited surveillance auditor.
+Quality manuals capture process diagrams and ISO 9001 conformance evidence revised every quarter.
+ISO 9001 surveillance audits log nonconformances against published manuals with severity codes and remediation owners.
+Supplier onboarding requires completed security screening and documented data classification before activation.
+Supplier onboarding records list each vendor name, contact owner, and procurement reviewer for every onboarding ticket.
+Procurement tickets track open supplier onboarding items until finance signs off on screening evidence weekly.
+Supplier onboarding corrective actions follow the procurement workflow with a ten day closure window tracked by the vendor lead.
+Customer renewal risk is scored quarterly by the customer success team using usage signals and engagement health.
+Contract review obligations require renewal risk scoring and escalation alignment with customer success leadership.
+Renewal risk scores feed customer success quarterly business reviews and inform renewal recommendations.
+Customer success leadership escalates red renewal risk scores to the contracts team within five business days.
