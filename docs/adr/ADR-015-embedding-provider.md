@@ -2,14 +2,15 @@
 
 ## Status
 
-**Proposed**, 2026-05-02. Awaiting acceptance before Phase 3 work starts.
+**Accepted**, 2026-05-03. Project owner confirmed Voyage AI as the v1
+provider; Phase 3 implementation work is unblocked. Originally
+proposed 2026-05-02.
 
 This ADR is the embedding-provider half of the Phase 3 chat-surface
 prereqs that ADR-013 explicitly deferred ("Embedding provider for
 Phase 3's vector RAG mode. Phase 3 ADR.") and that
 [`docs/roadmap/mvp_backlog_review.md`](../roadmap/mvp_backlog_review.md)
-flagged as a still-open decision. Until accepted, no embedding code
-ships.
+flagged as a still-open decision.
 
 ## Context
 
@@ -196,10 +197,12 @@ they launch.
 
 ## Acceptance criteria for this ADR
 
-Mark **Accepted** when:
+Both criteria met as of 2026-05-03:
 
-1. The project owner confirms Voyage AI is acceptable as the v1
-   provider (or picks differently — see "Rejected alternatives" — and
-   I update this ADR before Phase 3 starts).
-2. A short Phase 3 issue is filed citing this ADR as the embedding
-   provider commitment, so the work has a tracking ticket.
+1. ✅ The project owner confirmed Voyage AI is acceptable as the v1
+   provider.
+2. ⏳ Phase 3 tracking issue to be filed citing this ADR as the
+   embedding-provider commitment. Implementation scaffolding
+   (settings field, optional `voyageai` dep, `EmbeddingClient`
+   Protocol, `FakeEmbeddingClient`) lands alongside this acceptance
+   so the issue can pick up directly from a configured baseline.

@@ -164,6 +164,35 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias
+    # because the Voyage SDK uses that exact name and operators tend to
+    # surface it under that label. Phase 3 vector mode refuses to
+    # construct without ``voyage_api_key``; Phase 1 + Phase 2 + the
+    # existing pipeline run with it unset.
+    # ------------------------------------------------------------------
+    voyage_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_VOYAGE_API_KEY", "VOYAGE_API_KEY"),
+        description=(
+            "Voyage AI API key. Empty disables Phase 3 vector embedding; "
+            "Phase 1 (graph projection) and Phase 2 (entity extraction) "
+            "are unaffected."
+        ),
+    )
+    embedding_model: str = Field(
+        default="voyage-3",
+        validation_alias=AliasChoices(
+            "KW_EMBEDDING_MODEL",
+        ),
+        description=(
+            "Voyage embedding model id. Defaults to ``voyage-3`` per "
+            "ADR-015. Operators may override (e.g. ``voyage-3-large``) "
+            "without code changes; the index dimensionality is read "
+            "from the configured model at construction time."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Logging (issue #42). ``json`` is the production / container shape
     # that the on-call workflow greps; ``text`` is the stdlib default
     # used for local development to keep tracebacks human-readable.
