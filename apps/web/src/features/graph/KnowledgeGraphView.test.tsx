@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeGraphView from "./KnowledgeGraphView";
@@ -61,6 +61,15 @@ const FIXTURE_PROJECTION: ApiKnowledgeGraphProjection = {
   ],
 };
 
+const EMPTY_PROJECTION: ApiKnowledgeGraphProjection = {
+  document_id: "doc-001",
+  version_id: "ver-001",
+  schema_version: "v0.1",
+  generated_at: "2026-05-01T00:00:00Z",
+  nodes: [],
+  edges: [],
+};
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("KnowledgeGraphView", () => {
@@ -119,19 +128,109 @@ describe("KnowledgeGraphView", () => {
     expect(screen.getByTestId("knowledge-graph-canvas")).toBeInTheDocument();
   });
 
-  it("shows an error banner when the fetch fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      Promise.resolve(makeJsonResponse({ detail: "boom" }, 500)),
-    );
+  it("shows an error banner with a Retry button when the fetch fails", async () => {
+    let attempts = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      attempts += 1;
+      if (attempts === 1) {
+        return Promise.resolve(makeJsonResponse({ detail: "boom" }, 503));
+      }
+      return Promise.resolve(makeJsonResponse(FIXTURE_PROJECTION));
+    });
 
     render(<KnowledgeGraphView documentId="doc-001" />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/Failed to load graph/i)).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't load the knowledge graph/i)).toBeInTheDocument();
     expect(screen.getByText(/boom/)).toBeInTheDocument();
     expect(screen.queryByTestId("nvl-stub")).not.toBeInTheDocument();
+
+    // Retry must be a real button so it's keyboard-reachable. Click it and
+    // verify the panel recovers with a fresh payload.
+    const retry = screen.getByRole("button", { name: /retry/i });
+    fireEvent.click(retry);
+
+    const stub = await screen.findByTestId("nvl-stub");
+    expect(stub).toBeInTheDocument();
+    expect(attempts).toBe(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders the pre-validation copy when status !== VALIDATED and payload is empty", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(makeJsonResponse(EMPTY_PROJECTION)),
+    );
+
+    render(
+      <KnowledgeGraphView documentId="doc-001" documentStatus="NEEDS_REVIEW" />,
+    );
+
+    expect(
+      await screen.findByText(/after a reviewer validates this document/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("nvl-stub")).not.toBeInTheDocument();
+    // Make sure the layer-disabled copy is NOT shown — they must be distinct.
+    expect(
+      screen.queryByText(/optional add-on/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the disabled-layer copy when status === VALIDATED and payload is empty", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(makeJsonResponse(EMPTY_PROJECTION)),
+    );
+
+    render(
+      <KnowledgeGraphView documentId="doc-001" documentStatus="VALIDATED" />,
+    );
+
+    expect(
+      await screen.findByText(/optional add-on/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/KW_KNOWLEDGE_LAYER_ENABLED=true/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("nvl-stub")).not.toBeInTheDocument();
+    // The pre-validation copy must NOT show here.
+    expect(
+      screen.queryByText(/after a reviewer validates this document/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("re-fetches and shows the latest payload when refreshKey changes", async () => {
+    // Track the inflight resolvers so the test can control ordering.
+    const resolvers: Array<(value: Response) => void> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      return new Promise<Response>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+
+    const { rerender } = render(
+      <KnowledgeGraphView documentId="doc-001" refreshKey={0} />,
+    );
+
+    // Wait for the first fetch to be issued.
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+
+    // Bump refreshKey while the first request is still inflight; this
+    // should issue a second request and the cancel flag should drop the
+    // first response when it eventually arrives.
+    rerender(<KnowledgeGraphView documentId="doc-001" refreshKey={1} />);
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+
+    // First (now-stale) request resolves with an old/empty payload.
+    await act(async () => {
+      resolvers[0](makeJsonResponse(EMPTY_PROJECTION));
+    });
+    // Second (latest) request resolves with the real projection.
+    await act(async () => {
+      resolvers[1](makeJsonResponse(FIXTURE_PROJECTION));
+    });
+
+    const stub = await screen.findByTestId("nvl-stub");
+    expect(stub.getAttribute("data-node-count")).toBe("3");
+    expect(stub.getAttribute("data-rel-count")).toBe("2");
   });
 });

@@ -5,10 +5,25 @@
  * ONLY module that imports from `@neo4j-nvl/react`; consumers should go
  * through the barrel in `./index.ts` so the dep stays contained.
  *
- * Lifecycle:
- *   - documentId === null  → empty-state message, no fetch.
- *   - documentId changes   → fetch GET /documents/{id}/graph, replace state.
- *   - in-flight requests for stale documentIds are dropped via a cancel flag.
+ * The panel must be readable in five distinct states:
+ *
+ *   1. Loading                — fetch in flight.
+ *   2. Pre-validation         — document is uploaded but not yet VALIDATED;
+ *                               the projection has not been computed yet.
+ *   3. Knowledge layer off    — operator has not enabled
+ *                               KW_KNOWLEDGE_LAYER_ENABLED; backend returns
+ *                               an empty projection for every validated doc.
+ *   4. Backend / Neo4j down   — fetch failed (5xx, network); show a retry
+ *                               button instead of crashing the workspace.
+ *   5. Loaded with data       — the existing NVL canvas.
+ *
+ * Distinguishing 2 vs 3 isn't possible from the wire payload alone — both
+ * return `{ nodes: [], edges: [] }` — so the parent passes
+ * `documentStatus` and we branch on it. See issue #133.
+ *
+ * Refresh seam: `refreshKey` is bumped by the parent after a mutation
+ * (validate, edit, …) lands. Changes to it re-issue the fetch; an in-flight
+ * request from a previous `refreshKey` is dropped via the cancel flag.
  */
 import { useEffect, useMemo, useState } from "react";
 import { InteractiveNvlWrapper } from "@neo4j-nvl/react";
@@ -18,6 +33,7 @@ import type {
   ApiGraphEdge,
   ApiGraphNode,
   ApiKnowledgeGraphProjection,
+  DocumentVersionStatus,
 } from "../../api/types";
 
 // ─── Color palette (mirrors the kinds enum on GraphNode) ─────────────────────
@@ -75,12 +91,33 @@ function toNvlRelationships(edges: ApiGraphEdge[]): NvlRelationship[] {
 
 interface KnowledgeGraphViewProps {
   documentId: string | null;
+  /**
+   * Status of the document version the parent is currently displaying.
+   * Used to disambiguate "knowledge layer disabled" from "not validated yet"
+   * when the backend returns an empty projection. Optional so the component
+   * keeps working before the parent (#129) wires the prop through.
+   */
+  documentStatus?: DocumentVersionStatus | null;
+  /**
+   * Bumped by the parent after a mutation lands (validate, edit, …) so the
+   * panel re-fetches without remounting. Optional; absent → never refreshes
+   * unless `documentId` changes. See issue #129 for the wider plumbing.
+   */
+  refreshKey?: number;
 }
 
-export default function KnowledgeGraphView({ documentId }: KnowledgeGraphViewProps) {
+export default function KnowledgeGraphView({
+  documentId,
+  documentStatus = null,
+  refreshKey = 0,
+}: KnowledgeGraphViewProps) {
   const [projection, setProjection] = useState<ApiKnowledgeGraphProjection | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Local counter used solely to re-issue the fetch when the user clicks
+  // "Retry". Kept separate from `refreshKey` so a manual retry doesn't
+  // require the parent to bump its own counter.
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
     if (documentId === null) {
@@ -115,7 +152,10 @@ export default function KnowledgeGraphView({ documentId }: KnowledgeGraphViewPro
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+    // `refreshKey` (parent-driven) and `retryAttempt` (local) both re-issue
+    // the fetch; whichever changes last wins, and the cancel flag drops
+    // any in-flight result from the previous attempt.
+  }, [documentId, refreshKey, retryAttempt]);
 
   const nvlNodes = useMemo(
     () => (projection ? toNvlNodes(projection.nodes) : []),
@@ -125,6 +165,12 @@ export default function KnowledgeGraphView({ documentId }: KnowledgeGraphViewPro
     () => (projection ? toNvlRelationships(projection.edges) : []),
     [projection],
   );
+
+  const isEmptyPayload = projection === null || nvlNodes.length === 0;
+  // `documentStatus === null` means the parent hasn't passed it yet — fall
+  // back to the legacy generic empty-state message in that case.
+  const isPreValidation =
+    documentStatus !== null && documentStatus !== "VALIDATED";
 
   return (
     <article className="panel graph-panel" aria-labelledby="graph-panel-title">
@@ -143,10 +189,31 @@ export default function KnowledgeGraphView({ documentId }: KnowledgeGraphViewPro
         </p>
       ) : error !== null ? (
         <div className="notice danger" role="alert">
-          <strong>Failed to load graph</strong>
+          <strong>Couldn&apos;t load the knowledge graph</strong>
           <span>{error}</span>
+          <button
+            type="button"
+            className="button"
+            onClick={() => setRetryAttempt((n) => n + 1)}
+          >
+            Retry
+          </button>
         </div>
-      ) : projection === null || nvlNodes.length === 0 ? (
+      ) : isEmptyPayload && isPreValidation ? (
+        <p className="muted" role="status">
+          The knowledge graph is generated after a reviewer validates this
+          document. Validate the document to see its projection here.
+        </p>
+      ) : isEmptyPayload && documentStatus === "VALIDATED" ? (
+        <div className="notice info" role="status">
+          <strong>Knowledge graph is an optional add-on</strong>
+          <span>
+            Enable it by starting the API with{" "}
+            <code>KW_KNOWLEDGE_LAYER_ENABLED=true</code> and a Neo4j
+            instance — see the Knowledge Layer wiki.
+          </span>
+        </div>
+      ) : isEmptyPayload ? (
         <p className="muted">
           No knowledge graph projection has been generated for this document yet.
         </p>
