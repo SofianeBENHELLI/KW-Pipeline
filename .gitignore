@@ -6,7 +6,15 @@ __pycache__/
 .venv*/
 venv/
 node_modules/
+# Secrets — every variant of `.env` except the committed template.
+# `.env.example` is force-included via the `!` rule so contributors
+# can still see the schema; everything else is ignored by default.
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
 .DS_Store
 *.egg-info/
 .kw-pipeline/
