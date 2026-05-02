@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any
 
@@ -78,7 +79,7 @@ def _json_error_response(
     detail: Any,
     code: str | None = None,
     message: str | None = None,
-    headers: dict[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     message = message or _message_from_detail(status_code=status_code, detail=detail)
     payload = {
@@ -94,7 +95,7 @@ def _json_error_response(
     return JSONResponse(
         status_code=status_code,
         content=jsonable_encoder(payload),
-        headers=headers,
+        headers=dict(headers) if headers is not None else None,
     )
 
 
