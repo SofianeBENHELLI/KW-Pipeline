@@ -32,10 +32,56 @@ for the current backlog and remaining-work plan.
 
 ## Quick start
 
+- **Two-step demo (dummy-proof)** → [Two-step demo](#two-step-demo)
+  — one launcher for the backend, one for the frontend. Both
+  bootstrap their own deps on first run.
 - **Run tests** → [Run tests](#run-tests) (backend pytest + frontend vitest)
 - **Run locally** → [Run locally](#run-locally) (backend uvicorn + frontend Vite dev server)
 - **Run the customer demo** → [Local demo](#local-demo)
 - **Browse the API** → after starting the backend, open http://localhost:8000/docs
+
+## Two-step demo
+
+The fastest path to a running KW-Pipeline + 3DX widget on your
+laptop. Each step bootstraps its own dependencies (Python venv +
+API package for the backend, npm deps for the frontend), so the
+**very first run** takes ~30–60 seconds total; subsequent runs
+launch in under 5 seconds.
+
+**Step 1 — Backend.** From the repo root:
+
+```bash
+./scripts/demo-backend.sh
+```
+
+…or double-click `Demo Backend.command` in Finder. Boots
+`uvicorn` on **http://127.0.0.1:8000** with CORS allowlisting every
+demo frontend out of the box.
+
+**Step 2 — Frontend.** In a second terminal:
+
+```bash
+./scripts/demo-frontend.sh
+```
+
+…or double-click `Demo Frontend.command` in Finder. Boots a Vite
+dev server on **http://127.0.0.1:5174** that mounts the real
+`apps/widget/src/App` in a plain browser tab — no `@widget-lab` npm
+registry credentials, no 3DEXPERIENCE host required. The browser
+window IS the widget tile; resize the window to see the layout
+reflow. Hot-reload is live, so any edit to `apps/widget/src/`
+shows up within ~200 ms.
+
+To stop either, `Ctrl-C` in its terminal. Re-running the same
+script just restarts the server; the venv and `node_modules` are
+reused.
+
+> **Heads-up on the frontend choice.** The standalone Vite preview
+> avoids the `@widget-lab/3ddashboard-utils` private-registry
+> dependency by stubbing the runtime. For a "real" build that
+> targets the 3DEXPERIENCE host, see `apps/widget/README.md` and
+> the `make demo-widget` target — both require the
+> `~/.kw-pipeline/3ddashboard-utils/` clone described there.
 
 ## Pre-commit hooks
 
