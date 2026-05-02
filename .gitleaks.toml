@@ -1,0 +1,52 @@
+# Gitleaks configuration for KW-Pipeline.
+#
+# Loaded automatically by gitleaks when invoked from repo root (the
+# pre-commit hook in `.pre-commit-config.yaml` runs gitleaks at repo
+# root). Custom rules and allowlists below extend the upstream default
+# ruleset; they do not replace it.
+
+title = "KW-Pipeline gitleaks config"
+
+[extend]
+# Inherit the bundled ruleset (Anthropic, OpenAI, AWS, GCP, Azure,
+# generic high-entropy, JWT, private keys, etc.) and add the project-
+# specific rules below.
+useDefault = true
+
+# ── Custom rules ──────────────────────────────────────────────────────
+
+# Voyage AI API keys are not in the upstream ruleset as of v8.18.
+# Format: ``pa-`` prefix followed by 30+ url-safe base64 characters.
+# Confirmed against a real key (since rotated and removed from disk).
+[[rules]]
+id = "voyage-api-key"
+description = "Voyage AI API key"
+regex = '''pa-[A-Za-z0-9_-]{30,}'''
+keywords = ["pa-", "VOYAGE_API_KEY", "voyage_api_key"]
+
+# ── Allowlists ────────────────────────────────────────────────────────
+# Templates and documentation that legitimately contain placeholder
+# strings matching key shapes (``sk-ant-...``, ``pa-xxxx...``).
+# Anything matching these regexes inside the listed paths is ignored.
+
+[allowlist]
+description = "KW-Pipeline templates and documentation placeholders"
+paths = [
+  '''^\.env\.example$''',
+  '''^\.gitleaks\.toml$''',
+  '''^\.pre-commit-config\.yaml$''',
+  '''^README\.md$''',
+  '''^docs/adr/.*\.md$''',
+  '''^docs/architecture/.*\.md$''',
+  '''^docs/roadmap/.*\.md$''',
+  '''^apps/widget/README\.md$''',
+  '''^apps/widget/docs/.*\.md$''',
+]
+regexes = [
+  # Documented placeholder values — never real keys.
+  '''sk-ant-\.{2,}''',
+  '''pa-x{5,}''',
+  '''pa-[A-Z]{3,}\.{2,}''',
+  # Local-dev Neo4j dummy password used in setup snippets.
+  '''test_password_change_me''',
+]
