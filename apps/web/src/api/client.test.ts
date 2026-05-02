@@ -266,4 +266,55 @@ describe("API client — error paths", () => {
     const { getVersion } = await import("./client");
     await expect(getVersion("doc-001", "ver-001")).rejects.toThrow(/not yet implemented/i);
   });
+
+  it("ApiError carries code/retryable/remediation from the public envelope (#97)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        makeJsonResponse(
+          {
+            error: {
+              code: "KW_LIFECYCLE_CONFLICT",
+              message: "Version is in STORED, not NEEDS_REVIEW.",
+              status: 409,
+              retryable: false,
+              remediation: "Refresh the document and re-evaluate the available actions.",
+            },
+            detail: "Version is in STORED, not NEEDS_REVIEW.",
+          },
+          409,
+        ),
+      ),
+    );
+
+    try {
+      await getDocument("doc-001");
+      throw new Error("expected ApiError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(409);
+      expect(apiErr.code).toBe("KW_LIFECYCLE_CONFLICT");
+      expect(apiErr.retryable).toBe(false);
+      expect(apiErr.remediation).toMatch(/Refresh the document/);
+      // `detail` falls back to the envelope's `message` when present.
+      expect(apiErr.detail).toBe("Version is in STORED, not NEEDS_REVIEW.");
+    }
+  });
+
+  it("ApiError defaults code/retryable/remediation when envelope is absent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("plain text body", { status: 502, statusText: "Bad Gateway" }),
+    );
+    try {
+      await listDocuments();
+      throw new Error("expected ApiError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(502);
+      expect(apiErr.code).toBe("KW_HTTP_ERROR");
+      expect(apiErr.retryable).toBe(false);
+      expect(apiErr.remediation).toBeNull();
+    }
+  });
 });

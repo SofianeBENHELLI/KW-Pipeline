@@ -1,5 +1,47 @@
 # API Contract
 
+## Error envelope (#97 / #120)
+
+Every non-2xx response carries the same shape:
+
+```json
+{
+  "error": {
+    "code": "KW_UPLOAD_EMPTY",
+    "message": "Uploaded file is empty.",
+    "status": 400,
+    "retryable": false,
+    "remediation": "Pick a file that has content and re-upload. The byte stream we received was zero-length."
+  },
+  "detail": "Uploaded file is empty."
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `error.code` | Stable machine-readable identifier. KW-Pipeline-specific codes are prefixed `KW_`. Generic fallbacks (`KW_NOT_FOUND`, `KW_HTTP_ERROR`) come from the HTTP status when a raise site doesn't pick a more specific one. |
+| `error.message` | Short user-facing summary. |
+| `error.status` | HTTP status (mirrors the response status — convenient for clients that read the body without inspecting headers). |
+| `error.retryable` | `true` iff the same request might succeed if retried (transient backend, rate-limit). `false` for permanent errors. Frontends use this to decide whether to surface a Retry button. |
+| `error.remediation` | Optional actionable hint (`null` when none applies). Frontends render this in their notice banners. |
+| `detail` | Legacy field preserved alongside the envelope for older clients that read FastAPI's default error shape (issue #120). |
+
+### Code catalog
+
+| Code | Status | Retryable | Where raised |
+|---|---|---|---|
+| `KW_UPLOAD_EMPTY` | 400 | false | `POST /documents/upload` — body has zero bytes. |
+| `KW_UPLOAD_TOO_LARGE` | 413 | false | `POST /documents/upload` — body exceeds `MAX_UPLOAD_BYTES`. |
+| `KW_UPLOAD_UNSUPPORTED_TYPE` | 415 | false | `POST /documents/upload` — content type not in `KW_ALLOWED_CONTENT_TYPES`. |
+| `KW_LIFECYCLE_CONFLICT` | 409 | false | `POST /documents/{id}/versions/{vid}/{validate,reject,extract,semantic}` — version's lifecycle status doesn't permit the transition. |
+| `KW_IDEMPOTENCY_REPLAY` | 422 | false | Any POST with an `Idempotency-Key` header, when the key was previously used with a different request body. |
+| `KW_VALIDATION_ERROR` | 422 | false | FastAPI/Pydantic request-validation failures (malformed query params, body schema mismatches). |
+| `KW_NOT_FOUND` | 404 | false | Generic fallback for `HTTPException(status_code=404)` raises (e.g. unknown document/version/extraction). |
+| `KW_CONFLICT` | 409 | false | Generic fallback for `HTTPException(status_code=409)` raises. |
+| `KW_BAD_REQUEST`, `KW_UNAUTHORIZED`, `KW_FORBIDDEN`, `KW_PAYLOAD_TOO_LARGE`, `KW_UNSUPPORTED_MEDIA_TYPE`, `KW_UNPROCESSABLE_ENTITY`, `KW_HTTP_ERROR` | various | false | Status-derived fallbacks for the rest. |
+
+Adding a new code is a public-API change: define it in [`apps/api/app/errors.py`](../../apps/api/app/errors.py) (`ErrorCode` class), document it here, and add a regression test to [`apps/api/tests/test_error_contract.py`](../../apps/api/tests/test_error_contract.py) that pins the (status, code, retryable, remediation) tuple.
+
 ## Upload Document
 
 `POST /documents/upload`

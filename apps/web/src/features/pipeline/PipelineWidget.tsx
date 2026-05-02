@@ -22,7 +22,7 @@ type UploadState =
   | { kind: "idle" }
   | { kind: "uploading"; filename: string }
   | { kind: "success"; version: ApiUploadResponse }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; remediation: string | null };
 
 export function PipelineWidget({
   documents,
@@ -55,7 +55,11 @@ export function PipelineWidget({
     if (!file) return;
 
     if (file.size === 0) {
-      setUpload({ kind: "error", message: "The selected file is empty." });
+      setUpload({
+        kind: "error",
+        message: "The selected file is empty.",
+        remediation: "Pick a non-empty file and try again.",
+      });
       return;
     }
 
@@ -73,7 +77,8 @@ export function PipelineWidget({
           : err instanceof Error
             ? err.message
             : "Upload failed.";
-      setUpload({ kind: "error", message });
+      const remediation = err instanceof ApiError ? err.remediation : null;
+      setUpload({ kind: "error", message, remediation });
     }
   }
 
@@ -132,6 +137,9 @@ export function PipelineWidget({
         <div className="notice danger" role="alert">
           <strong>Upload failed</strong>
           <span>{upload.message}</span>
+          {upload.remediation ? (
+            <span className="muted">{upload.remediation}</span>
+          ) : null}
         </div>
       ) : null}
 

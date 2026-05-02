@@ -40,14 +40,69 @@ const http = createClient<paths>({
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
+/**
+ * Public error envelope from the API (#97). The backend always wraps
+ * non-OK responses in `{ error: { code, message, status, retryable,
+ * remediation }, detail }` — see `apps/api/app/errors.py`.
+ *
+ * `ApiError` mirrors the public fields onto a JS Error subclass so call
+ * sites can `throw err`, `if (err instanceof ApiError)`, and read the
+ * structured fields without re-parsing the response.
+ */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly detail: string,
+    public readonly code: string = "KW_HTTP_ERROR",
+    public readonly retryable: boolean = false,
+    public readonly remediation: string | null = null,
   ) {
     super(`API ${status}: ${detail}`);
     this.name = "ApiError";
   }
+}
+
+interface ErrorEnvelope {
+  code?: unknown;
+  message?: unknown;
+  status?: unknown;
+  retryable?: unknown;
+  remediation?: unknown;
+}
+
+interface ResponseBodyShape {
+  error?: ErrorEnvelope;
+  detail?: unknown;
+}
+
+function fieldsFromBody(
+  body: ResponseBodyShape | null,
+  fallbackDetail: string,
+): {
+  detail: string;
+  code: string;
+  retryable: boolean;
+  remediation: string | null;
+} {
+  let detail = fallbackDetail;
+  if (typeof body?.detail === "string") detail = body.detail;
+
+  const env = body?.error;
+  const code =
+    typeof env?.code === "string" && env.code.length > 0
+      ? env.code
+      : "KW_HTTP_ERROR";
+  const retryable = env?.retryable === true;
+  const remediation =
+    typeof env?.remediation === "string" && env.remediation.length > 0
+      ? env.remediation
+      : null;
+  // Prefer the envelope's `message` over a list-shaped `detail` (the
+  // RequestValidationError path emits `detail: [...errors]`).
+  if (typeof env?.message === "string" && env.message.length > 0) {
+    detail = env.message;
+  }
+  return { detail, code, retryable, remediation };
 }
 
 /**
@@ -55,14 +110,17 @@ export class ApiError extends Error {
  * bypass openapi-fetch (the multipart upload path).
  */
 async function asApiError(response: Response): Promise<ApiError> {
-  let detail = response.statusText;
+  let body: ResponseBodyShape | null = null;
   try {
-    const body = (await response.clone().json()) as { detail?: string };
-    if (typeof body.detail === "string") detail = body.detail;
+    body = (await response.clone().json()) as ResponseBodyShape;
   } catch {
-    // Non-JSON or empty body — keep the statusText fallback.
+    // Non-JSON or empty body — fall through to statusText.
   }
-  return new ApiError(response.status, detail);
+  const { detail, code, retryable, remediation } = fieldsFromBody(
+    body,
+    response.statusText,
+  );
+  return new ApiError(response.status, detail, code, retryable, remediation);
 }
 
 /**
@@ -70,8 +128,9 @@ async function asApiError(response: Response): Promise<ApiError> {
  *
  * On success, return `data`. On failure, build an `ApiError` from the
  * already-parsed `error` body (openapi-fetch consumes the response stream,
- * so we can't re-read it) and surface the FastAPI `detail` when present.
- * Falls back to `response.statusText` for non-JSON error bodies.
+ * so we can't re-read it). Pulls the public envelope fields (`code`,
+ * `retryable`, `remediation`) when present; falls back to status-derived
+ * defaults otherwise.
  */
 function unwrap<T>(result: {
   data?: T;
@@ -80,14 +139,18 @@ function unwrap<T>(result: {
 }): T {
   if (result.data !== undefined) return result.data;
   const { response, error } = result;
-  let detail = response.statusText;
-  if (error && typeof error === "object" && "detail" in error) {
-    const candidate = (error as { detail?: unknown }).detail;
-    if (typeof candidate === "string") detail = candidate;
-  } else if (typeof error === "string" && error.length > 0) {
-    detail = error;
-  }
-  throw new ApiError(response.status, detail);
+  // openapi-fetch parsed the JSON for us — `error` is the body shape.
+  const body =
+    error && typeof error === "object"
+      ? (error as ResponseBodyShape)
+      : null;
+  const { detail, code, retryable, remediation } = fieldsFromBody(
+    body,
+    typeof error === "string" && error.length > 0
+      ? error
+      : response.statusText,
+  );
+  throw new ApiError(response.status, detail, code, retryable, remediation);
 }
 
 // ─── Document endpoints ──────────────────────────────────────────────────────

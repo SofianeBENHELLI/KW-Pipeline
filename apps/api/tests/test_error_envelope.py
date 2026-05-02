@@ -25,14 +25,20 @@ def test_404_returns_envelope_and_legacy_detail():
     assert response.status_code == 404
     body = response.json()
     assert body["error"] == {
-        "code": "NOT_FOUND",
+        "code": "KW_NOT_FOUND",
         "message": "Document not found.",
         "status": 404,
+        "retryable": False,
+        "remediation": None,
     }
     assert body["detail"] == "Document not found."
 
 
 def test_415_returns_envelope_for_disallowed_content_type(monkeypatch):
+    """The 415 path now raises ``ApiError`` with the specific
+    ``KW_UPLOAD_UNSUPPORTED_TYPE`` code (issue #97) instead of falling
+    through to the status-derived ``KW_UNSUPPORTED_MEDIA_TYPE`` code.
+    The remediation hint points operators at the allowlist env var."""
     monkeypatch.delenv("KW_ALLOWED_CONTENT_TYPES", raising=False)
     monkeypatch.delenv("ALLOWED_CONTENT_TYPES", raising=False)
     client = _client()
@@ -42,31 +48,36 @@ def test_415_returns_envelope_for_disallowed_content_type(monkeypatch):
     )
     assert response.status_code == 415
     body = response.json()
-    assert body["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+    assert body["error"]["code"] == "KW_UPLOAD_UNSUPPORTED_TYPE"
     assert body["error"]["status"] == 415
+    assert body["error"]["retryable"] is False
+    assert "KW_ALLOWED_CONTENT_TYPES" in body["error"]["remediation"]
     # Legacy field still carries the human-readable detail.
     assert "not allowed" in body["detail"]
 
 
 def test_validation_error_uses_validation_error_code():
-    """RequestValidationError gets its own 422 ``VALIDATION_ERROR`` code so
-    clients can distinguish "your payload was malformed" from "the server
-    rejected this transition" (which is also 422 but uses
-    ``UNPROCESSABLE_ENTITY``)."""
+    """RequestValidationError gets its own 422 ``KW_VALIDATION_ERROR``
+    code so clients can distinguish "your payload was malformed" from
+    "the server rejected this transition" (also 422 but uses
+    ``KW_UNPROCESSABLE_ENTITY`` or ``KW_LIFECYCLE_CONFLICT``)."""
     client = _client()
     # Bad ``limit`` query param → FastAPI/Pydantic raises RequestValidationError.
     response = client.get("/documents?limit=not-a-number")
     assert response.status_code == 422
     body = response.json()
-    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert body["error"]["code"] == "KW_VALIDATION_ERROR"
+    assert body["error"]["retryable"] is False
+    assert body["error"]["remediation"]
     # Detail keeps the structured Pydantic error list for debugging.
     assert isinstance(body["detail"], list)
 
 
 def test_api_error_explicit_code_message_and_headers():
     """Direct ``ApiError`` construction round-trips ``code`` / ``message`` /
-    ``headers`` through the envelope. We mount a one-off route on a fresh app
-    so the test doesn't depend on any production route raising ApiError."""
+    ``retryable`` / ``remediation`` / ``headers`` through the envelope.
+    We mount a one-off route on a fresh app so the test doesn't depend
+    on any production route raising ApiError."""
     from fastapi import FastAPI
 
     from app.errors import ApiError, install_error_handlers
@@ -80,6 +91,8 @@ def test_api_error_explicit_code_message_and_headers():
             status_code=418,
             code="IM_A_TEAPOT",
             message="Out of coffee.",
+            retryable=True,
+            remediation="Brew a fresh pot and retry.",
             detail={"reason": "drained"},
             headers={"X-Brewing": "off"},
         )
@@ -91,6 +104,8 @@ def test_api_error_explicit_code_message_and_headers():
         "code": "IM_A_TEAPOT",
         "message": "Out of coffee.",
         "status": 418,
+        "retryable": True,
+        "remediation": "Brew a fresh pot and retry.",
     }
     assert body["detail"] == {"reason": "drained"}
     assert response.headers["X-Brewing"] == "off"
@@ -109,17 +124,22 @@ def test_message_from_detail_falls_back_to_http_phrase_for_unmapped_status():
 
     @app.get("/_pep")
     def _pep() -> None:
-        # 451 has no entry in _STATUS_ERROR_CODES; the handler should still
-        # produce a sane envelope by deriving the code from the HTTP phrase.
+        # 451 has no entry in _STATUS_FALLBACK_CODES; the handler should
+        # still produce a sane envelope by deriving the code from the
+        # HTTP phrase.
         raise HTTPException(status_code=451, detail={"unrelated": "payload"})
 
     response = TestClient(app).get("/_pep")
     assert response.status_code == 451
     body = response.json()
-    # No mapping for 451 → falls back to HTTP_ERROR.
-    assert body["error"]["code"] == "HTTP_ERROR"
+    # No mapping for 451 → falls back to KW_HTTP_ERROR.
+    assert body["error"]["code"] == "KW_HTTP_ERROR"
     # No string under the dict's "message"/"detail"/"error" keys → falls
     # back to the HTTP phrase ("Unavailable For Legal Reasons").
     assert body["error"]["message"]
+    # Bare HTTPException is treated as non-retryable with no remediation
+    # hint — only ApiError carries those.
+    assert body["error"]["retryable"] is False
+    assert body["error"]["remediation"] is None
     # Original detail dict is preserved for debugging.
     assert body["detail"] == {"unrelated": "payload"}

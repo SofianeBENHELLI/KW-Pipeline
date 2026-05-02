@@ -267,7 +267,7 @@ class TestUploadStreaming:
         import asyncio
         import tempfile
 
-        from fastapi import HTTPException
+        from starlette.exceptions import HTTPException as StarletteHTTPException
 
         monkeypatch.setenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))
         payload = b"y" * (51 * 1024 * 1024)
@@ -283,10 +283,13 @@ class TestUploadStreaming:
                 tracemalloc.reset_peak()
                 try:
                     asyncio.run(upload_handler(file=upload, document_id=None))
-                except HTTPException as exc:
+                except StarletteHTTPException as exc:
+                    # ApiError extends Starlette's HTTPException; the
+                    # specific KW_UPLOAD_TOO_LARGE code is asserted
+                    # separately in tests/test_error_contract.py.
                     assert exc.status_code == 413
                 else:
-                    raise AssertionError("Expected HTTPException(413).")
+                    raise AssertionError("Expected an HTTPException(413).")
                 _, peak = tracemalloc.get_traced_memory()
             finally:
                 tracemalloc.stop()
