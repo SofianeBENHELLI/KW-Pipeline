@@ -26,7 +26,6 @@ from app.services.knowledge.embedding_client import (
     VoyageEmbeddingClient,
 )
 
-
 # ─── FakeEmbeddingClient ───────────────────────────────────────────────────
 
 
