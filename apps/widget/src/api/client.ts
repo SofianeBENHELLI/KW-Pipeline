@@ -184,3 +184,104 @@ export async function uploadDocument(
   if (!response.ok) throw await asApiError(response);
   return (await response.json()) as DocumentVersion;
 }
+
+/**
+ * Upload variant that reports byte-level progress via a callback.
+ * Uses `XMLHttpRequest` because the Fetch API still does not expose
+ * upload progress in the browsers the dashboard targets. The error
+ * envelope handling stays consistent with `uploadDocument` — same
+ * shape, same `ApiError` instances on failure.
+ */
+export function uploadDocumentWithProgress(
+  file: File,
+  opts: {
+    baseUrl?: string;
+    signal?: AbortSignal;
+    /** Receives a fraction in `[0, 1]`. Called only when total is known. */
+    onProgress?: (fraction: number) => void;
+  } = {},
+): Promise<DocumentVersion> {
+  return new Promise<DocumentVersion>((resolve, reject) => {
+    const baseUrl = opts.baseUrl ?? getApiBaseUrl();
+    const form = new FormData();
+    form.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", baseUrl.replace(/\/$/, "") + "/documents/upload");
+
+    if (opts.onProgress) {
+      xhr.upload.addEventListener("progress", (evt) => {
+        if (!evt.lengthComputable || evt.total === 0) return;
+        opts.onProgress?.(evt.loaded / evt.total);
+      });
+    }
+
+    xhr.addEventListener("load", () => {
+      const ok = xhr.status >= 200 && xhr.status < 300;
+      if (ok) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as DocumentVersion);
+        } catch (err) {
+          reject(new ApiError(xhr.status, "Invalid JSON in upload response"));
+        }
+        return;
+      }
+      // Reconstruct an `ApiError` with the same envelope semantics as
+      // `asApiError`. Hand-parsed because XHR doesn't return a `Response`.
+      let detail = xhr.statusText;
+      let code = "KW_HTTP_ERROR";
+      let retryable = false;
+      let remediation: string | null = null;
+      try {
+        const body = JSON.parse(xhr.responseText) as ResponseBodyShape;
+        if (typeof body?.detail === "string") detail = body.detail;
+        const env = body?.error;
+        if (env) {
+          if (typeof env.code === "string" && env.code.length > 0) code = env.code;
+          if (env.retryable === true) retryable = true;
+          if (typeof env.remediation === "string" && env.remediation.length > 0) {
+            remediation = env.remediation;
+          }
+          if (typeof env.message === "string" && env.message.length > 0) {
+            detail = env.message;
+          }
+        }
+      } catch {
+        // Non-JSON body — fall through with statusText.
+      }
+      reject(new ApiError(xhr.status, detail, code, retryable, remediation));
+    });
+    xhr.addEventListener("error", () => {
+      reject(new ApiError(0, "Network error during upload", "KW_NETWORK_ERROR", true));
+    });
+    xhr.addEventListener("abort", () => {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      reject(err);
+    });
+
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        xhr.abort();
+      } else {
+        opts.signal.addEventListener("abort", () => xhr.abort(), { once: true });
+      }
+    }
+
+    xhr.send(form);
+  });
+}
+
+/**
+ * Health probe that also returns the round-trip latency in milliseconds,
+ * measured client-side via `performance.now()`. The latency is shown in
+ * the health card and the settings panel reachability metadata.
+ */
+export async function getHealthWithLatency(
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<{ health: Health; latencyMs: number }> {
+  const start = performance.now();
+  const health = await getHealth(opts);
+  const latencyMs = Math.round(performance.now() - start);
+  return { health, latencyMs };
+}
