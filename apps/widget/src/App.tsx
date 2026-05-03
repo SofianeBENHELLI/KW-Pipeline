@@ -6,6 +6,7 @@ import { SideRail, type ActiveMode } from "./components/SideRail";
 import { DocumentsList } from "./sections/DocumentsList";
 import { HealthCard } from "./sections/HealthCard";
 import { KnowledgeSummary } from "./sections/KnowledgeSummary";
+import { SearchPanel } from "./sections/SearchPanel";
 import { UploadQueue } from "./sections/UploadQueue";
 import { SettingsPanel } from "./settings/SettingsPanel";
 
@@ -103,6 +104,9 @@ const App: React.FC = () => {
           )}
           {activeMode === "docs" && (
             <DocumentsList apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />
+          )}
+          {activeMode === "search" && (
+            <SearchPanel apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />
           )}
           {activeMode === "kg" && (
             <KnowledgeSummary apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />

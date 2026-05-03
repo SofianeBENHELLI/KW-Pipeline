@@ -77,3 +77,28 @@ export interface KnowledgeGraphPage {
   edges: GraphEdge[];
   next_cursor: string | null;
 }
+
+/**
+ * Single hit returned by ``GET /knowledge/search`` (Phase 3 / ADR-015).
+ * Mirrors ``apps/api/app/schemas/knowledge.py::ChunkSearchResult``.
+ */
+export interface ChunkSearchResult {
+  chunk_id: string;
+  document_id: string;
+  version_id: string;
+  section_id: string;
+  snippet: string | null;
+  score: number;
+}
+
+/**
+ * Response envelope for ``GET /knowledge/search``. Mirrors
+ * ``apps/api/app/schemas/knowledge.py::ChunkSearchResponse``.
+ */
+export interface ChunkSearchResponse {
+  schema_version: string;
+  query: string;
+  embedding_model: string;
+  query_embedding_dim: number;
+  results: ChunkSearchResult[];
+}

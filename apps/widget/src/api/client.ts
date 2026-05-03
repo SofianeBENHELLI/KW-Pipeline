@@ -16,6 +16,7 @@
 import { widget } from "@widget-lab/3ddashboard-utils";
 
 import type {
+  ChunkSearchResponse,
   Document,
   DocumentListResponse,
   DocumentVersion,
@@ -176,6 +177,28 @@ export function getDocument(
   return request<Document>(
     `/documents/${encodeURIComponent(documentId)}`,
     opts,
+  );
+}
+
+/**
+ * GET /knowledge/search (Phase 3 / ADR-015).
+ *
+ * Returns top-K chunks ranked by cosine similarity to ``q``. Phase 3
+ * is gated server-side: when ``KW_KNOWLEDGE_LAYER_ENABLED`` is off or
+ * ``VOYAGE_API_KEY`` is unset, the backend returns 503 with the
+ * ``KW_VECTOR_SEARCH_DISABLED`` envelope code and the operator-facing
+ * remediation copy. The widget surfaces both verbatim.
+ */
+export function searchKnowledgeChunks(
+  q: string,
+  opts: { limit?: number; baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<ChunkSearchResponse> {
+  const params = new URLSearchParams();
+  params.set("q", q);
+  params.set("limit", String(opts.limit ?? 10));
+  return request<ChunkSearchResponse>(
+    `/knowledge/search?${params.toString()}`,
+    { baseUrl: opts.baseUrl, signal: opts.signal },
   );
 }
 
