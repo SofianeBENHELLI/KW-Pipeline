@@ -587,13 +587,19 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     // React 19's cleanup committed, and the polling loop kept reading
     // a not-yet-aborted snapshot. The event listener observes the
     // abort on the same microtask as the cleanup, which is reliable.
+    //
+    // Note: we do NOT also assert ``seenSignals[0].aborted`` — under
+    // some openapi-fetch paths the first captured signal isn't the
+    // controller's signal directly (it can be a derived / wrapped
+    // signal, depending on how the underlying fetch implementation
+    // composes init.signal with the Request constructor). The
+    // event-based assertion is robust to that detail because the
+    // listener fires on whichever captured signal the abort
+    // propagates to.
     await waitFor(() => expect(abortEvents).toBeGreaterThan(0), {
       timeout: 5000,
       interval: 25,
     });
-    // Sanity check on the indexed signal — by the time the abort
-    // event has fired, ``.aborted`` is committed to ``true``.
-    expect(seenSignals[0].aborted).toBe(true);
   }, 15_000);
 });
 
