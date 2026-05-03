@@ -25,6 +25,20 @@ def _allowed_origins() -> list[str]:
     return Settings().cors_allowed_origins
 
 
+def _allowed_origin_regex() -> str | None:
+    """Parse the optional regex CORS allowlist.
+
+    Returns ``None`` when the env var is unset or blank, which keeps
+    Starlette's ``CORSMiddleware`` on the exact-allowlist path. A
+    non-empty value (e.g. ``^https://.*\\.3dexperience\\.3ds\\.com$``)
+    is forwarded verbatim to ``allow_origin_regex`` so the deployed
+    backend can accept whole tenant families without enumerating every
+    subdomain in the CSV allowlist.
+    """
+    raw = Settings().cors_allowed_origin_regex.strip()
+    return raw or None
+
+
 def create_app(
     services: PipelineServices | None = None,
     *,
@@ -64,13 +78,16 @@ def create_app(
     configure_logging(services.settings)
 
     app.state.services = services
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_allowed_origins(),
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-    )
+    cors_kwargs: dict[str, object] = {
+        "allow_origins": _allowed_origins(),
+        "allow_credentials": False,
+        "allow_methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["*"],
+    }
+    origin_regex = _allowed_origin_regex()
+    if origin_regex is not None:
+        cors_kwargs["allow_origin_regex"] = origin_regex
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     # Issue #120 — wrap raised HTTPExceptions into the public error
     # envelope defined in ``app.errors``. The legacy ``detail`` field is

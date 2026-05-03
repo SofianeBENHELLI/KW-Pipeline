@@ -42,6 +42,13 @@ def main() -> None:
         "KW_CORS_ALLOWED_ORIGINS",
         "http://localhost:5173,https://localhost:8081",
     )
+    # Accept any 3DEXPERIENCE on-cloud tenant origin so the deployed
+    # widget can reach the API without enumerating every subdomain.
+    # Operators on a different host pattern can still override via env.
+    os.environ.setdefault(
+        "KW_CORS_ALLOWED_ORIGIN_REGEX",
+        r"^https://.*\.3dexperience\.3ds\.com$",
+    )
     os.environ.setdefault(
         "KW_ALLOWED_CONTENT_TYPES",
         "text/plain,application/pdf,"

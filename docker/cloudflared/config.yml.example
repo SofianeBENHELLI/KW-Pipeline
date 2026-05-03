@@ -1,0 +1,34 @@
+# Cloudflared tunnel config for the workstation deploy.
+#
+# Copy this file to ``config.yml`` next to it, then paste the tunnel
+# UUID Cloudflare prints during ``cloudflared tunnel create kw-api`` —
+# see docs/runbook/workstation-deploy.md for the full one-time setup.
+#
+# The config file + the credentials JSON are mounted read-only into
+# the cloudflared sidecar (see docker-compose.yml). The connector
+# calls outbound to Cloudflare's edge — no port forwarding needed.
+
+# UUID returned by ``cloudflared tunnel create kw-api``.
+tunnel: REPLACE-WITH-TUNNEL-UUID
+
+# Path *inside the container* to the credentials file. We bind-mount
+# ./docker/cloudflared:/etc/cloudflared:ro so this resolves to
+# ./docker/cloudflared/<tunnel-uuid>.json on the host.
+credentials-file: /etc/cloudflared/REPLACE-WITH-TUNNEL-UUID.json
+
+# Routing — public hostname → in-network service. The ``api``
+# hostname is the docker-compose service name; cloudflared and the
+# api containers share the default compose network so the connector
+# can reach the FastAPI app at http://api:8000 without exposing it
+# anywhere else.
+ingress:
+  - hostname: kw-api.benhelli.org
+    service: http://api:8000
+    originRequest:
+      # Don't choke if a slow extraction takes more than the default
+      # 30 s; uploads of larger PDFs can hit this.
+      connectTimeout: 10s
+      noHappyEyeballs: true
+  # Catch-all: any request that didn't match an earlier rule gets a
+  # 404. Required by cloudflared.
+  - service: http_status:404

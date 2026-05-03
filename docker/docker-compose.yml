@@ -1,19 +1,20 @@
-# Opt-in compose stack for the knowledge layer (ADR-012, Phase 1b).
+# Compose stacks for the knowledge-layer backend.
 #
-# Defines a Neo4j 5.23 Community service plus the FastAPI app wired
-# to it via KW_NEO4J_* env vars. Default unit tests do not need this
-# stack; it exists for local end-to-end development and for the
-# `integration` CI job that exercises Neo4jGraphStore against a real
-# bolt:// connection.
+# Two profiles:
 #
-# Note: there is intentionally no `web` / frontend service here. The
-# Vite dev server is expected to run on the host (`npm run dev` from
-# apps/web/) — keeping it out of compose avoids node_modules churn
-# inside Docker for what is otherwise a trivial dev workflow.
+#   1. ``dev``   — Neo4j + API. Used by the integration CI job and for
+#                  local end-to-end work on a developer laptop.
+#   2. ``deploy`` — Same Neo4j + API plus a ``cloudflared`` sidecar
+#                  that exposes the API at the operator's chosen
+#                  hostname (e.g. ``https://kw-api.benhelli.org``).
+#                  See ``docs/runbook/workstation-deploy.md`` for the
+#                  one-time tunnel setup.
 #
-# Quickstart:
-#   docker compose -f docker/docker-compose.yml up neo4j   # bolt + browser only
-#   docker compose -f docker/docker-compose.yml up         # neo4j + api
+# Quickstart (dev):
+#   docker compose -f docker/docker-compose.yml --profile dev up -d
+#
+# Quickstart (workstation deploy):
+#   docker compose -f docker/docker-compose.yml --profile deploy up -d
 
 services:
   neo4j:
@@ -32,6 +33,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    profiles: ["dev", "deploy"]
+    restart: unless-stopped
 
   api:
     build:
@@ -39,15 +42,60 @@ services:
       dockerfile: Dockerfile
     container_name: kw-pipeline-api
     ports:
+      # Host-exposed for ``dev`` so a host-side ``curl`` works. The
+      # ``deploy`` profile keeps the port exposed too — cloudflared
+      # talks to it via the docker network ("api" hostname) but local
+      # access from the host stays handy for poking the Swagger UI.
       - "8000:8000"
     environment:
       KW_KNOWLEDGE_LAYER_ENABLED: "true"
       KW_NEO4J_URI: bolt://neo4j:7687
       KW_NEO4J_USER: neo4j
       KW_NEO4J_PASSWORD: test_password_change_me
+      # Accept any 3DEXPERIENCE on-cloud tenant origin so the deployed
+      # widget can reach the API without enumerating every subdomain.
+      # Override per-deployment if your tenant lives outside this
+      # pattern.
+      KW_CORS_ALLOWED_ORIGIN_REGEX: "^https://.*\\.3dexperience\\.3ds\\.com$$"
+      # Optional API keys passed through from the host's ``.env`` file
+      # so the workstation deploy can use the real Anthropic + Voyage
+      # paths without baking secrets into the image.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      VOYAGE_API_KEY: "${VOYAGE_API_KEY:-}"
+    volumes:
+      # Persist SQLite catalog + raw uploads across container restarts.
+      # The Dockerfile defaults ``KW_DATA_DIR=/data`` so this matches.
+      - api_data:/data
     depends_on:
       neo4j:
         condition: service_healthy
+    profiles: ["dev", "deploy"]
+    restart: unless-stopped
+
+  # ── Workstation deployment sidecar (``deploy`` profile only) ──────
+  #
+  # The cloudflared connector calls outbound to Cloudflare's edge so
+  # no port forwarding / public IP is required on the workstation.
+  # See docs/runbook/workstation-deploy.md for the one-time
+  # ``cloudflared tunnel login`` + ``tunnel route dns`` setup.
+  #
+  # The mounted ``cloudflared/`` directory carries the operator's
+  # tunnel credentials JSON + the config.yml that maps the public
+  # hostname to the in-network ``http://api:8000``. Both files are
+  # gitignored — see docker/cloudflared/.gitignore — so credentials
+  # never land in source control.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: kw-pipeline-cloudflared
+    command: ["tunnel", "--no-autoupdate", "run"]
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      api:
+        condition: service_started
+    profiles: ["deploy"]
+    restart: unless-stopped
 
 volumes:
   neo4j_data:
+  api_data:
