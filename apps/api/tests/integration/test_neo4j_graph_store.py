@@ -265,3 +265,78 @@ def test_find_subgraph_rejects_out_of_range_limit(store: Neo4jGraphStore) -> Non
         store.find_subgraph(limit=0)
     with pytest.raises(ValueError):
         store.find_subgraph(limit=MAX_GRAPH_PAGE_LIMIT + 1)
+
+
+# ─── Phase 3 vector primitives (ADR-015) ─────────────────────────────────
+
+
+def _chunk(
+    ns: str,
+    chunk_id: str,
+    *,
+    snippet: str | None = None,
+    section_id: str | None = None,
+    document_id: str = "doc-A",
+    version_id: str = "ver-A",
+) -> GraphNode:
+    return GraphNode(
+        id=f"{ns}-{chunk_id}",
+        kind="chunk",
+        label=f"label-{chunk_id}",
+        properties={
+            "document_id": f"{ns}-{document_id}",
+            "version_id": f"{ns}-{version_id}",
+            "section_id": f"{ns}-{section_id or chunk_id}",
+            "text_preview": snippet,
+        },
+    )
+
+
+def test_vector_index_provisioning_and_cosine_search(store: Neo4jGraphStore, ns: str) -> None:
+    """End-to-end: provision the HNSW index, write embeddings, query
+    by cosine similarity. Uses a unique 4-dim vector so the recall is
+    deterministic regardless of the index's HNSW heuristics.
+    """
+    index_name = f"chunk_embedding_{ns.replace('-', '_')}"
+    store.ensure_vector_index(name=index_name, dim=4)
+    # Idempotent: a second call must not raise.
+    store.ensure_vector_index(name=index_name, dim=4)
+
+    store.upsert_nodes(
+        [
+            _chunk(ns, "c1", snippet="alpha"),
+            _chunk(ns, "c2", snippet="beta"),
+            _chunk(ns, "c3", snippet="gamma"),
+        ]
+    )
+    store.set_chunk_embedding(chunk_id=f"{ns}-c1", embedding=[1.0, 0.0, 0.0, 0.0])
+    store.set_chunk_embedding(chunk_id=f"{ns}-c2", embedding=[0.0, 1.0, 0.0, 0.0])
+    store.set_chunk_embedding(chunk_id=f"{ns}-c3", embedding=[0.5, 0.5, 0.0, 0.0])
+
+    hits = store.find_chunks_by_similarity(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=3,
+        index_name=index_name,
+    )
+
+    chunk_ids = [h.chunk_id for h in hits]
+    assert chunk_ids[0] == f"{ns}-c1", f"expected c1 first; got {chunk_ids}"
+    assert hits[0].score == pytest.approx(1.0, abs=1e-3)
+    assert {h.chunk_id for h in hits} == {f"{ns}-c1", f"{ns}-c2", f"{ns}-c3"}
+    # Locator metadata round-trips through the Cypher RETURN.
+    for h in hits:
+        assert h.document_id == f"{ns}-doc-A"
+        assert h.version_id == f"{ns}-ver-A"
+        assert h.section_id.startswith(f"{ns}-")
+
+
+def test_vector_index_creation_rejects_non_positive_dim(store: Neo4jGraphStore) -> None:
+    with pytest.raises(ValueError):
+        store.ensure_vector_index(name="bad_index", dim=0)
+
+
+def test_find_chunks_by_similarity_rejects_oversize_limit(
+    store: Neo4jGraphStore,
+) -> None:
+    with pytest.raises(ValueError):
+        store.find_chunks_by_similarity([0.0, 0.0, 0.0, 0.0], limit=10_000)

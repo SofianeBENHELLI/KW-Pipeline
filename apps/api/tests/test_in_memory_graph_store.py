@@ -149,3 +149,119 @@ def test_find_subgraph_default_limit_returns_everything_when_small():
     page = store.find_subgraph(limit=DEFAULT_GRAPH_PAGE_LIMIT)
     assert len(page.nodes) == 5
     assert page.next_cursor is None
+
+
+# ─── Phase 3 vector primitives (ADR-015) ─────────────────────────────────
+
+
+def _chunk_node(chunk_id: str, *, version_id="ver-A", section_id=None, snippet=None):
+    return GraphNode(
+        id=chunk_id,
+        kind="chunk",
+        label=f"label-{chunk_id}",
+        properties={
+            "document_id": "doc-A",
+            "version_id": version_id,
+            "section_id": section_id or chunk_id,
+            "text_preview": snippet,
+        },
+    )
+
+
+def test_ensure_vector_index_is_no_op_for_in_memory():
+    store = InMemoryGraphStore()
+    # Both the first call and a re-call must succeed (idempotent contract).
+    store.ensure_vector_index(name="chunk_embedding", dim=16)
+    store.ensure_vector_index(name="chunk_embedding", dim=16)
+
+
+def test_ensure_vector_index_rejects_non_positive_dim():
+    store = InMemoryGraphStore()
+    with pytest.raises(ValueError):
+        store.ensure_vector_index(name="chunk_embedding", dim=0)
+    with pytest.raises(ValueError):
+        store.ensure_vector_index(name="chunk_embedding", dim=-3)
+
+
+def test_find_chunks_by_similarity_ranks_by_cosine():
+    store = InMemoryGraphStore()
+    store.upsert_nodes(
+        [
+            _chunk_node("c1", snippet="alpha"),
+            _chunk_node("c2", snippet="beta"),
+            _chunk_node("c3", snippet="gamma"),
+        ]
+    )
+    # Hand-crafted vectors so the order is unambiguous.
+    store.set_chunk_embedding(chunk_id="c1", embedding=[1.0, 0.0])
+    store.set_chunk_embedding(chunk_id="c2", embedding=[0.0, 1.0])
+    store.set_chunk_embedding(chunk_id="c3", embedding=[0.5, 0.5])
+
+    hits = store.find_chunks_by_similarity([1.0, 0.0], limit=3)
+
+    assert [h.chunk_id for h in hits] == ["c1", "c3", "c2"]
+    # Score for c1 is exactly 1.0 (identical direction).
+    assert hits[0].score == pytest.approx(1.0)
+    # Snippet round-trips from text_preview.
+    assert hits[0].snippet == "alpha"
+    assert hits[0].document_id == "doc-A"
+    assert hits[0].version_id == "ver-A"
+
+
+def test_find_chunks_by_similarity_respects_limit():
+    store = InMemoryGraphStore()
+    for i in range(5):
+        store.upsert_nodes([_chunk_node(f"c{i}")])
+        store.set_chunk_embedding(chunk_id=f"c{i}", embedding=[float(i), 1.0])
+    hits = store.find_chunks_by_similarity([1.0, 1.0], limit=2)
+    assert len(hits) == 2
+
+
+def test_find_chunks_by_similarity_skips_dim_mismatch():
+    """A stale vector from a prior model is silently ignored, not raised."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1"), _chunk_node("c2")])
+    store.set_chunk_embedding(chunk_id="c1", embedding=[1.0, 0.0])
+    store.set_chunk_embedding(chunk_id="c2", embedding=[1.0, 0.0, 0.0])  # wrong dim
+
+    hits = store.find_chunks_by_similarity([1.0, 0.0], limit=10)
+
+    # Only c1 should be ranked; c2 is silently skipped.
+    assert {h.chunk_id for h in hits} == {"c1"}
+
+
+def test_find_chunks_by_similarity_returns_empty_when_no_embeddings():
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1")])
+    hits = store.find_chunks_by_similarity([1.0, 0.0], limit=5)
+    assert hits == []
+
+
+def test_find_chunks_by_similarity_rejects_invalid_limit():
+    store = InMemoryGraphStore()
+    with pytest.raises(ValueError):
+        store.find_chunks_by_similarity([1.0], limit=0)
+    with pytest.raises(ValueError):
+        store.find_chunks_by_similarity([1.0], limit=10_000)
+
+
+def test_set_chunk_embedding_is_overwritable():
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1")])
+    store.set_chunk_embedding(chunk_id="c1", embedding=[1.0, 0.0])
+    store.set_chunk_embedding(chunk_id="c1", embedding=[0.0, 1.0])
+    hits = store.find_chunks_by_similarity([0.0, 1.0], limit=1)
+    assert hits[0].chunk_id == "c1"
+    assert hits[0].score == pytest.approx(1.0)
+
+
+def test_delete_subgraph_for_version_drops_chunk_embedding():
+    """Re-projecting a version must invalidate stale embeddings."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1", version_id="v1")])
+    store.set_chunk_embedding(chunk_id="c1", embedding=[1.0, 0.0])
+
+    store.delete_subgraph_for_version(document_id="doc-A", version_id="v1")
+
+    hits = store.find_chunks_by_similarity([1.0, 0.0], limit=5)
+    assert hits == []

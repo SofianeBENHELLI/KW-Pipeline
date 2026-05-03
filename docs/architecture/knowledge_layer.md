@@ -77,6 +77,7 @@ New routes added in `apps/api/app/routes.py`:
 |---|---|---|---|
 | `GET /documents/{document_id}/graph` | 1 | `get_document_graph` | `KnowledgeGraphProjection` (nodes + edges for one document) |
 | `GET /knowledge/graph` | 1 | `get_knowledge_graph` | Cursor-paginated `KnowledgeGraphPage` (cross-document subgraph) |
+| `GET /knowledge/search` | 3 | `search_knowledge_chunks` | `ChunkSearchResponse` (top-K chunks ranked by cosine similarity to the embedded query) |
 | `POST /chat/rag` | 3 | `chat_rag` | `ChatResponse` (vector retrieval over validated content) |
 | `POST /chat/graph` | 3 | `chat_graph` | `ChatResponse` (Cypher-translated query over the graph) |
 | `POST /chat/hybrid` | 3 | `chat_hybrid` | `ChatResponse` (vector + graph blended) |
@@ -188,6 +189,15 @@ LLM integration tests against the real Anthropic API run behind
 
 - `tests/integration/test_anthropic_llm_client.py` — happy-path
   smoke; rate-limit handling.
+
+Embedding integration tests against the real Voyage AI API + Neo4j
+vector index run behind `pytest -m embedding_integration`, also opt-in
+and not part of default CI:
+
+- `tests/integration/test_voyage_neo4j_search.py` — embeds three
+  semantically-distinct chunks through real Voyage, persists their
+  vectors in a real Neo4j HNSW index, and asserts the right chunk
+  wins for an English-language query (Phase 3).
 
 ## Docker / local dev
 

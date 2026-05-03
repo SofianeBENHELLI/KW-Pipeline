@@ -71,10 +71,19 @@ class EmbeddingClient(Protocol):
     documents vs queries) are common. The Protocol is shape-only;
     concrete implementations decide whether the two methods route to
     one model or two.
+
+    ``dim`` is exposed as a read-only property so implementations may
+    resolve it lazily (Voyage probes once for unknown model ids); the
+    in-memory fake binds it as a plain attribute, which still
+    satisfies the Protocol since ``runtime_checkable`` checks
+    attribute presence, not write-ness.
     """
 
     name: str
-    dim: int
+
+    @property
+    def dim(self) -> int:
+        """Embedding dimensionality. Must be a positive integer."""
 
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed one or more chunks for indexing. Order-preserving."""

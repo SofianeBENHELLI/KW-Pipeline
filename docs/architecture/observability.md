@@ -82,6 +82,11 @@ gating rules.
 |---|---|---|---|
 | `knowledge.projection.written` | INFO | `KnowledgeProjector` after a successful projection | `document_id`, `version_id`, node and edge counts |
 | `knowledge.entity_extraction.completed` | INFO | Phase 2 entity extractor finishes | `document_id`, `version_id`, `entity_count`, token usage |
+| `knowledge.embeddings.computed` | INFO | Phase 3: `KnowledgeProjector` after writing chunk embeddings | `document_id`, `version_id`, `chunk_count`, `embedding_model`, `cache_hits`, `embedded_count` |
+| `knowledge.embeddings.failed` | WARNING | Phase 3: embedding write fails (fire-and-log; structural projection is unaffected) | `document_id`, `version_id`, `error_type` |
+| `knowledge.vector_index.created` | INFO | Phase 3: `app.main` startup successfully provisioned the chunk-embedding HNSW index | `index_name`, `dim`, `embedding_model`, `store` |
+| `knowledge.vector_index.failed` | WARNING | Phase 3: startup index provisioning raised (e.g. Neo4j blip); the API still serves Phase 1 + Phase 2 traffic | `index_name`, `embedding_model`, `error_type` |
+| `knowledge.search.queried` | INFO | Phase 3: every `GET /knowledge/search` request | `query_char_count`, `top_k`, `result_count`, `embedding_model`, `latency_ms` |
 
 ### Idempotency
 

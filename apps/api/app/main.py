@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,7 +7,10 @@ from app.dependencies import PipelineServices, build_persistent_services, build_
 from app.errors import install_error_handlers
 from app.logging_config import configure_logging
 from app.routes import build_router
+from app.services.knowledge.graph_store import VECTOR_INDEX_NAME
 from app.settings import Settings
+
+log = logging.getLogger(__name__)
 
 
 def _allowed_origins() -> list[str]:
@@ -75,7 +80,45 @@ def create_app(
 
     app.include_router(build_router(services))
 
+    _ensure_vector_index(services)
+
     return app
+
+
+def _ensure_vector_index(services: PipelineServices) -> None:
+    """Provision the Phase 3 chunk-embedding vector index on startup.
+
+    Runs only when both gates are on (knowledge layer enabled + Voyage
+    configured); otherwise the search service is ``None`` and the
+    route returns 503. Failures are logged and swallowed so a Neo4j
+    blip during boot does not stop the API from accepting Phase 1 /
+    Phase 2 traffic.
+    """
+    if services.embedding_client is None:
+        return
+    try:
+        services.graph_store.ensure_vector_index(
+            name=VECTOR_INDEX_NAME,
+            dim=services.embedding_client.dim,
+        )
+        log.info(
+            "knowledge.vector_index.created",
+            extra={
+                "index_name": VECTOR_INDEX_NAME,
+                "dim": services.embedding_client.dim,
+                "embedding_model": services.embedding_client.name,
+                "store": getattr(services.graph_store, "name", "unknown"),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+        log.warning(
+            "knowledge.vector_index.failed",
+            extra={
+                "index_name": VECTOR_INDEX_NAME,
+                "embedding_model": services.embedding_client.name,
+                "error_type": type(exc).__name__,
+            },
+        )
 
 
 def _build_app() -> FastAPI:

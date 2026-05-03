@@ -79,3 +79,127 @@ def test_layer_enabled_with_full_neo4j_config_constructs_neo4j_store(
     finally:
         if isinstance(store, Neo4jGraphStore):
             store.close()
+
+
+# ─── Phase 3 embedding-client wiring (ADR-015 / #186) ─────────────────────
+
+
+from app.dependencies import _maybe_build_embedding_client  # noqa: E402
+from app.services.knowledge import (  # noqa: E402
+    FakeEmbeddingClient,
+    VoyageEmbeddingClient,
+)
+
+
+def test_embedding_client_disabled_when_no_voyage_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.delenv("KW_VOYAGE_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    assert _maybe_build_embedding_client() is None
+
+
+def test_embedding_client_disabled_when_layer_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KW_KNOWLEDGE_LAYER_ENABLED", raising=False)
+    monkeypatch.setenv("KW_VOYAGE_API_KEY", "vk-x")
+    assert _maybe_build_embedding_client() is None
+
+
+def test_embedding_client_built_when_both_gates_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_VOYAGE_API_KEY", "vk-x")
+    monkeypatch.delenv("KW_EMBEDDING_MODEL", raising=False)
+    client = _maybe_build_embedding_client()
+    assert isinstance(client, VoyageEmbeddingClient)
+
+
+def test_embedding_client_built_with_explicit_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_VOYAGE_API_KEY", "vk-x")
+    monkeypatch.setenv("KW_EMBEDDING_MODEL", "voyage-3-large")
+    client = _maybe_build_embedding_client()
+    assert isinstance(client, VoyageEmbeddingClient)
+
+
+def test_embedding_client_built_with_empty_model_falls_back_to_sdk_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit empty ``KW_EMBEDDING_MODEL`` lets the constructor's
+    own default win — the no-model branch in the builder."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_VOYAGE_API_KEY", "vk-x")
+    monkeypatch.setenv("KW_EMBEDDING_MODEL", "")
+    client = _maybe_build_embedding_client()
+    assert isinstance(client, VoyageEmbeddingClient)
+
+
+def test_layer_threads_embedding_client_into_projector() -> None:
+    """When an embedding client is supplied, the projector wires it
+    through so the Phase 3 write path activates."""
+    from app.dependencies import _maybe_build_knowledge_layer
+
+    embedder = FakeEmbeddingClient(dim=16)
+    store, projector = _maybe_build_knowledge_layer(
+        embedding_client=embedder,
+    )
+    # Layer disabled by default → projector None, but embedder is still
+    # usable elsewhere.
+    assert projector is None
+    assert isinstance(store, InMemoryGraphStore)
+
+
+def test_layer_threads_embedding_client_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.dependencies import _maybe_build_knowledge_layer
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    embedder = FakeEmbeddingClient(dim=16)
+    store, projector = _maybe_build_knowledge_layer(
+        embedding_client=embedder,
+    )
+    assert isinstance(projector, KnowledgeProjector)
+    # The projector must hold the embedder reference; we verify by
+    # projecting a tiny doc and checking the embedding is written.
+    from datetime import UTC, datetime
+
+    from app.models.document import DocumentVersionStatus
+    from app.schemas.document import Document, DocumentVersion
+    from app.schemas.semantic_document import (
+        DocumentProfile,
+        SemanticDocument,
+        SemanticSection,
+    )
+
+    version = DocumentVersion(
+        id="ver-1",
+        document_id="doc-1",
+        version_number=1,
+        filename="x.txt",
+        content_type="text/plain",
+        file_size=1,
+        sha256="0" * 64,
+        storage_uri="file://x",
+        status=DocumentVersionStatus.VALIDATED,
+    )
+    document = Document(
+        id="doc-1",
+        original_filename="x.txt",
+        latest_version_id="ver-1",
+        versions=[version],
+    )
+    semantic = SemanticDocument(
+        id="sem-1",
+        document_version_id="ver-1",
+        document_profile=DocumentProfile(title="x"),
+        sections=[SemanticSection(id="s1", heading="A", text="hello")],
+        validation_status="validated",
+        markdown="# x\n",
+        created_at=datetime(2026, 5, 4, tzinfo=UTC),
+    )
+    projector.project(document=document, version=version, semantic=semantic)
+    hits = store.find_chunks_by_similarity(embedder.embed_query("hello"), limit=5)
+    assert {h.chunk_id for h in hits} == {"s1"}

@@ -1,4 +1,4 @@
-"""Graph store boundary for the knowledge layer (ADR-012).
+"""Graph store boundary for the knowledge layer (ADR-012, ADR-015).
 
 The ``GraphStore`` Protocol is the only seam between the rest of the
 codebase and a concrete graph backend. Two implementations live in
@@ -15,13 +15,17 @@ this module:
   ``neo4j-labs/llm-graph-builder/backend/src/graphDB_dataAccess.py``
   and ``make_relationships.py`` (Apache-2.0).
 
-The Protocol surface is intentionally small. Phase 1 only needs
-upserts for the projection lifecycle plus two read shapes
-(``find_subgraph_for_document`` for the per-document view and
-``find_subgraph`` for the cursor-paginated catalog walk). Phase 2's
-entity work will add ``upsert_entity`` and ``merge_has_entity``
-methods alongside; ADR-012 explicitly carves the surface to avoid
-leaking Cypher into callers.
+Phase 3 (#186, ADR-015) adds vector-index primitives that live behind
+the same Protocol so the search service never reaches into a backend:
+
+- :meth:`GraphStore.ensure_vector_index` provisions an HNSW vector
+  index on ``(:Chunk {embedding})`` (Neo4j) or a no-op (in-memory).
+- :meth:`GraphStore.set_chunk_embedding` writes the per-chunk vector
+  outside the wire-shape ``properties`` map so 1k-float arrays don't
+  travel back through ``KnowledgeGraphProjection`` responses.
+- :meth:`GraphStore.find_chunks_by_similarity` runs cosine retrieval
+  and returns ranked chunks (id + locator metadata + score), the
+  retrieval primitive ``KnowledgeSearchService`` consumes.
 """
 
 from __future__ import annotations
@@ -29,8 +33,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from app.schemas.knowledge import (
@@ -46,6 +52,32 @@ log = logging.getLogger(__name__)
 # route's bounds to avoid surprises.
 DEFAULT_GRAPH_PAGE_LIMIT = 50
 MAX_GRAPH_PAGE_LIMIT = 200
+
+# Phase 3 vector-index name. Single canonical name across stores so
+# operators and the search route don't need to know the storage layer.
+VECTOR_INDEX_NAME = "chunk_embedding"
+
+# Vector-search guardrails. Match Neo4j's HNSW typical ``ef`` budget.
+DEFAULT_VECTOR_SEARCH_LIMIT = 10
+MAX_VECTOR_SEARCH_LIMIT = 50
+
+
+@dataclass(frozen=True)
+class ChunkSearchHit:
+    """One result from :meth:`GraphStore.find_chunks_by_similarity`.
+
+    The store returns the lowest-level locator metadata it has on the
+    chunk plus the cosine similarity score. The HTTP response shape
+    (:class:`app.schemas.knowledge.ChunkSearchResult`) is built on top
+    of this in :class:`KnowledgeSearchService`.
+    """
+
+    chunk_id: str
+    document_id: str
+    version_id: str
+    section_id: str
+    snippet: str | None
+    score: float
 
 
 @runtime_checkable
@@ -92,6 +124,39 @@ class GraphStore(Protocol):
         node_id)`` so pages are stable across calls.
         """
 
+    # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
+
+    def ensure_vector_index(self, *, name: str, dim: int) -> None:
+        """Idempotently provision the chunk-embedding vector index.
+
+        Backends without a native vector index (the in-memory store)
+        treat this as a no-op; the search method falls back to a
+        brute-force cosine scan over the materialised vectors.
+        """
+
+    def set_chunk_embedding(self, *, chunk_id: str, embedding: Sequence[float]) -> None:
+        """Write an embedding vector for one chunk.
+
+        Stored outside the wire-shape ``properties`` map so the public
+        ``KnowledgeGraphProjection`` payload doesn't grow by 1024
+        floats per chunk. ``find_chunks_by_similarity`` is the only
+        public read path for these vectors.
+        """
+
+    def find_chunks_by_similarity(
+        self,
+        query_embedding: Sequence[float],
+        *,
+        limit: int = DEFAULT_VECTOR_SEARCH_LIMIT,
+        index_name: str = VECTOR_INDEX_NAME,
+    ) -> list[ChunkSearchHit]:
+        """Return the top-K chunks ranked by cosine similarity.
+
+        Empty graph (or empty index) is a valid response: an empty
+        list, not an exception. ``limit`` is bounded by
+        :data:`MAX_VECTOR_SEARCH_LIMIT`.
+        """
+
 
 # ─── In-memory implementation (used by unit tests and demos) ────────────
 
@@ -118,6 +183,10 @@ class InMemoryGraphStore:
         self._version_to_node_ids: dict[str, set[str]] = {}
         # Same for edges.
         self._version_to_edge_ids: dict[str, set[str]] = {}
+        # Phase 3: chunk_id → embedding vector. Lives outside
+        # ``self._nodes`` so the wire-shape projection stays unchanged
+        # when the embedding write path runs.
+        self._chunk_embeddings: dict[str, list[float]] = {}
         self._lock = threading.RLock()
 
     def upsert_nodes(self, nodes: Iterable[GraphNode]) -> None:
@@ -151,6 +220,10 @@ class InMemoryGraphStore:
                 )
                 if not still_referenced:
                     self._nodes.pop(node_id, None)
+                    # Drop the chunk's embedding alongside the node so
+                    # a re-projection re-embeds rather than serving a
+                    # stale vector.
+                    self._chunk_embeddings.pop(node_id, None)
             for edge_id in edge_ids:
                 self._edges.pop(edge_id, None)
 
@@ -223,6 +296,83 @@ class InMemoryGraphStore:
                 edges=sorted(page_edges, key=lambda e: (e.kind, e.id)),
                 next_cursor=next_cursor,
             )
+
+    # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
+
+    def ensure_vector_index(self, *, name: str, dim: int) -> None:
+        """No-op: the in-memory store keeps vectors in a Python dict
+        and uses brute-force cosine in :meth:`find_chunks_by_similarity`.
+
+        Accepts the same arguments as the Neo4j path so callers can
+        invoke it unconditionally without branching on the store type.
+        """
+        if dim <= 0:
+            raise ValueError(f"vector index dim must be positive; got {dim}.")
+
+    def set_chunk_embedding(self, *, chunk_id: str, embedding: Sequence[float]) -> None:
+        with self._lock:
+            self._chunk_embeddings[chunk_id] = list(embedding)
+
+    def find_chunks_by_similarity(
+        self,
+        query_embedding: Sequence[float],
+        *,
+        limit: int = DEFAULT_VECTOR_SEARCH_LIMIT,
+        index_name: str = VECTOR_INDEX_NAME,
+    ) -> list[ChunkSearchHit]:
+        if limit < 1 or limit > MAX_VECTOR_SEARCH_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_VECTOR_SEARCH_LIMIT}; got {limit}.")
+        query = list(query_embedding)
+        if not query:
+            return []
+        with self._lock:
+            scored: list[tuple[float, str]] = []
+            for chunk_id, vector in self._chunk_embeddings.items():
+                score = _cosine_similarity(query, vector)
+                if score is None:
+                    continue
+                scored.append((score, chunk_id))
+            # Sort by descending score; tie-break on chunk_id so the
+            # order is deterministic across runs.
+            scored.sort(key=lambda pair: (-pair[0], pair[1]))
+            hits: list[ChunkSearchHit] = []
+            for score, chunk_id in scored[:limit]:
+                node = self._nodes.get(chunk_id)
+                if node is None:
+                    continue
+                props = node.properties
+                hits.append(
+                    ChunkSearchHit(
+                        chunk_id=chunk_id,
+                        document_id=str(props.get("document_id") or ""),
+                        version_id=str(props.get("version_id") or ""),
+                        section_id=str(props.get("section_id") or ""),
+                        snippet=_string_or_none(props.get("text_preview")),
+                        score=score,
+                    )
+                )
+            return hits
+
+
+def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float | None:
+    """Return cosine(a, b) in ``[-1, 1]``, or ``None`` for incompatible inputs.
+
+    Mismatched dimensionality is not raised — the search service is
+    fire-and-log; a stale vector left over from a prior model is
+    skipped, never crashes the request.
+    """
+    if len(a) != len(b):
+        return None
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return None
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    return dot / (norm_a * norm_b)
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _version_id_from_properties(props: Mapping[str, object]) -> str | None:
@@ -454,6 +604,101 @@ class Neo4jGraphStore:
             last = nodes[-1]
             next_cursor = _encode_cursor((last.kind, last.id))
         return KnowledgeGraphPage(nodes=nodes, edges=edges, next_cursor=next_cursor)
+
+    # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
+    # Each method below is exercised end-to-end by
+    # ``tests/integration/test_neo4j_graph_store.py`` against a real
+    # Neo4j 5.x with vector-index support; the default unit suite uses
+    # the in-memory cosine shim. Coverage exclusion mirrors the
+    # ``__init__`` and the existing Phase 1 Neo4j methods.
+
+    def ensure_vector_index(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        *,
+        name: str,
+        dim: int,
+    ) -> None:
+        """Idempotently create an HNSW vector index on chunk nodes.
+
+        Neo4j 5.13+ ``CREATE VECTOR INDEX`` syntax with ``IF NOT
+        EXISTS`` keeps the call safe across restarts. Cosine
+        similarity matches Voyage's embedding space.
+        """
+        if dim <= 0:
+            raise ValueError(f"vector index dim must be positive; got {dim}.")
+        self._write(
+            f"""
+            CREATE VECTOR INDEX {name} IF NOT EXISTS
+            FOR (n:KnowledgeNode) ON n.embedding
+            OPTIONS {{
+                indexConfig: {{
+                    `vector.dimensions`: $dim,
+                    `vector.similarity_function`: 'cosine'
+                }}
+            }}
+            """,
+            {"dim": dim},
+        )
+
+    def set_chunk_embedding(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        *,
+        chunk_id: str,
+        embedding: Sequence[float],
+    ) -> None:
+        self._write(
+            """
+            MATCH (n:KnowledgeNode {id: $chunk_id, kind: 'chunk'})
+            SET n.embedding = $embedding
+            """,
+            {"chunk_id": chunk_id, "embedding": list(embedding)},
+        )
+
+    def find_chunks_by_similarity(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        query_embedding: Sequence[float],
+        *,
+        limit: int = DEFAULT_VECTOR_SEARCH_LIMIT,
+        index_name: str = VECTOR_INDEX_NAME,
+    ) -> list[ChunkSearchHit]:
+        if limit < 1 or limit > MAX_VECTOR_SEARCH_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_VECTOR_SEARCH_LIMIT}; got {limit}.")
+        rows = self._read(
+            """
+            CALL db.index.vector.queryNodes($index_name, $limit, $vector)
+            YIELD node, score
+            WHERE node.kind = 'chunk'
+            RETURN node.id           AS chunk_id,
+                   node.document_id  AS document_id,
+                   node.version_id   AS version_id,
+                   node.section_id   AS section_id,
+                   node.text_preview AS snippet,
+                   score
+            """,
+            {
+                "index_name": index_name,
+                "limit": limit,
+                "vector": list(query_embedding),
+            },
+        )
+        # Bolt ``Record`` objects return ``object`` typed values; the
+        # query above shapes each row as a flat ``dict[str, Any]`` so
+        # the cast to ``Any`` here matches the runtime contract.
+        hits: list[ChunkSearchHit] = []
+        for row in rows:
+            row_any: Any = row
+            snippet_raw = row_any.get("snippet")
+            hits.append(
+                ChunkSearchHit(
+                    chunk_id=str(row_any["chunk_id"]),
+                    document_id=str(row_any.get("document_id") or ""),
+                    version_id=str(row_any.get("version_id") or ""),
+                    section_id=str(row_any.get("section_id") or ""),
+                    snippet=snippet_raw if isinstance(snippet_raw, str) else None,
+                    score=float(row_any["score"]),
+                )
+            )
+        return hits
 
     # The retry pattern is adapted from llm-graph-builder's
     # ``execute_graph_query``: catch transient driver errors a few

@@ -302,3 +302,143 @@ def test_graph_node_and_edge_round_trip_through_store():
     page = store.find_subgraph(limit=20)
     assert {n.id for n in page.nodes} == {"x", "y"}
     assert page.edges[0].properties["source_reference_id"] == "src-1"
+
+
+# ─── Phase 3 embedding write path (ADR-015 / #186) ───────────────────────
+
+
+def test_project_writes_chunk_embeddings_when_client_set():
+    from app.services.knowledge import FakeEmbeddingClient
+
+    store = InMemoryGraphStore()
+    embedder = FakeEmbeddingClient(dim=16)
+    projector = KnowledgeProjector(graph_store=store, embedding_client=embedder)
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="Intro", text="hello world"),
+            SemanticSection(id="s2", heading="Body", text="goodbye world"),
+        ],
+    )
+
+    projector.project(document=document, version=version, semantic=semantic)
+
+    # Both chunks must be retrievable via the vector index.
+    hits = store.find_chunks_by_similarity(embedder.embed_query("hello world"), limit=10)
+    assert {h.chunk_id for h in hits} == {"s1", "s2"}
+
+
+def test_project_skips_embeddings_when_client_unset():
+    """No embedding client ⇒ projection still works, search index empty."""
+    store = InMemoryGraphStore()
+    projector = KnowledgeProjector(graph_store=store, embedding_client=None)
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[SemanticSection(id="s1", heading="A", text="x")],
+    )
+    projector.project(document=document, version=version, semantic=semantic)
+
+    # No vectors written; the chunk node still exists.
+    assert "s1" in {n.id for n in store.find_subgraph(limit=50).nodes}
+    hits = store.find_chunks_by_similarity([1.0] * 16, limit=10)
+    assert hits == []
+
+
+def test_project_caches_embeddings_by_text_sha256():
+    """Re-projecting the same chunk text reuses the cached vector."""
+    from app.services.knowledge import FakeEmbeddingClient
+
+    store = InMemoryGraphStore()
+    embedder = FakeEmbeddingClient(dim=16)
+    projector = KnowledgeProjector(graph_store=store, embedding_client=embedder)
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="boilerplate"),
+            SemanticSection(id="s2", heading="B", text="boilerplate"),  # same text
+        ],
+    )
+    projector.project(document=document, version=version, semantic=semantic)
+
+    # Re-project the same content; the cache should hold and only one
+    # embed_documents call should be issued at most across the second
+    # invocation.
+    embedder.calls.clear()
+    projector.project(document=document, version=version, semantic=semantic)
+
+    embed_calls = [c for c in embedder.calls if c["method"] == "embed_documents"]
+    # Either zero (full cache hit) or one with empty inputs — never a
+    # call with two unique texts, since both sections share the digest.
+    if embed_calls:
+        for c in embed_calls:
+            assert c["texts"] == []
+
+
+def test_project_embedding_failure_does_not_break_projection():
+    """A flaky embedding provider must not roll back the structural
+    projection — the catalog stays the source of truth."""
+
+    class FlakyEmbedder:
+        name = "flaky"
+        dim = 16
+
+        def embed_documents(self, texts):
+            raise RuntimeError("voyage 503")
+
+        def embed_query(self, query):
+            raise RuntimeError("voyage 503")
+
+    store = InMemoryGraphStore()
+    projector = KnowledgeProjector(graph_store=store, embedding_client=FlakyEmbedder())
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[SemanticSection(id="s1", heading="A", text="x")],
+    )
+
+    # Must not raise.
+    projector.project(document=document, version=version, semantic=semantic)
+
+    proj = store.find_subgraph_for_document(document.id)
+    assert "s1" in {n.id for n in proj.nodes if n.kind == "chunk"}
+
+
+def test_project_handles_embedding_provider_count_mismatch():
+    """Provider returns the wrong number of vectors → log warning, no
+    crash. The structural projection must still land."""
+
+    class WrongCountEmbedder:
+        name = "wrong-count"
+        dim = 16
+
+        def embed_documents(self, texts):
+            return []  # one too few
+
+        def embed_query(self, query):
+            return [0.0] * 16
+
+    store = InMemoryGraphStore()
+    projector = KnowledgeProjector(graph_store=store, embedding_client=WrongCountEmbedder())
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[SemanticSection(id="s1", heading="A", text="x")],
+    )
+
+    projector.project(document=document, version=version, semantic=semantic)
+
+    proj = store.find_subgraph_for_document(document.id)
+    assert "s1" in {n.id for n in proj.nodes if n.kind == "chunk"}

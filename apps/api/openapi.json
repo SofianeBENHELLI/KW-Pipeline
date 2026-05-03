@@ -194,6 +194,93 @@
         "title": "Body_upload_documents_batch",
         "type": "object"
       },
+      "ChunkSearchResponse": {
+        "description": "Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).\n\nEmpty ``results`` is a valid response — it means no chunk in the\nindexed set was similar enough (or no chunks have been embedded\nyet). ``query_embedding_dim`` mirrors the dimensionality the\nrequest was scored against, so an operator can spot\nmodel-mismatch errors at a glance.",
+        "properties": {
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "query_embedding_dim": {
+            "title": "Query Embedding Dim",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ChunkSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "query",
+          "embedding_model",
+          "query_embedding_dim",
+          "results"
+        ],
+        "title": "ChunkSearchResponse",
+        "type": "object"
+      },
+      "ChunkSearchResult": {
+        "description": "One match returned by ``GET /knowledge/search`` (Phase 3).\n\nCarries enough locator metadata for the caller to navigate back to\nthe originating chunk + its document/version, plus the cosine\nsimilarity score. ``snippet`` is the chunk's ``text_preview`` (the\nsame trimmed/200-char excerpt the projector wrote on the chunk\nnode), present when the projector materialised one and ``None``\notherwise.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "version_id",
+          "section_id",
+          "snippet",
+          "score"
+        ],
+        "title": "ChunkSearchResult",
+        "type": "object"
+      },
       "Document": {
         "description": "Logical document family containing one or more versions.",
         "properties": {
@@ -1976,6 +2063,59 @@
           }
         },
         "summary": "Get Knowledge Graph"
+      }
+    },
+    "/knowledge/search": {
+      "get": {
+        "description": "Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).\n\nRequires both ``KW_KNOWLEDGE_LAYER_ENABLED=true`` and a\n``VOYAGE_API_KEY`` to be configured. When either gate is off\nthe route returns 503 with a stable public error code so the\nfrontend can surface the right remediation.",
+        "operationId": "search_knowledge_chunks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Knowledge Chunks"
       }
     }
   }
