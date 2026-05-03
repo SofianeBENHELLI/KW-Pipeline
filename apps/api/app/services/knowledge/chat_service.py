@@ -43,7 +43,7 @@ _SYSTEM_PROMPT = (
     "[chunk_id] for chunk excerpts and [doc:document_id] for graph "
     "triples.\n"
     "2. If the context does not contain the information needed, reply "
-    "with: \"I don't have enough context to answer that.\"\n"
+    'with: "I don\'t have enough context to answer that."\n'
     "3. Keep answers concise — 1 to 4 sentences unless the question "
     "explicitly asks for more.\n"
     "4. Never invent chunk_ids or document_ids; only cite identifiers "
