@@ -4,6 +4,7 @@ from pathlib import Path
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
+from app.services.enrichers import RuleBasedEntityEnricher
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.idempotency_store import (
     IdempotencyStore,
@@ -162,7 +163,10 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     documents = DocumentService(storage=storage)
     parsers = _build_parser_registry()
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
-    semantic_extractor = SemanticExtractor(enrichers=[])
+    # Default enricher chain: deterministic rule-based entity extraction
+    # (#48). Pure regex / no model dep, safe to run on every wiring path
+    # including the in-memory unit suite.
+    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
     markdown_generator = MarkdownGenerator()
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
     return PipelineServices(
@@ -200,7 +204,10 @@ def build_persistent_services(
     )
     parsers = _build_parser_registry()
     extraction_jobs = ExtractionJobService(documents=documents, parsers=parsers)
-    semantic_extractor = SemanticExtractor(enrichers=[])
+    # Default enricher chain: deterministic rule-based entity extraction
+    # (#48). Pure regex / no model dep, safe to run on every wiring path
+    # including the in-memory unit suite.
+    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
     markdown_generator = MarkdownGenerator()
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
     return PipelineServices(

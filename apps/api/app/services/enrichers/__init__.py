@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable
 
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticAsset
+from app.services.enrichers.rule_based_entities import RuleBasedEntityEnricher
 
 
 @runtime_checkable
@@ -56,4 +57,4 @@ class NoOpEnricher:
         return []
 
 
-__all__ = ["NoOpEnricher", "SemanticEnricher"]
+__all__ = ["NoOpEnricher", "RuleBasedEntityEnricher", "SemanticEnricher"]
