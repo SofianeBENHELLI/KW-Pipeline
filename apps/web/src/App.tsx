@@ -4,6 +4,7 @@ import { ApiError, getDocument, listDocuments } from "./api/client";
 import type { ApiDocument } from "./api/types";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
+import { SearchPanel } from "./features/search";
 
 /**
  * Centralised document-catalog hook.
@@ -286,6 +287,9 @@ export default function App() {
           <p className="muted">No documents found. Upload a document to get started.</p>
         </section>
       )}
+      <SearchPanel
+        onSelectResult={(result) => selectDocument(result.document_id)}
+      />
     </main>
   );
 }

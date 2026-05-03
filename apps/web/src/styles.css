@@ -724,3 +724,123 @@ pre {
     flex-direction: column;
   }
 }
+
+/* ─── Search panel (Phase 3 / ADR-015) ────────────────────────────── */
+
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.search-panel__header h2 {
+  margin: 0;
+}
+
+.search-panel__input input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #d0d7de);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.search-panel__notice {
+  border-radius: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #d0d7de);
+}
+
+.search-panel__notice--disabled {
+  background: #fff8e1;
+  border-color: #f1c40f;
+}
+
+.search-panel__notice--error {
+  background: #fff0f0;
+  border-color: #d73a4a;
+  color: #2c0c10;
+}
+
+.search-panel__notice strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.search-panel__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.search-panel__result {
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  background: var(--surface, #ffffff);
+}
+
+.search-panel__result-button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 10px 12px;
+  font: inherit;
+  cursor: pointer;
+  border-radius: inherit;
+}
+
+.search-panel__result-button:hover,
+.search-panel__result-button:focus-visible {
+  background: var(--surface-hover, #f6f8fa);
+}
+
+.search-panel__result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.search-panel__result-score {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-panel__result-id {
+  color: var(--muted, #57606a);
+  font-size: 0.875rem;
+}
+
+.search-panel__result-snippet {
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  width: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
