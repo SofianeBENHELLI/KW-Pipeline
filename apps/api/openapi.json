@@ -1,6 +1,168 @@
 {
   "components": {
     "schemas": {
+      "BatchUploadOutcome": {
+        "description": "Per-file result inside a :class:`BatchUploadResult`.\n\nEvery file the client sent in a batch produces exactly one of\nthese — partial-success batches keep the records for the failed\nfiles alongside the successful ones, and the route always returns\nHTTP 200 (the report itself describes failures). Clients route\non the ``status`` discriminant.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "status": {
+            "enum": [
+              "uploaded",
+              "duplicate",
+              "rejected_content_type",
+              "too_large",
+              "empty",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "bytes",
+          "status",
+          "document_id",
+          "version_id",
+          "sha256",
+          "error_code",
+          "error_message"
+        ],
+        "title": "BatchUploadOutcome",
+        "type": "object"
+      },
+      "BatchUploadResult": {
+        "description": "Response body for ``POST /documents/upload/batch`` (#82).\n\nAlways returned with HTTP 200 — the report itself records per-file\nfailures, so a single bad file never hides successful files.\nIdempotency-Key replay returns the original report unchanged.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BatchUploadOutcome"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/BatchUploadSummary"
+          }
+        },
+        "required": [
+          "results",
+          "summary"
+        ],
+        "title": "BatchUploadResult",
+        "type": "object"
+      },
+      "BatchUploadSummary": {
+        "description": "Aggregate counters for a :class:`BatchUploadResult`.\n\nThe fields decompose ``total`` into mutually-exclusive buckets;\nsumming every non-``total`` field equals ``total``. Saves clients\nfrom re-walking the per-file results to draw a banner.",
+        "properties": {
+          "duplicate": {
+            "title": "Duplicate",
+            "type": "integer"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "rejected_content_type": {
+            "title": "Rejected Content Type",
+            "type": "integer"
+          },
+          "too_large": {
+            "title": "Too Large",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "uploaded": {
+            "title": "Uploaded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "uploaded",
+          "duplicate",
+          "rejected_content_type",
+          "too_large",
+          "empty",
+          "failed"
+        ],
+        "title": "BatchUploadSummary",
+        "type": "object"
+      },
       "Body_upload_document": {
         "properties": {
           "file": {
@@ -13,6 +175,23 @@
           "file"
         ],
         "title": "Body_upload_document",
+        "type": "object"
+      },
+      "Body_upload_documents_batch": {
+        "properties": {
+          "files": {
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_documents_batch",
         "type": "object"
       },
       "Document": {
@@ -1133,6 +1312,63 @@
           }
         },
         "summary": "Upload Document"
+      }
+    },
+    "/documents/upload/batch": {
+      "post": {
+        "description": "Bulk upload — one request, one structured per-file report (#82).\n\nPer-file outcomes never raise: a file that fails MIME validation,\nthe size cap, the empty-body check, or a downstream error lands\nin the response body with a populated ``error_code`` /\n``error_message`` pair. The route returns 200 even when every\nfile failed; clients route on the ``summary`` counters.\n\nIdempotency-Key replay returns the original report unchanged. A\nzero-file body returns 400 (the only kind of \"request envelope\"\nerror this route raises).",
+        "operationId": "upload_documents_batch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_documents_batch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchUploadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Documents Batch"
       }
     },
     "/documents/{document_id}": {

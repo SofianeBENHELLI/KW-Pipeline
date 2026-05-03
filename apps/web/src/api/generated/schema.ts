@@ -51,6 +51,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/upload/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Documents Batch
+         * @description Bulk upload — one request, one structured per-file report (#82).
+         *
+         *     Per-file outcomes never raise: a file that fails MIME validation,
+         *     the size cap, the empty-body check, or a downstream error lands
+         *     in the response body with a populated ``error_code`` /
+         *     ``error_message`` pair. The route returns 200 even when every
+         *     file failed; clients route on the ``summary`` counters.
+         *
+         *     Idempotency-Key replay returns the original report unchanged. A
+         *     zero-file body returns 400 (the only kind of "request envelope"
+         *     error this route raises).
+         */
+        post: operations["upload_documents_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -257,6 +287,76 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * BatchUploadOutcome
+         * @description Per-file result inside a :class:`BatchUploadResult`.
+         *
+         *     Every file the client sent in a batch produces exactly one of
+         *     these — partial-success batches keep the records for the failed
+         *     files alongside the successful ones, and the route always returns
+         *     HTTP 200 (the report itself describes failures). Clients route
+         *     on the ``status`` discriminant.
+         */
+        BatchUploadOutcome: {
+            /** Bytes */
+            bytes: number;
+            /** Content Type */
+            content_type: string;
+            /** Document Id */
+            document_id: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Filename */
+            filename: string;
+            /** Sha256 */
+            sha256: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploaded" | "duplicate" | "rejected_content_type" | "too_large" | "empty" | "failed";
+            /** Version Id */
+            version_id: string | null;
+        };
+        /**
+         * BatchUploadResult
+         * @description Response body for ``POST /documents/upload/batch`` (#82).
+         *
+         *     Always returned with HTTP 200 — the report itself records per-file
+         *     failures, so a single bad file never hides successful files.
+         *     Idempotency-Key replay returns the original report unchanged.
+         */
+        BatchUploadResult: {
+            /** Results */
+            results: components["schemas"]["BatchUploadOutcome"][];
+            summary: components["schemas"]["BatchUploadSummary"];
+        };
+        /**
+         * BatchUploadSummary
+         * @description Aggregate counters for a :class:`BatchUploadResult`.
+         *
+         *     The fields decompose ``total`` into mutually-exclusive buckets;
+         *     summing every non-``total`` field equals ``total``. Saves clients
+         *     from re-walking the per-file results to draw a banner.
+         */
+        BatchUploadSummary: {
+            /** Duplicate */
+            duplicate: number;
+            /** Empty */
+            empty: number;
+            /** Failed */
+            failed: number;
+            /** Rejected Content Type */
+            rejected_content_type: number;
+            /** Too Large */
+            too_large: number;
+            /** Total */
+            total: number;
+            /** Uploaded */
+            uploaded: number;
+        };
         /** Body_upload_document */
         Body_upload_document: {
             /**
@@ -264,6 +364,11 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /** Body_upload_documents_batch */
+        Body_upload_documents_batch: {
+            /** Files */
+            files: string[];
         };
         /**
          * Document
@@ -723,6 +828,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentVersion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_documents_batch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_documents_batch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchUploadResult"];
                 };
             };
             /** @description Validation Error */
