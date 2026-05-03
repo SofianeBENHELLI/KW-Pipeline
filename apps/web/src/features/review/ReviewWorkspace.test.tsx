@@ -488,6 +488,12 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("switching to a different document aborts the in-flight detail fetches and never poisons the new selection", async () => {
+    // Per-test timeout bumped to 15 s (vitest default 5 s). The test
+    // does three sequential ``waitFor`` polls and one of them — the
+    // abort assertion — needs comfortable headroom in CI where the
+    // React 19 effect cleanup lands on a slower microtask schedule.
+    // The ``it()``-level timeout is the *ceiling*; healthy runs
+    // finish in well under 200 ms.
     // Capture controllers per call so we can assert they were aborted.
     const seenSignals: AbortSignal[] = [];
     const docBExtraction = {
@@ -557,18 +563,19 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     // Doc A's text never reaches the DOM because its fetch was aborted.
     expect(screen.queryByText("DOC A TEXT")).toBeNull();
 
-    // The first signal (doc A's) is aborted. React 19's strict-mode
-    // effect cleanup runs asynchronously relative to the rerender, and
+    // The first signal (doc A's) is aborted. React 19's effect
+    // cleanup lands asynchronously relative to the rerender, and
     // the abort is dispatched off a microtask the rerender doesn't
     // wait for — under Node 22 in CI the default 1 s ``waitFor``
     // budget can expire before the AbortSignal flips. Bump the
-    // timeout (still bounded; we just don't want to assert into the
-    // race window) and poll faster so the test stays snappy locally.
+    // budget to 10 s (still safely inside the 15 s per-test cap
+    // declared above) and poll faster so the test stays snappy when
+    // the abort fires immediately.
     await waitFor(() => expect(seenSignals[0].aborted).toBe(true), {
-      timeout: 5000,
+      timeout: 10_000,
       interval: 25,
     });
-  });
+  }, 15_000);
 });
 
 describe("ReviewWorkspace — refresh indicator", () => {
