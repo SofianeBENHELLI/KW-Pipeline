@@ -49,13 +49,13 @@ def test_extraction_marks_version_failed_when_parser_raises():
 
     # The reason carried on the exception is the same string persisted on the
     # version, prefixed with the parser class name.
-    assert excinfo.value.reason == "AlwaysFailingParser: simulated parser failure"
+    assert excinfo.value.reason == "always_failing: simulated parser failure"
     # Original parser exception is preserved as __cause__.
     assert isinstance(excinfo.value.__cause__, RuntimeError)
 
     failed = documents.get_version(version.document_id, version.id)
     assert failed.status == DocumentVersionStatus.FAILED
-    assert failed.failure_reason == "AlwaysFailingParser: simulated parser failure"
+    assert failed.failure_reason == "always_failing: simulated parser failure"
 
     # No raw extraction was cached for the failing run.
     with pytest.raises(KeyError, match="Raw extraction not found"):
@@ -176,8 +176,8 @@ def test_extraction_marks_version_failed_when_no_source_references():
     with pytest.raises(ExtractionFailed) as excinfo:
         jobs.extract(document_id=version.document_id, version_id=version.id)
 
-    assert excinfo.value.reason == "PlainTextParser: No extractable content"
+    assert excinfo.value.reason == "plain_text: No extractable content"
 
     failed = documents.get_version(version.document_id, version.id)
     assert failed.status == DocumentVersionStatus.FAILED
-    assert failed.failure_reason == "PlainTextParser: No extractable content"
+    assert failed.failure_reason == "plain_text: No extractable content"

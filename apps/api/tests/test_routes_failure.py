@@ -49,7 +49,7 @@ class TestExtractEndpointFailurePath:
         )
 
         assert response.status_code == 422
-        assert response.json()["detail"] == "FailingParser: simulated parser failure"
+        assert response.json()["detail"] == "failing: simulated parser failure"
 
     def test_failure_reason_is_visible_via_get_document(self):
         client = _client_with_failing_parser()
@@ -60,7 +60,7 @@ class TestExtractEndpointFailurePath:
 
         failed_version = document["versions"][0]
         assert failed_version["status"] == "FAILED"
-        assert failed_version["failure_reason"] == "FailingParser: simulated parser failure"
+        assert failed_version["failure_reason"] == "failing: simulated parser failure"
 
     def test_failure_reason_is_visible_in_catalog_listing(self):
         client = _client_with_failing_parser()
@@ -72,6 +72,6 @@ class TestExtractEndpointFailurePath:
         assert catalog["items"][0]["versions"][0]["status"] == "FAILED"
         assert (
             catalog["items"][0]["versions"][0]["failure_reason"]
-            == "FailingParser: simulated parser failure"
+            == "failing: simulated parser failure"
         )
         assert catalog["next_cursor"] is None

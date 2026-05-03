@@ -71,7 +71,11 @@ class ExtractionJobService:
                 },
             )
             raise ExtractionFailed(reason) from exc
-        parser_name = type(parser).__name__
+        # Use the parser's declared ``name`` so the audit log uses the
+        # same identifier as ``RawExtraction.parser_name`` (e.g.
+        # "plain_text", "docx", "pdf", "pptx"). Letting greppers join
+        # logs and stored extractions on a single value (#26).
+        parser_name = parser.name
         try:
             raw_extraction = parser.parse(version=version, storage=self.documents.storage)
         except Exception as exc:

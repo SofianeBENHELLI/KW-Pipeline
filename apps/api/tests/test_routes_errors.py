@@ -156,12 +156,12 @@ class TestExtractWhitespaceOnly:
         )
 
         assert response.status_code == 422
-        assert response.json()["detail"] == "PlainTextParser: No extractable content"
+        assert response.json()["detail"] == "plain_text: No extractable content"
 
         document = client.get(f"/documents/{upload['document_id']}").json()
         failed_version = document["versions"][0]
         assert failed_version["status"] == "FAILED"
-        assert failed_version["failure_reason"] == "PlainTextParser: No extractable content"
+        assert failed_version["failure_reason"] == "plain_text: No extractable content"
 
 
 class TestExtractUnknownContentType:
