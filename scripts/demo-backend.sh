@@ -63,6 +63,49 @@ fi
 #    standalone widget preview at :5174.
 export KW_CORS_ALLOWED_ORIGINS="${KW_CORS_ALLOWED_ORIGINS:-http://localhost:5173,https://localhost:8081,http://127.0.0.1:5174,http://localhost:5174}"
 
+# 4a. Re-run idempotency. If port 8000 is already in use AND the holder
+#     is *our own* kw-demo from a previous launch (started off the same
+#     venv binary), kill it before exec'ing the new uvicorn — otherwise
+#     uvicorn errors with ``Address already in use``. If the port is
+#     held by something else entirely, bail loudly so we don't murder
+#     an unrelated process.
+if command -v lsof >/dev/null 2>&1; then
+  HOLDERS="$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [ -n "$HOLDERS" ]; then
+    OURS=()
+    FOREIGN=()
+    for pid in $HOLDERS; do
+      cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+      case "$cmd" in
+        *"$VENV_DIR"*|*kw-demo*) OURS+=("$pid") ;;
+        *) FOREIGN+=("$pid") ;;
+      esac
+    done
+    if [ "${#FOREIGN[@]}" -gt 0 ]; then
+      echo "✗ Port 8000 is held by an unrelated process (PIDs: ${FOREIGN[*]})." >&2
+      echo "  Kill it manually before re-running this launcher." >&2
+      exit 1
+    fi
+    if [ "${#OURS[@]}" -gt 0 ]; then
+      echo "→ stopping previous kw-demo on :8000 (PIDs: ${OURS[*]})…"
+      kill "${OURS[@]}" 2>/dev/null || true
+      # Wait up to 3 s for the port to free; uvicorn shuts down promptly.
+      for _ in 1 2 3 4 5 6; do
+        sleep 0.5
+        if [ -z "$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
+          break
+        fi
+      done
+      # Stragglers get a SIGKILL so the new uvicorn always succeeds.
+      STILL="$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null || true)"
+      if [ -n "$STILL" ]; then
+        kill -9 $STILL 2>/dev/null || true
+        sleep 0.5
+      fi
+    fi
+  fi
+fi
+
 cat <<EOF
 
 ╭─ KW-Pipeline backend ────────────────────────────────────────╮

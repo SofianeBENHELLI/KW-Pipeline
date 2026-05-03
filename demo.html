@@ -462,12 +462,17 @@
       // ── Live status pings ─────────────────────────────────────
       const POLL_MS = 5000;
 
+      // ``mode: "no-cors"`` returns an opaque response we can't read
+      // (status === 0, body inaccessible) but the fetch promise still
+      // *resolves* iff the connection succeeded. That's exactly the
+      // signal we want — "is the server up" — without needing the
+      // backend or vite to whitelist the page's `null` origin (which
+      // is what the browser sends for `file://` pages).
       async function probe(url) {
         try {
           const t0 = performance.now();
-          const r = await fetch(url, { cache: "no-store" });
+          await fetch(url, { cache: "no-store", mode: "no-cors" });
           const ms = Math.round(performance.now() - t0);
-          if (!r.ok) return { ok: false, ms, msg: `${r.status} ${r.statusText}` };
           return { ok: true, ms };
         } catch (err) {
           return { ok: false, msg: "unreachable" };
