@@ -972,6 +972,7 @@
   "paths": {
     "/documents": {
       "get": {
+        "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.",
         "operationId": "list_documents",
         "parameters": [
           {
@@ -998,6 +999,42 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           }
         ],

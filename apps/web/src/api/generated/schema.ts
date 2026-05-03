@@ -11,7 +11,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Documents */
+        /**
+         * List Documents
+         * @description List document families with optional status / filename filters (#86).
+         *
+         *     - ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``
+         *       returns only documents whose latest version is in either state.
+         *       Unknown status names yield 400 with a clear allowed-set message
+         *       rather than a silent 0-result page.
+         *     - ``q`` is a case-insensitive substring match against the
+         *       document's ``original_filename``. Trims whitespace; an empty
+         *       string after trim is treated as "no filter".
+         *     - Filters apply before pagination. Re-walking with a different
+         *       filter requires dropping the cursor.
+         */
         get: operations["list_documents"];
         put?: never;
         post?: never;
@@ -657,6 +670,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string | null;
+                status?: string[] | null;
+                q?: string | null;
             };
             header?: never;
             path?: never;
