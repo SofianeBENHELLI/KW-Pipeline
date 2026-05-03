@@ -19,6 +19,16 @@ import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
  * prop and refetch their own derived state without us coordinating
  * directly with them.
  */
+/** Catalog filter state surfaced by ``useDocumentCatalog`` (#86). */
+export interface CatalogFilter {
+  /** Empty array = no status filter. */
+  status: string[];
+  /** Empty string = no filename filter. */
+  q: string;
+}
+
+export const EMPTY_CATALOG_FILTER: CatalogFilter = { status: [], q: "" };
+
 export interface DocumentCatalog {
   documents: ApiDocument[];
   selected: ApiDocument | null;
@@ -28,6 +38,8 @@ export interface DocumentCatalog {
   error: ApiError | string | null;
   refreshError: string | null;
   lastMutationAt: number;
+  filter: CatalogFilter;
+  setFilter: (next: CatalogFilter) => void;
   refreshAll: () => Promise<void>;
   refreshSelected: () => Promise<void>;
   selectDocument: (id: string | null) => void;
@@ -42,6 +54,13 @@ export function useDocumentCatalog(): DocumentCatalog {
   const [error, setError] = useState<ApiError | string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastMutationAt, setLastMutationAt] = useState(0);
+  const [filter, setFilterState] = useState<CatalogFilter>(EMPTY_CATALOG_FILTER);
+
+  // Mirror filter state into a ref so the in-flight dedup callbacks
+  // see the latest values without forcing the callbacks themselves to
+  // re-create on every keystroke.
+  const filterRef = useRef<CatalogFilter>(EMPTY_CATALOG_FILTER);
+  filterRef.current = filter;
 
   // In-flight dedup. We hold raw Promises so a second concurrent caller
   // short-circuits onto the existing one rather than firing another fetch.
@@ -52,7 +71,11 @@ export function useDocumentCatalog(): DocumentCatalog {
     if (listInFlight.current !== null) return listInFlight.current;
     const task = (async () => {
       try {
-        const page = await listDocuments();
+        const { status, q } = filterRef.current;
+        const page = await listDocuments({
+          status: status.length > 0 ? status : undefined,
+          q: q || undefined,
+        });
         setDocuments(page.items);
         setError(null);
         setRefreshError(null);
@@ -112,17 +135,36 @@ export function useDocumentCatalog(): DocumentCatalog {
     setLastMutationAt(Date.now());
   }, []);
 
-  // Initial load.
+  const setFilter = useCallback((next: CatalogFilter) => {
+    setFilterState(next);
+  }, []);
+
+  // Refresh whenever filter changes — drops any in-flight cursor
+  // pagination since the cursor's semantics are "next page within
+  // the current filter set".
   useEffect(() => {
     let cancelled = false;
     setLoadingDocuments(true);
     setError(null);
-    listDocuments()
+    const { status, q } = filter;
+    listDocuments({
+      status: status.length > 0 ? status : undefined,
+      q: q || undefined,
+    })
       .then((page) => {
         if (cancelled) return;
         setDocuments(page.items);
         if (page.items.length > 0) {
-          setSelectedId((current) => current ?? page.items[0].id);
+          setSelectedId((current) => {
+            // Keep the selection if it's still in the filtered list,
+            // otherwise default to the first matching document.
+            if (current !== null && page.items.some((d) => d.id === current)) {
+              return current;
+            }
+            return page.items[0].id;
+          });
+        } else {
+          setSelectedId(null);
         }
       })
       .catch((err: unknown) => {
@@ -137,7 +179,7 @@ export function useDocumentCatalog(): DocumentCatalog {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [filter]);
 
   const selected = documents.find((d) => d.id === selectedId) ?? null;
 
@@ -150,6 +192,8 @@ export function useDocumentCatalog(): DocumentCatalog {
     error,
     refreshError,
     lastMutationAt,
+    filter,
+    setFilter,
     refreshAll,
     refreshSelected,
     selectDocument,
@@ -168,6 +212,8 @@ export default function App() {
     error,
     refreshError,
     lastMutationAt,
+    filter,
+    setFilter,
     refreshAll,
     refreshSelected,
     selectDocument,
@@ -224,6 +270,8 @@ export default function App() {
         selectedDocumentId={selectedId ?? ""}
         onSelectDocument={selectDocument}
         onUploaded={handleUploaded}
+        filter={filter}
+        onFilterChange={setFilter}
       />
       {selected !== null ? (
         <ReviewWorkspace
