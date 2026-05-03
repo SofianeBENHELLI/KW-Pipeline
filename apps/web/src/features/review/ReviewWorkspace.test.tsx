@@ -558,10 +558,16 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     expect(screen.queryByText("DOC A TEXT")).toBeNull();
 
     // The first signal (doc A's) is aborted. React 19's strict-mode
-    // effect cleanup runs asynchronously relative to the rerender →
-    // poll instead of asserting synchronously, otherwise this race
-    // flakes under Node 22 in CI even when the abort eventually fires.
-    await waitFor(() => expect(seenSignals[0].aborted).toBe(true));
+    // effect cleanup runs asynchronously relative to the rerender, and
+    // the abort is dispatched off a microtask the rerender doesn't
+    // wait for — under Node 22 in CI the default 1 s ``waitFor``
+    // budget can expire before the AbortSignal flips. Bump the
+    // timeout (still bounded; we just don't want to assert into the
+    // race window) and poll faster so the test stays snappy locally.
+    await waitFor(() => expect(seenSignals[0].aborted).toBe(true), {
+      timeout: 5000,
+      interval: 25,
+    });
   });
 });
 
