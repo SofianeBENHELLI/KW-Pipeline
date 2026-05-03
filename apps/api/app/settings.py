@@ -81,6 +81,21 @@ class Settings(BaseSettings):
             "no cross-origin requests are accepted until an operator opts in."
         ),
     )
+    cors_allowed_origin_regex: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_CORS_ALLOWED_ORIGIN_REGEX"),
+        description=(
+            "Regex matched against the request's ``Origin`` header. Empty "
+            "(the default) means regex matching is disabled and only the "
+            "exact ``cors_allowed_origins`` allowlist applies. Use this to "
+            "cover whole tenant families without enumerating every "
+            "subdomain — e.g. ``^https://.*\\.3dexperience\\.3ds\\.com$`` "
+            "for any 3DEXPERIENCE on-cloud tenant. Forwarded verbatim to "
+            "Starlette's ``CORSMiddleware`` ``allow_origin_regex`` "
+            "parameter; an origin that matches either the CSV allowlist "
+            "or this regex is accepted."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Demo / local persistence startup (issue #130)

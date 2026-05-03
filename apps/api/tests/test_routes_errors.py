@@ -126,6 +126,7 @@ class TestCorsMiddleware:
     def test_default_app_has_empty_allowlist(self, monkeypatch):
         """With no env var set, no origin should ever be allowed."""
         monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+        monkeypatch.delenv("KW_CORS_ALLOWED_ORIGIN_REGEX", raising=False)
         client = TestClient(create_app())
 
         response = client.options(
@@ -137,6 +138,91 @@ class TestCorsMiddleware:
         )
 
         assert "access-control-allow-origin" not in response.headers
+
+    def test_origin_regex_accepts_any_matching_origin(self, monkeypatch):
+        """A regex allowlist covers a whole tenant family — useful for
+        ``https://*.3dexperience.3ds.com`` where every customer has a
+        different subdomain."""
+        monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+        monkeypatch.setenv(
+            "KW_CORS_ALLOWED_ORIGIN_REGEX",
+            r"^https://.*\.3dexperience\.3ds\.com$",
+        )
+        client = TestClient(create_app())
+
+        for origin in (
+            "https://r1132100968447-eu1-space.3dexperience.3ds.com",
+            "https://r9999000000000-na1-space.3dexperience.3ds.com",
+            "https://anything-at-all.3dexperience.3ds.com",
+        ):
+            response = client.options(
+                "/documents",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == origin
+
+    def test_origin_regex_still_rejects_non_matching_origin(self, monkeypatch):
+        monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+        monkeypatch.setenv(
+            "KW_CORS_ALLOWED_ORIGIN_REGEX",
+            r"^https://.*\.3dexperience\.3ds\.com$",
+        )
+        client = TestClient(create_app())
+
+        response = client.options(
+            "/documents",
+            headers={
+                "Origin": "https://evil.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_csv_allowlist_and_regex_combine(self, monkeypatch):
+        """Both lists feed Starlette's CORSMiddleware — an origin
+        passes if it matches either."""
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+        monkeypatch.setenv(
+            "KW_CORS_ALLOWED_ORIGIN_REGEX",
+            r"^https://.*\.3dexperience\.3ds\.com$",
+        )
+        client = TestClient(create_app())
+
+        # Exact-list match.
+        r1 = client.options(
+            "/documents",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert r1.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+        # Regex match.
+        r2 = client.options(
+            "/documents",
+            headers={
+                "Origin": "https://r1-space.3dexperience.3ds.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert (
+            r2.headers.get("access-control-allow-origin") == "https://r1-space.3dexperience.3ds.com"
+        )
+
+        # Neither.
+        r3 = client.options(
+            "/documents",
+            headers={
+                "Origin": "https://evil.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert "access-control-allow-origin" not in r3.headers
 
 
 class TestExtractWhitespaceOnly:

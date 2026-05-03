@@ -151,6 +151,22 @@ class TestCors:
         monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "")
         assert Settings().cors_allowed_origins == []
 
+    def test_cors_allowed_origin_regex_default_blank(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("KW_CORS_ALLOWED_ORIGIN_REGEX", raising=False)
+        assert Settings().cors_allowed_origin_regex == ""
+
+    def test_cors_allowed_origin_regex_via_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Operators can whitelist whole tenant families with one regex."""
+        regex = r"^https://.*\.3dexperience\.3ds\.com$"
+        monkeypatch.setenv("KW_CORS_ALLOWED_ORIGIN_REGEX", regex)
+        assert Settings().cors_allowed_origin_regex == regex
+
 
 class TestKnowledgeLayer:
     @pytest.mark.parametrize("flag", ["1", "true", "TRUE", "yes", "on", "On"])

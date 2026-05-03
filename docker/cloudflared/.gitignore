@@ -1,0 +1,10 @@
+# Operator-specific tunnel config + credentials live alongside this
+# file but must NEVER be committed — the credentials JSON is a
+# bearer token that grants tunnel-publish rights to the operator's
+# Cloudflare account.
+#
+# What's tracked: only ``config.yml.example`` (this directory's
+# template). Everything else is local.
+
+config.yml
+*.json
