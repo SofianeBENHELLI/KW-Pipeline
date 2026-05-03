@@ -19,7 +19,7 @@ from app.services.knowledge import (
     Neo4jGraphStore,
 )
 from app.services.markdown_generator import MarkdownGenerator
-from app.services.parsers import DocxParser, PdfParser
+from app.services.parsers import DocxParser, PdfParser, PptxParser
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
@@ -82,6 +82,7 @@ def _build_parser_registry() -> ParserRegistry:
             PlainTextParser(),
             DocxParser(),
             PdfParser(),
+            PptxParser(),
         ]
     )
 

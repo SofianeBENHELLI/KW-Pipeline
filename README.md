@@ -165,7 +165,7 @@ run uvicorn against the module-level app:
 ```bash
 KW_PERSISTENT=true \
 KW_CORS_ALLOWED_ORIGINS=http://localhost:5173 \
-KW_ALLOWED_CONTENT_TYPES=text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+KW_ALLOWED_CONTENT_TYPES=text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation \
 .venv312/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir apps/api
 ```
 
@@ -208,7 +208,7 @@ After starting the demo backend, seed deterministic demo content:
 cd apps/api
 # Broaden the upload allowlist so PDF/DOCX fixtures are accepted; the
 # default backend only allows text/plain.
-KW_ALLOWED_CONTENT_TYPES="text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" \
+KW_ALLOWED_CONTENT_TYPES="text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" \
   uvicorn app.main:app --reload &
 python scripts/seed_demo.py
 ```
