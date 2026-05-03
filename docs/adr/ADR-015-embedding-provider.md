@@ -201,8 +201,10 @@ Both criteria met as of 2026-05-03:
 
 1. ✅ The project owner confirmed Voyage AI is acceptable as the v1
    provider.
-2. ⏳ Phase 3 tracking issue to be filed citing this ADR as the
-   embedding-provider commitment. Implementation scaffolding
-   (settings field, optional `voyageai` dep, `EmbeddingClient`
-   Protocol, `FakeEmbeddingClient`) lands alongside this acceptance
-   so the issue can pick up directly from a configured baseline.
+2. ✅ Phase 3 tracking issue filed:
+   [#186 — Vector RAG (chunk indexing + Neo4j vector index +
+   /knowledge/search)](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186).
+   Implementation scaffolding (settings field, optional `voyageai`
+   dep, `EmbeddingClient` Protocol, `FakeEmbeddingClient`) already
+   lives on `main` so #186 can pick up directly from a configured
+   baseline.
