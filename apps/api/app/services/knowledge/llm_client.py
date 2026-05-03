@@ -26,7 +26,10 @@ method when needed; we don't speculate the shape now.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from collections import deque
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
@@ -41,6 +44,13 @@ DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 # implementation; the extractor uses a smaller value for short
 # section-level prompts.
 DEFAULT_MAX_TOKENS = 2048
+
+# ADR-014 §4: one exponential-backoff retry on 429 / 5xx. Two attempts
+# total — the original call plus one retry. Anything beyond that is a
+# real upstream incident the operator should see in logs.
+DEFAULT_MAX_RETRIES = 1
+DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
+DEFAULT_RETRY_BACKOFF_CAP_SECONDS = 30.0
 
 
 @runtime_checkable
@@ -92,15 +102,24 @@ class AnthropicLLMClient:
 
     name: str = "anthropic"
 
-    def __init__(  # pragma: no cover - exercised behind pytest -m llm_integration
+    def __init__(
         self,
         *,
         api_key: str,
         model: str = DEFAULT_ANTHROPIC_MODEL,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         client: Any = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+        retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
+        sleep: Callable[[float], None] | None = None,
+        rng: Callable[[], float] | None = None,
     ) -> None:
-        if client is None:
+        if max_retries < 0:
+            raise ValueError("max_retries must be >= 0")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be >= 0")
+        if client is None:  # pragma: no cover - exercised behind pytest -m llm_integration
             try:
                 import anthropic  # noqa: PLC0415
             except ImportError as exc:
@@ -113,6 +132,11 @@ class AnthropicLLMClient:
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
+        self._max_retries = max_retries
+        self._retry_backoff_seconds = retry_backoff_seconds
+        self._retry_backoff_cap_seconds = retry_backoff_cap_seconds
+        self._sleep = sleep or time.sleep
+        self._rng = rng or random.random
 
     def complete_with_tool(
         self,
@@ -131,31 +155,19 @@ class AnthropicLLMClient:
         sections of all documents, which is exactly the shape the
         cache amortizes. The user portion stays in ``messages`` and
         is *not* cached, since it varies per section.
+
+        Per ADR-014 §4, transient upstream failures (HTTP 429 and the
+        5xx family, plus connect/timeout exceptions surfaced by the
+        SDK) are retried up to ``max_retries`` times with jittered
+        exponential backoff. A ``Retry-After`` header on the offending
+        response, when present, replaces the computed delay.
         """
         tool_name = "emit_structured"
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": user}],
-            tools=[
-                {
-                    "name": tool_name,
-                    "description": (
-                        "Emit the structured payload that conforms to the "
-                        "provided JSON schema. Always invoke this tool; "
-                        "never reply in plain text."
-                    ),
-                    "input_schema": tool_schema,
-                }
-            ],
-            tool_choice={"type": "tool", "name": tool_name},
+        response = self._call_with_retry(
+            system=system,
+            user=user,
+            tool_schema=tool_schema,
+            tool_name=tool_name,
         )
 
         # Find the tool_use block. Anthropic returns a list of content
@@ -185,6 +197,122 @@ class AnthropicLLMClient:
             ),
         }
         return tool_input, token_usage
+
+    def _call_with_retry(
+        self,
+        *,
+        system: str,
+        user: str,
+        tool_schema: dict[str, Any],
+        tool_name: str,
+    ) -> Any:
+        """Issue the SDK call, retrying transient upstream failures.
+
+        Returns the raw SDK response. ``max_retries=0`` disables the
+        retry loop entirely (one attempt, no recovery), which matches
+        callers that bring their own outer retry strategy.
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._client.messages.create(
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user}],
+                    tools=[
+                        {
+                            "name": tool_name,
+                            "description": (
+                                "Emit the structured payload that conforms to the "
+                                "provided JSON schema. Always invoke this tool; "
+                                "never reply in plain text."
+                            ),
+                            "input_schema": tool_schema,
+                        }
+                    ],
+                    tool_choice={"type": "tool", "name": tool_name},
+                )
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if attempt >= self._max_retries or not _is_retryable(exc):
+                    raise
+                delay = self._retry_delay(exc, attempt)
+                log.warning(
+                    "knowledge.llm.retrying",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": self._max_retries,
+                        "delay_seconds": round(delay, 3),
+                        "error_type": type(exc).__name__,
+                        "status_code": getattr(exc, "status_code", None),
+                    },
+                )
+                self._sleep(delay)
+                attempt += 1
+
+    def _retry_delay(self, exc: Exception, attempt: int) -> float:
+        """Pick the backoff duration before the next attempt.
+
+        Honours ``Retry-After`` (in seconds) when the response carries
+        one; otherwise jittered exponential backoff capped at
+        :data:`DEFAULT_RETRY_BACKOFF_CAP_SECONDS`.
+        """
+        retry_after = _retry_after_seconds(exc)
+        if retry_after is not None:
+            return min(max(retry_after, 0.0), self._retry_backoff_cap_seconds)
+        base = self._retry_backoff_seconds * (2**attempt)
+        jitter = self._rng() * self._retry_backoff_seconds
+        return min(base + jitter, self._retry_backoff_cap_seconds)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Classify an SDK exception as transient (retryable) or terminal.
+
+    Detection is duck-typed on :pyattr:`status_code` so we don't need
+    a hard import of ``anthropic`` to recognise its exception classes.
+    Connection / timeout errors that surface without a status code are
+    matched by their well-known SDK class names.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or 500 <= status < 600
+    name = type(exc).__name__
+    return name in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "APIConnectionTimeoutError",
+    }
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Extract ``Retry-After`` (in seconds) from an SDK exception, if any.
+
+    The Anthropic SDK exposes the upstream HTTP response on
+    ``exc.response``. We tolerate the header being absent, malformed,
+    or expressed as an HTTP-date (which we ignore — exponential
+    backoff covers those).
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    raw = None
+    try:
+        raw = headers.get("Retry-After") or headers.get("retry-after")
+    except Exception:  # noqa: BLE001 - tolerate non-dict header bags
+        return None
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 # ─── In-process fake (used by all default unit tests) ────────────────────
@@ -237,7 +365,10 @@ class FakeLLMClient:
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
+    "DEFAULT_MAX_RETRIES",
     "DEFAULT_MAX_TOKENS",
+    "DEFAULT_RETRY_BACKOFF_CAP_SECONDS",
+    "DEFAULT_RETRY_BACKOFF_SECONDS",
     "AnthropicLLMClient",
     "FakeLLMClient",
     "LLMClient",

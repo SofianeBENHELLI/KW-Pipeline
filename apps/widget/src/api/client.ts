@@ -137,11 +137,32 @@ export function getHealth(opts: { baseUrl?: string; signal?: AbortSignal } = {})
 }
 
 export function listDocuments(
-  opts: { limit?: number; cursor?: string; baseUrl?: string; signal?: AbortSignal } = {},
+  opts: {
+    limit?: number;
+    cursor?: string;
+    /**
+     * Filter by latest-version status — repeats on the wire as
+     * ``?status=A&status=B``. Backend supports the same shape as the
+     * web client (#86); see ``apps/web/src/api/client.ts``.
+     */
+    status?: string[];
+    /**
+     * Case-insensitive substring match against ``original_filename``.
+     * Trimmed; empty values are dropped so the URL stays clean.
+     */
+    q?: string;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<DocumentListResponse> {
   const params = new URLSearchParams();
   params.set("limit", String(opts.limit ?? 25));
   if (opts.cursor) params.set("cursor", opts.cursor);
+  if (opts.status && opts.status.length > 0) {
+    for (const value of opts.status) params.append("status", value);
+  }
+  const trimmedQ = opts.q?.trim() ?? "";
+  if (trimmedQ.length > 0) params.set("q", trimmedQ);
   return request<DocumentListResponse>(`/documents?${params.toString()}`, {
     baseUrl: opts.baseUrl,
     signal: opts.signal,

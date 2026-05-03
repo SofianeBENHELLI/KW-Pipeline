@@ -15,7 +15,7 @@ The canonical, version-locked roadmap is [`docs/roadmap/mvp_backlog_review.md`](
 - Phase 1b: Docker compose + integration CI job (#110). Caught two real Cypher bugs the in-memory tests couldn't see.
 - Phase 1c: `<KnowledgeGraphView />` wrapping `@neo4j-nvl/react` (#111).
 - Phase 2: LLM entity extraction with citation enforcement (#112).
-- Phase 2.1: Anthropic prompt caching (#115).
+- Phase 2.1: Anthropic prompt caching (#115), backoff retry on 429/5xx (ADR-014 §4), per-document input-token circuit breaker (ADR-014 §3) — Phase 2 closed 2026-05-04.
 - Bundle lazy-split: NVL ships only when the panel mounts (#114).
 
 ## In flight
@@ -32,7 +32,8 @@ The canonical, version-locked roadmap is [`docs/roadmap/mvp_backlog_review.md`](
 ## Next phases
 
 - **3DEXPERIENCE widget readiness** (#78). Container size + auth/context model are open product decisions; #125 lays the bundle-budget groundwork.
-- **Phase 3 — chat surface**. Mode taxonomy comes from llm-graph-builder; reimplement against Anthropic SDK directly. Open: embedding provider for vector retrieval. ADR pending.
+- **Phase 3 — vector RAG** ([#186](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186)). Embedding scaffold (ADR-015, Voyage AI) is on `main`; first PR provisions the Neo4j HNSW vector index, wires a `KnowledgeSearchService`, and exposes `GET /knowledge/search`. Chat surface follows.
+- Phase-2.1 follow-up: section batching for the LLM extractor ([#195](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/195)) — final residual deferred from ADR-014.
 
 ## Deferred
 

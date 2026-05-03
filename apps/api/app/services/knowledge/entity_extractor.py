@@ -120,6 +120,14 @@ class EntityExtractor:
     bounds how many sections may be packed into one prompt; v1 keeps
     this at 1 (one call per section) for clean per-section warning
     attribution and simpler token budgeting.
+
+    ADR-014 §3 — circuit breaker. When ``max_input_tokens_per_document``
+    is set, the extractor sums ``input_tokens`` (the per-call billable
+    portion) across sections of a single ``extract()`` invocation and
+    stops issuing calls once the cumulative count meets or exceeds the
+    cap. Remaining sections are recorded as warnings and yield no
+    triples. ``None`` (the default) disables the breaker, preserving
+    the pre-Phase-2-closure behaviour.
     """
 
     def __init__(
@@ -127,11 +135,15 @@ class EntityExtractor:
         *,
         llm: LLMClient,
         max_sections_per_call: int = 8,
+        max_input_tokens_per_document: int | None = None,
     ) -> None:
         if max_sections_per_call < 1:
             raise ValueError("max_sections_per_call must be >= 1")
+        if max_input_tokens_per_document is not None and max_input_tokens_per_document < 1:
+            raise ValueError("max_input_tokens_per_document must be >= 1 when set")
         self._llm = llm
         self._max_sections_per_call = max_sections_per_call
+        self._max_input_tokens_per_document = max_input_tokens_per_document
 
     def extract(
         self,
@@ -149,11 +161,33 @@ class EntityExtractor:
         triples: list[EntityTriple] = []
         warnings: list[str] = []
         usage_total: dict[str, int] = {}
+        budget = self._max_input_tokens_per_document
+        tripped = False
 
         # v1 issues one call per section so warnings attribute cleanly
         # and token budgeting is per-section. ``max_sections_per_call``
         # is reserved for a Phase 2.1 batching pass.
         for section in semantic.sections:
+            if budget is not None and not tripped:
+                used = usage_total.get("input_tokens", 0)
+                if used >= budget:
+                    tripped = True
+                    log.warning(
+                        "knowledge.entity_extraction.budget_exceeded",
+                        extra={
+                            "document_id": document.id,
+                            "version_id": version.id,
+                            "input_tokens_used": used,
+                            "input_tokens_cap": budget,
+                        },
+                    )
+            if tripped:
+                warnings.append(
+                    f"section {section.id}: skipped — per-document input-token "
+                    f"cap of {budget} reached (ADR-014 §3 circuit breaker)"
+                )
+                continue
+
             section_triples, section_warnings, section_usage = self._extract_section(
                 section=section,
                 document=document,

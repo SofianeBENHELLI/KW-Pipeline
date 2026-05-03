@@ -357,6 +357,92 @@ def test_llm_failure_is_caught_per_section():
     assert any("LLM call failed" in w for w in result.warnings)
 
 
+def test_circuit_breaker_skips_remaining_sections_after_cap():
+    """ADR-014 §3: once the per-doc input_tokens cap is met, skip rest."""
+    fake = FakeLLMClient()
+    fake.enqueue(
+        {
+            "triples": [
+                {
+                    "subject": "S",
+                    "subject_type": "T",
+                    "predicate": "P",
+                    "object": "O",
+                    "object_type": "T",
+                    "confidence": 0.9,
+                    "source_reference_ids": ["src-1"],
+                }
+            ]
+        },
+        {"input_tokens": 600, "output_tokens": 10},
+    )
+    # The second response would push us over, but the breaker should
+    # trip before s2 ever issues a call. Enqueue defensively so the
+    # test fails loudly if the breaker doesn't fire.
+    fake.enqueue({"triples": []}, {"input_tokens": 999, "output_tokens": 999})
+
+    extractor = EntityExtractor(llm=fake, max_input_tokens_per_document=500)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+            SemanticSection(id="s2", heading="B", text="y", source_reference_ids=["src-2"]),
+            SemanticSection(id="s3", heading="C", text="z", source_reference_ids=["src-3"]),
+        ],
+    )
+
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+
+    # Only s1 issued an LLM call (it consumed 600 of the 500 budget).
+    assert len(fake.calls) == 1
+    # s1's triple still lands.
+    assert len(result.triples) == 1
+    assert result.triples[0].source_section_id == "s1"
+    # s2 + s3 skipped with a circuit-breaker warning each.
+    skip_warnings = [w for w in result.warnings if "circuit breaker" in w]
+    assert len(skip_warnings) == 2
+    assert any("section s2" in w for w in skip_warnings)
+    assert any("section s3" in w for w in skip_warnings)
+
+
+def test_circuit_breaker_disabled_by_default():
+    """No cap configured ⇒ every section issues an LLM call as before."""
+    fake = FakeLLMClient()
+    for _ in range(3):
+        fake.enqueue({"triples": []}, {"input_tokens": 1000, "output_tokens": 5})
+
+    extractor = EntityExtractor(llm=fake)  # cap is None
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id=f"s{i}", heading="A", text="x", source_reference_ids=["src-1"])
+            for i in range(3)
+        ],
+    )
+    extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    assert len(fake.calls) == 3
+
+
+def test_circuit_breaker_rejects_invalid_cap():
+    fake = FakeLLMClient()
+    try:
+        EntityExtractor(llm=fake, max_input_tokens_per_document=0)
+    except ValueError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("Expected ValueError on cap=0")
+
+
 def test_extract_rejects_mismatched_semantic_doc():
     fake = FakeLLMClient()
     extractor = EntityExtractor(llm=fake)

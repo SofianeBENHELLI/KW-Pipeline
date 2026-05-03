@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { ApiError, listDocuments } from "../api/client";
 import type { Document, DocumentVersionStatus } from "../api/types";
@@ -28,20 +28,20 @@ const FILTERS: { id: FilterId; label: string }[] = [
   { id: "failed", label: "Failed" },
 ];
 
-function statusBucket(status: DocumentVersionStatus): FilterId {
-  switch (status) {
-    case "VALIDATED":
-      return "validated";
-    case "NEEDS_REVIEW":
-    case "DUPLICATE_DETECTED":
-      return "review";
-    case "REJECTED":
-    case "FAILED":
-      return "failed";
-    default:
-      return "all";
-  }
-}
+// Maps the widget's coarse filter chips to the backend's ``?status=``
+// repeatable query param. ``"all"`` skips the param entirely so the
+// server returns the full catalog page.
+const FILTER_TO_STATUSES: Record<FilterId, DocumentVersionStatus[]> = {
+  all: [],
+  validated: ["VALIDATED"],
+  review: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"],
+  failed: ["REJECTED", "FAILED"],
+};
+
+// Debounce window for the search input. The server-side filter applies
+// before pagination (#86), so a re-fetch per keystroke would burn round
+// trips; 250 ms keeps typing fluid without flooding the catalog endpoint.
+const SEARCH_DEBOUNCE_MS = 250;
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
@@ -68,14 +68,33 @@ export const DocumentsList: React.FC<Props> = ({
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ``query`` is the immediate input value; ``debouncedQuery`` drives
+  // the network round-trip. Decoupling them keeps typing snappy while
+  // collapsing keystroke bursts into a single request.
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>("all");
 
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [query]);
+
+  // Server-side ``?status=`` + ``?q=`` filters (#86). Cursors are
+  // scoped to the current filter set, so changing either resets
+  // pagination — the next ``Load more`` advances within the new view.
   const loadFirstPage = useCallback(
     (signal: AbortSignal) => {
       setLoading(true);
       setError(null);
-      listDocuments({ limit: PAGE_LIMIT, baseUrl: apiBaseUrl, signal })
+      const statusList = FILTER_TO_STATUSES[filter];
+      listDocuments({
+        limit: PAGE_LIMIT,
+        baseUrl: apiBaseUrl,
+        signal,
+        status: statusList.length > 0 ? statusList : undefined,
+        q: debouncedQuery,
+      })
         .then((page) => {
           setItems(page.items);
           setCursor(page.next_cursor);
@@ -92,7 +111,7 @@ export const DocumentsList: React.FC<Props> = ({
         })
         .finally(() => setLoading(false));
     },
-    [apiBaseUrl],
+    [apiBaseUrl, filter, debouncedQuery],
   );
 
   useEffect(() => {
@@ -104,7 +123,14 @@ export const DocumentsList: React.FC<Props> = ({
   const loadMore = useCallback(() => {
     if (!cursor) return;
     setLoading(true);
-    listDocuments({ limit: PAGE_LIMIT, cursor, baseUrl: apiBaseUrl })
+    const statusList = FILTER_TO_STATUSES[filter];
+    listDocuments({
+      limit: PAGE_LIMIT,
+      cursor,
+      baseUrl: apiBaseUrl,
+      status: statusList.length > 0 ? statusList : undefined,
+      q: debouncedQuery,
+    })
       .then((page) => {
         setItems((prev) => [...prev, ...page.items]);
         setCursor(page.next_cursor);
@@ -119,36 +145,7 @@ export const DocumentsList: React.FC<Props> = ({
         );
       })
       .finally(() => setLoading(false));
-  }, [cursor, apiBaseUrl]);
-
-  // Counts derived from the currently-loaded rows. Approximate while
-  // there are more pages to fetch; the badge in the header surface
-  // ("25 of 142") makes that explicit.
-  const counts = useMemo(() => {
-    const base = { all: items.length, validated: 0, review: 0, failed: 0 };
-    for (const doc of items) {
-      const latest =
-        doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
-      const status = latest?.status ?? ("UPLOADED" as DocumentVersionStatus);
-      const bucket = statusBucket(status);
-      if (bucket !== "all") base[bucket] += 1;
-    }
-    return base;
-  }, [items]);
-
-  const visibleItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return items.filter((doc) => {
-      if (q && !doc.original_filename.toLowerCase().includes(q)) return false;
-      if (filter !== "all") {
-        const latest =
-          doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
-        const status = latest?.status ?? ("UPLOADED" as DocumentVersionStatus);
-        if (statusBucket(status) !== filter) return false;
-      }
-      return true;
-    });
-  }, [items, query, filter]);
+  }, [cursor, apiBaseUrl, filter, debouncedQuery]);
 
   return (
     <section className="kw-section" aria-label="Recent documents">
@@ -186,32 +183,33 @@ export const DocumentsList: React.FC<Props> = ({
             onClick={() => setFilter(f.id)}
           >
             {f.label}
-            <span className="kw-seg__count">{counts[f.id]}</span>
           </button>
         ))}
       </div>
 
       {error && <div className="kw-error">{error}</div>}
 
-      {!error && visibleItems.length === 0 && !loading && (
+      {!error && items.length === 0 && !loading && (
         <div className="kw-empty">
           <span className="kw-empty__glyph" aria-hidden="true">
             <Icon name="files" size={18} />
           </span>
           <div className="kw-empty__title">
-            {items.length === 0 ? "No documents yet" : "Nothing matches"}
+            {filter === "all" && debouncedQuery.trim() === ""
+              ? "No documents yet"
+              : "Nothing matches"}
           </div>
           <div className="kw-empty__body">
-            {items.length === 0
+            {filter === "all" && debouncedQuery.trim() === ""
               ? "Drop a file in the upload pane or use the buttons there to get started. Each ingestion runs through validation, extraction, and semantic enrichment."
               : "Try a different search or filter to see more rows."}
           </div>
         </div>
       )}
 
-      {visibleItems.length > 0 && (
+      {items.length > 0 && (
         <ul className="kw-doc-list">
-          {visibleItems.map((doc) => {
+          {items.map((doc) => {
             const latest =
               doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
             const status = latest?.status ?? ("UPLOADED" as DocumentVersionStatus);

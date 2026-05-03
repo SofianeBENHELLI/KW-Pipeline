@@ -78,6 +78,8 @@ class TestDefaults:
         # LLM credentials unset by default.
         assert s.anthropic_api_key == ""
         assert s.anthropic_model == ""
+        # ADR-014 §3 circuit breaker disabled by default.
+        assert s.entity_extractor_max_input_tokens_per_document == 0
 
 
 class TestUploadGuardrails:
@@ -214,6 +216,11 @@ class TestLLMCredentials:
         """The architecture doc advertises ``KW_LLM_MODEL`` — that alias must work."""
         monkeypatch.setenv("KW_LLM_MODEL", "claude-sonnet-4-5")
         assert Settings().anthropic_model == "claude-sonnet-4-5"
+
+    def test_entity_extractor_token_cap_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ADR-014 §3 circuit breaker is configurable via the prefixed env var."""
+        monkeypatch.setenv("KW_ENTITY_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT", "12000")
+        assert Settings().entity_extractor_max_input_tokens_per_document == 12000
 
 
 class TestProgrammaticConstruction:

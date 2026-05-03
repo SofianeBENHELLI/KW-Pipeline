@@ -218,11 +218,18 @@ cd apps/api && \
   pytest -m integration --override-ini="addopts=-ra --strict-markers --strict-config -m integration"
 ```
 
+## Phase status
+
+- **Phase 1 — graph projection.** Shipped. `KnowledgeProjector` materialises every `(:Document)`, `(:Version)`, `(:Section)`, `(:Chunk)`, `(:Topic)`, and structural edge from the validated `SemanticDocument`.
+- **Phase 2 — LLM entity extraction with citation enforcement.** **Closed 2026-05-04.** All four ADR-014 acceptance items are on `main`: section-level prompt with tool-use, two-gate citation enforcement, prompt-injection sanitization, ephemeral prompt caching, exponential-backoff retry on 429/5xx (§4), and per-document `input_tokens` circuit breaker (§3, default off — opt-in via `KW_ENTITY_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT`). Residual deferred follow-up: section batching to amortise cache hits ([#195](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/195)).
+- **Phase 3 — vector RAG.** Embedding-client scaffold (`EmbeddingClient` Protocol + `VoyageEmbeddingClient` + `FakeEmbeddingClient`) and the `voyage_api_key` / `embedding_model` settings live on `main` per ADR-015. Implementation (Neo4j HNSW vector index + chunk-embedding write path + `GET /knowledge/search`) is tracked in [#186](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186) and not yet wired into the projector or any route.
+- **Reconciliation surface.** A reconciliation service exists (`apps/api/app/services/knowledge/reconciliation.py`); the operator-facing route / CLI is tracked in [#124](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/124).
+
 ## Out-of-scope for this architecture doc
 
-- **Embedding model and vector index.** Phase 3 ADR.
-- **Cypher-generation prompt design.** Phase 3 ADR.
-- **Prompt-caching policy and cost telemetry.** Phase 2 ADR.
+- **Embedding model and vector index implementation details.** Tracked in [#186](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186); see ADR-015 for the provider commitment.
+- **Cypher-generation prompt design.** Phase 3 ADR (chat surface).
+- **Prompt-caching policy and cost telemetry.** ADR-014.
 - **3DEXPERIENCE widget composition** of graph + chat. #78.
 - **Multi-tenant data isolation** for the graph. #91.
 - **Sensitive data detection** before publishing to the graph. #92.
