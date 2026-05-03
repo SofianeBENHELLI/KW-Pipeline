@@ -97,6 +97,8 @@ extend-immutable-calls = [
   "fastapi.Depends",
   "fastapi.File",
   "fastapi.Form",
+  "fastapi.Header",
+  "fastapi.Query",
 ]
 
 [tool.ruff.lint.isort]

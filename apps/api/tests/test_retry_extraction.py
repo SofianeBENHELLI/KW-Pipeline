@@ -234,6 +234,80 @@ def test_retry_extraction_route_409_when_version_not_failed(
     assert "Retry only allowed from FAILED" in response.text
 
 
+def test_retry_extraction_route_succeeds_with_idempotency_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Route-layer success path: retry runs cleanly and the idempotency
+    cache is populated so a replayed key returns the cached result
+    without rerunning extraction."""
+    odd_mime = "application/x-temporary-error"
+    monkeypatch.setenv("ALLOWED_CONTENT_TYPES", f"text/plain,{odd_mime}")
+    client = TestClient(create_app())
+
+    # First attempt fails because no parser is registered for the MIME.
+    version = _force_failed(client, odd_mime)
+
+    # Widen the registry by registering a parser for the MIME on the
+    # already-running app's services. The dependencies module exposes
+    # the registry on the live PipelineServices via the FastAPI app
+    # state — reach in and mutate the in-memory ``parsers`` dict.
+    parsers = client.app.state.services.parsers  # type: ignore[attr-defined]
+
+    class _LateParser:
+        name = "late"
+        version = "test"
+        supported_content_types = frozenset({odd_mime})
+
+        def parse(self, version, storage):  # noqa: ANN001
+            from app.schemas.extraction import RawExtraction, RawSection, SourceReference
+
+            content = storage.get(version.storage_uri)
+            ref = SourceReference(
+                document_version_id=version.id,
+                section_id="s-0",
+                page_number=None,
+                line_start=None,
+                line_end=None,
+                snippet=content[:24].decode("latin-1", errors="replace"),
+            )
+            return RawExtraction(
+                document_version_id=version.id,
+                parser_name=self.name,
+                parser_version=self.version,
+                text=content.decode("latin-1", errors="replace"),
+                sections=[
+                    RawSection(
+                        id="s-0",
+                        heading="Body",
+                        text=content.decode("latin-1", errors="replace") or "fallback",
+                        source_reference_ids=[ref.id],
+                        parser_metadata={},
+                    )
+                ],
+                source_references=[ref],
+            )
+
+    parsers._by_content_type[odd_mime] = _LateParser()  # type: ignore[attr-defined]
+
+    response = client.post(
+        f"/documents/{version['document_id']}/versions/{version['id']}/retry-extraction",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["parser_name"] == "late"
+
+    # Replaying with the same idempotency key returns the cached payload
+    # without rerunning extraction (the version already moved out of
+    # FAILED on the first call, so a fresh call would 409).
+    replay = client.post(
+        f"/documents/{version['document_id']}/versions/{version['id']}/retry-extraction",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert replay.status_code == 200
+    assert replay.json() == body
+
+
 def test_retry_extraction_route_emits_audit_event_and_persists_new_failure(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

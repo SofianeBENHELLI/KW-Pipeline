@@ -263,7 +263,24 @@ def build_router(services: PipelineServices) -> APIRouter:
         operation_id="list_documents",
         response_model=DocumentListResponse,
     )
-    def list_documents(limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> Any:
+    def list_documents(
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: str | None = None,
+        status: list[str] | None = Query(default=None),
+        q: str | None = Query(default=None, max_length=200),
+    ) -> Any:
+        """List document families with optional status / filename filters (#86).
+
+        - ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``
+          returns only documents whose latest version is in either state.
+          Unknown status names yield 400 with a clear allowed-set message
+          rather than a silent 0-result page.
+        - ``q`` is a case-insensitive substring match against the
+          document's ``original_filename``. Trims whitespace; an empty
+          string after trim is treated as "no filter".
+        - Filters apply before pagination. Re-walking with a different
+          filter requires dropping the cursor.
+        """
         if limit < MIN_PAGE_LIMIT or limit > MAX_PAGE_LIMIT:
             raise HTTPException(
                 status_code=400,
@@ -271,10 +288,33 @@ def build_router(services: PipelineServices) -> APIRouter:
                     f"limit must be between {MIN_PAGE_LIMIT} and {MAX_PAGE_LIMIT}; got {limit}."
                 ),
             )
+
+        status_set: frozenset[DocumentVersionStatus] | None = None
+        if status:
+            valid_values = {s.value for s in DocumentVersionStatus}
+            normalized = {value.strip().upper() for value in status if value.strip()}
+            unknown = normalized - valid_values
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown status: {', '.join(sorted(unknown))}. "
+                        f"Allowed values: {', '.join(sorted(valid_values))}."
+                    ),
+                )
+            if normalized:
+                status_set = frozenset(DocumentVersionStatus(v) for v in normalized)
+
+        filename_query = q.strip() if q is not None else None
+        if filename_query == "":
+            filename_query = None
+
         try:
             items, next_cursor = services.documents.list_documents_page(
                 limit=limit,
                 cursor=cursor,
+                status_filter=status_set,
+                filename_query=filename_query,
             )
         except InvalidCursor as exc:
             raise HTTPException(

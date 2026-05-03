@@ -214,6 +214,8 @@ class DocumentService:
         *,
         limit: int,
         cursor: str | None = None,
+        status_filter: frozenset[DocumentVersionStatus] | None = None,
+        filename_query: str | None = None,
     ) -> tuple[list[Document], str | None]:
         """Return one page of documents and the cursor for the next page.
 
@@ -223,10 +225,20 @@ class DocumentService:
         last returned row's ``(created_at, id)`` so the next call returns
         rows strictly greater than that tuple.
 
+        Optional ``status_filter`` and ``filename_query`` (#86) apply
+        before pagination. The cursor's semantics are "next page within
+        the current filter set" — clients re-walking with a different
+        filter should drop the cursor and start from the top.
+
         Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded; the
         route layer maps that to HTTP 400.
         """
-        items = self.catalog.list_documents(cursor=cursor, limit=limit)
+        items = self.catalog.list_documents(
+            cursor=cursor,
+            limit=limit,
+            status_filter=status_filter,
+            filename_query=filename_query,
+        )
         if len(items) < limit:
             return items, None
         last = items[-1]

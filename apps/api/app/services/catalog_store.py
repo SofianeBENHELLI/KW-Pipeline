@@ -77,6 +77,24 @@ def _decode_cursor(token: str) -> tuple[datetime, str]:
 _SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
+def _latest_status(
+    document: Document,
+    versions: dict[str, DocumentVersion],
+) -> DocumentVersionStatus | None:
+    """Resolve the latest version's status for in-memory filter routes.
+
+    Used by :class:`InMemoryCatalogStore.list_documents` when ``status_filter``
+    is set. Returns ``None`` when the document family has no versions or
+    its ``latest_version_id`` is dangling (a state that shouldn't occur
+    in practice but is handled defensively so the filter just skips
+    such rows rather than raising).
+    """
+    version = versions.get(document.latest_version_id)
+    if version is None and document.versions:
+        version = document.versions[-1]
+    return version.status if version is not None else None
+
+
 class CatalogStore(Protocol):
     """Persistence boundary for document catalog metadata."""
 
@@ -95,6 +113,8 @@ class CatalogStore(Protocol):
         *,
         cursor: str | None = None,
         limit: int | None = None,
+        status_filter: frozenset[DocumentVersionStatus] | None = None,
+        filename_query: str | None = None,
     ) -> list[Document]:
         """Return document families with their versions.
 
@@ -103,7 +123,14 @@ class CatalogStore(Protocol):
         between pages. When ``cursor`` is provided, only rows strictly
         greater than the encoded ``(created_at, id)`` tuple are returned.
         When ``limit`` is provided, at most ``limit`` rows are returned.
-        Both are optional and default to "all rows from the start".
+
+        ``status_filter`` (#86): when provided, only documents whose
+        **latest version's status** is in the given set are returned.
+        ``filename_query``: case-insensitive substring match against
+        the document's ``original_filename``. Filters apply *before*
+        pagination — the cursor semantics are "next page within the
+        current filter set". A page short of ``limit`` still signals
+        end-of-stream via the route layer.
 
         Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
         """
@@ -215,6 +242,8 @@ class InMemoryCatalogStore:
         *,
         cursor: str | None = None,
         limit: int | None = None,
+        status_filter: frozenset[DocumentVersionStatus] | None = None,
+        filename_query: str | None = None,
     ) -> list[Document]:
         ordered = sorted(
             self.documents.values(),
@@ -223,6 +252,11 @@ class InMemoryCatalogStore:
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
             ordered = [d for d in ordered if (d.created_at, d.id) > (after_created_at, after_id)]
+        if status_filter is not None:
+            ordered = [d for d in ordered if _latest_status(d, self.versions) in status_filter]
+        if filename_query:
+            needle = filename_query.lower()
+            ordered = [d for d in ordered if needle in d.original_filename.lower()]
         if limit is not None:
             ordered = ordered[:limit]
         return ordered
@@ -382,24 +416,39 @@ class SQLiteCatalogStore:
         *,
         cursor: str | None = None,
         limit: int | None = None,
+        status_filter: frozenset[DocumentVersionStatus] | None = None,
+        filename_query: str | None = None,
     ) -> list[Document]:
-        # Build the documents query with optional cursor/limit clauses.
-        # The tuple comparison `(created_at, id) > (?, ?)` is supported by
-        # SQLite directly and matches the in-memory store's ordering.
+        # Build the documents query with optional cursor / status /
+        # filename / limit clauses. The tuple comparison
+        # `(d.created_at, d.id) > (?, ?)` is supported by SQLite directly
+        # and matches the in-memory store's ordering. Status filter
+        # joins on the latest version row; the LEFT JOIN keeps documents
+        # without versions visible when the filter is absent.
+        clauses: list[str] = []
         params: list[object] = []
-        where_clause = ""
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
-            where_clause = " WHERE (created_at, id) > (?, ?)"
+            clauses.append("(d.created_at, d.id) > (?, ?)")
             params.extend([after_created_at.isoformat(), after_id])
+        if status_filter is not None:
+            placeholders = ", ".join("?" for _ in status_filter)
+            clauses.append(f"latest.status IN ({placeholders})")
+            params.extend(s.value for s in status_filter)
+        if filename_query:
+            clauses.append("LOWER(d.original_filename) LIKE ?")
+            params.append(f"%{filename_query.lower()}%")
+        where_clause = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         limit_clause = ""
         if limit is not None:
             limit_clause = " LIMIT ?"
             params.append(int(limit))
         query = (
-            "SELECT * FROM documents"
+            "SELECT d.* FROM documents d "
+            "LEFT JOIN document_versions latest "
+            "  ON latest.id = d.latest_version_id"
             + where_clause
-            + " ORDER BY created_at ASC, id ASC"
+            + " ORDER BY d.created_at ASC, d.id ASC"
             + limit_clause
         )
         with self._connect() as connection:
