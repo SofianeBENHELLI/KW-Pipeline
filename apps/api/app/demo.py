@@ -10,10 +10,13 @@ needs for a one-paste local demo:
   server (``apps/widget``, served by webpack-dev-server on 8081) reach
   the API.
 * ``KW_ALLOWED_CONTENT_TYPES`` — set to the comma-separated allowlist
-  ``text/plain,application/pdf,<docx-mime>`` so the demo dataset (text,
-  PDF, DOCX) is accepted without the operator pre-configuring it.
-  ``<docx-mime>`` is
-  ``application/vnd.openxmlformats-officedocument.wordprocessingml.document``.
+  ``text/plain,application/pdf,<docx-mime>,<pptx-mime>`` so the demo
+  dataset (text, PDF, DOCX, PPTX) is accepted without the operator
+  pre-configuring it. The MIME strings are
+  ``application/vnd.openxmlformats-officedocument.wordprocessingml.document``
+  for DOCX and
+  ``application/vnd.openxmlformats-officedocument.presentationml.presentation``
+  for PPTX.
 * ``KW_KNOWLEDGE_LAYER_ENABLED=true`` — turn on the v0.2 KG projection
   so validated documents materialise chunks, topics, and deterministic
   semantic relations against the in-memory ``GraphStore``. No Neo4j
@@ -42,7 +45,8 @@ def main() -> None:
     os.environ.setdefault(
         "KW_ALLOWED_CONTENT_TYPES",
         "text/plain,application/pdf,"
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
     os.environ.setdefault("KW_KNOWLEDGE_LAYER_ENABLED", "true")
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
