@@ -338,3 +338,62 @@ class ChunkSearchResponse(BaseModel):
     embedding_model: str
     query_embedding_dim: int
     results: list[ChunkSearchResult] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 chat surface (POST /chat/rag) — ADR-015 follow-up
+# ---------------------------------------------------------------------------
+
+
+class ChatRagRequest(BaseModel):
+    """Request body for ``POST /chat/rag``.
+
+    The ``query`` is the user's natural-language question. ``top_k``
+    bounds how many chunks the retriever pulls before assembling the
+    citation context — small numbers keep prompts cheap and speed up
+    the LLM call.
+    """
+
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class ChatCitation(BaseModel):
+    """One chunk that grounded the chat answer.
+
+    Mirrors :class:`ChunkSearchResult` so the frontend can render
+    citations with the same locator widgets it already uses for the
+    search panel.
+    """
+
+    chunk_id: str
+    document_id: str
+    version_id: str
+    section_id: str
+    snippet: str | None = None
+    score: float = Field(ge=-1.0, le=1.0)
+
+
+class ChatRagResponse(BaseModel):
+    """Response shape for ``POST /chat/rag`` (Phase 3 chat — RAG mode).
+
+    The model's free-text ``answer`` is rendered alongside the
+    ``citations`` it was grounded in. ``mode`` documents which
+    retrieval strategy produced the citations — only ``"rag"`` is
+    supported in this PR; ``"graph"`` and ``"hybrid"`` modes follow
+    in subsequent slices but share the same response shape.
+
+    ``token_usage`` carries the per-call accounting from the LLM
+    provider so operators can audit cost; the field's keys match the
+    flat shape Phase 2's entity extractor already emits
+    (``input_tokens`` / ``output_tokens`` / cache counters).
+    """
+
+    schema_version: Literal["v0.1"] = "v0.1"
+    mode: Literal["rag"] = "rag"
+    query: str
+    answer: str
+    citations: list[ChatCitation] = Field(default_factory=list)
+    embedding_model: str
+    llm_model: str
+    token_usage: dict[str, int] = Field(default_factory=dict)

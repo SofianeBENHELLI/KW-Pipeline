@@ -58,6 +58,9 @@ class ErrorCode:
     # ─── Phase 3 vector RAG (GET /knowledge/search) ────────────────
     VECTOR_SEARCH_DISABLED = "KW_VECTOR_SEARCH_DISABLED"
 
+    # ─── Phase 3 chat surface (POST /chat/rag) ─────────────────────
+    CHAT_DISABLED = "KW_CHAT_DISABLED"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"

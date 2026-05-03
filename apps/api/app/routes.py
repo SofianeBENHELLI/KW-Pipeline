@@ -23,6 +23,8 @@ from app.schemas.document import (
 )
 from app.schemas.extraction import RawExtraction
 from app.schemas.knowledge import (
+    ChatRagRequest,
+    ChatRagResponse,
     ChunkSearchResponse,
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
@@ -943,6 +945,51 @@ def build_router(services: PipelineServices) -> APIRouter:
             )
         try:
             return services.knowledge_search.search(q, limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post(
+        "/chat/rag",
+        operation_id="chat_rag",
+        response_model=ChatRagResponse,
+    )
+    def chat_rag(request: ChatRagRequest = Body(...)) -> Any:
+        """Citation-grounded RAG chat over the indexed knowledge base.
+
+        Retrieves the top-K most similar chunks via the vector index
+        (Phase 3 / ADR-015) and asks Anthropic to answer the user's
+        question grounded in those passages. The response carries
+        both the free-text answer and the originating chunks so the
+        frontend can render inline citations and let reviewers
+        navigate back to the source.
+
+        Requires:
+        - ``KW_KNOWLEDGE_LAYER_ENABLED=true``
+        - ``VOYAGE_API_KEY`` (for retrieval)
+        - ``ANTHROPIC_API_KEY`` (for the chat answer)
+
+        When any gate is off the route returns 503 with a stable
+        public error code so the frontend can surface the right
+        remediation.
+        """
+        if services.chat is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.CHAT_DISABLED,
+                message=(
+                    "Chat is disabled. The Phase 3 chat surface needs vector "
+                    "retrieval (Voyage) and a chat LLM (Anthropic) both "
+                    "configured."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set KW_KNOWLEDGE_LAYER_ENABLED=true, VOYAGE_API_KEY "
+                    "(or KW_VOYAGE_API_KEY), and ANTHROPIC_API_KEY in the "
+                    "API environment, then restart the service."
+                ),
+            )
+        try:
+            return services.chat.chat_rag(query=request.query, top_k=request.top_k)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

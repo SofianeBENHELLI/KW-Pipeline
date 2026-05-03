@@ -203,3 +203,92 @@ def test_layer_threads_embedding_client_when_enabled(
     projector.project(document=document, version=version, semantic=semantic)
     hits = store.find_chunks_by_similarity(embedder.embed_query("hello"), limit=5)
     assert {h.chunk_id for h in hits} == {"s1"}
+
+
+# ─── Phase 3 chat-service wiring (#186 follow-up) ─────────────────────────
+
+
+from app.dependencies import _maybe_build_chat_service  # noqa: E402
+from app.services.knowledge import ChatService  # noqa: E402
+
+
+def test_chat_service_disabled_without_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No vector search ⇒ no chat service even if Anthropic is set."""
+    from app.settings import Settings as _Settings
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "sk-x")
+    assert _maybe_build_chat_service(settings=_Settings(), knowledge_search=None) is None
+
+
+def test_chat_service_disabled_without_anthropic_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Search wired but no Anthropic key ⇒ chat is None."""
+    from app.services.knowledge import (
+        FakeEmbeddingClient,
+        InMemoryGraphStore,
+        KnowledgeSearchService,
+    )
+    from app.settings import Settings as _Settings
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.delenv("KW_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    search = KnowledgeSearchService(
+        embedding_client=FakeEmbeddingClient(dim=16),
+        graph_store=InMemoryGraphStore(),
+    )
+    assert _maybe_build_chat_service(settings=_Settings(), knowledge_search=search) is None
+
+
+def test_chat_service_built_when_both_gates_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both search + Anthropic ⇒ ChatService instance with the
+    configured Anthropic model recorded for the response payload."""
+    from app.services.knowledge import (
+        FakeEmbeddingClient,
+        InMemoryGraphStore,
+        KnowledgeSearchService,
+    )
+    from app.settings import Settings as _Settings
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("KW_ANTHROPIC_MODEL", "claude-haiku-4-5")
+
+    search = KnowledgeSearchService(
+        embedding_client=FakeEmbeddingClient(dim=16),
+        graph_store=InMemoryGraphStore(),
+    )
+    chat = _maybe_build_chat_service(settings=_Settings(), knowledge_search=search)
+    assert isinstance(chat, ChatService)
+    assert chat.llm_model == "claude-haiku-4-5"
+
+
+def test_chat_service_falls_back_to_default_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty model env ⇒ DEFAULT_ANTHROPIC_MODEL is used so the
+    response payload still advertises which model produced the answer."""
+    from app.services.knowledge import (
+        FakeEmbeddingClient,
+        InMemoryGraphStore,
+        KnowledgeSearchService,
+    )
+    from app.services.knowledge.llm_client import DEFAULT_ANTHROPIC_MODEL
+    from app.settings import Settings as _Settings
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("KW_ANTHROPIC_MODEL", "")
+
+    search = KnowledgeSearchService(
+        embedding_client=FakeEmbeddingClient(dim=16),
+        graph_store=InMemoryGraphStore(),
+    )
+    chat = _maybe_build_chat_service(settings=_Settings(), knowledge_search=search)
+    assert isinstance(chat, ChatService)
+    assert chat.llm_model == DEFAULT_ANTHROPIC_MODEL

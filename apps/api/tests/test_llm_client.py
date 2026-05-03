@@ -377,3 +377,141 @@ def test_invalid_max_retries_rejected():
 def test_invalid_backoff_rejected():
     with pytest.raises(ValueError):
         AnthropicLLMClient(api_key="unused", client=MagicMock(), retry_backoff_seconds=-0.1)
+
+
+# ─── complete_chat (Phase 3 chat surface) ──────────────────────────────────
+
+
+def _ok_chat_response(text: str = "Hello, world.") -> MagicMock:
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    response = MagicMock()
+    response.content = [block]
+    response.usage = MagicMock(
+        input_tokens=12,
+        output_tokens=3,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    return response
+
+
+def test_anthropic_complete_chat_returns_concatenated_text():
+    """Multiple text blocks concatenate into one answer string."""
+    block_a = MagicMock()
+    block_a.type = "text"
+    block_a.text = "Part one. "
+    block_b = MagicMock()
+    block_b.type = "text"
+    block_b.text = "Part two."
+    response = MagicMock()
+    response.content = [block_a, block_b]
+    response.usage = MagicMock(
+        input_tokens=20,
+        output_tokens=5,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = response
+
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client)
+    answer, usage = llm.complete_chat(system="s", user="u")
+    assert answer == "Part one. Part two."
+    assert usage["input_tokens"] == 20
+    assert usage["output_tokens"] == 5
+
+
+def test_anthropic_complete_chat_uses_ephemeral_cache_on_system():
+    """ADR-014 §2: the system block carries cache_control on chat too."""
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _ok_chat_response()
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client)
+
+    llm.complete_chat(system="static framing", user="user q")
+
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    assert call_kwargs["system"] == [
+        {
+            "type": "text",
+            "text": "static framing",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    assert call_kwargs["messages"] == [{"role": "user", "content": "user q"}]
+    # No tool binding on the chat path.
+    assert "tools" not in call_kwargs
+    assert "tool_choice" not in call_kwargs
+
+
+def test_anthropic_complete_chat_raises_on_no_text_blocks():
+    """Misbehaving model with no text content surfaces a RuntimeError."""
+    response = MagicMock()
+    response.content = []
+    response.usage = MagicMock(
+        input_tokens=5,
+        output_tokens=0,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = response
+
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client)
+    with pytest.raises(RuntimeError, match="text content"):
+        llm.complete_chat(system="s", user="u")
+
+
+def test_anthropic_complete_chat_retries_on_503():
+    """Same retry policy as complete_with_tool — 5xx is transient."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(503),
+        _ok_chat_response("recovered"),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+    answer, _ = llm.complete_chat(system="s", user="u")
+    assert answer == "recovered"
+    assert mock_client.messages.create.call_count == 2
+    assert len(sleeps) == 1
+
+
+def test_fake_llm_client_complete_chat_pops_queue():
+    """``enqueue_chat`` and ``complete_chat`` round-trip an answer."""
+    fake = FakeLLMClient()
+    fake.enqueue_chat("hello", {"input_tokens": 1, "output_tokens": 1})
+    answer, usage = fake.complete_chat(system="s", user="u")
+    assert answer == "hello"
+    assert usage == {"input_tokens": 1, "output_tokens": 1}
+    assert fake.calls[-1] == {"method": "complete_chat", "system": "s", "user": "u"}
+
+
+def test_fake_llm_client_complete_chat_raises_on_empty_queue():
+    fake = FakeLLMClient()
+    with pytest.raises(RuntimeError, match="chat responses"):
+        fake.complete_chat(system="s", user="u")
+
+
+def test_fake_llm_client_separate_queues_dont_interfere():
+    """``enqueue`` (tool) and ``enqueue_chat`` (chat) have independent
+    queues — exhausting one doesn't affect the other."""
+    fake = FakeLLMClient()
+    fake.enqueue({"triples": []}, {"input_tokens": 1, "output_tokens": 1})
+    fake.enqueue_chat("answer", {"input_tokens": 5, "output_tokens": 2})
+
+    # Drain chat first; tool queue still has its response.
+    answer, _ = fake.complete_chat(system="s", user="u")
+    assert answer == "answer"
+    tool_in, _ = fake.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+    assert tool_in == {"triples": []}

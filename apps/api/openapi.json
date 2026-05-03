@@ -194,6 +194,136 @@
         "title": "Body_upload_documents_batch",
         "type": "object"
       },
+      "ChatCitation": {
+        "description": "One chunk that grounded the chat answer.\n\nMirrors :class:`ChunkSearchResult` so the frontend can render\ncitations with the same locator widgets it already uses for the\nsearch panel.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "version_id",
+          "section_id",
+          "snippet",
+          "score"
+        ],
+        "title": "ChatCitation",
+        "type": "object"
+      },
+      "ChatRagRequest": {
+        "description": "Request body for ``POST /chat/rag``.\n\nThe ``query`` is the user's natural-language question. ``top_k``\nbounds how many chunks the retriever pulls before assembling the\ncitation context — small numbers keep prompts cheap and speed up\nthe LLM call.",
+        "properties": {
+          "query": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ChatRagRequest",
+        "type": "object"
+      },
+      "ChatRagResponse": {
+        "description": "Response shape for ``POST /chat/rag`` (Phase 3 chat — RAG mode).\n\nThe model's free-text ``answer`` is rendered alongside the\n``citations`` it was grounded in. ``mode`` documents which\nretrieval strategy produced the citations — only ``\"rag\"`` is\nsupported in this PR; ``\"graph\"`` and ``\"hybrid\"`` modes follow\nin subsequent slices but share the same response shape.\n\n``token_usage`` carries the per-call accounting from the LLM\nprovider so operators can audit cost; the field's keys match the\nflat shape Phase 2's entity extractor already emits\n(``input_tokens`` / ``output_tokens`` / cache counters).",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "llm_model": {
+            "title": "Llm Model",
+            "type": "string"
+          },
+          "mode": {
+            "const": "rag",
+            "default": "rag",
+            "title": "Mode",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "token_usage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Token Usage",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "mode",
+          "query",
+          "answer",
+          "citations",
+          "embedding_model",
+          "llm_model",
+          "token_usage"
+        ],
+        "title": "ChatRagResponse",
+        "type": "object"
+      },
       "ChunkSearchResponse": {
         "description": "Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).\n\nEmpty ``results`` is a valid response — it means no chunk in the\nindexed set was similar enough (or no chunks have been embedded\nyet). ``query_embedding_dim`` mirrors the dimensionality the\nrequest was scored against, so an operator can spot\nmodel-mismatch errors at a glance.",
         "properties": {
@@ -1236,6 +1366,45 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/chat/rag": {
+      "post": {
+        "description": "Citation-grounded RAG chat over the indexed knowledge base.\n\nRetrieves the top-K most similar chunks via the vector index\n(Phase 3 / ADR-015) and asks Anthropic to answer the user's\nquestion grounded in those passages. The response carries\nboth the free-text answer and the originating chunks so the\nfrontend can render inline citations and let reviewers\nnavigate back to the source.\n\nRequires:\n- ``KW_KNOWLEDGE_LAYER_ENABLED=true``\n- ``VOYAGE_API_KEY`` (for retrieval)\n- ``ANTHROPIC_API_KEY`` (for the chat answer)\n\nWhen any gate is off the route returns 503 with a stable\npublic error code so the frontend can surface the right\nremediation.",
+        "operationId": "chat_rag",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRagRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatRagResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Rag"
+      }
+    },
     "/documents": {
       "get": {
         "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.",

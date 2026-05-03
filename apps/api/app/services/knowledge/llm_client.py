@@ -55,18 +55,26 @@ DEFAULT_RETRY_BACKOFF_CAP_SECONDS = 30.0
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """One LLM call → typed structured output.
+    """LLM provider boundary.
 
-    ``complete_with_tool`` issues a single prompt that requires the
-    model to invoke a named tool whose input schema is the caller's
-    desired output shape. Tool-use is the supported way to force
-    JSON-shaped output from Claude (and from the equivalent endpoints
-    in OpenAI / Vertex), so the Protocol commits to it.
+    Two methods because the entity extractor (Phase 2) and the chat
+    service (Phase 3) want fundamentally different response shapes:
 
-    The return value is a ``(parsed_tool_input, token_usage)`` tuple.
-    ``token_usage`` is a flat ``dict[str, int]`` carrying at minimum
-    ``input_tokens`` and ``output_tokens``; cache-related counters are
-    included when the provider reports them, zeros otherwise.
+    - ``complete_with_tool`` issues a single prompt that *requires*
+      the model to invoke a named tool whose input schema is the
+      caller's desired output shape. Tool-use is the supported way
+      to force JSON-shaped output from Claude (and the equivalent
+      endpoints in OpenAI / Vertex), so the Protocol commits to it.
+    - ``complete_chat`` issues a single prompt and returns the
+      model's free-text answer. No tool is bound. The chat service
+      uses this to render a natural-language response over a small
+      pre-retrieved set of cited chunks.
+
+    Both return ``(payload, token_usage)`` tuples; ``token_usage`` is
+    a flat ``dict[str, int]`` carrying at minimum ``input_tokens`` and
+    ``output_tokens``. Cache-related counters
+    (``cache_read_input_tokens``, ``cache_creation_input_tokens``)
+    are included when the provider reports them, zeros otherwise.
     """
 
     name: str
@@ -79,6 +87,21 @@ class LLMClient(Protocol):
         tool_schema: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, int]]:
         """Run one structured-output call and return the parsed tool input."""
+
+    def complete_chat(
+        self,
+        *,
+        system: str,
+        user: str,
+    ) -> tuple[str, dict[str, int]]:
+        """Run one free-text chat call and return ``(answer_text, token_usage)``.
+
+        The static ``system`` block is wrapped with ephemeral prompt
+        caching by production implementations — the chat surface's
+        system prompt (RAG instructions, citation rules) is invariant
+        across queries within a session, exactly the shape the cache
+        amortizes.
+        """
 
 
 # ─── Anthropic implementation ────────────────────────────────────────────
@@ -198,6 +221,48 @@ class AnthropicLLMClient:
         }
         return tool_input, token_usage
 
+    def complete_chat(
+        self,
+        *,
+        system: str,
+        user: str,
+    ) -> tuple[str, dict[str, int]]:
+        """Run one free-text chat call against Anthropic.
+
+        Same prompt-cache + retry posture as
+        :meth:`complete_with_tool`: the static ``system`` block is
+        wrapped with ``cache_control: {"type": "ephemeral"}`` so
+        repeat calls within the 5 min cache window pay the input
+        cost only once, and transient 429 / 5xx failures are
+        retried per ADR-014 §4.
+        """
+        response = self._call_with_retry_chat(system=system, user=user)
+
+        # Anthropic returns a list of content blocks; for a chat
+        # response without tool-use, exactly one ``text`` block is
+        # expected. Concatenate all text blocks defensively in case
+        # the SDK introduces multi-block responses later.
+        chunks: list[str] = []
+        for block in getattr(response, "content", []) or []:
+            if getattr(block, "type", None) == "text":
+                text = getattr(block, "text", None)
+                if isinstance(text, str):
+                    chunks.append(text)
+        if not chunks:
+            raise RuntimeError("Anthropic chat response did not include any text content blocks.")
+        answer = "".join(chunks)
+
+        usage = getattr(response, "usage", None)
+        token_usage: dict[str, int] = {
+            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+            "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            "cache_creation_input_tokens": int(
+                getattr(usage, "cache_creation_input_tokens", 0) or 0
+            ),
+        }
+        return answer, token_usage
+
     def _call_with_retry(
         self,
         *,
@@ -251,6 +316,46 @@ class AnthropicLLMClient:
                         "delay_seconds": round(delay, 3),
                         "error_type": type(exc).__name__,
                         "status_code": getattr(exc, "status_code", None),
+                    },
+                )
+                self._sleep(delay)
+                attempt += 1
+
+    def _call_with_retry_chat(self, *, system: str, user: str) -> Any:
+        """Free-text variant of :meth:`_call_with_retry` (no tools).
+
+        The retry classification + backoff logic is identical; the
+        only difference is the SDK call shape (no ``tools`` /
+        ``tool_choice`` arguments).
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._client.messages.create(
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user}],
+                )
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if attempt >= self._max_retries or not _is_retryable(exc):
+                    raise
+                delay = self._retry_delay(exc, attempt)
+                log.warning(
+                    "knowledge.llm.retrying",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": self._max_retries,
+                        "delay_seconds": round(delay, 3),
+                        "error_type": type(exc).__name__,
+                        "status_code": getattr(exc, "status_code", None),
+                        "call_kind": "chat",
                     },
                 )
                 self._sleep(delay)
@@ -321,14 +426,18 @@ def _retry_after_seconds(exc: Exception) -> float | None:
 class FakeLLMClient:
     """Deterministic in-process :class:`LLMClient` for unit tests.
 
-    Pre-load a queue of ``(parsed_tool_input, token_usage)`` responses
-    via :meth:`enqueue`. Each call to :meth:`complete_with_tool` pops
-    the next one in FIFO order. If the queue is empty, the call raises
-    so misconfigured tests fail loudly instead of returning ``None``.
+    Two queues — one per Protocol method — so tests can pre-load
+    structured-output responses (``enqueue``) and free-text chat
+    responses (``enqueue_chat``) independently. Each call to
+    :meth:`complete_with_tool` / :meth:`complete_chat` pops the
+    matching queue's head in FIFO order; an empty queue raises so
+    misconfigured tests fail loudly instead of returning ``None``.
 
-    The fake stores the ``(system, user, tool_schema)`` tuple for each
-    call on :attr:`calls` so tests can assert on prompt construction
-    without spinning up a real provider.
+    The fake stores every call's prompt arguments on :attr:`calls`
+    so tests can assert on prompt construction without spinning up
+    a real provider. Each entry includes a ``method`` field
+    (``"complete_with_tool"`` / ``"complete_chat"``) so a single
+    call list covers both code paths.
     """
 
     name: str = "fake"
@@ -338,6 +447,7 @@ class FakeLLMClient:
         responses: list[tuple[dict[str, Any], dict[str, int]]] | None = None,
     ) -> None:
         self._responses: deque[tuple[dict[str, Any], dict[str, int]]] = deque(responses or [])
+        self._chat_responses: deque[tuple[str, dict[str, int]]] = deque()
         self.calls: list[dict[str, Any]] = []
 
     def enqueue(
@@ -347,6 +457,14 @@ class FakeLLMClient:
     ) -> None:
         self._responses.append((parsed_tool_input, token_usage or {}))
 
+    def enqueue_chat(
+        self,
+        answer: str,
+        token_usage: dict[str, int] | None = None,
+    ) -> None:
+        """Pre-load a free-text response for the next ``complete_chat`` call."""
+        self._chat_responses.append((answer, token_usage or {}))
+
     def complete_with_tool(
         self,
         *,
@@ -354,13 +472,40 @@ class FakeLLMClient:
         user: str,
         tool_schema: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, int]]:
-        self.calls.append({"system": system, "user": user, "tool_schema": tool_schema})
+        self.calls.append(
+            {
+                "method": "complete_with_tool",
+                "system": system,
+                "user": user,
+                "tool_schema": tool_schema,
+            }
+        )
         if not self._responses:
             raise RuntimeError(
-                "FakeLLMClient: no recorded responses left to return. "
-                "Call `enqueue(...)` once per expected LLM call."
+                "FakeLLMClient: no recorded tool responses left to return. "
+                "Call `enqueue(...)` once per expected complete_with_tool call."
             )
         return self._responses.popleft()
+
+    def complete_chat(
+        self,
+        *,
+        system: str,
+        user: str,
+    ) -> tuple[str, dict[str, int]]:
+        self.calls.append(
+            {
+                "method": "complete_chat",
+                "system": system,
+                "user": user,
+            }
+        )
+        if not self._chat_responses:
+            raise RuntimeError(
+                "FakeLLMClient: no recorded chat responses left to return. "
+                "Call `enqueue_chat(...)` once per expected complete_chat call."
+            )
+        return self._chat_responses.popleft()
 
 
 __all__ = [

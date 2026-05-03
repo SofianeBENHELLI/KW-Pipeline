@@ -13,15 +13,18 @@ from app.services.idempotency_store import (
 )
 from app.services.knowledge import (
     AnthropicLLMClient,
+    ChatService,
     EmbeddingClient,
     EntityExtractor,
     GraphStore,
     InMemoryGraphStore,
     KnowledgeProjector,
     KnowledgeSearchService,
+    LLMClient,
     Neo4jGraphStore,
     VoyageEmbeddingClient,
 )
+from app.services.knowledge.llm_client import DEFAULT_ANTHROPIC_MODEL
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
 from app.services.semantic_extractor import SemanticExtractor
@@ -72,6 +75,12 @@ class PipelineServices:
     # returns 503.
     embedding_client: EmbeddingClient | None = None
     knowledge_search: KnowledgeSearchService | None = None
+    # Phase 3 chat surface (RAG mode). ``chat`` is constructed iff
+    # **both** the search service AND an entity-extractor LLM client
+    # are wired (i.e. ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND
+    # ``VOYAGE_API_KEY`` AND ``ANTHROPIC_API_KEY`` are all set).
+    # ``None`` keeps the route at 503 with the public error envelope.
+    chat: ChatService | None = None
     # Snapshot of the typed settings used to construct this container
     # (issue #43). Routes read settings *fresh per request* via
     # ``Settings()`` so per-test ``monkeypatch.setenv`` is observable;
@@ -160,6 +169,48 @@ def _maybe_build_embedding_client(
     )
 
 
+def _maybe_build_chat_service(
+    *,
+    settings: Settings,
+    knowledge_search: KnowledgeSearchService | None,
+) -> ChatService | None:
+    """Build the Phase 3 chat service iff both gates are wired.
+
+    Requires:
+    - ``knowledge_search is not None`` (Phase 3 vector retrieval is on,
+      which transitively means ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND
+      ``VOYAGE_API_KEY`` is set).
+    - ``settings.anthropic_api_key`` is non-empty (otherwise we can't
+      generate the answer).
+
+    Returns ``None`` otherwise; the route layer maps ``None`` to a
+    503 with ``KW_CHAT_DISABLED``.
+
+    The chat LLM client is **separate** from the entity extractor's
+    LLM client. Same Anthropic credentials, different per-call
+    settings (chat uses larger ``max_tokens`` and no tool binding).
+    """
+    if knowledge_search is None:
+        return None
+    if not settings.anthropic_api_key.strip():
+        return None
+    api_key = settings.anthropic_api_key.strip()
+    model = settings.anthropic_model.strip() or DEFAULT_ANTHROPIC_MODEL
+    chat_llm: LLMClient = AnthropicLLMClient(
+        api_key=api_key,
+        model=model,
+        # Larger budget than the extractor so multi-paragraph answers
+        # don't get truncated. Still bounded so a runaway prompt
+        # doesn't burn the whole token cap.
+        max_tokens=4096,
+    )
+    return ChatService(
+        search=knowledge_search,
+        llm=chat_llm,
+        llm_model=model,
+    )
+
+
 def _maybe_build_knowledge_layer(
     settings: Settings | None = None,
     *,
@@ -234,6 +285,10 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         if embedding_client is not None
         else None
     )
+    chat = _maybe_build_chat_service(
+        settings=settings,
+        knowledge_search=knowledge_search,
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -253,6 +308,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         entity_extractor=_maybe_build_entity_extractor(settings),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        chat=chat,
         settings=settings,
     )
 
@@ -288,6 +344,10 @@ def build_persistent_services(
         if embedding_client is not None
         else None
     )
+    chat = _maybe_build_chat_service(
+        settings=settings,
+        knowledge_search=knowledge_search,
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -307,5 +367,6 @@ def build_persistent_services(
         entity_extractor=_maybe_build_entity_extractor(settings),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        chat=chat,
         settings=settings,
     )

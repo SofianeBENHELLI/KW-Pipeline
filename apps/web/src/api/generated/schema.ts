@@ -4,6 +4,42 @@
  */
 
 export interface paths {
+    "/chat/rag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chat Rag
+         * @description Citation-grounded RAG chat over the indexed knowledge base.
+         *
+         *     Retrieves the top-K most similar chunks via the vector index
+         *     (Phase 3 / ADR-015) and asks Anthropic to answer the user's
+         *     question grounded in those passages. The response carries
+         *     both the free-text answer and the originating chunks so the
+         *     frontend can render inline citations and let reviewers
+         *     navigate back to the source.
+         *
+         *     Requires:
+         *     - ``KW_KNOWLEDGE_LAYER_ENABLED=true``
+         *     - ``VOYAGE_API_KEY`` (for retrieval)
+         *     - ``ANTHROPIC_API_KEY`` (for the chat answer)
+         *
+         *     When any gate is off the route returns 503 with a stable
+         *     public error code so the frontend can surface the right
+         *     remediation.
+         */
+        post: operations["chat_rag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -394,6 +430,89 @@ export interface components {
         Body_upload_documents_batch: {
             /** Files */
             files: string[];
+        };
+        /**
+         * ChatCitation
+         * @description One chunk that grounded the chat answer.
+         *
+         *     Mirrors :class:`ChunkSearchResult` so the frontend can render
+         *     citations with the same locator widgets it already uses for the
+         *     search panel.
+         */
+        ChatCitation: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string;
+            /** Snippet */
+            snippet: string | null;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ChatRagRequest
+         * @description Request body for ``POST /chat/rag``.
+         *
+         *     The ``query`` is the user's natural-language question. ``top_k``
+         *     bounds how many chunks the retriever pulls before assembling the
+         *     citation context — small numbers keep prompts cheap and speed up
+         *     the LLM call.
+         */
+        ChatRagRequest: {
+            /** Query */
+            query: string;
+            /**
+             * Top K
+             * @default 5
+             */
+            top_k: number;
+        };
+        /**
+         * ChatRagResponse
+         * @description Response shape for ``POST /chat/rag`` (Phase 3 chat — RAG mode).
+         *
+         *     The model's free-text ``answer`` is rendered alongside the
+         *     ``citations`` it was grounded in. ``mode`` documents which
+         *     retrieval strategy produced the citations — only ``"rag"`` is
+         *     supported in this PR; ``"graph"`` and ``"hybrid"`` modes follow
+         *     in subsequent slices but share the same response shape.
+         *
+         *     ``token_usage`` carries the per-call accounting from the LLM
+         *     provider so operators can audit cost; the field's keys match the
+         *     flat shape Phase 2's entity extractor already emits
+         *     (``input_tokens`` / ``output_tokens`` / cache counters).
+         */
+        ChatRagResponse: {
+            /** Answer */
+            answer: string;
+            /** Citations */
+            citations: components["schemas"]["ChatCitation"][];
+            /** Embedding Model */
+            embedding_model: string;
+            /** Llm Model */
+            llm_model: string;
+            /**
+             * Mode
+             * @default rag
+             * @constant
+             */
+            mode: "rag";
+            /** Query */
+            query: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Token Usage */
+            token_usage: {
+                [key: string]: number;
+            };
         };
         /**
          * ChunkSearchResponse
@@ -846,6 +965,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    chat_rag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatRagRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatRagResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_documents: {
         parameters: {
             query?: {

@@ -87,6 +87,8 @@ gating rules.
 | `knowledge.vector_index.created` | INFO | Phase 3: `app.main` startup successfully provisioned the chunk-embedding HNSW index | `index_name`, `dim`, `embedding_model`, `store` |
 | `knowledge.vector_index.failed` | WARNING | Phase 3: startup index provisioning raised (e.g. Neo4j blip); the API still serves Phase 1 + Phase 2 traffic | `index_name`, `embedding_model`, `error_type` |
 | `knowledge.search.queried` | INFO | Phase 3: every `GET /knowledge/search` request | `query_char_count`, `top_k`, `result_count`, `embedding_model`, `latency_ms` |
+| `knowledge.chat.empty_retrieval` | INFO | Phase 3 chat: vector retrieval returned zero results; the route short-circuits with a deterministic "no relevant content" answer and skips the LLM call | `query_char_count`, `top_k`, `embedding_model`, `latency_ms` |
+| `knowledge.chat.answered` | INFO | Phase 3 chat: `POST /chat/rag` answered successfully | `mode`, `query_char_count`, `top_k`, `citation_count`, `embedding_model`, `llm_model`, `retrieval_latency_ms`, `llm_latency_ms`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` |
 
 ### Idempotency
 

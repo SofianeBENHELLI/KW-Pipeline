@@ -17,6 +17,7 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.chat_service import ChatService
 from app.services.knowledge.chunk_relations import (
     ChunkRecord,
     ChunkRelation,
@@ -57,6 +58,7 @@ from app.services.knowledge.topic_clustering import (
 
 __all__ = [
     "AnthropicLLMClient",
+    "ChatService",
     "ChunkRecord",
     "ChunkRelation",
     "ChunkRelationKind",

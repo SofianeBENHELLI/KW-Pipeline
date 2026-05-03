@@ -78,9 +78,9 @@ New routes added in `apps/api/app/routes.py`:
 | `GET /documents/{document_id}/graph` | 1 | `get_document_graph` | `KnowledgeGraphProjection` (nodes + edges for one document) |
 | `GET /knowledge/graph` | 1 | `get_knowledge_graph` | Cursor-paginated `KnowledgeGraphPage` (cross-document subgraph) |
 | `GET /knowledge/search` | 3 | `search_knowledge_chunks` | `ChunkSearchResponse` (top-K chunks ranked by cosine similarity to the embedded query) |
-| `POST /chat/rag` | 3 | `chat_rag` | `ChatResponse` (vector retrieval over validated content) |
-| `POST /chat/graph` | 3 | `chat_graph` | `ChatResponse` (Cypher-translated query over the graph) |
-| `POST /chat/hybrid` | 3 | `chat_hybrid` | `ChatResponse` (vector + graph blended) |
+| `POST /chat/rag` | 3 | `chat_rag` | `ChatRagResponse` (citation-grounded answer over the top-K vector hits) |
+| `POST /chat/graph` | 3 (planned) | `chat_graph` | `ChatGraphResponse` (Cypher-translated query over the graph) |
+| `POST /chat/hybrid` | 3 (planned) | `chat_hybrid` | `ChatHybridResponse` (vector + graph blended) |
 
 Frontend additions under `apps/web/src/features/`:
 
