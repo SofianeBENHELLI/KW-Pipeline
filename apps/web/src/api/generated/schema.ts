@@ -143,6 +143,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/versions/{version_id}/retry-extraction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Extraction
+         * @description Retry extraction for a previously-FAILED version (#87).
+         *
+         *     Returns the fresh ``RawExtraction`` on success, ``422`` with the
+         *     new failure reason on a re-fail, ``404`` if the version doesn't
+         *     exist, or ``409`` if the version isn't in ``FAILED`` (review
+         *     states stay frozen — retry never bypasses the gate).
+         */
+        post: operations["retry_extraction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/semantic": {
         parameters: {
             query?: never;
@@ -880,6 +905,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SemanticDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_extraction: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RawExtraction"];
                 };
             };
             /** @description Validation Error */

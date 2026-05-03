@@ -1397,6 +1397,71 @@
         "summary": "Reject Version"
       }
     },
+    "/documents/{document_id}/versions/{version_id}/retry-extraction": {
+      "post": {
+        "description": "Retry extraction for a previously-FAILED version (#87).\n\nReturns the fresh ``RawExtraction`` on success, ``422`` with the\nnew failure reason on a re-fail, ``404`` if the version doesn't\nexist, or ``409`` if the version isn't in ``FAILED`` (review\nstates stay frozen — retry never bypasses the gate).",
+        "operationId": "retry_extraction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawExtraction"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Extraction"
+      }
+    },
     "/documents/{document_id}/versions/{version_id}/semantic": {
       "get": {
         "operationId": "get_semantic",

@@ -336,6 +336,55 @@ def build_router(services: PipelineServices) -> APIRouter:
         except ExtractionFailed as exc:
             raise HTTPException(status_code=422, detail=exc.reason) from exc
 
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/retry-extraction",
+        operation_id="retry_extraction",
+        response_model=RawExtraction,
+    )
+    def retry_extraction(
+        document_id: str,
+        version_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        """Retry extraction for a previously-FAILED version (#87).
+
+        Returns the fresh ``RawExtraction`` on success, ``422`` with the
+        new failure reason on a re-fail, ``404`` if the version doesn't
+        exist, or ``409`` if the version isn't in ``FAILED`` (review
+        states stay frozen — retry never bypasses the gate).
+        """
+        _route = "/documents/{document_id}/versions/{version_id}/retry-extraction"
+        _req_hash = hash_json_body(
+            None,
+            path_params={"document_id": document_id, "version_id": version_id},
+        )
+        cached = _check_idempotency(
+            store=services.idempotency,
+            idempotency_key=idempotency_key,
+            route=_route,
+            request_hash=_req_hash,
+        )
+        if cached is not None:
+            return cached
+        try:
+            result = services.extraction_jobs.retry_extract(
+                document_id=document_id, version_id=version_id
+            )
+            _store_idempotency(
+                store=services.idempotency,
+                idempotency_key=idempotency_key,
+                route=_route,
+                request_hash=_req_hash,
+                result=result.model_dump(mode="json"),
+            )
+            return result
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ExtractionFailed as exc:
+            raise HTTPException(status_code=422, detail=exc.reason) from exc
+
     @router.get(
         "/documents/{document_id}/versions/{version_id}/extraction",
         operation_id="get_extraction",

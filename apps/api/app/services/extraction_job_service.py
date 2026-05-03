@@ -118,6 +118,48 @@ class ExtractionJobService:
         )
         return raw_extraction
 
+    def retry_extract(self, document_id: str, version_id: str) -> RawExtraction:
+        """Retry extraction for a previously-FAILED document version (#87).
+
+        The MVP recovery surface for "an extraction failed because of an
+        unsupported parser, transient infrastructure error, or bad
+        configuration; after the issue is fixed, retry without re-
+        uploading everything." Concretely:
+
+        * The version's current status MUST be ``FAILED``. Any other
+          status (``EXTRACTED``, ``VALIDATED``, ``REJECTED``,
+          ``DUPLICATE_DETECTED``, …) raises :class:`ValueError` so the
+          route layer surfaces a 409 — retry never bypasses the review
+          gate or reprocesses a still-running pipeline.
+        * Emits an :data:`extraction.retried` audit event before re-
+          running so the structured log preserves a clean retry trail
+          (the previous ``extraction.failed`` records aren't deleted —
+          they just sit ahead of the new ``extraction.started`` /
+          ``extraction.succeeded`` entries on the timeline).
+        * Delegates to :meth:`extract` for the actual run. The FSM has
+          a dedicated ``FAILED → EXTRACTING`` edge (see
+          ``app.models.document.ALLOWED_TRANSITIONS``) so the inner
+          ``update_status`` call goes through cleanly. On success, the
+          catalog clears the previous ``failure_reason`` (see
+          :meth:`CatalogStore.update_version_status`); on re-fail, the
+          new reason replaces the old one and the version stays
+          ``FAILED``.
+        """
+        version = self.documents.get_version(document_id=document_id, version_id=version_id)
+        if version.status is not DocumentVersionStatus.FAILED:
+            raise ValueError(
+                f"Retry only allowed from FAILED; version is currently {version.status.value}."
+            )
+        log.info(
+            "extraction.retried",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "previous_failure_reason": version.failure_reason,
+            },
+        )
+        return self.extract(document_id=document_id, version_id=version_id)
+
     def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
         """Return raw extraction output for a document version."""
         self.documents.get_version(document_id=document_id, version_id=version_id)

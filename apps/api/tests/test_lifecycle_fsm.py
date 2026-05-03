@@ -50,13 +50,21 @@ LEGAL_TRANSITIONS: list[tuple[DocumentVersionStatus, DocumentVersionStatus]] = [
     (DocumentVersionStatus.SEMANTIC_READY, DocumentVersionStatus.FAILED),
     (DocumentVersionStatus.NEEDS_REVIEW, DocumentVersionStatus.VALIDATED),
     (DocumentVersionStatus.NEEDS_REVIEW, DocumentVersionStatus.REJECTED),
+    # The retry-extraction edge introduced by #87.
+    (DocumentVersionStatus.FAILED, DocumentVersionStatus.EXTRACTING),
 ]
 
+# Truly-terminal states — once reached, no outgoing transitions exist.
+# ``FAILED`` is intentionally NOT here: issue #87 added a controlled
+# ``FAILED → EXTRACTING`` edge for the retry-extraction surface. The
+# transition is exercised separately in
+# :class:`TestFailedRetryTransition` below; the review-gate states
+# (``VALIDATED``, ``REJECTED``) and ``DUPLICATE_DETECTED`` remain
+# fully terminal.
 TERMINAL_STATES: list[DocumentVersionStatus] = [
     DocumentVersionStatus.DUPLICATE_DETECTED,
     DocumentVersionStatus.VALIDATED,
     DocumentVersionStatus.REJECTED,
-    DocumentVersionStatus.FAILED,
 ]
 
 

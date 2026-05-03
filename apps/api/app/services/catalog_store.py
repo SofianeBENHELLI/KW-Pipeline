@@ -254,6 +254,13 @@ class InMemoryCatalogStore:
                 f"but found {version.status.value}."
             )
         version.status = status
+        # Any transition to a non-FAILED status clears the version's
+        # ``failure_reason``. Critical for the FAILED → EXTRACTING retry
+        # path (#87): without this, a successfully-retried version
+        # carries stale failure text forever. Idempotent for non-FAILED
+        # rows since their ``failure_reason`` is already None.
+        if status is not DocumentVersionStatus.FAILED:
+            version.failure_reason = None
         return version
 
     def update_version_failure(
@@ -479,11 +486,19 @@ class SQLiteCatalogStore:
             # equals so the UPDATE matches zero rows by construction.
             placeholders = "?"
             predecessor_values = ("__no_legal_predecessor__",)
+        # Any transition to a non-FAILED status clears ``failure_reason``
+        # so a successfully-retried version (FAILED → EXTRACTING → ...)
+        # doesn't carry stale failure text forever (#87). Idempotent for
+        # non-FAILED rows since their ``failure_reason`` is already NULL.
+        clear_failure = status is not DocumentVersionStatus.FAILED
         with self._connect() as connection:
+            update_clause = (
+                "SET status = ?, failure_reason = NULL" if clear_failure else "SET status = ?"
+            )
             cursor = connection.execute(
                 f"""
                 UPDATE document_versions
-                SET status = ?
+                {update_clause}
                 WHERE document_id = ? AND id = ? AND status IN ({placeholders})
                 """,
                 (status.value, document_id, version_id, *predecessor_values),

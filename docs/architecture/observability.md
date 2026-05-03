@@ -50,6 +50,7 @@ re-uploads.
 | `extraction.started` | INFO | `ExtractionJobService.run` start | `document_id`, `version_id`, `content_type`, `bytes_in` |
 | `extraction.succeeded` | INFO | `ExtractionJobService.run` success | `document_id`, `version_id`, `parser_name`, `bytes_in`, `sections_out` |
 | `extraction.failed` | WARNING | `ExtractionJobService.run` failure (parser missing, parser raised, no extractable content) | `document_id`, `version_id`, `parser_name` (or `null` when no parser was found), `failure_reason` |
+| `extraction.retried` | INFO | `ExtractionJobService.retry_extract` (#87), fired *before* the new attempt runs | `document_id`, `version_id`, `previous_failure_reason` |
 
 `parser_name` is the parser's declared `name` attribute
 (e.g. `"plain_text"`, `"docx"`, `"pdf"`, `"pptx"`). It matches
