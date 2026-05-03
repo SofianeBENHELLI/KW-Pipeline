@@ -633,6 +633,68 @@ pre {
   cursor: not-allowed;
 }
 
+/* ── Catalog filter bar (#86) ────────────────────────────────────── */
+
+.catalog-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.catalog-filter-search {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #d4dde5;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #0e1b26;
+  box-sizing: border-box;
+}
+
+.catalog-filter-search:focus-visible {
+  outline: 0;
+  border-color: #1f8fbf;
+  box-shadow: 0 0 0 2px rgba(31, 143, 191, 0.18);
+}
+
+.catalog-filter-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.catalog-filter-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border: 1px solid #d4dde5;
+  background: #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #495a68;
+}
+
+.catalog-filter-chip:hover {
+  background: #f4f6f8;
+  color: #0e1b26;
+}
+
+.catalog-filter-chip.active {
+  background: #e5f2f8;
+  color: #005686;
+  border-color: #1f8fbf;
+  font-weight: 600;
+}
+
+.catalog-filter-chip-clear {
+  margin-left: auto;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;

@@ -157,15 +157,42 @@ function unwrap<T>(result: {
 
 /**
  * GET /documents
- * Returns one page of catalog entries. Pass `cursor` to advance pages.
+ *
+ * Returns one page of catalog entries. Pass ``cursor`` to advance pages.
+ *
+ * Optional filters introduced by #86:
+ *   - ``status``: array of ``DocumentVersionStatus`` strings to filter
+ *     by the document's *latest version* status. Repeatable on the
+ *     wire (FastAPI handles list-of-strings query params natively).
+ *     Example: ``listDocuments({ status: ["NEEDS_REVIEW", "FAILED"] })``.
+ *   - ``q``: case-insensitive substring match against
+ *     ``original_filename``. Empty / whitespace-only strings act as
+ *     "no filter" server-side, but we still drop them client-side so
+ *     the URL stays clean.
+ *
+ * Filters apply *before* pagination — the cursor's semantics are
+ * "next page within the current filter set". A different filter
+ * combination requires dropping the cursor.
  */
+export interface ListDocumentsOptions {
+  limit?: number;
+  cursor?: string;
+  status?: string[];
+  q?: string;
+}
+
 export async function listDocuments(
-  limit = 50,
-  cursor?: string,
+  options: ListDocumentsOptions = {},
 ): Promise<ListDocumentsResponse> {
+  const { limit = 50, cursor, status, q } = options;
+  const query: Record<string, string | number | string[]> = { limit };
+  if (cursor) query.cursor = cursor;
+  if (status && status.length > 0) query.status = status;
+  const trimmedQ = q?.trim() ?? "";
+  if (trimmedQ.length > 0) query.q = trimmedQ;
   return unwrap(
     await http.GET("/documents", {
-      params: { query: { limit, ...(cursor ? { cursor } : {}) } },
+      params: { query: query as never },
     }),
   );
 }

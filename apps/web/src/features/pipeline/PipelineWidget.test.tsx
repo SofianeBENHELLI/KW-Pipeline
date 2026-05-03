@@ -403,6 +403,125 @@ describe("PipelineWidget — document row selection", () => {
   });
 });
 
+describe("PipelineWidget — catalog filter bar (#86)", () => {
+  it("does not render the filter bar when no filter prop is provided", () => {
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/Filter documents/i)).not.toBeInTheDocument();
+  });
+
+  it("renders search input and saved-view chips when filter prop is provided", () => {
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+        filter={{ status: [], q: "" }}
+        onFilterChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Search by filename/i)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Review/i })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    expect(screen.getByRole("tab", { name: /Validated/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Failed/i })).toBeInTheDocument();
+  });
+
+  it("clicking a saved-view chip emits the matching status set", () => {
+    const onFilterChange = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+        filter={{ status: [], q: "" }}
+        onFilterChange={onFilterChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+    expect(onFilterChange).toHaveBeenCalledWith({
+      status: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"],
+      q: "",
+    });
+  });
+
+  it("re-clicking the active saved-view chip clears the status filter", () => {
+    const onFilterChange = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+        filter={{ status: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"], q: "" }}
+        onFilterChange={onFilterChange}
+      />,
+    );
+
+    const reviewTab = screen.getByRole("tab", { name: /Review/i });
+    expect(reviewTab).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(reviewTab);
+    expect(onFilterChange).toHaveBeenCalledWith({ status: [], q: "" });
+  });
+
+  it("typing in the search box updates the q filter", () => {
+    const onFilterChange = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+        filter={{ status: [], q: "" }}
+        onFilterChange={onFilterChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Search by filename/i), {
+      target: { value: "policy" },
+    });
+    expect(onFilterChange).toHaveBeenCalledWith({ status: [], q: "policy" });
+  });
+
+  it("Clear button appears when a filter is active and resets both axes", () => {
+    const onFilterChange = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[FIXTURE_DOCUMENT]}
+        selectedDocumentId={FIXTURE_DOCUMENT.id}
+        onSelectDocument={() => {}}
+        filter={{ status: ["FAILED", "REJECTED"], q: "policy" }}
+        onFilterChange={onFilterChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear all filters/i }));
+    expect(onFilterChange).toHaveBeenCalledWith({ status: [], q: "" });
+  });
+
+  it("shows a 'no match' empty state when the filtered list is empty", () => {
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        filter={{ status: ["FAILED"], q: "" }}
+        onFilterChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/No documents match this filter/i)).toBeInTheDocument();
+  });
+});
+
 describe("PipelineWidget — duplicate marker in row", () => {
   it("shows a 'Duplicate' marker on document rows whose latest version is a duplicate", () => {
     const dupeDoc: ApiDocument = {

@@ -158,11 +158,30 @@ describe("API client — happy paths", () => {
   });
 
   it("listDocuments forwards limit and cursor as query params", async () => {
-    await listDocuments(10, "token123");
+    await listDocuments({ limit: 10, cursor: "token123" });
     const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
     const url = urlOf(input);
     expect(url).toContain("limit=10");
     expect(url).toContain("cursor=token123");
+  });
+
+  it("listDocuments forwards status filters as repeatable query params", async () => {
+    await listDocuments({ status: ["NEEDS_REVIEW", "FAILED"] });
+    const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    const url = urlOf(input);
+    expect(url).toContain("status=NEEDS_REVIEW");
+    expect(url).toContain("status=FAILED");
+  });
+
+  it("listDocuments forwards trimmed q as a query param, dropping empties", async () => {
+    await listDocuments({ q: "  procurement  " });
+    let [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    expect(urlOf(input)).toContain("q=procurement");
+
+    vi.mocked(fetch).mockClear();
+    await listDocuments({ q: "   " });
+    [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
+    expect(urlOf(input)).not.toContain("q=");
   });
 
   it("getDocument returns a full document", async () => {

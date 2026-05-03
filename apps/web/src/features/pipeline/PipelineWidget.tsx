@@ -16,7 +16,23 @@ interface PipelineWidgetProps {
    * parent can refresh the catalog and re-select.
    */
   onUploaded?: (documentId: string) => void | Promise<void>;
+  /** Active catalog filter (#86); ``undefined`` keeps the legacy "no filter" UX. */
+  filter?: { status: string[]; q: string };
+  /** Filter setter — required when ``filter`` is provided. */
+  onFilterChange?: (next: { status: string[]; q: string }) => void;
 }
+
+/**
+ * Saved-view definitions for the segmented filter bar (#86). Each
+ * entry maps a UX label to the set of statuses the server should
+ * filter on. ``All`` is the implicit default and isn't rendered as
+ * an explicit chip — clearing the active view restores it.
+ */
+const SAVED_VIEWS: ReadonlyArray<{ id: string; label: string; statuses: string[] }> = [
+  { id: "review", label: "Review", statuses: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"] },
+  { id: "validated", label: "Validated", statuses: ["VALIDATED"] },
+  { id: "failed", label: "Failed", statuses: ["FAILED", "REJECTED"] },
+];
 
 type UploadState =
   | { kind: "idle" }
@@ -29,7 +45,15 @@ export function PipelineWidget({
   selectedDocumentId,
   onSelectDocument,
   onUploaded,
+  filter,
+  onFilterChange,
 }: PipelineWidgetProps) {
+  // Active saved-view id: matches against the configured statuses set
+  // exactly so a custom-status filter (set programmatically) doesn't
+  // accidentally light up an unrelated chip.
+  const activeViewId = filter
+    ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
+    : null;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [upload, setUpload] = useState<UploadState>({ kind: "idle" });
   const [copiedHashFor, setCopiedHashFor] = useState<string | null>(null);
@@ -161,9 +185,21 @@ export function PipelineWidget({
         <h2>Recent documents</h2>
       </div>
 
+      {filter && onFilterChange ? (
+        <CatalogFilterBar
+          filter={filter}
+          activeViewId={activeViewId ?? null}
+          onFilterChange={onFilterChange}
+        />
+      ) : null}
+
       <div className="document-list">
         {documents.length === 0 ? (
-          <p className="muted">No documents yet.</p>
+          <p className="muted">
+            {filter && (filter.status.length > 0 || filter.q.length > 0)
+              ? "No documents match this filter."
+              : "No documents yet."}
+          </p>
         ) : (
           documents.map((document) => {
             const version = latestVersion(document);
@@ -258,4 +294,70 @@ function Metric({ label, value, tone }: MetricProps) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+interface CatalogFilterBarProps {
+  filter: { status: string[]; q: string };
+  activeViewId: string | null;
+  onFilterChange: (next: { status: string[]; q: string }) => void;
+}
+
+/**
+ * Search + saved-view chips for the catalog (#86).
+ *
+ * Saved views are mutually exclusive — clicking the active view chip
+ * clears it back to the implicit "All" filter. Search and saved view
+ * compose: the server applies both filters and ANDs them together.
+ */
+function CatalogFilterBar({ filter, activeViewId, onFilterChange }: CatalogFilterBarProps) {
+  return (
+    <div className="catalog-filter-bar" aria-label="Filter documents">
+      <input
+        type="search"
+        className="catalog-filter-search"
+        placeholder="Search filenames…"
+        aria-label="Search by filename"
+        value={filter.q}
+        onChange={(event) => onFilterChange({ ...filter, q: event.target.value })}
+      />
+      <div className="catalog-filter-views" role="tablist" aria-label="Saved views">
+        {SAVED_VIEWS.map((view) => {
+          const isActive = activeViewId === view.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={isActive ? "catalog-filter-chip active" : "catalog-filter-chip"}
+              onClick={() =>
+                onFilterChange({
+                  ...filter,
+                  status: isActive ? [] : [...view.statuses],
+                })
+              }
+            >
+              {view.label}
+            </button>
+          );
+        })}
+        {(activeViewId !== null || filter.q.length > 0) && (
+          <button
+            type="button"
+            className="catalog-filter-chip catalog-filter-chip-clear"
+            onClick={() => onFilterChange({ status: [], q: "" })}
+            aria-label="Clear all filters"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function sameStatusSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((value) => setB.has(value));
 }
