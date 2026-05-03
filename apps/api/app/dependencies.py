@@ -4,7 +4,8 @@ from pathlib import Path
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
-from app.services.enrichers import RuleBasedEntityEnricher
+from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
+from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.idempotency_store import (
     IdempotencyStore,
@@ -87,6 +88,24 @@ class PipelineServices:
     # programmatically-constructed Settings) can be threaded through
     # ``build_services(settings=...)``.
     settings: Settings = field(default_factory=Settings)
+
+
+def _build_enrichers(settings: Settings) -> list[SemanticEnricher]:
+    """Assemble the semantic-enricher chain for this wiring.
+
+    Always includes the deterministic :class:`RuleBasedEntityEnricher`
+    (date / monetary / requirement). When ``KW_NER_ENABLED=true`` and
+    the optional ``ner`` extra is installed, also includes the
+    :class:`SpacyNerEnricher` for person / organization assets (#190).
+    A misconfigured NER opt-in (flag on but spaCy or the model is
+    missing) raises :class:`RuntimeError` at construction time so the
+    operator sees the failure at startup rather than silently shipping
+    no NER assets.
+    """
+    chain: list[SemanticEnricher] = [RuleBasedEntityEnricher()]
+    if settings.ner_enabled:
+        chain.append(SpacyNerEnricher(model=settings.ner_spacy_model.strip() or "en_core_web_sm"))
+    return chain
 
 
 def _build_parser_registry() -> ParserRegistry:
@@ -281,7 +300,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # Default enricher chain: deterministic rule-based entity extraction
     # (#48). Pure regex / no model dep, safe to run on every wiring path
     # including the in-memory unit suite.
-    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
+    semantic_extractor = SemanticExtractor(enrichers=_build_enrichers(settings))
     markdown_generator = MarkdownGenerator()
     embedding_client = _maybe_build_embedding_client(settings)
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
@@ -347,7 +366,7 @@ def build_persistent_services(
     # Default enricher chain: deterministic rule-based entity extraction
     # (#48). Pure regex / no model dep, safe to run on every wiring path
     # including the in-memory unit suite.
-    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
+    semantic_extractor = SemanticExtractor(enrichers=_build_enrichers(settings))
     markdown_generator = MarkdownGenerator()
     embedding_client = _maybe_build_embedding_client(settings)
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
