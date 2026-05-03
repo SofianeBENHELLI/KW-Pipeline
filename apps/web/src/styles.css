@@ -832,6 +832,75 @@ pre {
   font-size: 0.85rem;
 }
 
+/* ─── Batch upload report (#82) ────────────────────────────────────── */
+
+.batch-upload-report {
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface, #ffffff);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.batch-upload-report__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.batch-upload-report__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.batch-upload-report__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: baseline;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.batch-upload-report__row--uploaded {
+  background: #e6ffed;
+}
+
+.batch-upload-report__row--duplicate {
+  background: #fff8e1;
+}
+
+.batch-upload-report__row--failed,
+.batch-upload-report__row--rejected_content_type,
+.batch-upload-report__row--too_large,
+.batch-upload-report__row--empty {
+  background: #fff0f0;
+}
+
+.batch-upload-report__file {
+  font-family: monospace;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-upload-report__status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.batch-upload-report__row .muted {
+  grid-column: 1 / -1;
+}
+
 /* ─── Chat panel (Phase 3 grounded chat) ──────────────────────────── */
 
 .chat-panel {

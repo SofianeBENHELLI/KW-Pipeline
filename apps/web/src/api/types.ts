@@ -53,6 +53,12 @@ export type ApiKnowledgeGraphPage = Schemas["KnowledgeGraphPage"];
 export type ApiChunkSearchResult = Schemas["ChunkSearchResult"];
 export type ApiChunkSearchResponse = Schemas["ChunkSearchResponse"];
 
+// ─── Batch upload (#82) ─────────────────────────────────────────────────────
+
+export type ApiBatchUploadOutcome = Schemas["BatchUploadOutcome"];
+export type ApiBatchUploadSummary = Schemas["BatchUploadSummary"];
+export type ApiBatchUploadResult = Schemas["BatchUploadResult"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];
