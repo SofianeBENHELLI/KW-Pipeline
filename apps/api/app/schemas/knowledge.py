@@ -302,3 +302,39 @@ class KnowledgeGraphPage(BaseModel):
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     next_cursor: str | None = None
+
+
+class ChunkSearchResult(BaseModel):
+    """One match returned by ``GET /knowledge/search`` (Phase 3).
+
+    Carries enough locator metadata for the caller to navigate back to
+    the originating chunk + its document/version, plus the cosine
+    similarity score. ``snippet`` is the chunk's ``text_preview`` (the
+    same trimmed/200-char excerpt the projector wrote on the chunk
+    node), present when the projector materialised one and ``None``
+    otherwise.
+    """
+
+    chunk_id: str
+    document_id: str
+    version_id: str
+    section_id: str
+    snippet: str | None = None
+    score: float = Field(ge=-1.0, le=1.0)
+
+
+class ChunkSearchResponse(BaseModel):
+    """Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).
+
+    Empty ``results`` is a valid response — it means no chunk in the
+    indexed set was similar enough (or no chunks have been embedded
+    yet). ``query_embedding_dim`` mirrors the dimensionality the
+    request was scored against, so an operator can spot
+    model-mismatch errors at a glance.
+    """
+
+    schema_version: Literal["v0.1"] = "v0.1"
+    query: str
+    embedding_model: str
+    query_embedding_dim: int
+    results: list[ChunkSearchResult] = Field(default_factory=list)

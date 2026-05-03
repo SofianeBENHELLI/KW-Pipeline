@@ -84,6 +84,7 @@ from app.services.knowledge.chunk_relations import (
     ChunkRelation,
     ChunkRelationService,
 )
+from app.services.knowledge.embedding_client import EmbeddingClient
 from app.services.knowledge.graph_store import GraphStore
 from app.services.knowledge.topic_clustering import (
     TopicAssignment,
@@ -106,6 +107,7 @@ class KnowledgeProjector:
         *,
         chunk_relation_service: ChunkRelationService | None = None,
         topic_clustering_service: TopicClusteringService | None = None,
+        embedding_client: EmbeddingClient | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -113,6 +115,17 @@ class KnowledgeProjector:
         # ``GraphStore`` as before.
         self._chunk_relation_service = chunk_relation_service or ChunkRelationService()
         self._topic_clustering_service = topic_clustering_service or TopicClusteringService()
+        # Phase 3 (#186, ADR-015): when set, the projector embeds each
+        # chunk's text after writing the chunk node and stores the
+        # vector via :meth:`GraphStore.set_chunk_embedding`. ``None``
+        # preserves Phase 1 / Phase 2 behaviour exactly.
+        self._embedding_client = embedding_client
+        # Process-local embedding cache keyed by ``(model, sha256(text))``
+        # so re-projections (and re-projections of the same chunk text
+        # across versions) skip the Voyage round-trip. The cache is
+        # bounded by the unique-chunk count of one process; that's fine
+        # for the single-API-pod deployment story.
+        self._embedding_cache: dict[tuple[str, str], list[float]] = {}
 
     def project(
         self,
@@ -186,6 +199,90 @@ class KnowledgeProjector:
                 "chunk_count": len(chunks),
                 "topic_count": len(assignment.topics),
                 "chunk_relation_count": len(relations),
+            },
+        )
+
+        # Phase 3 vector RAG: write per-chunk embeddings if Voyage is
+        # wired. Fire-and-log per ADR-012 §3 — a Voyage hiccup leaves
+        # the structural projection intact; the search index just
+        # lacks the latest version's chunks until the next re-project.
+        if self._embedding_client is not None and chunks:
+            try:
+                self._embed_and_store_chunks(
+                    document_id=document.id,
+                    version_id=version.id,
+                    chunks=chunks,
+                )
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.embeddings.failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+    def _embed_and_store_chunks(
+        self,
+        *,
+        document_id: str,
+        version_id: str,
+        chunks: Sequence[ChunkRecord],
+    ) -> None:
+        """Compute + persist embeddings for one version's chunks.
+
+        The cache key is ``(model_name, sha256(text))`` so two chunks
+        with identical text — say, a boilerplate footer that recurs
+        across versions — embed once and reuse. Cache hits don't
+        cost a Voyage call but still write the vector to the new
+        chunk node so the index covers it.
+        """
+        assert self._embedding_client is not None  # narrowed by caller
+        model = self._embedding_client.name
+        # Index parallel to ``texts_to_embed`` so we can write back
+        # cache entries after the network call.
+        cache_keys: list[tuple[str, str]] = []
+        for chunk in chunks:
+            digest = hashlib.sha256((chunk.text or "").encode("utf-8")).hexdigest()
+            cache_keys.append((model, digest))
+
+        misses_idx: list[int] = []
+        misses_text: list[str] = []
+        for i, chunk in enumerate(chunks):
+            if cache_keys[i] not in self._embedding_cache:
+                misses_idx.append(i)
+                misses_text.append(chunk.text or "")
+
+        if misses_text:
+            new_vectors = self._embedding_client.embed_documents(misses_text)
+            if len(new_vectors) != len(misses_text):
+                # The provider broke its own contract; surface as a
+                # warning and abandon the embedding pass. The structural
+                # projection already wrote successfully.
+                raise RuntimeError(
+                    f"embedding client returned {len(new_vectors)} vectors "
+                    f"for {len(misses_text)} inputs."
+                )
+            for slot, vector in zip(misses_idx, new_vectors, strict=True):
+                self._embedding_cache[cache_keys[slot]] = list(vector)
+
+        for i, chunk in enumerate(chunks):
+            vector = self._embedding_cache[cache_keys[i]]
+            self._graph_store.set_chunk_embedding(
+                chunk_id=chunk.chunk_id,
+                embedding=vector,
+            )
+
+        log.info(
+            "knowledge.embeddings.computed",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "chunk_count": len(chunks),
+                "embedding_model": model,
+                "cache_hits": len(chunks) - len(misses_text),
+                "embedded_count": len(misses_text),
             },
         )
 

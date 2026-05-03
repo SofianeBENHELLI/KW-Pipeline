@@ -34,7 +34,12 @@ dependencies = [
   # use `FakeEmbeddingClient` so the SDK is never called in the default
   # suite. The client refuses to construct without `VOYAGE_API_KEY`,
   # so this dep is dormant unless a deployment opts in.
-  "voyageai>=0.2",
+  #
+  # Pinned to `<0.3`: voyageai 0.3.x added `langchain-text-splitters`
+  # as a runtime dependency, which transitively pulls `langchain-core`.
+  # ADR-013 forbids LangChain anywhere in the install graph, so we
+  # stay on the 0.2 line until upstream drops the LangChain edge.
+  "voyageai>=0.2,<0.3",
 ]
 
 [project.scripts]

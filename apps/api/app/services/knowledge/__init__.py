@@ -23,8 +23,14 @@ from app.services.knowledge.chunk_relations import (
     ChunkRelationKind,
     ChunkRelationService,
 )
+from app.services.knowledge.embedding_client import (
+    EmbeddingClient,
+    FakeEmbeddingClient,
+    VoyageEmbeddingClient,
+)
 from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.graph_store import (
+    ChunkSearchHit,
     GraphStore,
     InMemoryGraphStore,
     Neo4jGraphStore,
@@ -41,6 +47,7 @@ from app.services.knowledge.reconciliation import (
     ReconciliationOutcome,
     ReconciliationService,
 )
+from app.services.knowledge.search import KnowledgeSearchService
 from app.services.knowledge.topic_clustering import (
     Topic,
     TopicAssignment,
@@ -54,13 +61,17 @@ __all__ = [
     "ChunkRelation",
     "ChunkRelationKind",
     "ChunkRelationService",
+    "ChunkSearchHit",
     "DriftedVersion",
+    "EmbeddingClient",
     "EntityExtractor",
+    "FakeEmbeddingClient",
     "FakeLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
     "KnowledgeLayerDisabled",
     "KnowledgeProjector",
+    "KnowledgeSearchService",
     "LLMClient",
     "Neo4jGraphStore",
     "ReconciliationOutcome",
@@ -69,4 +80,5 @@ __all__ = [
     "TopicAssignment",
     "TopicClusteringService",
     "TopicMembership",
+    "VoyageEmbeddingClient",
 ]

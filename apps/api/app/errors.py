@@ -55,6 +55,9 @@ class ErrorCode:
     # ─── Idempotency (POST routes with Idempotency-Key) ───────────
     IDEMPOTENCY_REPLAY = "KW_IDEMPOTENCY_REPLAY"
 
+    # ─── Phase 3 vector RAG (GET /knowledge/search) ────────────────
+    VECTOR_SEARCH_DISABLED = "KW_VECTOR_SEARCH_DISABLED"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"

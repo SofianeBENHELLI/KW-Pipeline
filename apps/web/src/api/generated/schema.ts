@@ -283,6 +283,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Knowledge Chunks
+         * @description Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).
+         *
+         *     Requires both ``KW_KNOWLEDGE_LAYER_ENABLED=true`` and a
+         *     ``VOYAGE_API_KEY`` to be configured. When either gate is off
+         *     the route returns 503 with a stable public error code so the
+         *     frontend can surface the right remediation.
+         */
+        get: operations["search_knowledge_chunks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -369,6 +394,57 @@ export interface components {
         Body_upload_documents_batch: {
             /** Files */
             files: string[];
+        };
+        /**
+         * ChunkSearchResponse
+         * @description Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).
+         *
+         *     Empty ``results`` is a valid response — it means no chunk in the
+         *     indexed set was similar enough (or no chunks have been embedded
+         *     yet). ``query_embedding_dim`` mirrors the dimensionality the
+         *     request was scored against, so an operator can spot
+         *     model-mismatch errors at a glance.
+         */
+        ChunkSearchResponse: {
+            /** Embedding Model */
+            embedding_model: string;
+            /** Query */
+            query: string;
+            /** Query Embedding Dim */
+            query_embedding_dim: number;
+            /** Results */
+            results: components["schemas"]["ChunkSearchResult"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+        };
+        /**
+         * ChunkSearchResult
+         * @description One match returned by ``GET /knowledge/search`` (Phase 3).
+         *
+         *     Carries enough locator metadata for the caller to navigate back to
+         *     the originating chunk + its document/version, plus the cosine
+         *     similarity score. ``snippet`` is the chunk's ``text_preview`` (the
+         *     same trimmed/200-char excerpt the projector wrote on the chunk
+         *     node), present when the projector materialised one and ``None``
+         *     otherwise.
+         */
+        ChunkSearchResult: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string;
+            /** Snippet */
+            snippet: string | null;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * Document
@@ -1248,6 +1324,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeGraphPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_knowledge_chunks: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkSearchResponse"];
                 };
             };
             /** @description Validation Error */

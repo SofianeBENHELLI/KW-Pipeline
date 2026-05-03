@@ -13,11 +13,14 @@ from app.services.idempotency_store import (
 )
 from app.services.knowledge import (
     AnthropicLLMClient,
+    EmbeddingClient,
     EntityExtractor,
     GraphStore,
     InMemoryGraphStore,
     KnowledgeProjector,
+    KnowledgeSearchService,
     Neo4jGraphStore,
+    VoyageEmbeddingClient,
 )
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
@@ -61,6 +64,14 @@ class PipelineServices:
     # set; otherwise None and the route layer treats entity extraction
     # as disabled — Phase 1a behaviour is preserved.
     entity_extractor: EntityExtractor | None = None
+    # Phase 3 (ADR-015, #186): vector RAG. ``embedding_client`` is
+    # constructed iff ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND
+    # ``VOYAGE_API_KEY`` is set; ``knowledge_search`` requires the
+    # client. Both ``None`` keeps Phase 1 + Phase 2 behaviour exactly:
+    # the projector skips the embedding write, the search route
+    # returns 503.
+    embedding_client: EmbeddingClient | None = None
+    knowledge_search: KnowledgeSearchService | None = None
     # Snapshot of the typed settings used to construct this container
     # (issue #43). Routes read settings *fresh per request* via
     # ``Settings()`` so per-test ``monkeypatch.setenv`` is observable;
@@ -121,8 +132,38 @@ def _maybe_build_entity_extractor(settings: Settings | None = None) -> EntityExt
     )
 
 
+def _maybe_build_embedding_client(
+    settings: Settings | None = None,
+) -> EmbeddingClient | None:
+    """Build the Voyage embedding client iff Phase 3 is configured (ADR-015).
+
+    Returns ``None`` unless **both** the knowledge-layer kill switch is
+    truthy **and** ``VOYAGE_API_KEY`` is set. When ``None`` is
+    returned, the projector skips its embedding write path and the
+    ``GET /knowledge/search`` route returns 503 — Phase 1 / Phase 2
+    behaviour is preserved exactly.
+    """
+    settings = settings or Settings()
+    if not settings.knowledge_layer_enabled or not settings.voyage_api_key.strip():
+        return None
+    api_key = settings.voyage_api_key.strip()
+    # ``Settings.embedding_model`` defaults to ``"voyage-3"`` per
+    # ADR-015, so this is always truthy in production. We still tolerate
+    # an explicit empty override for forward-compat (a future "infer
+    # model from API key" path), at which point the SDK's own default
+    # kicks in via ``VoyageEmbeddingClient``'s constructor default.
+    model = settings.embedding_model.strip() or None
+    return (
+        VoyageEmbeddingClient(api_key=api_key, model=model)
+        if model
+        else VoyageEmbeddingClient(api_key=api_key)
+    )
+
+
 def _maybe_build_knowledge_layer(
     settings: Settings | None = None,
+    *,
+    embedding_client: EmbeddingClient | None = None,
 ) -> tuple[GraphStore, KnowledgeProjector | None]:
     """Build the knowledge graph store + projector based on settings.
 
@@ -130,6 +171,10 @@ def _maybe_build_knowledge_layer(
     via :class:`app.settings.Settings`. The defaults — knowledge layer
     disabled, in-memory store — preserve the existing pipeline's
     behaviour: no Neo4j needed to run the API or its tests.
+
+    When ``embedding_client`` is provided, the projector wires it
+    through so the embedding write path activates after each
+    structural projection.
 
     Returns the active ``GraphStore`` (always non-None so the read
     routes have something to query, even if it's empty) plus an
@@ -154,7 +199,10 @@ def _maybe_build_knowledge_layer(
         # turns on projection — useful for in-process demos and tests
         # without spinning up a database.
         store = InMemoryGraphStore()
-    return store, KnowledgeProjector(graph_store=store)
+    return store, KnowledgeProjector(
+        graph_store=store,
+        embedding_client=embedding_client,
+    )
 
 
 def build_services(settings: Settings | None = None) -> PipelineServices:
@@ -174,7 +222,18 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # including the in-memory unit suite.
     semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
     markdown_generator = MarkdownGenerator()
-    graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
+    embedding_client = _maybe_build_embedding_client(settings)
+    graph_store, knowledge_projector = _maybe_build_knowledge_layer(
+        settings, embedding_client=embedding_client
+    )
+    knowledge_search = (
+        KnowledgeSearchService(
+            embedding_client=embedding_client,
+            graph_store=graph_store,
+        )
+        if embedding_client is not None
+        else None
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -192,6 +251,8 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
         entity_extractor=_maybe_build_entity_extractor(settings),
+        embedding_client=embedding_client,
+        knowledge_search=knowledge_search,
         settings=settings,
     )
 
@@ -215,7 +276,18 @@ def build_persistent_services(
     # including the in-memory unit suite.
     semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
     markdown_generator = MarkdownGenerator()
-    graph_store, knowledge_projector = _maybe_build_knowledge_layer(settings)
+    embedding_client = _maybe_build_embedding_client(settings)
+    graph_store, knowledge_projector = _maybe_build_knowledge_layer(
+        settings, embedding_client=embedding_client
+    )
+    knowledge_search = (
+        KnowledgeSearchService(
+            embedding_client=embedding_client,
+            graph_store=graph_store,
+        )
+        if embedding_client is not None
+        else None
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -233,5 +305,7 @@ def build_persistent_services(
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
         entity_extractor=_maybe_build_entity_extractor(settings),
+        embedding_client=embedding_client,
+        knowledge_search=knowledge_search,
         settings=settings,
     )

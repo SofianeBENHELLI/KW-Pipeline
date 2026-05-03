@@ -22,14 +22,20 @@ from app.schemas.document import (
     HealthResponse,
 )
 from app.schemas.extraction import RawExtraction
-from app.schemas.knowledge import KnowledgeGraphPage, KnowledgeGraphProjection
+from app.schemas.knowledge import (
+    ChunkSearchResponse,
+    KnowledgeGraphPage,
+    KnowledgeGraphProjection,
+)
 from app.schemas.semantic_document import SemanticDocument
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import IdempotencyStore, hash_json_body
 from app.services.knowledge.graph_store import (
     DEFAULT_GRAPH_PAGE_LIMIT,
+    DEFAULT_VECTOR_SEARCH_LIMIT,
     MAX_GRAPH_PAGE_LIMIT,
+    MAX_VECTOR_SEARCH_LIMIT,
 )
 from app.settings import Settings
 
@@ -895,6 +901,48 @@ def build_router(services: PipelineServices) -> APIRouter:
             )
         try:
             return services.graph_store.find_subgraph(limit=limit, cursor=cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/search",
+        operation_id="search_knowledge_chunks",
+        response_model=ChunkSearchResponse,
+    )
+    def search_knowledge_chunks(
+        q: str = Query(min_length=1, max_length=2000),
+        limit: int = Query(default=DEFAULT_VECTOR_SEARCH_LIMIT, ge=1),
+    ) -> Any:
+        """Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).
+
+        Requires both ``KW_KNOWLEDGE_LAYER_ENABLED=true`` and a
+        ``VOYAGE_API_KEY`` to be configured. When either gate is off
+        the route returns 503 with a stable public error code so the
+        frontend can surface the right remediation.
+        """
+        if services.knowledge_search is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.VECTOR_SEARCH_DISABLED,
+                message=(
+                    "Vector search is disabled. Phase 3 requires "
+                    "KW_KNOWLEDGE_LAYER_ENABLED=true and VOYAGE_API_KEY "
+                    "to be configured."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set both KW_KNOWLEDGE_LAYER_ENABLED=true and a non-empty "
+                    "VOYAGE_API_KEY (or KW_VOYAGE_API_KEY) in the API "
+                    "environment, then restart the service."
+                ),
+            )
+        if limit > MAX_VECTOR_SEARCH_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"limit must be between 1 and {MAX_VECTOR_SEARCH_LIMIT}; got {limit}."),
+            )
+        try:
+            return services.knowledge_search.search(q, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
