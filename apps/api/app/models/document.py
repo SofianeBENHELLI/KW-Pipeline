@@ -17,10 +17,18 @@ class DocumentVersionStatus(StrEnum):
 
 # Lifecycle FSM for a DocumentVersion. Maps each state to the set of states
 # it is allowed to transition to. Terminal states (DUPLICATE_DETECTED,
-# VALIDATED, REJECTED, FAILED) map to the empty set — once reached, a version
-# is frozen. UPLOADED and HASHED are defensive entries: not every flow walks
-# through them today, but if a future ingestion path does, the only sane next
-# steps are STORED or FAILED.
+# VALIDATED, REJECTED) map to the empty set — once reached, a version is
+# frozen.
+#
+# ``FAILED`` is *not* fully terminal: it allows a single ``FAILED →
+# EXTRACTING`` edge so a reviewer can retry extraction after the
+# underlying issue (missing parser, transient infra error, bad config)
+# is fixed (#87). Validated and rejected versions stay frozen — retry
+# never bypasses the review gate.
+#
+# ``UPLOADED`` and ``HASHED`` are defensive entries: not every flow walks
+# through them today, but if a future ingestion path does, the only
+# sane next steps are STORED or FAILED.
 ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus]] = {
     DocumentVersionStatus.UPLOADED: frozenset(
         {DocumentVersionStatus.STORED, DocumentVersionStatus.FAILED}
@@ -50,7 +58,7 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
     DocumentVersionStatus.DUPLICATE_DETECTED: frozenset(),
     DocumentVersionStatus.VALIDATED: frozenset(),
     DocumentVersionStatus.REJECTED: frozenset(),
-    DocumentVersionStatus.FAILED: frozenset(),
+    DocumentVersionStatus.FAILED: frozenset({DocumentVersionStatus.EXTRACTING}),
 }
 
 

@@ -557,8 +557,11 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     // Doc A's text never reaches the DOM because its fetch was aborted.
     expect(screen.queryByText("DOC A TEXT")).toBeNull();
 
-    // The first signal (doc A's) is aborted.
-    expect(seenSignals[0].aborted).toBe(true);
+    // The first signal (doc A's) is aborted. React 19's strict-mode
+    // effect cleanup runs asynchronously relative to the rerender →
+    // poll instead of asserting synchronously, otherwise this race
+    // flakes under Node 22 in CI even when the abort eventually fires.
+    await waitFor(() => expect(seenSignals[0].aborted).toBe(true));
   });
 });
 
