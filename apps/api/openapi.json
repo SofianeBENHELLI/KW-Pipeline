@@ -194,6 +194,156 @@
         "title": "Body_upload_documents_batch",
         "type": "object"
       },
+      "ChatCitation": {
+        "description": "One context source the chat answer was grounded in.\n\nToday the only citation kind is ``chunk`` (vector-retrieval hits);\n``graph`` mode also produces chunk citations because the graph\ntraversal currently seeds from the same vector hits. A future\nGraphRAG mode that seeds from entity-name matching will introduce\nan ``entity`` citation kind.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "version_id",
+          "section_id",
+          "snippet",
+          "score"
+        ],
+        "title": "ChatCitation",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "description": "Request body for ``POST /knowledge/chat`` (Phase 3 chat surface).\n\n``mode`` selects the retrieval strategy used to build the grounded\ncontext the LLM sees. ``top_k`` bounds the number of vector hits\nretrieval will consider — the same ceiling applies to GraphRAG and\nHybrid because both modes seed the graph traversal from the\nvector-search hits today.",
+        "properties": {
+          "mode": {
+            "default": "rag",
+            "enum": [
+              "rag",
+              "graph",
+              "hybrid"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "question": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "ChatResponse": {
+        "description": "Response body for ``POST /knowledge/chat``.\n\n``answer`` is the free-text response from the LLM; ``citations``\nlists the chunks/triples the prompt grounded the model in. Empty\n``citations`` with a non-empty ``answer`` is possible — the LLM\nanswered from the question alone, which the system prompt asks it\nto flag with an explicit \"no supporting context\" preamble.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "llm_model": {
+            "title": "Llm Model",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "rag",
+              "graph",
+              "hybrid"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "token_usage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Token Usage",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "question",
+          "mode",
+          "answer",
+          "citations",
+          "embedding_model",
+          "llm_model",
+          "token_usage"
+        ],
+        "title": "ChatResponse",
+        "type": "object"
+      },
       "ChunkSearchResponse": {
         "description": "Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).\n\nEmpty ``results`` is a valid response — it means no chunk in the\nindexed set was similar enough (or no chunks have been embedded\nyet). ``query_embedding_dim`` mirrors the dimensionality the\nrequest was scored against, so an operator can spot\nmodel-mismatch errors at a glance.",
         "properties": {
@@ -2005,6 +2155,45 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/knowledge/chat": {
+      "post": {
+        "description": "Grounded chat surface (Phase 3 follow-up).\n\nBuilds a RAG / GraphRAG / Hybrid context from the configured\nretrieval primitives, asks the LLM for a free-text answer, and\nreturns the answer alongside the citations the prompt was\ngrounded in. Requires both ``ANTHROPIC_API_KEY`` and\n``VOYAGE_API_KEY`` (the chat service seeds graph traversal\nfrom vector hits, so the search service must be wired). When\neither gate is off the route returns 503 with\n``KW_CHAT_DISABLED`` and the public-error remediation copy.",
+        "operationId": "chat_with_knowledge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat With Knowledge"
       }
     },
     "/knowledge/graph": {

@@ -17,6 +17,12 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.chat_service import (
+    DEFAULT_MAX_OUTPUT_TOKENS as DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
+)
+from app.services.knowledge.chat_service import (
+    KnowledgeChatService,
+)
 from app.services.knowledge.chunk_relations import (
     ChunkRecord,
     ChunkRelation,
@@ -62,6 +68,7 @@ __all__ = [
     "ChunkRelationKind",
     "ChunkRelationService",
     "ChunkSearchHit",
+    "DEFAULT_CHAT_MAX_OUTPUT_TOKENS",
     "DriftedVersion",
     "EmbeddingClient",
     "EntityExtractor",
@@ -69,6 +76,7 @@ __all__ = [
     "FakeLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
+    "KnowledgeChatService",
     "KnowledgeLayerDisabled",
     "KnowledgeProjector",
     "KnowledgeSearchService",
