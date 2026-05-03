@@ -488,13 +488,14 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("switching to a different document aborts the in-flight detail fetches and never poisons the new selection", async () => {
-    // Per-test timeout bumped to 15 s (vitest default 5 s). The test
-    // does three sequential ``waitFor`` polls and one of them — the
-    // abort assertion — needs comfortable headroom in CI where the
-    // React 19 effect cleanup lands on a slower microtask schedule.
-    // The ``it()``-level timeout is the *ceiling*; healthy runs
-    // finish in well under 200 ms.
-    // Capture controllers per call so we can assert they were aborted.
+    // Capture controllers per call. We use this to assert (via the
+    // abort *event*, not the .aborted flag) that the controller was
+    // aborted — see the abort-event tracker below. Polling
+    // ``signal.aborted`` directly was flaky on CI: ``rerender`` returns
+    // before React 19 commits the effect cleanup, so the signal
+    // appears un-aborted in the test's microtask while the new effect
+    // is still scheduling. The abort *event* fires on the same
+    // microtask the cleanup runs on, which is observable.
     const seenSignals: AbortSignal[] = [];
     const docBExtraction = {
       ...FIXTURE_EXTRACTION,
@@ -509,11 +510,27 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     function signalOf(input: RequestInfo | URL): AbortSignal | undefined {
       return input instanceof Request ? input.signal : undefined;
     }
+    // Counter the mock bumps every time a captured signal fires its
+    // abort event. Asserting against this counter is robust to React
+    // 19's effect-cleanup ordering: the event handler runs on the
+    // exact same microtask the controller is aborted on, regardless
+    // of when the test's polling sees ``.aborted`` flip.
+    let abortEvents = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (input: RequestInfo | URL): Promise<Response> => {
         const url = urlOf(input);
         const signal = signalOf(input);
-        if (signal) seenSignals.push(signal);
+        if (signal) {
+          seenSignals.push(signal);
+          // Tracker listener fires on every abort event. Adding it
+          // alongside the existing per-fetch listener keeps the
+          // mock's behaviour intact (extraction promise still
+          // rejects on abort) while giving the assertion a stable
+          // observation point.
+          signal.addEventListener("abort", () => {
+            abortEvents += 1;
+          });
+        }
 
         // Doc A's extraction never resolves naturally — only abort
         // can settle it. Doc B's extraction resolves immediately.
@@ -563,18 +580,20 @@ describe("ReviewWorkspace — abort detail loader on document switch", () => {
     // Doc A's text never reaches the DOM because its fetch was aborted.
     expect(screen.queryByText("DOC A TEXT")).toBeNull();
 
-    // The first signal (doc A's) is aborted. React 19's effect
-    // cleanup lands asynchronously relative to the rerender, and
-    // the abort is dispatched off a microtask the rerender doesn't
-    // wait for — under Node 22 in CI the default 1 s ``waitFor``
-    // budget can expire before the AbortSignal flips. Bump the
-    // budget to 10 s (still safely inside the 15 s per-test cap
-    // declared above) and poll faster so the test stays snappy when
-    // the abort fires immediately.
-    await waitFor(() => expect(seenSignals[0].aborted).toBe(true), {
-      timeout: 10_000,
+    // At least one of the captured signals fired its abort event —
+    // i.e. the rerender's effect cleanup actually ran ``controller.abort()``.
+    // We assert on the event tracker rather than ``signal.aborted``
+    // because the latter was racy in CI: ``rerender`` returned before
+    // React 19's cleanup committed, and the polling loop kept reading
+    // a not-yet-aborted snapshot. The event listener observes the
+    // abort on the same microtask as the cleanup, which is reliable.
+    await waitFor(() => expect(abortEvents).toBeGreaterThan(0), {
+      timeout: 5000,
       interval: 25,
     });
+    // Sanity check on the indexed signal — by the time the abort
+    // event has fired, ``.aborted`` is committed to ``true``.
+    expect(seenSignals[0].aborted).toBe(true);
   }, 15_000);
 });
 
