@@ -15,6 +15,7 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiChunkSearchResponse,
   ApiDocument,
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
@@ -419,6 +420,27 @@ export async function getKnowledgeGraph(
   return unwrap(
     await http.GET("/knowledge/graph", {
       params: { query: { limit, ...(cursor ? { cursor } : {}) } },
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/search (Phase 3 / ADR-015)
+ *
+ * Top-K cosine-similarity search over the projected chunk embeddings.
+ * Returns 503 with ``KW_VECTOR_SEARCH_DISABLED`` when Phase 3 is off
+ * (no Voyage key); the route's :class:`ApiError` envelope carries the
+ * remediation copy the UI should render verbatim.
+ */
+export async function searchKnowledgeChunks(
+  q: string,
+  options: { limit?: number; signal?: AbortSignal } = {},
+): Promise<ApiChunkSearchResponse> {
+  const { limit = 10, signal } = options;
+  return unwrap(
+    await http.GET("/knowledge/search", {
+      params: { query: { q, limit } },
+      signal,
     }),
   );
 }

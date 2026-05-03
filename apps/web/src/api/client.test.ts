@@ -8,6 +8,7 @@ import {
   getSemantic,
   listDocuments,
   rejectVersion,
+  searchKnowledgeChunks,
   uploadDocument,
   validateVersion,
 } from "./client";
@@ -335,5 +336,128 @@ describe("API client — error paths", () => {
       expect(apiErr.retryable).toBe(false);
       expect(apiErr.remediation).toBeNull();
     }
+  });
+});
+
+// ─── searchKnowledgeChunks (Phase 3 / ADR-015) ─────────────────────────────
+
+describe("searchKnowledgeChunks", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns the typed response on 200", async () => {
+    const fixture = {
+      schema_version: "v0.1",
+      query: "ISO",
+      embedding_model: "fake-embedding",
+      query_embedding_dim: 16,
+      results: [
+        {
+          chunk_id: "chunk-001",
+          document_id: "doc-A",
+          version_id: "ver-A",
+          section_id: "sec-1",
+          snippet: "ISO 9001 compliance",
+          score: 0.87,
+        },
+      ],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(makeJsonResponse(fixture));
+
+    const response = await searchKnowledgeChunks("ISO", { limit: 5 });
+
+    expect(response.embedding_model).toBe("fake-embedding");
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0].chunk_id).toBe("chunk-001");
+  });
+
+  it("forwards q + limit as query params", async () => {
+    const fixture = {
+      schema_version: "v0.1",
+      query: "x",
+      embedding_model: "fake-embedding",
+      query_embedding_dim: 16,
+      results: [],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(makeJsonResponse(fixture));
+
+    await searchKnowledgeChunks("hello world", { limit: 25 });
+
+    const [input] = vi.mocked(fetch).mock.calls[0] as [
+      RequestInfo | URL,
+      ...unknown[],
+    ];
+    const url = urlOf(input);
+    expect(url).toContain("/knowledge/search");
+    expect(url).toContain("q=hello");
+    expect(url).toContain("limit=25");
+  });
+
+  it("defaults limit to 10 when not provided", async () => {
+    const fixture = {
+      schema_version: "v0.1",
+      query: "x",
+      embedding_model: "fake-embedding",
+      query_embedding_dim: 16,
+      results: [],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(makeJsonResponse(fixture));
+
+    await searchKnowledgeChunks("x");
+
+    const [input] = vi.mocked(fetch).mock.calls[0] as [
+      RequestInfo | URL,
+      ...unknown[],
+    ];
+    expect(urlOf(input)).toContain("limit=10");
+  });
+
+  it("throws ApiError with KW_VECTOR_SEARCH_DISABLED on 503", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(
+        {
+          error: {
+            code: "KW_VECTOR_SEARCH_DISABLED",
+            message: "Vector search is disabled. Phase 3 requires …",
+            status: 503,
+            retryable: false,
+            remediation: "Set both KW_KNOWLEDGE_LAYER_ENABLED=true and …",
+          },
+          detail: "Vector search is disabled.",
+        },
+        503,
+      ),
+    );
+    try {
+      await searchKnowledgeChunks("anything");
+      throw new Error("expected ApiError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(503);
+      expect(apiErr.code).toBe("KW_VECTOR_SEARCH_DISABLED");
+      expect(apiErr.retryable).toBe(false);
+      expect(apiErr.remediation).not.toBeNull();
+    }
+  });
+
+  it("forwards an AbortSignal to fetch", async () => {
+    const controller = new AbortController();
+    const fixture = {
+      schema_version: "v0.1",
+      query: "x",
+      embedding_model: "fake-embedding",
+      query_embedding_dim: 16,
+      results: [],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(makeJsonResponse(fixture));
+
+    await searchKnowledgeChunks("x", { signal: controller.signal });
+
+    const [input] = vi.mocked(fetch).mock.calls[0] as [
+      RequestInfo | URL,
+      ...unknown[],
+    ];
+    expect(input).toBeInstanceOf(Request);
+    expect((input as Request).signal).toBeDefined();
   });
 });
