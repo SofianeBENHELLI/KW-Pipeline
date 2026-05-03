@@ -38,7 +38,7 @@ The **knowledge layer** has shipped end-to-end behind opt-in env vars:
 - Phase 1b (#110): Docker compose (`docker/docker-compose.yml` with Neo4j 5.23 Community + the API), CI integration job. The integration job caught two real Phase 1a Cypher bugs the in-memory tests couldn't see; both fixed in the same PR.
 - Phase 1c (#111): `<KnowledgeGraphView />` wrapping `@neo4j-nvl/react`. Lazy-split on top in #114.
 - Phase 2 (#112): `LLMClient` Protocol + Anthropic impl + `EntityExtractor` with section-level citation enforcement; ADR-014 covers prompt design and cost guardrails.
-- Phase 2.1 (#115): Anthropic prompt caching for the entity extractor.
+- Phase 2.1 (#115 + 2026-05-04 closure PR): Anthropic prompt caching for the entity extractor, exponential-backoff retry on 429/5xx (ADR-014 §4), and per-document `input_tokens` circuit breaker (ADR-014 §3). Phase 2 is **closed** as of 2026-05-04. Residual deferred follow-up: section batching to amortise cache hits ([#195](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/195)).
 
 ## Audit findings — 2026-05-01
 
@@ -100,13 +100,13 @@ A code-walk audit produced a punch-list. The bulk of findings are now tracked as
 1. **#78** widget embedding + brand token adapter. Open product decisions: first 3DEXPERIENCE container size, auth/context model. Bundle budget from #125 lands first.
 2. Lodash/uuid advisories transitive through `@neo4j-nvl/*` — needs an NVL version bump or a fork. Probably one ticket below.
 
-### 3. Phase 3 — chat surface (deferred until Phase 2 has been used in anger)
+### 3. Phase 3 — vector RAG ([#186](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186)), then chat surface
 
-Per ADR-012 §3 last row + a Phase 3 ADR (TBD):
+Per ADR-012 §3 last row + ADR-015 (Voyage AI as the embedding provider):
 
-1. Embedding model + vector index decision (deferred to a Phase 3 ADR; either a remote embeddings endpoint or local sentence-transformers).
-2. `chat_service.py` with mode dispatch (RAG / GraphRAG / Hybrid). The mode taxonomy comes from `neo4j-labs/llm-graph-builder/backend/src/QA_integration.py` but reimplemented directly against the Anthropic SDK (no LangChain).
-3. `<ChatPanel />` + `<ChatModeToggle />` in `apps/web/src/features/chat/`.
+1. **Embedding provider — decided.** ADR-015 picks Voyage AI; the configuration scaffold + `EmbeddingClient` Protocol + `VoyageEmbeddingClient` + `FakeEmbeddingClient` already shipped in [#178](https://github.com/SofianeBENHELLI/KW-Pipeline/pull/178).
+2. **First Phase 3 PR** ([#186](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/186)): provision the Neo4j HNSW vector index on `(:Chunk {embedding})`, write embeddings during projection, expose `GET /knowledge/search`. Tests stay on `FakeEmbeddingClient`; real Voyage gated by `pytest -m embedding_integration`.
+3. **Chat surface (next sprint).** `chat_service.py` with mode dispatch (RAG / GraphRAG / Hybrid). The mode taxonomy comes from `neo4j-labs/llm-graph-builder/backend/src/QA_integration.py` but reimplemented directly against the Anthropic SDK (no LangChain). `<ChatPanel />` + `<ChatModeToggle />` in `apps/web/src/features/chat/`.
 
 ### 4. Robustness and operations
 

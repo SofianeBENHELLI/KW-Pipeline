@@ -162,6 +162,19 @@ class Settings(BaseSettings):
             "(currently ``claude-sonnet-4-5``)."
         ),
     )
+    entity_extractor_max_input_tokens_per_document: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "KW_ENTITY_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT",
+        ),
+        description=(
+            "ADR-014 §3 circuit breaker. Cap on cumulative ``input_tokens`` "
+            "the entity extractor may spend on a single document; once met, "
+            "remaining sections are skipped and recorded as warnings. "
+            "``0`` (the default) disables the breaker — matches Phase 2's "
+            "original unbounded behaviour."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias

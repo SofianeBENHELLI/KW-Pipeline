@@ -112,7 +112,13 @@ def _maybe_build_entity_extractor(settings: Settings | None = None) -> EntityExt
         if model
         else AnthropicLLMClient(api_key=api_key)
     )
-    return EntityExtractor(llm=llm)
+    # ADR-014 §3 circuit breaker. ``0`` means disabled; any positive
+    # value caps cumulative input_tokens per document.
+    cap = settings.entity_extractor_max_input_tokens_per_document
+    return EntityExtractor(
+        llm=llm,
+        max_input_tokens_per_document=cap if cap > 0 else None,
+    )
 
 
 def _maybe_build_knowledge_layer(

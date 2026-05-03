@@ -148,3 +148,232 @@ def test_fake_llm_client_records_system_as_passed():
     assert len(fake.calls) == 1
     assert fake.calls[0]["system"] == "static system prompt"
     assert fake.calls[0]["user"] == "user prompt"
+
+
+# ─── ADR-014 §4: retry on 429 / 5xx ────────────────────────────────────────
+
+
+class _StubAPIError(Exception):
+    """Stand-in for the Anthropic SDK's HTTP-status-bearing exceptions."""
+
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        retry_after: str | None = None,
+    ) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+        if retry_after is not None:
+            self.response = MagicMock()
+            self.response.headers = {"Retry-After": retry_after}
+
+
+def _ok_response(tool_input: dict | None = None) -> MagicMock:
+    block = MagicMock()
+    block.type = "tool_use"
+    block.name = "emit_structured"
+    block.input = tool_input or {"triples": []}
+    response = MagicMock()
+    response.content = [block]
+    response.usage = MagicMock(
+        input_tokens=1,
+        output_tokens=1,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    return response
+
+
+def test_retries_once_on_429_then_succeeds():
+    """ADR-014 §4: a single 429 is recovered by the built-in retry."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(429),
+        _ok_response({"triples": [{"x": 1}]}),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+
+    tool_input, _ = llm.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+
+    assert tool_input == {"triples": [{"x": 1}]}
+    assert mock_client.messages.create.call_count == 2
+    # First (and only) backoff slept once with a positive duration.
+    assert len(sleeps) == 1
+    assert sleeps[0] >= 0.0
+
+
+def test_retries_once_on_503_then_succeeds():
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(503),
+        _ok_response(),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+    llm.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+    assert mock_client.messages.create.call_count == 2
+
+
+def test_retry_after_header_overrides_backoff():
+    """When the upstream response carries Retry-After, honour it verbatim."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(429, retry_after="7"),
+        _ok_response(),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+        retry_backoff_seconds=0.001,  # ensure header dominates
+    )
+    llm.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+    assert sleeps == [7.0]
+
+
+def test_does_not_retry_on_400_bad_request():
+    """ADR-014 §4 limits retries to 429/5xx; a 400 must surface immediately."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = _StubAPIError(400)
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+    )
+    with pytest.raises(_StubAPIError):
+        llm.complete_with_tool(
+            system="s",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+    assert mock_client.messages.create.call_count == 1
+    assert sleeps == []
+
+
+def test_gives_up_after_max_retries_and_reraises():
+    """Two consecutive 503s with max_retries=1 ⇒ the second one re-raises."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(503),
+        _StubAPIError(503),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+    with pytest.raises(_StubAPIError):
+        llm.complete_with_tool(
+            system="s",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+    assert mock_client.messages.create.call_count == 2
+    assert len(sleeps) == 1
+
+
+def test_max_retries_zero_disables_retry_loop():
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = _StubAPIError(429)
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        max_retries=0,
+        sleep=sleeps.append,
+    )
+    with pytest.raises(_StubAPIError):
+        llm.complete_with_tool(
+            system="s",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+    assert mock_client.messages.create.call_count == 1
+    assert sleeps == []
+
+
+def test_connection_errors_are_retryable_without_status_code():
+    """Connect/timeout errors carry no status_code but are still transient."""
+
+    class APIConnectionError(Exception):
+        pass
+
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        APIConnectionError("dns blip"),
+        _ok_response(),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+    llm.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+    assert mock_client.messages.create.call_count == 2
+
+
+def test_retry_delay_is_capped():
+    """Even with an absurd Retry-After, we never sleep past the cap."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(429, retry_after="9999"),
+        _ok_response(),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        retry_backoff_cap_seconds=5.0,
+    )
+    llm.complete_with_tool(
+        system="s",
+        user="u",
+        tool_schema={"type": "object", "properties": {}, "required": []},
+    )
+    assert sleeps == [5.0]
+
+
+def test_invalid_max_retries_rejected():
+    with pytest.raises(ValueError):
+        AnthropicLLMClient(api_key="unused", client=MagicMock(), max_retries=-1)
+
+
+def test_invalid_backoff_rejected():
+    with pytest.raises(ValueError):
+        AnthropicLLMClient(api_key="unused", client=MagicMock(), retry_backoff_seconds=-0.1)

@@ -83,6 +83,14 @@ No circuit breaker in v1 — a failing extraction is fire-and-log per
 ADR-012 §4, so worst case is wasted spend, not a stuck pipeline.
 Phase 2.1 adds a per-document token-budget cap.
 
+**Update (2026-05-04, Phase 2 closure):** the cap is now wired as
+`EntityExtractor(max_input_tokens_per_document=...)`, configurable
+via `KW_ENTITY_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT`. Default `0`
+(disabled) preserves Phase 2's original unbounded behaviour; positive
+values cap cumulative `input_tokens` per document and emit a
+`knowledge.entity_extraction.budget_exceeded` log line + per-section
+warnings for every section skipped after the cap trips.
+
 ### 4. Failure modes
 
 Four failure modes, all handled by the extractor's per-section
@@ -100,10 +108,15 @@ warning aggregation rather than route-level errors:
 - **Model cites an unknown `source_reference_id`.** The extractor's
   set-membership check drops the triple to warnings *before* it
   reaches the projector. No uncited edge can land in the graph.
-- **Rate limit / 5xx from Anthropic.** Same path as "no tool call":
-  the SDK exception bubbles up to the per-section `try/except`,
-  warning recorded, version still validates. Retries are deferred
-  to Phase 2.1 (one exponential-backoff retry on 429/5xx).
+- **Rate limit / 5xx from Anthropic.** `AnthropicLLMClient` now
+  performs one jittered exponential-backoff retry on 429 and 5xx
+  responses (and on `APIConnectionError` / `APITimeoutError`),
+  honouring `Retry-After` when the upstream supplies it. If the
+  retry also fails, the SDK exception bubbles up to the per-section
+  `try/except`, a warning is recorded, and the version still
+  validates. The retry budget is configurable via the
+  `max_retries=...` constructor arg (default `1`); set it to `0` to
+  disable.
 
 ## Consequences
 
@@ -116,4 +129,7 @@ warning aggregation rather than route-level errors:
 - Adding `cache_control` is a single localized change in
   `AnthropicLLMClient`; the extractor doesn't need to know.
 - No retry, no circuit breaker, no batching in v1; each is a
-  bounded follow-up.
+  bounded follow-up. **Status (2026-05-04 Phase 2 closure):** retry
+  (§4) and circuit breaker (§3) shipped; section batching is the
+  sole residual follow-up, tracked as
+  [#195](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/195).
