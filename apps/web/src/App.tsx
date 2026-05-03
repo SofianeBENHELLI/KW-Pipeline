@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./styles.css";
 import { ApiError, getDocument, listDocuments } from "./api/client";
 import type { ApiDocument } from "./api/types";
+import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
@@ -289,6 +290,9 @@ export default function App() {
       )}
       <SearchPanel
         onSelectResult={(result) => selectDocument(result.document_id)}
+      />
+      <ChatPanel
+        onSelectCitation={(citation) => selectDocument(citation.document_id)}
       />
     </main>
   );

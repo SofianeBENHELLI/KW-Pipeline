@@ -15,6 +15,8 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiChatMode,
+  ApiChatResponse,
   ApiChunkSearchResponse,
   ApiDocument,
   ApiDocumentVersion,
@@ -440,6 +442,35 @@ export async function searchKnowledgeChunks(
   return unwrap(
     await http.GET("/knowledge/search", {
       params: { query: { q, limit } },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /knowledge/chat (Phase 3 grounded chat surface)
+ *
+ * Asks the backend to answer ``question`` grounded in the configured
+ * retrieval mode. ``mode`` selects RAG / GraphRAG / Hybrid; ``top_k``
+ * bounds the number of vector hits the prompt is grounded in.
+ *
+ * Returns 503 with ``KW_CHAT_DISABLED`` when any of the three gates
+ * (knowledge layer enabled, Anthropic key, Voyage key) is missing;
+ * the ``ApiError`` envelope carries the operator-facing remediation
+ * copy verbatim.
+ */
+export async function askKnowledgeChat(
+  question: string,
+  options: {
+    mode?: ApiChatMode;
+    top_k?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiChatResponse> {
+  const { mode = "rag", top_k = 5, signal } = options;
+  return unwrap(
+    await http.POST("/knowledge/chat", {
+      body: { question, mode, top_k },
       signal,
     }),
   );
