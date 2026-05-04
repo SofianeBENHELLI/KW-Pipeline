@@ -150,6 +150,43 @@ def _migrate_0003_perf_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
+    """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
+
+    Creates the ``document_scopes`` join table that links a document
+    family to one or more scopes (``personal`` / ``swym_community`` /
+    ``project``). A document can live in N scopes simultaneously; the
+    primary key ``(document_id, scope_kind, scope_ref)`` keeps the
+    same scope from being recorded twice for the same document.
+
+    The single supporting index covers the read pattern "list documents
+    in scope X" used by the future EPIC-D D.5 filter on every list /
+    search / graph endpoint. The reverse pattern ("list scopes for
+    document Y") is already covered by the primary key prefix.
+
+    Both DDL statements use ``IF NOT EXISTS`` so the migration is
+    idempotent — re-running on a database where the structures were
+    created out-of-band is safe.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_scopes (
+            document_id TEXT NOT NULL,
+            scope_kind  TEXT NOT NULL,
+            scope_ref   TEXT NOT NULL,
+            added_at    TEXT NOT NULL,
+            added_by    TEXT NOT NULL,
+            PRIMARY KEY (document_id, scope_kind, scope_ref),
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_scopes_lookup "
+        "ON document_scopes (scope_kind, scope_ref)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ordered registry — append only, never renumber
 # ---------------------------------------------------------------------------
@@ -158,6 +195,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
     ("0003_perf_indexes", _migrate_0003_perf_indexes),
+    ("0004_document_scopes", _migrate_0004_document_scopes),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
