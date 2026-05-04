@@ -387,7 +387,15 @@ describe("KnowledgeGraphView (Demo KG / Lane D)", () => {
     });
     fireEvent.click(relationButton);
 
-    const detail = await screen.findByTestId("graph-detail-edge");
+    // Default `findBy*` budget (1 s) was tight enough that this
+    // assertion flaked in CI (~1.08 s observed) — see PR #198 for the
+    // sibling `ReviewWorkspace` race. Locally the click→re-render→commit
+    // path settles in single-digit milliseconds; we just need a roomier
+    // budget and a tighter poll for CI's slower scheduler.
+    const detail = await screen.findByTestId("graph-detail-edge", undefined, {
+      timeout: 5000,
+      interval: 25,
+    });
     expect(within(detail).getByText(/same topic/i)).toBeInTheDocument();
     expect(within(detail).getByText(/0\.420/)).toBeInTheDocument();
     expect(within(detail).getByText(/Share 3 topic keywords/)).toBeInTheDocument();
