@@ -14,9 +14,10 @@ import hashlib
 import logging
 import tempfile
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
@@ -25,8 +26,10 @@ from app.schemas.document import (
     BatchUploadOutcome,
     BatchUploadResult,
     BatchUploadSummary,
-    DocumentVersion,
+    UploadDocumentResponse,
 )
+from app.schemas.scope import SCOPE_KINDS, Scope, ScopeKind
+from app.services.auth import User, get_current_user
 
 from ._helpers import (
     SPOOL_ROLLOVER_BYTES,
@@ -39,6 +42,58 @@ from ._helpers import (
 log = logging.getLogger(__name__)
 
 
+def _resolve_upload_scope(
+    *,
+    scope_kind: str | None,
+    scope_ref: str | None,
+    current_user: User,
+) -> tuple[ScopeKind, str]:
+    """Pick the scope link for a single upload (EPIC-D D.1, ADR-020 §1).
+
+    Both query params must be set or neither: a partial pair is a 422
+    so the client can't land an upload in personal:<user_id> when it
+    thought it targeted a community. When both are absent, the upload
+    defaults to the caller's personal scope using the auth-resolved
+    ``current_user.id`` (``"dev"`` in dev mode, ``"anonymous"`` under
+    ``KW_AUTH_MODE=disabled``).
+    """
+    has_kind = scope_kind is not None and scope_kind != ""
+    has_ref = scope_ref is not None and scope_ref != ""
+    if has_kind != has_ref:
+        # FastAPI surfaces this as HTTP 422 via ApiError because the
+        # client supplied a half-pair — the route layer rejects it
+        # before any catalog work happens.
+        raise ApiError(
+            status_code=422,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="scope_kind and scope_ref must be provided together.",
+            retryable=False,
+            remediation=(
+                "Send both scope_kind and scope_ref query params, or "
+                "neither (the upload defaults to the caller's personal "
+                "scope when both are omitted)."
+            ),
+        )
+    if not has_kind:
+        # Default to ``personal:<user_id>`` for the auth-resolved
+        # principal. Matches ADR-020 §1: every user has a personal
+        # scope from day one and it's the default upload destination.
+        return "personal", current_user.id
+    assert scope_kind is not None and scope_ref is not None  # for mypy
+    if scope_kind not in SCOPE_KINDS:
+        raise ApiError(
+            status_code=422,
+            code=ErrorCode.VALIDATION_ERROR,
+            message=(f"Invalid scope_kind '{scope_kind}'. Allowed: {', '.join(SCOPE_KINDS)}."),
+            retryable=False,
+            remediation=(
+                "Pick one of the documented scope kinds: 'personal', "
+                "'swym_community', or 'project'. See ADR-020 §1."
+            ),
+        )
+    return scope_kind, scope_ref  # type: ignore[return-value]
+
+
 def build_upload_router(services: PipelineServices) -> APIRouter:
     """Register single + batch upload routes."""
     router = APIRouter()
@@ -46,16 +101,30 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
     @router.post(
         "/documents/upload",
         operation_id="upload_document",
-        response_model=DocumentVersion,
+        response_model=UploadDocumentResponse,
     )
     async def upload_document(
         file: UploadFile = File(...),
         document_id: str | None = None,
+        scope_kind: str | None = None,
+        scope_ref: str | None = None,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
         settings = _request_settings()
         max_bytes = settings.max_upload_bytes
         allowed = settings.allowed_content_types
+
+        # Resolve the scope link for this upload (EPIC-D D.1, ADR-020 §1).
+        # Either both query params must be set or neither — a half-set
+        # pair is a 422 so the client can't accidentally land an upload
+        # in personal:<user_id> when they thought they targeted a
+        # community.
+        resolved_kind, resolved_ref = _resolve_upload_scope(
+            scope_kind=scope_kind,
+            scope_ref=scope_ref,
+            current_user=current_user,
+        )
 
         # Strip any media-type parameters (e.g. ``; charset=utf-8``) before
         # comparing against the allowlist — RFC 7231 lets clients tack them
@@ -141,12 +210,34 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
                     yield block
 
             try:
-                result = services.documents.upload_stream(
+                version = services.documents.upload_stream(
                     filename=file.filename or "untitled",
                     content_type=raw_content_type,
                     chunks=_iter_chunks(),
                     document_id=document_id,
                 )
+                # Persist the scope link before returning. ``add_scope`` is
+                # idempotent on (document_id, kind, ref) so the same upload
+                # replayed under a different idempotency key (or a duplicate
+                # detection that landed on an existing family) doesn't
+                # double-record. The catalog row's ``added_at`` is the wall
+                # clock when the link was created — the version's own
+                # ``created_at`` is preserved separately.
+                scope = Scope(
+                    kind=resolved_kind,
+                    ref=resolved_ref,
+                    added_at=datetime.now(UTC),
+                    added_by=current_user.id,
+                )
+                services.documents.catalog.add_scope(version.document_id, scope)
+                # Return the full :class:`UploadDocumentResponse` so the
+                # client sees every scope this document is linked to —
+                # including any scopes recorded by previous uploads of
+                # the same family (e.g. duplicate detection or explicit
+                # ``document_id`` re-upload). Avoids a second round-trip
+                # to ``list_scopes_for_document``.
+                scopes = services.documents.catalog.list_scopes_for_document(version.document_id)
+                result = UploadDocumentResponse(**version.model_dump(), scopes=scopes)
                 _store_idempotency(
                     store=services.idempotency,
                     idempotency_key=idempotency_key,
