@@ -135,6 +135,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Lineage
+         * @description Version history for one document family (EPIC-C C.3, ADR-025).
+         *
+         *     Returns a derived view of every :class:`DocumentVersion` in the
+         *     family with the ``is_latest`` and ``superseded_by_version_id``
+         *     fields the lineage modal needs filled in. Versions are sorted
+         *     ASC by ``version_number`` so the modal renders v1 → vN
+         *     top-to-bottom without re-sorting on the client.
+         *
+         *     ``superseded_by_version_id`` is reconstructed from
+         *     ``(version_number, status)`` ordering rather than read from a
+         *     joined audit row — per ADR-025, the supersede chain is "the
+         *     next-higher version-numbered sibling that exists in the
+         *     family", not an arbitrary pointer.
+         *
+         *     Returns ``404`` when the document does not exist; never raises
+         *     on an empty family (a freshly-created family with one version
+         *     is a valid response).
+         */
+        get: operations["get_document_lineage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/{document_id}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Similar Documents
+         * @description Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).
+         *
+         *     Uses :class:`DocumentSimilarityService` over the wired
+         *     ``DocumentTopicProvider`` adapter. Cold-start tolerance: when
+         *     the query document has no projected topics yet (knowledge layer
+         *     disabled, pre-validation, or no topic clusters of size ≥ 2),
+         *     returns ``results: []`` with HTTP 200 rather than a 5xx — the
+         *     frontend renders "no similar documents yet" gracefully.
+         *
+         *     ``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;
+         *     out-of-range values produce a 422 from FastAPI itself.
+         */
+        get: operations["get_similar_documents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/extract": {
         parameters: {
             query?: never;
@@ -297,6 +363,44 @@ export interface paths {
         };
         /** Health */
         get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Catalog
+         * @description Paginated catalog view filtered for the EPIC-C surface (ADR-025).
+         *
+         *     Differences from ``GET /documents``:
+         *
+         *     - **SUPERSEDED-aware "latest"**: ``latest_status`` is the highest
+         *       version-numbered version whose status is NOT ``SUPERSEDED``.
+         *       A document whose only versions are ``SUPERSEDED`` is hidden
+         *       entirely — there's nothing to review.
+         *     - **Default visibility**: ``VALIDATED`` and ``NEEDS_REVIEW`` are
+         *       the only statuses shown by default. ``REJECTED``, ``FAILED``,
+         *       and ``SUPERSEDED`` are hidden unless the explicit ``status=``
+         *       filter requests them (admin/audit use case).
+         *     - **Scope params (``scope_kind`` / ``scope_ref``) are accepted but
+         *       not yet enforced** — D.5 wires the predicate. The frontend can
+         *       start sending them today without any backend behaviour change.
+         *
+         *     Cursor encoding is shared with ``GET /documents`` (the
+         *     catalog's ``(created_at, id)`` codec) so a future change to the
+         *     codec only happens once.
+         */
+        get: operations["get_knowledge_catalog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -868,6 +972,43 @@ export interface components {
             workflow_ref: string;
         };
         /**
+         * KnowledgeCatalogItem
+         * @description One row of the EPIC-C C.3 catalog view (``GET /knowledge/catalog``).
+         *
+         *     Distinct from :class:`app.schemas.document.Document` in that it
+         *     surfaces only the *non-superseded* latest version's status —
+         *     ADR-025 §3 makes the catalog a SUPERSEDED-free surface so a
+         *     reviewer never sees a stale row hiding a newer validated sibling.
+         */
+        KnowledgeCatalogItem: {
+            /** Document Id */
+            document_id: string;
+            /** Family Filename */
+            family_filename: string;
+            latest_status: components["schemas"]["DocumentVersionStatus"];
+            /** Latest Version Number */
+            latest_version_number: number;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
+            /** Sha256 */
+            sha256: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /**
+         * KnowledgeCatalogResponse
+         * @description Response body for ``GET /knowledge/catalog`` (EPIC-C C.3).
+         *
+         *     Cursor-paginated. ``next_cursor`` is opaque; clients pass it back
+         *     unchanged to advance. ``None`` means "this page is the last one".
+         */
+        KnowledgeCatalogResponse: {
+            /** Items */
+            items: components["schemas"]["KnowledgeCatalogItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /**
          * KnowledgeGraphPage
          * @description Cursor-paginated page across all projected documents.
          *
@@ -938,6 +1079,61 @@ export interface components {
             max_input_tokens_per_document: number;
             /** Model */
             model: string;
+        };
+        /**
+         * LineageResponse
+         * @description Response body for ``GET /documents/{id}/lineage`` (EPIC-C C.3).
+         *
+         *     ``family_filename`` is the filename of the latest version in the
+         *     family — that's the label the lineage modal hangs at the top of
+         *     the version tree. ``versions`` is sorted ASC by ``version_number``
+         *     so v1 → vN renders top-to-bottom in the UI.
+         */
+        LineageResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Family Filename */
+            family_filename: string;
+            /** Versions */
+            versions: components["schemas"]["LineageVersion"][];
+        };
+        /**
+         * LineageVersion
+         * @description One row of a document family's version history (EPIC-C C.3).
+         *
+         *     Returned by ``GET /documents/{id}/lineage``. Mirrors a subset of
+         *     :class:`DocumentVersion` plus two derived fields the modal needs:
+         *
+         *     - ``is_latest`` — ``True`` for the version with the highest
+         *       ``version_number`` in the family. Lets the frontend render the
+         *       "current" badge without a second request.
+         *     - ``superseded_by_version_id`` — when this row's ``status`` is
+         *       :data:`DocumentVersionStatus.SUPERSEDED`, points to the id of the
+         *       next-higher version-numbered sibling that replaced it. ``None``
+         *       otherwise. Derived from ``(version_number, status)`` ordering at
+         *       response-build time per ADR-025 (the audit row that records the
+         *       transition is not joined into :class:`DocumentVersion` itself).
+         */
+        LineageVersion: {
+            /** Duplicate Of Version Id */
+            duplicate_of_version_id: string | null;
+            /** File Size */
+            file_size: number;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Ingested At */
+            ingested_at: string | null;
+            /** Is Latest */
+            is_latest: boolean;
+            /** Sha256 */
+            sha256: string;
+            status: components["schemas"]["DocumentVersionStatus"];
+            /** Superseded By Version Id */
+            superseded_by_version_id: string | null;
+            /** Version Number */
+            version_number: number;
         };
         /** LoggingConfig */
         LoggingConfig: {
@@ -1137,6 +1333,40 @@ export interface components {
             source_reference_ids: string[];
             /** Text */
             text: string;
+        };
+        /**
+         * SimilarDocument
+         * @description One ranking row from ``GET /documents/{id}/similar``.
+         *
+         *     ``similarity`` is the Jaccard score in ``[0.0, 1.0]`` produced by
+         *     :class:`app.services.document_similarity_service.DocumentSimilarityService`.
+         *     ``family_filename`` and ``latest_version_status`` are surfaced so
+         *     the lineage modal can render the row without a follow-up
+         *     ``GET /documents/{id}`` per neighbor.
+         */
+        SimilarDocument: {
+            /** Document Id */
+            document_id: string;
+            /** Family Filename */
+            family_filename: string;
+            latest_version_status: components["schemas"]["DocumentVersionStatus"];
+            /** Similarity */
+            similarity: number;
+        };
+        /**
+         * SimilarDocumentsResponse
+         * @description Response body for ``GET /documents/{id}/similar?k=N`` (EPIC-C C.3).
+         *
+         *     ``results`` is sorted by ``similarity`` descending; ties broken by
+         *     ``document_id`` ascending. An empty list with HTTP 200 is the
+         *     correct response when the query document has no topics yet (cold-
+         *     start) — see :class:`DocumentSimilarityService` for the contract.
+         */
+        SimilarDocumentsResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Results */
+            results: components["schemas"]["SimilarDocument"][];
         };
         /**
          * SourceReference
@@ -1483,6 +1713,70 @@ export interface operations {
             };
         };
     };
+    get_document_lineage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LineageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_similar_documents: {
+        parameters: {
+            query?: {
+                k?: number;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarDocumentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     extract_version: {
         parameters: {
             query?: never;
@@ -1810,6 +2104,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_knowledge_catalog: {
+        parameters: {
+            query?: {
+                status?: string[] | null;
+                q?: string | null;
+                cursor?: string | null;
+                limit?: number;
+                scope_kind?: string | null;
+                scope_ref?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

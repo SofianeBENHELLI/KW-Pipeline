@@ -1011,6 +1011,81 @@
         "title": "IteropConfig",
         "type": "object"
       },
+      "KnowledgeCatalogItem": {
+        "description": "One row of the EPIC-C C.3 catalog view (``GET /knowledge/catalog``).\n\nDistinct from :class:`app.schemas.document.Document` in that it\nsurfaces only the *non-superseded* latest version's status —\nADR-025 §3 makes the catalog a SUPERSEDED-free surface so a\nreviewer never sees a stale row hiding a newer validated sibling.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "family_filename": {
+            "title": "Family Filename",
+            "type": "string"
+          },
+          "latest_status": {
+            "$ref": "#/components/schemas/DocumentVersionStatus"
+          },
+          "latest_version_number": {
+            "title": "Latest Version Number",
+            "type": "integer"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "family_filename",
+          "latest_version_number",
+          "latest_status",
+          "version_count",
+          "sha256",
+          "scopes"
+        ],
+        "title": "KnowledgeCatalogItem",
+        "type": "object"
+      },
+      "KnowledgeCatalogResponse": {
+        "description": "Response body for ``GET /knowledge/catalog`` (EPIC-C C.3).\n\nCursor-paginated. ``next_cursor`` is opaque; clients pass it back\nunchanged to advance. ``None`` means \"this page is the last one\".",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeCatalogItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "KnowledgeCatalogResponse",
+        "type": "object"
+      },
       "KnowledgeGraphPage": {
         "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.",
         "properties": {
@@ -1153,6 +1228,113 @@
           "max_input_tokens_per_document"
         ],
         "title": "LLMConfig",
+        "type": "object"
+      },
+      "LineageResponse": {
+        "description": "Response body for ``GET /documents/{id}/lineage`` (EPIC-C C.3).\n\n``family_filename`` is the filename of the latest version in the\nfamily — that's the label the lineage modal hangs at the top of\nthe version tree. ``versions`` is sorted ASC by ``version_number``\nso v1 → vN renders top-to-bottom in the UI.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "family_filename": {
+            "title": "Family Filename",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/LineageVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "document_id",
+          "family_filename",
+          "versions"
+        ],
+        "title": "LineageResponse",
+        "type": "object"
+      },
+      "LineageVersion": {
+        "description": "One row of a document family's version history (EPIC-C C.3).\n\nReturned by ``GET /documents/{id}/lineage``. Mirrors a subset of\n:class:`DocumentVersion` plus two derived fields the modal needs:\n\n- ``is_latest`` — ``True`` for the version with the highest\n  ``version_number`` in the family. Lets the frontend render the\n  \"current\" badge without a second request.\n- ``superseded_by_version_id`` — when this row's ``status`` is\n  :data:`DocumentVersionStatus.SUPERSEDED`, points to the id of the\n  next-higher version-numbered sibling that replaced it. ``None``\n  otherwise. Derived from ``(version_number, status)`` ordering at\n  response-build time per ADR-025 (the audit row that records the\n  transition is not joined into :class:`DocumentVersion` itself).",
+        "properties": {
+          "duplicate_of_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of Version Id"
+          },
+          "file_size": {
+            "title": "File Size",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ingested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingested At"
+          },
+          "is_latest": {
+            "title": "Is Latest",
+            "type": "boolean"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentVersionStatus"
+          },
+          "superseded_by_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By Version Id"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "filename",
+          "status",
+          "sha256",
+          "file_size",
+          "is_latest",
+          "duplicate_of_version_id",
+          "superseded_by_version_id",
+          "ingested_at"
+        ],
+        "title": "LineageVersion",
         "type": "object"
       },
       "LoggingConfig": {
@@ -1583,6 +1765,56 @@
           "source_reference_ids"
         ],
         "title": "SemanticSection",
+        "type": "object"
+      },
+      "SimilarDocument": {
+        "description": "One ranking row from ``GET /documents/{id}/similar``.\n\n``similarity`` is the Jaccard score in ``[0.0, 1.0]`` produced by\n:class:`app.services.document_similarity_service.DocumentSimilarityService`.\n``family_filename`` and ``latest_version_status`` are surfaced so\nthe lineage modal can render the row without a follow-up\n``GET /documents/{id}`` per neighbor.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "family_filename": {
+            "title": "Family Filename",
+            "type": "string"
+          },
+          "latest_version_status": {
+            "$ref": "#/components/schemas/DocumentVersionStatus"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "document_id",
+          "family_filename",
+          "similarity",
+          "latest_version_status"
+        ],
+        "title": "SimilarDocument",
+        "type": "object"
+      },
+      "SimilarDocumentsResponse": {
+        "description": "Response body for ``GET /documents/{id}/similar?k=N`` (EPIC-C C.3).\n\n``results`` is sorted by ``similarity`` descending; ties broken by\n``document_id`` ascending. An empty list with HTTP 200 is the\ncorrect response when the query document has no topics yet (cold-\nstart) — see :class:`DocumentSimilarityService` for the contract.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarDocument"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "document_id",
+          "results"
+        ],
+        "title": "SimilarDocumentsResponse",
         "type": "object"
       },
       "SourceReference": {
@@ -2285,6 +2517,98 @@
         "summary": "Get Document Graph"
       }
     },
+    "/documents/{document_id}/lineage": {
+      "get": {
+        "description": "Version history for one document family (EPIC-C C.3, ADR-025).\n\nReturns a derived view of every :class:`DocumentVersion` in the\nfamily with the ``is_latest`` and ``superseded_by_version_id``\nfields the lineage modal needs filled in. Versions are sorted\nASC by ``version_number`` so the modal renders v1 → vN\ntop-to-bottom without re-sorting on the client.\n\n``superseded_by_version_id`` is reconstructed from\n``(version_number, status)`` ordering rather than read from a\njoined audit row — per ADR-025, the supersede chain is \"the\nnext-higher version-numbered sibling that exists in the\nfamily\", not an arbitrary pointer.\n\nReturns ``404`` when the document does not exist; never raises\non an empty family (a freshly-created family with one version\nis a valid response).",
+        "operationId": "get_document_lineage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Lineage"
+      }
+    },
+    "/documents/{document_id}/similar": {
+      "get": {
+        "description": "Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).\n\nUses :class:`DocumentSimilarityService` over the wired\n``DocumentTopicProvider`` adapter. Cold-start tolerance: when\nthe query document has no projected topics yet (knowledge layer\ndisabled, pre-validation, or no topic clusters of size ≥ 2),\nreturns ``results: []`` with HTTP 200 rather than a 5xx — the\nfrontend renders \"no similar documents yet\" gracefully.\n\n``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;\nout-of-range values produce a 422 from FastAPI itself.",
+        "operationId": "get_similar_documents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "k",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "K",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarDocumentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Similar Documents"
+      }
+    },
     "/documents/{document_id}/versions/{version_id}/extract": {
       "post": {
         "operationId": "extract_version",
@@ -2804,6 +3128,133 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/knowledge/catalog": {
+      "get": {
+        "description": "Paginated catalog view filtered for the EPIC-C surface (ADR-025).\n\nDifferences from ``GET /documents``:\n\n- **SUPERSEDED-aware \"latest\"**: ``latest_status`` is the highest\n  version-numbered version whose status is NOT ``SUPERSEDED``.\n  A document whose only versions are ``SUPERSEDED`` is hidden\n  entirely — there's nothing to review.\n- **Default visibility**: ``VALIDATED`` and ``NEEDS_REVIEW`` are\n  the only statuses shown by default. ``REJECTED``, ``FAILED``,\n  and ``SUPERSEDED`` are hidden unless the explicit ``status=``\n  filter requests them (admin/audit use case).\n- **Scope params (``scope_kind`` / ``scope_ref``) are accepted but\n  not yet enforced** — D.5 wires the predicate. The frontend can\n  start sending them today without any backend behaviour change.\n\nCursor encoding is shared with ``GET /documents`` (the\ncatalog's ``(created_at, id)`` codec) so a future change to the\ncodec only happens once.",
+        "operationId": "get_knowledge_catalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Ref"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Catalog"
       }
     },
     "/knowledge/chat": {

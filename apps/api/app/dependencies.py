@@ -11,6 +11,7 @@ from app.services.auth import AuthService, DisabledAuthService, build_auth_servi
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
+from app.services.document_similarity_service import DocumentSimilarityService
 from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
 from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
@@ -44,6 +45,60 @@ from app.services.storage_service import (
 )
 from app.services.taxonomy_loader import load_taxonomy
 from app.settings import Settings
+
+
+class _GraphStoreTopicProvider:
+    """:class:`DocumentTopicProvider` adapter over the catalog + graph store.
+
+    The :class:`DocumentSimilarityService` only needs two reads:
+
+    1. The list of document ids the catalog knows about (so it can
+       enumerate similarity candidates).
+    2. The set of topic ids each document touches.
+
+    There is no persisted "topics for document X" table today — topics
+    are emitted by ``TopicClusteringService`` per validated version
+    and projected onto the knowledge graph as
+    ``ChunkNodeProperties.topic_id`` on each chunk. This adapter walks
+    :meth:`GraphStore.find_subgraph_for_document` once per query and
+    folds the chunk-level ``topic_id`` values into a set, which is the
+    contract the similarity service consumes (ADR-025 §3).
+
+    Cold-start (knowledge layer disabled, no projected chunks, or
+    chunks with ``topic_id == None``) collapses to an empty set per the
+    Protocol contract — the similar-documents route then returns an
+    empty ``results`` list with HTTP 200 instead of a 5xx.
+    """
+
+    def __init__(
+        self,
+        *,
+        documents: DocumentService,
+        graph_store: GraphStore,
+    ) -> None:
+        self._documents = documents
+        self._graph_store = graph_store
+
+    def topic_ids_for_document(self, document_id: str) -> set[str]:
+        projection = self._graph_store.find_subgraph_for_document(document_id)
+        topic_ids: set[str] = set()
+        for node in projection.nodes:
+            if node.kind != "chunk":
+                continue
+            topic_id = node.properties.get("topic_id")
+            if isinstance(topic_id, str) and topic_id:
+                topic_ids.add(topic_id)
+        return topic_ids
+
+    def known_document_ids(self) -> list[str]:
+        # Source of truth for "what documents exist" is the catalog —
+        # the graph store may not have projected every document yet
+        # (knowledge layer disabled, or pre-validation), and feeding
+        # only graph-known ids here would silently truncate the
+        # candidate set. The similarity service tolerates documents
+        # with empty topic sets gracefully (returns 0.0, dropped from
+        # ``top_k``), so passing every catalog id is the safe default.
+        return [document.id for document in self._documents.list_documents()]
 
 
 @dataclass(frozen=True)
@@ -125,12 +180,19 @@ class PipelineServices:
     # while ``build_services`` / ``build_persistent_services`` pass
     # the canonical instance.
     review: ReviewService = field(init=False)
+    # Topic-Jaccard document similarity (ADR-025 §3, EPIC-C C.2/C.3).
+    # The provider is a thin adapter over the catalog + graph store so
+    # the surface stays decoupled from any specific clustering wiring;
+    # see :class:`_GraphStoreTopicProvider`. The service itself is
+    # stateless — building it eagerly here keeps the route layer's
+    # ``Depends(...)`` injection trivial.
+    document_similarity: DocumentSimilarityService = field(init=False)
 
     def __post_init__(self) -> None:
         # Frozen dataclass — bypass the immutability guard for the
-        # sole post-init field. Every other field is set by the
-        # caller (or has a default factory) so the only allowed
-        # mutation is this one.
+        # post-init fields. Every other field is set by the caller
+        # (or has a default factory) so the only allowed mutations
+        # are these two.
         object.__setattr__(
             self,
             "review",
@@ -139,6 +201,16 @@ class PipelineServices:
                 semantic_outputs=self.semantic_outputs,
                 knowledge_projector=self.knowledge_projector,
                 entity_extractor=self.entity_extractor,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "document_similarity",
+            DocumentSimilarityService(
+                topics=_GraphStoreTopicProvider(
+                    documents=self.documents,
+                    graph_store=self.graph_store,
+                ),
             ),
         )
 
