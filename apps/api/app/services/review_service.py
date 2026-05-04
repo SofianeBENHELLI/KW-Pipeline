@@ -29,10 +29,10 @@ straightforward:
   ``KnowledgeChatService``-style adapters — without churning this
   module.
 - **External-workflow integration (audit EPIC-B, #216).** The
-  Iterop adapter callback path constructs a ``ReviewResult``
+  ITEROP adapter callback path constructs a ``ReviewResult``
   through the same service, so the FSM transition + side-effects
   happen identically whether the decision came from Orbital or
-  Iterop.
+  ITEROP.
 
 Error-mapping contract
 ----------------------
