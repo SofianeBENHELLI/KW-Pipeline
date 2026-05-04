@@ -127,6 +127,42 @@ For local development, leave `KW_LOG_FORMAT=text` (the default) and
 the records render as `INFO app.services.document_service document.uploaded`
 plus a stdlib-formatted message.
 
+## Audit event store (#26 residual)
+
+When ``KW_AUDIT_ENABLED=true``, every event in this vocabulary is
+also persisted to a SQLite ``audit_events`` table by
+:class:`app.services.audit_log_handler.AuditLogHandler` (attached to
+the root logger by :func:`app.logging_config.install_audit_handler`).
+The store backs operator queries that the structured-log stream
+can't satisfy:
+
+```sql
+-- Who validated doc-A?
+SELECT ts_utc, level, payload_json FROM audit_events
+WHERE event_name = 'document.status_changed'
+  AND document_id = 'doc-A'
+  AND payload_json LIKE '%"to": "VALIDATED"%'
+ORDER BY ts_utc DESC;
+
+-- How many chat queries fired the empty-retrieval short-circuit today?
+SELECT COUNT(*) FROM audit_events
+WHERE event_name = 'knowledge.chat.empty_retrieval'
+  AND ts_utc >= date('now', '-1 day');
+```
+
+The table is append-only. ``payload_json`` carries the full ``extra``
+dict passed to the emitter so no field is dropped, even when the
+indexed columns (``document_id``, ``version_id``) are NULL. Path on
+disk: ``KW_AUDIT_DB_PATH`` if set, else
+``<data_dir>/audit.sqlite3``. Default install (no flag set) keeps
+the in-memory fake so the unit suite never opens a SQLite file.
+
+Out of scope for the foundation slice and tracked for follow-up:
+
+- Admin HTTP route for queries (``GET /admin/audit?event=...``).
+- Tamper-evidence / signed event chain.
+- Retention purges driven by ``KW_AUDIT_RETENTION_DAYS``.
+
 ## Adding a new event
 
 1. Pick a stable dotted name. Verb in past tense for done events

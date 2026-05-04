@@ -249,6 +249,33 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Audit event store (#26 residual). Off by default so the in-memory
+    # unit suite never opens a SQLite handle. Persistent deployments
+    # enable it explicitly; the documented event vocabulary then lands
+    # in a queryable table alongside the structured-log lines.
+    # ------------------------------------------------------------------
+    audit_enabled_raw: str = Field(
+        default="",
+        alias="audit_enabled",
+        validation_alias=AliasChoices("KW_AUDIT_ENABLED"),
+        description=(
+            "Truthy (``1``/``true``/``yes``/``on``) enables the SQLite "
+            "audit event store. Records every dotted-name structured "
+            "log event into ``audit_events`` so 'who validated doc X' "
+            "is a SQL query rather than a log scrape."
+        ),
+    )
+    audit_db_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_AUDIT_DB_PATH"),
+        description=(
+            "Absolute path to the audit SQLite file. Empty (default) "
+            "lets the persistent-services factory derive a path from "
+            "its configured data dir (``<data_dir>/audit.sqlite3``)."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Logging (issue #42). ``json`` is the production / container shape
     # that the on-call workflow greps; ``text`` is the stdlib default
     # used for local development to keep tracebacks human-readable.
@@ -304,6 +331,11 @@ class Settings(BaseSettings):
     def ner_enabled(self) -> bool:
         """Truthy parse of the spaCy NER kill switch (#190)."""
         return _truthy(self.ner_enabled_raw)
+
+    @property
+    def audit_enabled(self) -> bool:
+        """Truthy parse of the audit-store kill switch (#26 residual)."""
+        return _truthy(self.audit_enabled_raw)
 
 
 def _truthy(raw: str) -> bool:

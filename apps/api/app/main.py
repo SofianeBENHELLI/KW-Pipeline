@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import PipelineServices, build_persistent_services, build_services
 from app.errors import install_error_handlers
-from app.logging_config import configure_logging
+from app.logging_config import configure_logging, install_audit_handler
 from app.routes import build_router
 from app.services.knowledge.graph_store import VECTOR_INDEX_NAME
 from app.settings import Settings
@@ -76,6 +76,14 @@ def create_app(
     # root handler — so test suites that build many ``create_app``
     # instances in one process don't produce duplicate log lines.
     configure_logging(services.settings)
+
+    # Audit handler (#26 residual) — persists every dotted-name
+    # structured event into ``services.audit_events``. Idempotent: a
+    # previous handler bound to the same store is removed first so
+    # rebuilding the app doesn't stack duplicate handlers in the same
+    # process. The handler is always attached; the store choice (in-
+    # memory vs SQLite) decides whether anything actually persists.
+    install_audit_handler(services.audit_events)
 
     app.state.services = services
     cors_kwargs: dict[str, object] = {
