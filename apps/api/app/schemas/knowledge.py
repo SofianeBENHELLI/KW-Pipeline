@@ -394,6 +394,11 @@ class ChatResponse(BaseModel):
     ``citations`` with a non-empty ``answer`` is possible — the LLM
     answered from the question alone, which the system prompt asks it
     to flag with an explicit "no supporting context" preamble.
+
+    ``warnings`` carries server-side validation findings — today,
+    citation markers in ``answer`` that don't resolve against
+    ``citations``. The renderer surfaces these so reviewers can spot
+    a hallucinated reference without trusting it.
     """
 
     schema_version: Literal["v0.1"] = "v0.1"
@@ -404,3 +409,4 @@ class ChatResponse(BaseModel):
     embedding_model: str | None = None
     llm_model: str
     token_usage: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

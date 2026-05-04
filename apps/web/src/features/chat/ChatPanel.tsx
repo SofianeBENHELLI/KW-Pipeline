@@ -165,6 +165,23 @@ export function ChatPanel({ onSelectCitation }: ChatPanelProps) {
             <p className="chat-panel__answer-text">{response.answer}</p>
           )}
 
+          {response.warnings.length > 0 && (
+            <div
+              className="chat-panel__warnings"
+              role="status"
+              data-testid="chat-panel-warnings"
+            >
+              <strong>Unresolved citations:</strong>
+              <ul>
+                {response.warnings.map((marker) => (
+                  <li key={marker}>
+                    <code>{marker}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {response.citations.length > 0 && (
             <>
               <h3 className="chat-panel__citations-heading">Citations</h3>

@@ -211,17 +211,35 @@ def test_graph_mode_with_no_projected_entities_falls_back_gracefully():
     assert response.answer.startswith("I don't have enough")
 
 
-def test_rag_mode_with_no_indexed_chunks_renders_empty_chunk_block():
-    """Empty index ⇒ chunk block names the absence; LLM still gets called."""
+def test_empty_retrieval_short_circuits_without_calling_llm():
+    """Zero hits ⇒ deterministic answer, no LLM round-trip, empty token_usage."""
+    from app.services.knowledge.chat_service import EMPTY_RETRIEVAL_ANSWER
+
     store = InMemoryGraphStore()
     fake_llm = FakeLLMClient()
-    fake_llm.enqueue_text("I don't have enough context to answer that.")
+    # Intentionally do NOT enqueue a text response — if the service
+    # called the LLM the FakeLLMClient would raise.
     svc = _chat_service(store=store, fake_llm=fake_llm)
 
     response = svc.answer("question", mode="rag", top_k=3)
-    user_prompt = fake_llm.text_calls[0]["user"]
-    assert "no matching chunks were retrieved" in user_prompt
+
+    assert fake_llm.text_calls == []
+    assert response.answer == EMPTY_RETRIEVAL_ANSWER
     assert response.citations == []
+    assert response.token_usage == {}
+    assert response.warnings == []
+
+
+def test_empty_retrieval_short_circuits_for_every_mode():
+    """Empty hits ⇒ short-circuit in every retrieval mode."""
+    store = InMemoryGraphStore()
+    for mode in ("rag", "graph", "hybrid"):
+        fake_llm = FakeLLMClient()  # no enqueue_text — would raise on call
+        svc = _chat_service(store=store, fake_llm=fake_llm)
+        response = svc.answer("q", mode=mode, top_k=3)  # type: ignore[arg-type]
+        assert fake_llm.text_calls == []
+        assert response.mode == mode
+        assert response.citations == []
 
 
 def test_rag_mode_omits_snippet_line_for_chunks_without_text_preview():
@@ -354,6 +372,101 @@ def test_predicate_falls_back_to_edge_kind_when_property_missing():
 def test_llm_model_property_exposes_constructor_value():
     svc = _chat_service(store=_populated_store(), fake_llm=FakeLLMClient())
     assert svc.llm_model == "claude-test"
+
+
+# ─── Server-side citation validation ─────────────────────────────────────
+
+
+def test_valid_citations_produce_no_warnings():
+    """Answer cites only chunk_ids that match the returned citations."""
+    store = _populated_store(
+        ("c1", "ISO 9001 audit calendar"),
+        ("c2", "compliance"),
+    )
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("The audit is in [c1] and the policy is in [c2].")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("when is the audit?", mode="rag", top_k=2)
+    assert response.warnings == []
+
+
+def test_unresolved_chunk_citation_is_flagged():
+    """Answer cites [c-fake] not in citations ⇒ flagged in warnings."""
+    store = _populated_store(("c1", "audit calendar"))
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("The audit is in [c-fake].")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("question", mode="rag", top_k=1)
+    assert "[c-fake]" in response.warnings
+    # Real citation is still returned; the answer text is unchanged.
+    assert response.answer == "The audit is in [c-fake]."
+    assert {c.chunk_id for c in response.citations} == {"c1"}
+
+
+def test_unresolved_doc_citation_is_flagged():
+    """``[doc:X]`` where X isn't a returned document_id ⇒ flagged."""
+    store = _populated_store(("c1", "policy"))
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("ACME must comply [doc:doc-fake].")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("question", mode="graph", top_k=1)
+    assert "[doc:doc-fake]" in response.warnings
+
+
+def test_natural_prose_brackets_are_not_flagged():
+    """``[Section 1]`` / ``[see appendix]`` shouldn't be treated as citations."""
+    store = _populated_store(("c1", "policy"))
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("[See Appendix A] and [Section 1] are referenced.")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("q", mode="rag", top_k=1)
+    # Inner text contains spaces ⇒ regex doesn't match the citation
+    # pattern; nothing flagged.
+    assert response.warnings == []
+
+
+def test_duplicate_unresolved_citation_is_reported_once():
+    """Same hallucinated marker repeated in the answer ⇒ one warning, not many."""
+    store = _populated_store(("c1", "policy"))
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("First mention [c-bad]. Second mention [c-bad]. Third [c-bad].")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("q", mode="rag", top_k=1)
+    assert response.warnings.count("[c-bad]") == 1
+
+
+def test_chunk_and_doc_unresolved_markers_are_both_reported():
+    store = _populated_store(("c1", "policy"))
+    fake_llm = FakeLLMClient()
+    fake_llm.enqueue_text("Two ghosts: [c-fake] and [doc:doc-fake].")
+    svc = _chat_service(store=store, fake_llm=fake_llm)
+    response = svc.answer("q", mode="hybrid", top_k=1)
+    assert "[c-fake]" in response.warnings
+    assert "[doc:doc-fake]" in response.warnings
+
+
+# ─── Direct unit tests for module-level helpers ──────────────────────────
+
+
+def test_validate_citations_returns_empty_for_empty_answer():
+    """Defensive guard — empty answer text yields no warnings."""
+    from app.services.knowledge.chat_service import _validate_citations
+
+    assert _validate_citations("", []) == []
+
+
+def test_format_chunk_block_handles_empty_hits():
+    """Defensive copy when callers exercise the helper directly.
+
+    The :class:`KnowledgeChatService` short-circuits before calling
+    this helper with empty hits today, but the helper is module-level
+    and a future caller (e.g. an alternative orchestrator) may still
+    pass an empty list.
+    """
+    from app.services.knowledge.chat_service import _format_chunk_block
+
+    out = _format_chunk_block([])
+    assert "no matching chunks" in out
 
 
 # ─── Route-level tests ───────────────────────────────────────────────────

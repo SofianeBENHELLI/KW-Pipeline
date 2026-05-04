@@ -1025,6 +1025,24 @@ pre {
   white-space: pre-wrap;
 }
 
+.chat-panel__warnings {
+  border: 1px solid #f1c40f;
+  background: #fff8e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.chat-panel__warnings strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.chat-panel__warnings ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .chat-panel__citations-heading {
   margin: 4px 0 0;
   font-size: 0.95rem;

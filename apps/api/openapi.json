@@ -276,7 +276,7 @@
         "type": "object"
       },
       "ChatResponse": {
-        "description": "Response body for ``POST /knowledge/chat``.\n\n``answer`` is the free-text response from the LLM; ``citations``\nlists the chunks/triples the prompt grounded the model in. Empty\n``citations`` with a non-empty ``answer`` is possible — the LLM\nanswered from the question alone, which the system prompt asks it\nto flag with an explicit \"no supporting context\" preamble.",
+        "description": "Response body for ``POST /knowledge/chat``.\n\n``answer`` is the free-text response from the LLM; ``citations``\nlists the chunks/triples the prompt grounded the model in. Empty\n``citations`` with a non-empty ``answer`` is possible — the LLM\nanswered from the question alone, which the system prompt asks it\nto flag with an explicit \"no supporting context\" preamble.\n\n``warnings`` carries server-side validation findings — today,\ncitation markers in ``answer`` that don't resolve against\n``citations``. The renderer surfaces these so reviewers can spot\na hallucinated reference without trusting it.",
         "properties": {
           "answer": {
             "title": "Answer",
@@ -329,6 +329,13 @@
             },
             "title": "Token Usage",
             "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -339,7 +346,8 @@
           "citations",
           "embedding_model",
           "llm_model",
-          "token_usage"
+          "token_usage",
+          "warnings"
         ],
         "title": "ChatResponse",
         "type": "object"

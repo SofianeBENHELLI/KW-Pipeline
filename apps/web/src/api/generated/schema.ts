@@ -482,6 +482,11 @@ export interface components {
          *     ``citations`` with a non-empty ``answer`` is possible — the LLM
          *     answered from the question alone, which the system prompt asks it
          *     to flag with an explicit "no supporting context" preamble.
+         *
+         *     ``warnings`` carries server-side validation findings — today,
+         *     citation markers in ``answer`` that don't resolve against
+         *     ``citations``. The renderer surfaces these so reviewers can spot
+         *     a hallucinated reference without trusting it.
          */
         ChatResponse: {
             /** Answer */
@@ -509,6 +514,8 @@ export interface components {
             token_usage: {
                 [key: string]: number;
             };
+            /** Warnings */
+            warnings: string[];
         };
         /**
          * ChunkSearchResponse

@@ -18,6 +18,7 @@ dispatch here is intentionally a small Python switch on three
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from app.schemas.knowledge import (
@@ -55,6 +56,24 @@ _SYSTEM_PROMPT = (
 # operator and slows down the UX. Override via the constructor for
 # longer-form chat.
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
+
+# Deterministic answer returned when retrieval finds nothing. Mirrors
+# the system prompt's rule 2 verbatim so the operator-facing copy is
+# identical regardless of whether the LLM produced it or the
+# short-circuit did. Saves one LLM round-trip on the empty path.
+EMPTY_RETRIEVAL_ANSWER = "I don't have enough context to answer that."
+
+# Citation marker patterns the validator recognises. Two shapes the
+# system prompt asks the model to emit:
+#
+# - ``[chunk_id]`` for chunk excerpts. The validator only flags a
+#   marker as a hallucination when the inner text "looks like" a chunk
+#   id (alphanumerics, ``-``, ``_``) — that way prose like ``[NOTE]``
+#   or ``[Section 1]`` doesn't get mistaken for a citation.
+# - ``[doc:document_id]`` for graph triples. The ``doc:`` prefix is
+#   namespaced enough that we always treat it as a citation candidate.
+_CHUNK_CITATION_PATTERN = re.compile(r"\[([A-Za-z0-9_-]+)\]")
+_DOC_CITATION_PATTERN = re.compile(r"\[doc:([^\[\]\s]+)\]")
 
 
 class KnowledgeChatService:
@@ -105,6 +124,35 @@ class KnowledgeChatService:
         started = time.perf_counter()
         hits = self._search.search(cleaned, limit=top_k).results
 
+        # Empty-retrieval short-circuit. ADR-016 calls this out as a
+        # service-layer follow-up to the route-shape decision: when
+        # vector retrieval returns zero hits, every mode (RAG / graph
+        # / hybrid) ends up with an empty context block, and the
+        # system prompt's rule 2 already mandates the deterministic
+        # "I don't have enough context to answer that." response. We
+        # short-circuit before the LLM call to save the round-trip.
+        if not hits:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            log.info(
+                "knowledge.chat.empty_retrieval",
+                extra={
+                    "mode": mode,
+                    "top_k": top_k,
+                    "embedding_model": self._search.embedding_model,
+                    "latency_ms": elapsed_ms,
+                },
+            )
+            return ChatResponse(
+                question=question,
+                mode=mode,
+                answer=EMPTY_RETRIEVAL_ANSWER,
+                citations=[],
+                embedding_model=self._search.embedding_model,
+                llm_model=self._llm_model,
+                token_usage={},
+                warnings=[],
+            )
+
         # Graph and hybrid modes pull the projected subgraph for every
         # document the vector search surfaced. This is the simplest
         # GraphRAG seed: "documents whose chunks are similar to the
@@ -129,6 +177,37 @@ class KnowledgeChatService:
             max_tokens=self._max_output_tokens,
         )
 
+        citations = [
+            ChatCitation(
+                chunk_id=hit.chunk_id,
+                document_id=hit.document_id,
+                version_id=hit.version_id,
+                section_id=hit.section_id,
+                snippet=hit.snippet,
+                score=hit.score,
+            )
+            for hit in hits
+        ]
+
+        # Server-side citation validation. The system prompt asks the
+        # model to cite chunks as ``[chunk_id]`` and documents as
+        # ``[doc:document_id]``; we flag any marker that doesn't
+        # resolve against the returned citations. The answer text is
+        # NOT rewritten — the renderer can highlight valid citations
+        # and surface ``warnings`` to the operator separately. Avoids
+        # the LLM hallucinating a chunk_id and the user trusting it.
+        warnings = _validate_citations(answer_text, citations)
+        if warnings:
+            log.warning(
+                "knowledge.chat.unresolved_citation",
+                extra={
+                    "mode": mode,
+                    "unresolved_markers": warnings,
+                    "citation_chunk_ids": [c.chunk_id for c in citations],
+                    "llm_model": self._llm_model,
+                },
+            )
+
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         log.info(
             "knowledge.chat.answered",
@@ -141,21 +220,11 @@ class KnowledgeChatService:
                 "llm_model": self._llm_model,
                 "input_tokens": token_usage.get("input_tokens", 0),
                 "output_tokens": token_usage.get("output_tokens", 0),
+                "unresolved_citation_count": len(warnings),
                 "latency_ms": elapsed_ms,
             },
         )
 
-        citations = [
-            ChatCitation(
-                chunk_id=hit.chunk_id,
-                document_id=hit.document_id,
-                version_id=hit.version_id,
-                section_id=hit.section_id,
-                snippet=hit.snippet,
-                score=hit.score,
-            )
-            for hit in hits
-        ]
         return ChatResponse(
             question=question,
             mode=mode,
@@ -164,6 +233,7 @@ class KnowledgeChatService:
             embedding_model=self._search.embedding_model,
             llm_model=self._llm_model,
             token_usage=token_usage,
+            warnings=warnings,
         )
 
     # ─── Context helpers ───────────────────────────────────────────
@@ -254,6 +324,63 @@ def _format_triple_block(
     return "\n".join(lines)
 
 
+def _validate_citations(
+    answer_text: str,
+    citations: list[ChatCitation],
+) -> list[str]:
+    """Return a list of citation markers in the answer that don't resolve.
+
+    The system prompt asks the model to cite chunks as ``[chunk_id]``
+    and documents as ``[doc:document_id]``. This validator extracts
+    every such marker from the answer text and reports the ones that
+    don't match a returned citation. The answer text itself is NOT
+    rewritten — surfacing a list of warnings keeps the renderer in
+    charge of how to display the failure.
+
+    Heuristics:
+
+    - ``[doc:X]`` is always treated as a citation candidate (the
+      ``doc:`` prefix is namespaced). If ``X`` isn't a returned
+      ``document_id``, the marker is unresolved.
+    - ``[X]`` is only treated as a citation candidate when ``X`` looks
+      like an id (alphanumerics, ``-``, ``_``). Prose like ``[NOTE]``
+      passes the pattern but resolves cleanly when ``NOTE`` isn't a
+      chunk id we returned — that's flagged. Operators see the
+      warning, decide whether to tighten the prompt or accept the
+      noise.
+
+    Bracketed prose with spaces or punctuation (e.g. ``[Section 1]``,
+    ``[see appendix]``) is silently ignored because the inner pattern
+    won't match.
+    """
+    if not answer_text:
+        return []
+    valid_chunks = {c.chunk_id for c in citations}
+    valid_docs = {c.document_id for c in citations}
+    unresolved: list[str] = []
+    seen: set[str] = set()
+
+    for match in _DOC_CITATION_PATTERN.finditer(answer_text):
+        marker = match.group(0)
+        document_id = match.group(1)
+        if document_id in valid_docs or marker in seen:
+            continue
+        seen.add(marker)
+        unresolved.append(marker)
+
+    # ``_CHUNK_CITATION_PATTERN`` doesn't match ``[doc:X]`` (the colon
+    # isn't in ``[A-Za-z0-9_-]``) so we don't need a startswith guard.
+    for match in _CHUNK_CITATION_PATTERN.finditer(answer_text):
+        marker = match.group(0)
+        chunk_id = match.group(1)
+        if chunk_id in valid_chunks or marker in seen:
+            continue
+        seen.add(marker)
+        unresolved.append(marker)
+
+    return unresolved
+
+
 def _predicate_label(edge: GraphEdge) -> str:
     """Pick the human-readable predicate for a graph edge.
 
@@ -268,4 +395,8 @@ def _predicate_label(edge: GraphEdge) -> str:
     return edge.kind
 
 
-__all__ = ["KnowledgeChatService", "DEFAULT_MAX_OUTPUT_TOKENS"]
+__all__ = [
+    "DEFAULT_MAX_OUTPUT_TOKENS",
+    "EMPTY_RETRIEVAL_ANSWER",
+    "KnowledgeChatService",
+]

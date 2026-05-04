@@ -36,6 +36,7 @@ const FIXTURE_RESPONSE: ApiChatResponse = {
   embedding_model: "fake-embedding",
   llm_model: "claude-test",
   token_usage: { input_tokens: 10, output_tokens: 8 },
+  warnings: [],
 };
 
 function submit(question: string) {
@@ -183,6 +184,24 @@ describe("ChatPanel", () => {
     expect(onSelectCitation).toHaveBeenCalledWith(
       expect.objectContaining({ chunk_id: "chunk-1", document_id: "doc-A" }),
     );
+  });
+
+  it("renders unresolved-citation warnings when the API returns them", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({
+        ...FIXTURE_RESPONSE,
+        answer: "Cited [c-fake] which doesn't exist.",
+        warnings: ["[c-fake]", "[doc:doc-fake]"],
+      }),
+    );
+
+    render(<ChatPanel />);
+    submit("question");
+
+    const warnings = await screen.findByTestId("chat-panel-warnings");
+    expect(warnings).toHaveTextContent("Unresolved citations");
+    expect(warnings).toHaveTextContent("[c-fake]");
+    expect(warnings).toHaveTextContent("[doc:doc-fake]");
   });
 
   it("disables the submit button while a request is in flight", async () => {
