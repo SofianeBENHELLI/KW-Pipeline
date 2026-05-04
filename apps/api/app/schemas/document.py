@@ -77,6 +77,84 @@ class DocumentListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# ─── Lineage (EPIC-C C.3, ADR-025) ────────────────────────────────────
+
+
+class LineageVersion(BaseModel):
+    """One row of a document family's version history (EPIC-C C.3).
+
+    Returned by ``GET /documents/{id}/lineage``. Mirrors a subset of
+    :class:`DocumentVersion` plus two derived fields the modal needs:
+
+    - ``is_latest`` — ``True`` for the version with the highest
+      ``version_number`` in the family. Lets the frontend render the
+      "current" badge without a second request.
+    - ``superseded_by_version_id`` — when this row's ``status`` is
+      :data:`DocumentVersionStatus.SUPERSEDED`, points to the id of the
+      next-higher version-numbered sibling that replaced it. ``None``
+      otherwise. Derived from ``(version_number, status)`` ordering at
+      response-build time per ADR-025 (the audit row that records the
+      transition is not joined into :class:`DocumentVersion` itself).
+    """
+
+    id: str
+    version_number: int
+    filename: str
+    status: DocumentVersionStatus
+    sha256: str
+    file_size: int
+    is_latest: bool
+    duplicate_of_version_id: str | None = None
+    superseded_by_version_id: str | None = None
+    ingested_at: datetime | None = None
+
+
+class LineageResponse(BaseModel):
+    """Response body for ``GET /documents/{id}/lineage`` (EPIC-C C.3).
+
+    ``family_filename`` is the filename of the latest version in the
+    family — that's the label the lineage modal hangs at the top of
+    the version tree. ``versions`` is sorted ASC by ``version_number``
+    so v1 → vN renders top-to-bottom in the UI.
+    """
+
+    document_id: str
+    family_filename: str
+    versions: list[LineageVersion]
+
+
+# ─── Similar documents (EPIC-C C.3, ADR-025 §3) ───────────────────────
+
+
+class SimilarDocument(BaseModel):
+    """One ranking row from ``GET /documents/{id}/similar``.
+
+    ``similarity`` is the Jaccard score in ``[0.0, 1.0]`` produced by
+    :class:`app.services.document_similarity_service.DocumentSimilarityService`.
+    ``family_filename`` and ``latest_version_status`` are surfaced so
+    the lineage modal can render the row without a follow-up
+    ``GET /documents/{id}`` per neighbor.
+    """
+
+    document_id: str
+    family_filename: str
+    similarity: float
+    latest_version_status: DocumentVersionStatus
+
+
+class SimilarDocumentsResponse(BaseModel):
+    """Response body for ``GET /documents/{id}/similar?k=N`` (EPIC-C C.3).
+
+    ``results`` is sorted by ``similarity`` descending; ties broken by
+    ``document_id`` ascending. An empty list with HTTP 200 is the
+    correct response when the query document has no topics yet (cold-
+    start) — see :class:`DocumentSimilarityService` for the contract.
+    """
+
+    document_id: str
+    results: list[SimilarDocument]
+
+
 class HealthResponse(BaseModel):
     status: str
 

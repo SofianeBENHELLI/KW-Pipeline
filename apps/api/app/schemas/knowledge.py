@@ -22,7 +22,9 @@ from typing import Literal
 
 from pydantic import Field
 
+from app.models.document import DocumentVersionStatus
 from app.schemas import APISchemaModel as BaseModel
+from app.schemas.scope import Scope
 
 # Bump this when the wire shape of nodes/edges changes. Keep additive
 # changes additive (per ADR-008): the Orbital frontend reads any v0.x
@@ -410,3 +412,35 @@ class ChatResponse(BaseModel):
     llm_model: str
     token_usage: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+
+
+# ─── Catalog (EPIC-C C.3, ADR-020 / ADR-025) ─────────────────────────────
+
+
+class KnowledgeCatalogItem(BaseModel):
+    """One row of the EPIC-C C.3 catalog view (``GET /knowledge/catalog``).
+
+    Distinct from :class:`app.schemas.document.Document` in that it
+    surfaces only the *non-superseded* latest version's status —
+    ADR-025 §3 makes the catalog a SUPERSEDED-free surface so a
+    reviewer never sees a stale row hiding a newer validated sibling.
+    """
+
+    document_id: str
+    family_filename: str
+    latest_version_number: int
+    latest_status: DocumentVersionStatus
+    version_count: int
+    sha256: str
+    scopes: list[Scope] = Field(default_factory=list)
+
+
+class KnowledgeCatalogResponse(BaseModel):
+    """Response body for ``GET /knowledge/catalog`` (EPIC-C C.3).
+
+    Cursor-paginated. ``next_cursor`` is opaque; clients pass it back
+    unchanged to advance. ``None`` means "this page is the last one".
+    """
+
+    items: list[KnowledgeCatalogItem]
+    next_cursor: str | None = None

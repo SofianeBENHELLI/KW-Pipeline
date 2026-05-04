@@ -22,11 +22,20 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Resp
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
-from app.schemas.document import Document, DocumentListResponse, DocumentVersion
+from app.schemas.document import (
+    Document,
+    DocumentListResponse,
+    DocumentVersion,
+    LineageResponse,
+    LineageVersion,
+    SimilarDocument,
+    SimilarDocumentsResponse,
+)
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
 from app.services.auth import User, get_current_user
 from app.services.catalog_store import InvalidCursor
+from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import hash_json_body
 
@@ -344,6 +353,79 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             },
         )
 
+    @router.get(
+        "/documents/{document_id}/lineage",
+        operation_id="get_document_lineage",
+        response_model=LineageResponse,
+    )
+    def get_document_lineage(
+        document_id: str,
+        current_user: User = Depends(get_current_user),
+    ) -> Any:
+        """Version history for one document family (EPIC-C C.3, ADR-025).
+
+        Returns a derived view of every :class:`DocumentVersion` in the
+        family with the ``is_latest`` and ``superseded_by_version_id``
+        fields the lineage modal needs filled in. Versions are sorted
+        ASC by ``version_number`` so the modal renders v1 → vN
+        top-to-bottom without re-sorting on the client.
+
+        ``superseded_by_version_id`` is reconstructed from
+        ``(version_number, status)`` ordering rather than read from a
+        joined audit row — per ADR-025, the supersede chain is "the
+        next-higher version-numbered sibling that exists in the
+        family", not an arbitrary pointer.
+
+        Returns ``404`` when the document does not exist; never raises
+        on an empty family (a freshly-created family with one version
+        is a valid response).
+        """
+        document = services.documents.get_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return _build_lineage_response(document)
+
+    @router.get(
+        "/documents/{document_id}/similar",
+        operation_id="get_similar_documents",
+        response_model=SimilarDocumentsResponse,
+    )
+    def get_similar_documents(
+        document_id: str,
+        k: int = Query(default=5, ge=1, le=50),
+        current_user: User = Depends(get_current_user),
+    ) -> Any:
+        """Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).
+
+        Uses :class:`DocumentSimilarityService` over the wired
+        ``DocumentTopicProvider`` adapter. Cold-start tolerance: when
+        the query document has no projected topics yet (knowledge layer
+        disabled, pre-validation, or no topic clusters of size ≥ 2),
+        returns ``results: []`` with HTTP 200 rather than a 5xx — the
+        frontend renders "no similar documents yet" gracefully.
+
+        ``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;
+        out-of-range values produce a 422 from FastAPI itself.
+        """
+        document = services.documents.get_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        ranked = services.document_similarity.top_k(document_id, k=k)
+        results: list[SimilarDocument] = []
+        for neighbor_id, score in ranked:
+            row = _build_similar_row(
+                neighbor_id=neighbor_id,
+                similarity=score,
+                catalog=services.documents,
+            )
+            # Drop neighbors whose ``Document`` row vanished between
+            # ``top_k`` and the per-row catalog read (extremely
+            # unlikely but keeps the response shape honest if a
+            # deletion races us).
+            if row is not None:
+                results.append(row)
+        return SimilarDocumentsResponse(document_id=document_id, results=results)
+
     @router.post(
         "/documents/{document_id}/versions/{version_id}/validate",
         operation_id="validate_version",
@@ -383,6 +465,87 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         )
 
     return router
+
+
+def _build_lineage_response(document: Document) -> LineageResponse:
+    """Project a :class:`Document` into the lineage modal's response shape.
+
+    The supersede chain is reconstructed from ``(version_number,
+    status)`` ordering: any ``SUPERSEDED`` row is annotated with the
+    id of its next-higher version-numbered sibling. ADR-025 documents
+    why we don't read ``superseded_by_version_id`` from the audit
+    table — the chain *is* the version sequence, and any other pointer
+    would diverge if a future migration replays validation events.
+    """
+    sorted_versions = sorted(document.versions, key=lambda v: v.version_number)
+    if not sorted_versions:
+        return LineageResponse(
+            document_id=document.id,
+            family_filename=document.original_filename,
+            versions=[],
+        )
+    latest_version_number = max(v.version_number for v in sorted_versions)
+    family_filename = next(
+        (v.filename for v in sorted_versions if v.version_number == latest_version_number),
+        document.original_filename,
+    )
+    by_number: dict[int, DocumentVersion] = {v.version_number: v for v in sorted_versions}
+    rows: list[LineageVersion] = []
+    for version in sorted_versions:
+        superseded_by: str | None = None
+        if version.status == DocumentVersionStatus.SUPERSEDED:
+            successor = by_number.get(version.version_number + 1)
+            if successor is not None:
+                superseded_by = successor.id
+        rows.append(
+            LineageVersion(
+                id=version.id,
+                version_number=version.version_number,
+                filename=version.filename,
+                status=version.status,
+                sha256=version.sha256,
+                file_size=version.file_size,
+                is_latest=(version.version_number == latest_version_number),
+                duplicate_of_version_id=version.duplicate_of_version_id,
+                superseded_by_version_id=superseded_by,
+                ingested_at=version.created_at,
+            )
+        )
+    return LineageResponse(
+        document_id=document.id,
+        family_filename=family_filename,
+        versions=rows,
+    )
+
+
+def _build_similar_row(
+    *,
+    neighbor_id: str,
+    similarity: float,
+    catalog: DocumentService,
+) -> SimilarDocument | None:
+    """Build one :class:`SimilarDocument` row for the similar-docs response.
+
+    Returns ``None`` if the neighbor's catalog row vanished between
+    the similarity ranking and this read. The caller filters those
+    out so the wire shape stays consistent.
+
+    ``family_filename`` mirrors the lineage convention — the *latest*
+    version's filename, which is what the modal labels the row by.
+    ``latest_version_status`` deliberately reports the actual latest,
+    including ``SUPERSEDED`` if the family is in a stale state; the
+    catalog-view route is the surface that filters those out.
+    """
+    document = catalog.get_document(neighbor_id)
+    if document is None or not document.versions:
+        return None
+    latest = max(document.versions, key=lambda v: v.version_number)
+    return SimilarDocument(
+        document_id=neighbor_id,
+        family_filename=latest.filename,
+        similarity=similarity,
+        latest_version_status=latest.status,
+    )
 
 
 def _dispatch_review(
