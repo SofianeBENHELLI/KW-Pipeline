@@ -5,6 +5,7 @@ import logging
 import tempfile
 from collections.abc import Callable, Iterator
 from typing import Any, Literal
+from urllib.parse import quote as urlquote
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
@@ -756,9 +757,7 @@ def build_router(services: PipelineServices) -> APIRouter:
         render PDFs and images natively instead of forcing a download.
         """
         try:
-            version = services.documents.get_version(
-                document_id=document_id, version_id=version_id
-            )
+            version = services.documents.get_version(document_id=document_id, version_id=version_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
@@ -772,12 +771,8 @@ def build_router(services: PipelineServices) -> APIRouter:
         # the header. ``filename*`` is the modern form; the legacy
         # ``filename=`` falls back to a sanitized ASCII version.
         ascii_name = "".join(c if ord(c) < 128 else "_" for c in version.filename)
-        from urllib.parse import quote as _urlquote
-
-        encoded_name = _urlquote(version.filename, safe="")
-        disposition = (
-            f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
-        )
+        encoded_name = urlquote(version.filename, safe="")
+        disposition = f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
         return Response(
             content=payload,
             media_type=media_type,

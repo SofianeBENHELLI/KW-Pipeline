@@ -86,9 +86,7 @@ def test_get_raw_file_returns_uploaded_bytes():
     )
     version = upload_response.json()
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/raw"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/raw")
 
     assert response.status_code == 200
     assert response.content == payload
