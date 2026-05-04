@@ -16,6 +16,7 @@ from app.models.document import (
 )
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.extraction import RawExtraction
+from app.schemas.scope import Scope
 from app.schemas.semantic_document import SemanticDocument
 from app.services.migrations import _run_migrations
 from app.services.semantic_schema_loader import load_semantic_document
@@ -204,6 +205,63 @@ class CatalogStore(Protocol):
         KeyError if none exists.
         """
 
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        """Persist a ``(document_id, scope_kind, scope_ref)`` link.
+
+        Idempotent: re-adding the same triple is a no-op. The
+        first-write's ``added_at`` and ``added_by`` are preserved on
+        re-add — the audit trail records who *originally* linked the
+        document into the scope, not the most recent caller. This
+        matches the "scope link is itself an auditable event"
+        framing in ADR-020 §2.
+        """
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        """Return every :class:`Scope` row recorded for ``document_id``.
+
+        Order is insertion order so callers can show "first linked"
+        prominently if they want to. Returns an empty list when the
+        document has no scope links — including when ``document_id``
+        does not exist (the scope table is decoupled from the
+        document family for forward-compat with bulk-link routes).
+        """
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        """Return one page of documents that live in the given scope.
+
+        Documents are returned sorted by ``(created_at ASC, id ASC)``,
+        the same ordering ``list_documents`` uses, so the cursor
+        codec is shared via :func:`_encode_cursor` /
+        :func:`_decode_cursor`. The second tuple element is the
+        cursor token to feed back as ``cursor`` for the next page,
+        or ``None`` when this page is the last one.
+
+        Implementations look the (kind, ref) up via the
+        ``idx_document_scopes_lookup`` index (SQLite) or the in-memory
+        reverse index (in-memory store) and then materialise the
+        ``Document`` objects so callers don't need a second round-trip.
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
+        """
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        """Remove a single ``(document_id, scope_kind, scope_ref)`` link.
+
+        Idempotent: removing a link that doesn't exist is a no-op,
+        not an error. Added now for the future EPIC-D D.6 cascade
+        (community-deletion → unlink-every-document) so the Protocol
+        doesn't churn when that slice lands.
+        """
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -217,6 +275,14 @@ class InMemoryCatalogStore:
         # in-memory store mirrors the SQLite payload column and the loader
         # is the single boundary that yields a typed model. Per ADR-008.
         self.semantic_documents: dict[str, dict] = {}
+        # ADR-020 §1, EPIC-D D.1. Forward index keyed by document_id so
+        # ``list_scopes_for_document`` is O(1). The list ordering is
+        # preserved-on-insert so callers can show "first linked" first.
+        self.scopes_by_document: dict[str, list[Scope]] = {}
+        # Reverse index keyed by (scope_kind, scope_ref) so
+        # ``list_documents_in_scope`` is O(1) on the lookup and only
+        # the page slice does any work. The set holds document_ids.
+        self.documents_by_scope: dict[tuple[str, str], set[str]] = {}
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         return self.versions_by_hash.get(sha256)
@@ -343,6 +409,64 @@ class InMemoryCatalogStore:
             raise KeyError("Semantic output not found.")
         # Deep copy so callers can't mutate persisted state.
         return copy.deepcopy(payload)
+
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        existing = self.scopes_by_document.setdefault(document_id, [])
+        # Idempotent on (kind, ref) — first-write wins so the recorded
+        # ``added_at`` / ``added_by`` are stable for audit reads.
+        for already in existing:
+            if already.kind == scope.kind and already.ref == scope.ref:
+                return
+        existing.append(scope)
+        self.documents_by_scope.setdefault((scope.kind, scope.ref), set()).add(document_id)
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        # Return a shallow copy so callers can't mutate the persisted
+        # list. The Scope models themselves are Pydantic frozen-ish
+        # (no ``frozen=True`` config) but we don't expose the storage
+        # list directly so test mutations don't corrupt the store.
+        return list(self.scopes_by_document.get(document_id, ()))
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        document_ids = self.documents_by_scope.get((scope_kind, scope_ref), set())
+        candidates = [self.documents[d] for d in document_ids if d in self.documents]
+        ordered = sorted(candidates, key=lambda d: (d.created_at, d.id))
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            ordered = [d for d in ordered if (d.created_at, d.id) > (after_created_at, after_id)]
+        page = ordered[:limit]
+        # Emit a next cursor only when there's strictly more data behind
+        # this page; mirrors the "page short of limit signals end" rule
+        # used by ``list_documents``.
+        if len(ordered) > limit and page:
+            last = page[-1]
+            next_cursor = _encode_cursor((last.created_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        existing = self.scopes_by_document.get(document_id)
+        if existing is not None:
+            self.scopes_by_document[document_id] = [
+                s for s in existing if not (s.kind == scope_kind and s.ref == scope_ref)
+            ]
+            if not self.scopes_by_document[document_id]:
+                del self.scopes_by_document[document_id]
+        reverse = self.documents_by_scope.get((scope_kind, scope_ref))
+        if reverse is not None:
+            reverse.discard(document_id)
+            if not reverse:
+                del self.documents_by_scope[(scope_kind, scope_ref)]
 
 
 class SQLiteCatalogStore:
@@ -751,3 +875,114 @@ class SQLiteCatalogStore:
         if row is None:
             raise KeyError("Semantic output not found.")
         return json.loads(row["payload"])
+
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        # ``INSERT OR IGNORE`` makes the call idempotent on the
+        # ``(document_id, scope_kind, scope_ref)`` primary key — re-adding
+        # the same triple preserves the original ``added_at`` /
+        # ``added_by`` (first-write wins). Matches the in-memory impl.
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO document_scopes (
+                    document_id, scope_kind, scope_ref, added_at, added_by
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    scope.kind,
+                    scope.ref,
+                    scope.added_at.isoformat(),
+                    scope.added_by,
+                ),
+            )
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by
+                FROM document_scopes
+                WHERE document_id = ?
+                ORDER BY added_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
+        return [self._scope_from_row(row) for row in rows]
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # Fetch ``limit + 1`` rows so we can emit a next-cursor only when
+        # there's strictly more data behind the page. Matches the
+        # in-memory impl's "page short of limit signals end" rule.
+        clauses: list[str] = ["s.scope_kind = ?", "s.scope_ref = ?"]
+        params: list[object] = [scope_kind, scope_ref]
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            clauses.append("(d.created_at, d.id) > (?, ?)")
+            params.extend([after_created_at.isoformat(), after_id])
+        params.append(int(limit) + 1)
+        query = (
+            "SELECT d.* FROM document_scopes s "
+            "INNER JOIN documents d ON d.id = s.document_id "
+            "WHERE " + " AND ".join(clauses) + " "
+            "ORDER BY d.created_at ASC, d.id ASC "
+            "LIMIT ?"
+        )
+        with self._connect() as connection:
+            document_rows = connection.execute(query, tuple(params)).fetchall()
+            if not document_rows:
+                return [], None
+            ids = [row["id"] for row in document_rows[:limit]]
+            placeholders = ", ".join("?" for _ in ids)
+            version_rows = connection.execute(
+                f"""
+                SELECT * FROM document_versions
+                WHERE document_id IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+        versions_by_document: dict[str, list[DocumentVersion]] = {}
+        for row in version_rows:
+            version = self._version_from_row(row)
+            versions_by_document.setdefault(version.document_id, []).append(version)
+        page_rows = document_rows[:limit]
+        page = [
+            self._document_from_row(row, versions_by_document.get(row["id"], []))
+            for row in page_rows
+        ]
+        if len(document_rows) > limit and page:
+            last = page[-1]
+            next_cursor: str | None = _encode_cursor((last.created_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        # Idempotent: a non-existent row produces zero rowcount, no error.
+        with self._connect() as connection:
+            connection.execute(
+                """
+                DELETE FROM document_scopes
+                WHERE document_id = ? AND scope_kind = ? AND scope_ref = ?
+                """,
+                (document_id, scope_kind, scope_ref),
+            )
+
+    def _scope_from_row(self, row: sqlite3.Row) -> Scope:
+        return Scope(
+            kind=row["scope_kind"],
+            ref=row["scope_ref"],
+            added_at=row["added_at"],
+            added_by=row["added_by"],
+        )

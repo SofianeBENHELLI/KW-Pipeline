@@ -216,6 +216,8 @@ def _call_upload_route_directly(
     import asyncio
     import tempfile
 
+    from app.services.auth import User
+
     with tempfile.SpooledTemporaryFile(max_size=64 * 1024, mode="w+b") as backing:
         backing.write(payload)
         backing.seek(0)
@@ -224,7 +226,16 @@ def _call_upload_route_directly(
         tracemalloc.start()
         try:
             tracemalloc.reset_peak()
-            result = asyncio.run(upload_handler(file=upload, document_id=None))
+            # Pass an explicit ``current_user`` because we're calling the
+            # route handler directly (no FastAPI dep injection). The
+            # auth-resolved id is what the personal-scope default uses.
+            result = asyncio.run(
+                upload_handler(
+                    file=upload,
+                    document_id=None,
+                    current_user=User(id="test-user", role="admin"),
+                )
+            )
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
@@ -278,11 +289,19 @@ class TestUploadStreaming:
             backing.seek(0)
             upload = _ChunkedUpload("oversize.txt", "text/plain", backing)
 
+            from app.services.auth import User
+
             tracemalloc.start()
             try:
                 tracemalloc.reset_peak()
                 try:
-                    asyncio.run(upload_handler(file=upload, document_id=None))
+                    asyncio.run(
+                        upload_handler(
+                            file=upload,
+                            document_id=None,
+                            current_user=User(id="test-user", role="admin"),
+                        )
+                    )
                 except StarletteHTTPException as exc:
                     # ApiError extends Starlette's HTTPException; the
                     # specific KW_UPLOAD_TOO_LARGE code is asserted
