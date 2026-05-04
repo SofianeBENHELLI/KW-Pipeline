@@ -31,6 +31,7 @@ from app.schemas.knowledge import (
     KnowledgeGraphProjection,
 )
 from app.schemas.semantic_document import SemanticDocument
+from app.schemas.taxonomy import TaxonomyResponse
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import IdempotencyStore, hash_json_body
@@ -1036,5 +1037,29 @@ def build_router(services: PipelineServices) -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/taxonomy",
+        operation_id="get_knowledge_taxonomy",
+        response_model=TaxonomyResponse,
+    )
+    def get_knowledge_taxonomy() -> Any:
+        """Read the operator-imposed taxonomy (ADR-017).
+
+        Returns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points
+        at a YAML file the loader could parse; returns
+        ``is_configured=false`` with empty ``categories`` otherwise.
+        Never 404s — a missing taxonomy is a valid deployment state
+        (the platform falls back to auto-deduced topic clustering)
+        and the frontend uses ``is_configured`` to decide which empty
+        state to render.
+        """
+        taxonomy = services.taxonomy
+        is_configured = taxonomy is not None
+        return TaxonomyResponse(
+            is_configured=is_configured,
+            source_path=services.taxonomy_source_path,
+            categories=taxonomy.categories if taxonomy is not None else [],
+        )
 
     return router

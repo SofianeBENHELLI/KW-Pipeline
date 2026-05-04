@@ -221,6 +221,40 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Taxonomy / ontology (ADR-017). Hybrid mode — auto-deduction is
+    # the default, an operator-imposed taxonomy takes precedence when
+    # configured. Editing happens through a YAML file in v1; the admin
+    # HTTP route + KnowledgeForge UI are deferred with the auth story
+    # (#83). Both fields are empty by default so the platform ships
+    # without an opt-in.
+    # ------------------------------------------------------------------
+    taxonomy_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_TAXONOMY_PATH"),
+        description=(
+            "Filesystem path to a taxonomy YAML (ADR-017). Empty "
+            "(default) means no operator-imposed taxonomy is loaded "
+            "and the platform falls back to the auto-deduced topic "
+            "clustering. The path is read once at startup; edits "
+            "require a service restart in v1."
+        ),
+    )
+    taxonomy_cosine_threshold: float = Field(
+        default=0.55,
+        validation_alias=AliasChoices("KW_TAXONOMY_COSINE_THRESHOLD"),
+        description=(
+            "Cosine similarity floor for the embedding-based "
+            "classifier (ADR-017 §4). Chunks scoring above this "
+            "threshold are assigned to their top-1 category; below, "
+            "they fall back to the auto-deduced topic. Operators "
+            "tune per-deployment without a code change. Range "
+            "[0.0, 1.0]."
+        ),
+        ge=0.0,
+        le=1.0,
+    )
+
+    # ------------------------------------------------------------------
     # Optional spaCy NER enricher (#190). Off by default — the spaCy
     # install lives behind the ``ner`` extra so the default wheel stays
     # slim. The enricher only loads when both this flag is truthy and

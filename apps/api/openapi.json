@@ -1344,6 +1344,85 @@
         "title": "SourceReference",
         "type": "object"
       },
+      "TaxonomyCategory": {
+        "description": "One node in the taxonomy tree.\n\n``id`` is stable across runs and is what the classifier writes\nonto chunks/documents (``taxonomy_category_id``). The convention\nis dot-separated lower-snake (``hr.hybrid_work``); the id format\nis enforced at load time, not by this schema, so the wire shape\nstays permissive enough to describe a future v0.2 with different\nrules.\n\n``description`` is a free-text paragraph the classifier embeds\nonce at taxonomy-publish time and compares against chunk\nembeddings via cosine similarity. Operators write this with the\nmetier vocabulary they want to match.",
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "subcategories": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyCategory"
+            },
+            "title": "Subcategories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "subcategories"
+        ],
+        "title": "TaxonomyCategory",
+        "type": "object"
+      },
+      "TaxonomyResponse": {
+        "description": "Response shape for ``GET /knowledge/taxonomy``.\n\n``is_configured`` is ``False`` when no YAML file was found at\nthe configured path. The frontend uses it to decide whether to\nrender the auto-deduction-only state or the imposed taxonomy\ntree. ``source_path`` carries the resolved absolute path when\nconfigured, ``None`` otherwise — useful for operator debugging.\n\nThe route never returns 404: a missing taxonomy is a valid\ndeployment state, not an error.",
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "is_configured": {
+            "title": "Is Configured",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
+          }
+        },
+        "required": [
+          "schema_version",
+          "is_configured",
+          "source_path",
+          "categories"
+        ],
+        "title": "TaxonomyResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -2364,6 +2443,25 @@
           }
         },
         "summary": "Search Knowledge Chunks"
+      }
+    },
+    "/knowledge/taxonomy": {
+      "get": {
+        "description": "Read the operator-imposed taxonomy (ADR-017).\n\nReturns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points\nat a YAML file the loader could parse; returns\n``is_configured=false`` with empty ``categories`` otherwise.\nNever 404s — a missing taxonomy is a valid deployment state\n(the platform falls back to auto-deduced topic clustering)\nand the frontend uses ``is_configured`` to decide which empty\nstate to render.",
+        "operationId": "get_knowledge_taxonomy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Knowledge Taxonomy"
       }
     }
   }
