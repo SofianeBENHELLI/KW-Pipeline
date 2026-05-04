@@ -46,14 +46,9 @@ interface QueueItem {
 let _id = 0;
 const nextId = () => `q-${++_id}`;
 
-interface WebkitFile extends File {
-  webkitRelativePath?: string;
-}
-
 function relPath(file: File): string {
-  const wf = file as WebkitFile;
-  return wf.webkitRelativePath && wf.webkitRelativePath.length > 0
-    ? wf.webkitRelativePath
+  return file.webkitRelativePath && file.webkitRelativePath.length > 0
+    ? file.webkitRelativePath
     : file.name;
 }
 
