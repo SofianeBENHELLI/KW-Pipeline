@@ -131,9 +131,10 @@ The classifier reuses them:
   2. For each chunk, computes cosine similarity between the chunk
      embedding and every category's embedding.
   3. Assigns the chunk to the top-1 category if the cosine score is
-     above a configurable threshold (default `0.55`); otherwise
-     leaves the chunk unassigned (i.e. falls back to the auto-
-     deduced topic).
+     above a configurable threshold (default `0.55`, exposed as the
+     `KW_TAXONOMY_COSINE_THRESHOLD` env var; operators tune it to
+     match their corpus without a code change); otherwise leaves the
+     chunk unassigned (i.e. falls back to the auto-deduced topic).
   4. The document's `taxonomy_category_id` is the most-frequently
      assigned category among its chunks.
 
@@ -235,9 +236,10 @@ The macro decision ("hybrid") is ratified. Five sub-decisions are
    "directement l'API admin behind a token".
 4. **Opt-in re-classify** — proposed CLI / explicit. Push back:
    "auto-reclassify on YAML change".
-5. **Default cosine threshold** — proposed `0.55`. Push back:
-   "tighter (0.7)" or "looser (0.45)" — easy to tune, mostly cosmetic
-   for v1.
+5. **Default cosine threshold** — proposed `0.55`, exposed as
+   `KW_TAXONOMY_COSINE_THRESHOLD` so operators tune per-deployment
+   without a code change. Push back: "tighter (0.7)" / "looser
+   (0.45)" / a different env-var name.
 
 ## References
 
