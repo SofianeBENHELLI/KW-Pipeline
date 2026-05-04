@@ -7,6 +7,7 @@ from app.services.audit_event_store import (
     InMemoryAuditEventStore,
     SQLiteAuditEventStore,
 )
+from app.services.auth import AuthService, DisabledAuthService, build_auth_service
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
@@ -94,6 +95,12 @@ class PipelineServices:
     # the test-suite default and the SQLite store lights up only when
     # ``KW_AUDIT_ENABLED=true`` plus a persistent wiring.
     audit_events: AuditEventStore = field(default_factory=InMemoryAuditEventStore)
+    # Authentication service (ADR-019). Always present; the default is
+    # :class:`DisabledAuthService` so every existing test and demo
+    # keeps working without setting ``KW_AUTH_MODE``. ``build_services``
+    # / ``build_persistent_services`` swap in the configured impl when
+    # the env var is set.
+    auth: AuthService = field(default_factory=DisabledAuthService)
     # Operator-imposed taxonomy (ADR-017). Loaded once at startup
     # from ``KW_TAXONOMY_PATH`` (or left ``None`` when no path is
     # configured / the file is missing). The ``GET /knowledge/taxonomy``
@@ -424,6 +431,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
             graph_store=graph_store,
         ),
         audit_events=_build_audit_store(settings),
+        auth=build_auth_service(settings),
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
@@ -493,6 +501,7 @@ def build_persistent_services(
             graph_store=graph_store,
         ),
         audit_events=_build_audit_store(settings, default_dir=root),
+        auth=build_auth_service(settings),
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,

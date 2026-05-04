@@ -305,14 +305,22 @@ class DocumentService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Reviewer accepts the semantic output. Refuses transition unless the
-        version is currently in NEEDS_REVIEW."""
+        version is currently in NEEDS_REVIEW.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4); when
+        provided, the ``review.validated`` audit event records it so
+        "who validated doc X" is a SQL filter on the audit table.
+        """
         return self._record_review(
             document_id=document_id,
             version_id=version_id,
             target_status=DocumentVersionStatus.VALIDATED,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
 
     def mark_rejected(
@@ -320,14 +328,20 @@ class DocumentService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Reviewer rejects the semantic output. Refuses transition unless the
-        version is currently in NEEDS_REVIEW."""
+        version is currently in NEEDS_REVIEW.
+
+        See :meth:`mark_validated` for the ``actor`` contract.
+        """
         return self._record_review(
             document_id=document_id,
             version_id=version_id,
             target_status=DocumentVersionStatus.REJECTED,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
 
     def _record_review(
@@ -337,6 +351,7 @@ class DocumentService:
         version_id: str,
         target_status: DocumentVersionStatus,
         reviewer_note: str | None,
+        actor: str | None = None,
     ) -> DocumentVersion:
         version = self.catalog.get_version(document_id=document_id, version_id=version_id)
         if version.status != DocumentVersionStatus.NEEDS_REVIEW:
@@ -360,6 +375,7 @@ class DocumentService:
                     "document_id": document_id,
                     "version_id": version_id,
                     "reviewer_note": reviewer_note,
+                    "actor": actor,
                 },
             )
         else:
@@ -369,6 +385,7 @@ class DocumentService:
                     "document_id": document_id,
                     "version_id": version_id,
                     "reviewer_note": reviewer_note,
+                    "actor": actor,
                 },
             )
         return updated

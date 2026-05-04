@@ -147,3 +147,48 @@ class TestReviewWrongState:
         )
 
         assert response.status_code == 409
+
+
+class TestReviewActorAttribution:
+    """ADR-019 §4: validate / reject audit events carry the actor id."""
+
+    def test_dev_mode_records_actor_dev_on_validate(self, monkeypatch):
+        """With ``KW_AUTH_MODE=dev`` (default user id), the audit row
+        for a successful validation attributes the decision to ``dev``."""
+        monkeypatch.setenv("KW_AUTH_MODE", "dev")
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={},
+        )
+        assert response.status_code == 200
+
+        rows = services.audit_events.query(event_name="review.validated")
+        actors = [row.payload.get("actor") for row in rows]
+        assert "dev" in actors, (
+            f"Expected actor='dev' in review.validated audit rows, got {actors!r}."
+        )
+
+    def test_disabled_mode_records_anonymous_actor(self):
+        """Default mode (``disabled``) lands the documented
+        ``ANONYMOUS_USER_ID`` on the audit row so existing demos and
+        seeds still produce a queryable audit trail (with a clear
+        sentinel signaling no auth was configured)."""
+        from app.services.auth import ANONYMOUS_USER_ID
+
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={},
+        )
+        assert response.status_code == 200
+
+        rows = services.audit_events.query(event_name="review.validated")
+        actors = [row.payload.get("actor") for row in rows]
+        assert ANONYMOUS_USER_ID in actors
