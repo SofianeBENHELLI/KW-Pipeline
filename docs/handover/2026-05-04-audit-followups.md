@@ -59,12 +59,19 @@ the broader `main` snapshot before the audit, see
 
 ### CI flake to know about
 
-Frontend (vitest, node 22) job failed once on commit `5312717`
-(B.4, a backend-only commit) and passed on every other push. Locally
-vitest is green across 3 consecutive runs. Same pattern as the
-historical [#198](https://github.com/SofianeBENHELLI/KW-Pipeline/pull/198)
-flake. If it fires again on a frontend PR, dig into the actual
-failing test before assuming it's a flake.
+Frontend (vitest, node 22) job failed twice on this PR — once on
+commit `5312717` (B.4, backend-only) and once on `1c07c49` (this
+handover doc, no code changes). Both failures completed suspiciously
+fast (~30–37s vs the ~50s baseline for a passing run), suggesting a
+runner-level `npm ci` / network blip rather than an actual test
+failure. Locally vitest is green across 5 consecutive runs of the
+exact CI invocation (`npm ci` then `CI=true npx vitest run`):
+105/105 each time.
+
+Same pattern as the historical
+[#198](https://github.com/SofianeBENHELLI/KW-Pipeline/pull/198) flake.
+**Action when this fires:** re-run the job. Only investigate if it
+fires twice on the same head commit, or on a frontend-touching PR.
 
 ---
 
