@@ -311,23 +311,26 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------
     # Authentication (ADR-019). Three modes selected by ``KW_AUTH_MODE``:
-    # ``disabled`` (the current default — anonymous admin user, behaviour
-    # unchanged for existing tests / demos), ``dev`` (fixed identity from
-    # ``KW_AUTH_DEV_USER``), and ``bearer`` (HS256 JWT validated against
-    # ``KW_AUTH_SECRET`` — MVP scheme; production scheme is the deferred
-    # 3DEXPERIENCE context handoff). The default is intentionally
-    # ``disabled`` so this slice ships without breaking existing callers;
-    # the factory logs a loud warning at startup when that's the case.
+    # ``dev`` (default — fixed identity from ``KW_AUTH_DEV_USER``,
+    # falls back to a ``"dev"`` admin user so existing tests / demos
+    # work out of the box and the audit trail is attributed to a
+    # recognisable actor), ``disabled`` (legacy escape hatch — anonymous
+    # admin user, kept for back-compat), and ``bearer`` (HS256 JWT
+    # validated against ``KW_AUTH_SECRET`` — MVP scheme; production
+    # scheme is the deferred 3DEXPERIENCE context handoff).
     # ------------------------------------------------------------------
     auth_mode: str = Field(
-        default="disabled",
+        default="dev",
         validation_alias=AliasChoices("KW_AUTH_MODE"),
         description=(
-            "Active auth mode. One of ``disabled`` / ``dev`` / "
-            "``bearer`` (case-insensitive). Default ``disabled`` keeps "
-            "every existing test / demo / frontend call working "
-            "without setting any env var; the platform logs a loud "
-            "warning so operators notice. See ADR-019."
+            "Active auth mode. One of ``dev`` / ``disabled`` / "
+            "``bearer`` (case-insensitive). Default ``dev`` stamps a "
+            "fixed ``dev`` admin user on every request so existing "
+            "tests / demos / frontend calls keep working AND every "
+            "review decision lands a recognisable actor in the audit "
+            "table. ``disabled`` is the legacy escape hatch (anonymous "
+            "actor); ``bearer`` is the MVP signed-token mode. See "
+            "ADR-019."
         ),
     )
     auth_dev_user: str = Field(

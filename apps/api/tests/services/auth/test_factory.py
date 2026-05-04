@@ -19,17 +19,28 @@ from app.services.auth import (
 from app.settings import Settings
 
 
-def test_factory_default_returns_disabled_mode():
-    """No env var set → ``disabled`` (the documented MVP default).
+def test_factory_default_returns_dev_mode():
+    """No env var set → ``dev`` (the documented MVP default).
 
-    This is the load-bearing assertion for backward compatibility:
-    every existing test, demo seed script, and frontend call must
-    keep working without setting ``KW_AUTH_MODE``.
+    Picking ``dev`` as default keeps every existing test, demo seed
+    script, and frontend call working without setting ``KW_AUTH_MODE``,
+    AND every review decision lands a recognisable ``actor="dev"`` in
+    the audit table — strictly better than the legacy ``anonymous``
+    sentinel ``disabled`` mode used to land.
     """
     service = build_auth_service(Settings())
 
-    assert isinstance(service, DisabledAuthService)
-    assert service.name == "disabled"
+    assert isinstance(service, DevModeAuthService)
+    assert service.name == "dev"
+
+
+def test_factory_empty_mode_falls_back_to_dev():
+    """An explicitly-empty ``KW_AUTH_MODE`` (e.g. ``KW_AUTH_MODE=``)
+    should land the documented default rather than silently switching
+    behaviour."""
+    service = build_auth_service(Settings(auth_mode=""))
+
+    assert isinstance(service, DevModeAuthService)
 
 
 def test_factory_disabled_mode_is_explicit():

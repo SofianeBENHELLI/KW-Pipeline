@@ -152,10 +152,11 @@ class TestReviewWrongState:
 class TestReviewActorAttribution:
     """ADR-019 §4: validate / reject audit events carry the actor id."""
 
-    def test_dev_mode_records_actor_dev_on_validate(self, monkeypatch):
-        """With ``KW_AUTH_MODE=dev`` (default user id), the audit row
-        for a successful validation attributes the decision to ``dev``."""
-        monkeypatch.setenv("KW_AUTH_MODE", "dev")
+    def test_default_mode_records_actor_dev_on_validate(self):
+        """Default mode (``dev``, no env var set) attributes a successful
+        validation to the literal ``"dev"`` actor — picked so the
+        audit table is queryable out of the box without any operator
+        configuration."""
         services = build_services()
         client = TestClient(create_app(services=services))
         v = _drive_to_needs_review(client)
@@ -172,13 +173,33 @@ class TestReviewActorAttribution:
             f"Expected actor='dev' in review.validated audit rows, got {actors!r}."
         )
 
-    def test_disabled_mode_records_anonymous_actor(self):
-        """Default mode (``disabled``) lands the documented
-        ``ANONYMOUS_USER_ID`` on the audit row so existing demos and
-        seeds still produce a queryable audit trail (with a clear
-        sentinel signaling no auth was configured)."""
+    def test_dev_mode_with_custom_user(self, monkeypatch):
+        """``KW_AUTH_DEV_USER`` overrides the default ``"dev"`` actor."""
+        monkeypatch.setenv("KW_AUTH_MODE", "dev")
+        monkeypatch.setenv("KW_AUTH_DEV_USER", "alice")
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={},
+        )
+        assert response.status_code == 200
+
+        rows = services.audit_events.query(event_name="review.validated")
+        actors = [row.payload.get("actor") for row in rows]
+        assert "alice" in actors
+
+    def test_disabled_mode_records_anonymous_actor(self, monkeypatch):
+        """Explicit ``KW_AUTH_MODE=disabled`` (legacy escape hatch)
+        lands the documented ``ANONYMOUS_USER_ID`` on the audit row so
+        callers that still set the legacy mode produce a queryable
+        audit trail with a clear sentinel signaling no auth was
+        configured."""
         from app.services.auth import ANONYMOUS_USER_ID
 
+        monkeypatch.setenv("KW_AUTH_MODE", "disabled")
         services = build_services()
         client = TestClient(create_app(services=services))
         v = _drive_to_needs_review(client)

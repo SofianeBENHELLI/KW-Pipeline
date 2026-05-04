@@ -59,9 +59,9 @@ read once at app startup through `app.settings.Settings`.
 
 | Mode | Identity | When it's used | Audit actor |
 |---|---|---|---|
-| `disabled` | Anonymous user, role `admin` | **Current default during MVP transition.** Behaviour unchanged from pre-ADR-019: every existing test, demo, and frontend call works without setting any env var. Loud startup warning. **Will be removed** once `bearer` is the default and every write surface ships auth-aware UI. | `anonymous` |
-| `dev` | Fixed identity from `KW_AUTH_DEV_USER` (defaults to `dev`), role `admin` | Local dev / CI / demos. Lets a presenter exercise the audit path with a recognisable actor name without configuring a token. | `KW_AUTH_DEV_USER` (or `dev`) |
-| `bearer` | HS256 JWT in `Authorization: Bearer <jwt>`, validated against `KW_AUTH_SECRET` | **MVP only.** Internal service-to-service handshake (Iterop callbacks, scheduled jobs). Refuses to construct without `KW_AUTH_SECRET` so a misconfigured deployment fails at startup, not at the first 401. | `sub` claim |
+| `dev` | Fixed identity from `KW_AUTH_DEV_USER` (defaults to `dev`), role `admin` | **Current default.** Local dev / CI / demos. Keeps the out-of-the-box flow open while attributing every review decision to a recognisable actor in the audit log. Switch to `bearer` for any shared deployment. | `KW_AUTH_DEV_USER` (or `dev`) |
+| `disabled` | Anonymous user, role `admin` | **Legacy escape hatch.** Behaviour matches pre-ADR-019: every write endpoint accepts every caller and the audit row carries the `anonymous` sentinel. Kept as an explicit opt-in (`KW_AUTH_MODE=disabled`) for callers that still expect the open-API shape; loud startup warning. **Will be removed** once nothing in CI / docs / dashboards still asks for it. | `anonymous` |
+| `bearer` | HS256 JWT in `Authorization: Bearer <jwt>`, validated against `KW_AUTH_SECRET` | **MVP only.** Internal service-to-service handshake (ITEROP callbacks, scheduled jobs). Refuses to construct without `KW_AUTH_SECRET` so a misconfigured deployment fails at startup, not at the first 401. | `sub` claim |
 
 The `bearer` claim shape is `sub` (user id) + `role` (one of
 `viewer` / `contributor` / `reviewer` / `admin`) + `exp` (Unix
@@ -71,12 +71,17 @@ rejected with a generic `401 unauthorized` envelope — error messages
 are intentionally constant ("missing or invalid token") so the
 verifier doesn't leak which check failed.
 
-`disabled` is the current default to preserve backward compatibility.
-Every existing test, demo seed script, and frontend call must keep
-working without setting `KW_AUTH_MODE`. The factory logs
-`auth.mode_selected` at startup with a remediation hint pointing at
-this ADR so an operator who deployed without flipping the mode does
-not silently keep an open API.
+`dev` is the current default. Every existing test, demo seed script,
+and frontend call keeps working without setting `KW_AUTH_MODE`, AND
+every review decision lands a recognisable `actor="dev"` in the audit
+log instead of the legacy `anonymous` sentinel. The factory logs
+`auth.mode_selected` at startup so an operator who left the default in
+a shared environment notices the MVP-grade identity layer.
+
+`disabled` remains available as a legacy escape hatch via an explicit
+`KW_AUTH_MODE=disabled` opt-in. Picking it loudly logs
+`auth.mode_selected` with a remediation hint pointing at this ADR so
+an operator who set it does not silently keep an open API.
 
 ### 2. Implementation — stdlib HS256, no PyJWT
 
@@ -206,10 +211,13 @@ work) — the same physical platform docs unblock both ADRs.
   shared secret model does not survive a browser deployment. The
   ADR documents this explicitly; the production path is the 3DX
   handoff (deferred).
-- **Three-mode complexity.** Operators must pick a mode; an unset
-  env var defaults to `disabled` (open API) which the factory
-  flags loudly at startup. This is intentional for the MVP
-  transition but not a desirable long-term shape.
+- **Three-mode complexity.** Operators have to understand three
+  modes. An unset env var defaults to `dev` (fixed dev admin user)
+  which is safe for local but not for shared deployments — the
+  factory logs `auth.mode_selected` at startup so operators notice.
+  `disabled` (open API) remains as an explicit escape hatch and the
+  long-term shape collapses back to one or two modes once `bearer`
+  (or its 3DX successor) is wired everywhere.
 - **One more env-var-scoped secret.** `KW_AUTH_SECRET` joins
   `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` in the deployment
   surface.
@@ -256,7 +264,7 @@ no-progress option.
 - [#215](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/215) —
   EPIC-A (HITL routing). The HITL router will read `User` to drive its decision-routing.
 - [#216](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/216) —
-  EPIC-B (external review systems / Iterop). Relies on the bearer mode for callback authentication.
+  EPIC-B (external review systems / ITEROP). Relies on the bearer mode for callback authentication.
 - [#218](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/218) —
   EPIC-D (multi-scope). Relies on `User.id` for the `personal:<user_id>` scope auto-creation; the workspace ADR (ADR-020) will pick up the tenant key from the same `User`.
 - [ADR-013](ADR-013-llm-provider-and-no-langchain.md) — Protocol-behind-a-factory shape this ADR mirrors.

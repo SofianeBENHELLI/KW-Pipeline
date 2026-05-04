@@ -1,8 +1,10 @@
 """Authentication scaffold (ADR-019).
 
-Three operating modes selected by ``KW_AUTH_MODE``: ``disabled`` (the
-current default — anonymous admin user, behaviour unchanged),
-``dev`` (fixed identity for local dev / CI / demos), and ``bearer``
+Three operating modes selected by ``KW_AUTH_MODE``: ``dev`` (the
+default — fixed ``"dev"`` admin user from ``KW_AUTH_DEV_USER``, keeps
+the out-of-the-box demo flow open while attributing every review
+decision to a recognisable actor), ``disabled`` (legacy escape hatch —
+anonymous admin user, behaviour matches pre-ADR-019), and ``bearer``
 (HS256 JWT, MVP only — production scheme is the deferred 3DX
 context handoff).
 

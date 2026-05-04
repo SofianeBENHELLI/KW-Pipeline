@@ -2,10 +2,13 @@
 
 ADR-019 §2 defines three modes:
 
-- ``disabled`` (default): :class:`DisabledAuthService` — anonymous
-  user with ``admin`` role, behaviour unchanged from pre-ADR-019.
-- ``dev``: :class:`DevModeAuthService` — fixed identity from
-  ``KW_AUTH_DEV_USER``.
+- ``dev`` (default): :class:`DevModeAuthService` — fixed identity from
+  ``KW_AUTH_DEV_USER`` (falls back to a ``"dev"`` admin user). Keeps
+  the out-of-the-box demo flow open while attributing every review
+  decision to a recognisable actor in the audit log.
+- ``disabled``: :class:`DisabledAuthService` — anonymous user with
+  ``admin`` role. Legacy escape hatch for callers that have not yet
+  migrated; loud startup warning.
 - ``bearer``: :class:`BearerJWTAuthService` — HS256 JWT validated
   against ``KW_AUTH_SECRET``.
 
@@ -39,7 +42,7 @@ def build_auth_service(settings: Settings | None = None) -> AuthService:
     leave an open API.
     """
     settings = settings or Settings()
-    mode = settings.auth_mode.strip().lower() or "disabled"
+    mode = settings.auth_mode.strip().lower() or "dev"
 
     if mode == "disabled":
         log.warning(

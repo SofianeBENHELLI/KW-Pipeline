@@ -1,19 +1,20 @@
-"""``DisabledAuthService`` — current default for backward compatibility.
+"""``DisabledAuthService`` — legacy escape hatch for back-compat.
 
 ADR-019 §2 defines three operating modes:
 
+- ``dev`` (default) — fixed identity from ``KW_AUTH_DEV_USER``. See
+  :mod:`app.services.auth.dev_mode`.
 - ``disabled`` (this module) — anonymous user with ``admin`` role.
-  Behaviour is unchanged from pre-ADR-019: every existing test, demo
-  seed script, and frontend call works without setting any env var.
-  This mode is the default during the MVP transition and will be
-  removed once ``bearer`` is the default and every write surface ships
-  auth-aware UI.
-- ``dev`` — see :mod:`app.services.auth.dev_mode`.
+  Behaviour matches pre-ADR-019: every write endpoint accepts every
+  caller. Kept as an explicit opt-in for callers that haven't yet
+  switched to ``dev`` or ``bearer``; it will be removed once nothing
+  in CI / docs / dashboards still asks for it.
 - ``bearer`` — see :mod:`app.services.auth.bearer`.
 
 The service emits a single startup-style warning the first time
-``authenticate`` runs so an operator who deployed without flipping the
-mode does not silently keep an open API.
+``authenticate`` runs so an operator who explicitly opted into
+``disabled`` (or whose tooling still sets it) does not silently keep
+an open API.
 """
 
 from __future__ import annotations
@@ -35,9 +36,9 @@ class DisabledAuthService:
     """No-op auth: every request is the same anonymous admin user.
 
     Returned by :func:`app.services.auth.factory.build_auth_service`
-    when ``KW_AUTH_MODE`` is unset or ``"disabled"`` (the current
-    default). ``admin`` is the role to keep parity with today's
-    behaviour where every endpoint is open.
+    when ``KW_AUTH_MODE="disabled"`` is explicitly set (legacy escape
+    hatch). ``admin`` is the role to keep parity with pre-ADR-019
+    behaviour where every endpoint was open.
     """
 
     name: str = "disabled"
