@@ -169,6 +169,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/versions/{version_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Raw File
+         * @description Stream the originally-uploaded binary back to the caller.
+         *
+         *     Powers the Knowledge Explorer's per-type viewers (PDF/DOCX/PPTX/
+         *     text/wiki). The Content-Type mirrors what the uploader declared
+         *     at ingest time, and ``Content-Disposition: inline`` lets browsers
+         *     render PDFs and images natively instead of forcing a download.
+         */
+        get: operations["get_raw_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/reject": {
         parameters: {
             query?: never;
@@ -1101,6 +1126,46 @@ export interface operations {
                     "application/json": unknown;
                     "text/markdown": string;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_raw_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Original uploaded binary for the version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Document or version not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

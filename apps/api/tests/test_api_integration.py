@@ -77,6 +77,35 @@ def test_upload_catalog_detail_extract_and_semantic_flow():
     assert get_markdown_response.text == semantic["markdown"]
 
 
+def test_get_raw_file_returns_uploaded_bytes():
+    client = TestClient(create_app())
+    payload = b"Policy title\nReview required"
+    upload_response = client.post(
+        "/documents/upload",
+        files={"file": ("policy.txt", payload, "text/plain")},
+    )
+    version = upload_response.json()
+
+    response = client.get(
+        f"/documents/{version['document_id']}/versions/{version['id']}/raw"
+    )
+
+    assert response.status_code == 200
+    assert response.content == payload
+    assert response.headers["content-type"].startswith("text/plain")
+    disposition = response.headers["content-disposition"]
+    assert "inline" in disposition
+    assert "policy.txt" in disposition
+
+
+def test_get_raw_file_returns_404_for_missing_version():
+    client = TestClient(create_app())
+
+    response = client.get("/documents/missing/versions/missing/raw")
+
+    assert response.status_code == 404
+
+
 def test_get_extraction_returns_404_before_extraction():
     client = TestClient(create_app())
     version = client.post(
