@@ -246,17 +246,14 @@ class ReviewService:
         if document is None:
             return
 
-        prior_validated = None
-        for sibling in document.versions:
-            if sibling.id == new_version_id:
-                continue
-            if sibling.status != DocumentVersionStatus.VALIDATED:
-                continue
-            if prior_validated is None or sibling.version_number > prior_validated.version_number:
-                prior_validated = sibling
-
-        if prior_validated is None:
+        candidates = [
+            sibling
+            for sibling in document.versions
+            if sibling.id != new_version_id and sibling.status == DocumentVersionStatus.VALIDATED
+        ]
+        if not candidates:
             return
+        prior_validated = max(candidates, key=lambda v: v.version_number)
 
         try:
             self._documents.mark_superseded(
