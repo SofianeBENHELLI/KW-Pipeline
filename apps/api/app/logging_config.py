@@ -157,3 +157,30 @@ def configure_logging(settings: Settings) -> None:
     if not isinstance(level, int):
         level = logging.INFO
     root.setLevel(level)
+
+
+# ─── Audit handler wiring (#26 residual) ─────────────────────────────────
+
+# Marker so :func:`install_audit_handler` can identify and remove any
+# previous handler it installed before attaching a fresh one. Same
+# pattern as ``_HARVESTER_HANDLER_FLAG`` for the structured-log
+# handler — keep idempotency semantics consistent.
+_AUDIT_HANDLER_FLAG = "_harvester_audit_handler"
+
+
+def install_audit_handler(store: Any) -> None:
+    """Attach an :class:`AuditLogHandler` writing into ``store``.
+
+    Imported lazily so this module doesn't pull the audit-store
+    dependency just to configure formatting. Idempotent: any handler
+    previously installed by this function is removed first.
+    """
+    from app.services.audit_log_handler import AuditLogHandler  # noqa: PLC0415
+
+    root = logging.getLogger()
+    for existing in list(root.handlers):
+        if getattr(existing, _AUDIT_HANDLER_FLAG, False):
+            root.removeHandler(existing)
+    handler = AuditLogHandler(store)
+    setattr(handler, _AUDIT_HANDLER_FLAG, True)
+    root.addHandler(handler)

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.services.audit_event_store import (
+    AuditEventStore,
+    InMemoryAuditEventStore,
+    SQLiteAuditEventStore,
+)
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
@@ -72,6 +77,11 @@ class PipelineServices:
     # returns 503.
     embedding_client: EmbeddingClient | None = None
     knowledge_search: KnowledgeSearchService | None = None
+    # Audit event store (#26 residual). Always present so the
+    # logging-handler wiring is unconditional; the in-memory fake is
+    # the test-suite default and the SQLite store lights up only when
+    # ``KW_AUDIT_ENABLED=true`` plus a persistent wiring.
+    audit_events: AuditEventStore = field(default_factory=InMemoryAuditEventStore)
     # Snapshot of the typed settings used to construct this container
     # (issue #43). Routes read settings *fresh per request* via
     # ``Settings()`` so per-test ``monkeypatch.setenv`` is observable;
@@ -79,6 +89,35 @@ class PipelineServices:
     # programmatically-constructed Settings) can be threaded through
     # ``build_services(settings=...)``.
     settings: Settings = field(default_factory=Settings)
+
+
+def _build_audit_store(
+    settings: Settings,
+    *,
+    default_dir: Path | None = None,
+) -> AuditEventStore:
+    """Pick the audit-event store for this wiring (#26 residual).
+
+    Returns :class:`SQLiteAuditEventStore` when ``KW_AUDIT_ENABLED`` is
+    truthy and the path can be resolved (explicit ``KW_AUDIT_DB_PATH``
+    or, for persistent services, ``<data_dir>/audit.sqlite3``). Falls
+    back to :class:`InMemoryAuditEventStore` otherwise — that's the
+    in-memory test default and the "audit explicitly disabled in
+    persistent" deployment shape.
+    """
+    if not settings.audit_enabled:
+        return InMemoryAuditEventStore()
+    explicit = settings.audit_db_path.strip()
+    if explicit:
+        return SQLiteAuditEventStore(Path(explicit))
+    if default_dir is not None:
+        return SQLiteAuditEventStore(default_dir / "audit.sqlite3")
+    # Truthy flag + no path + no default dir (i.e. ``build_services``
+    # called from the in-memory factory). Fall back to in-memory so the
+    # configured event vocabulary still flows but isn't persisted; the
+    # operator's likely intent was to enable persistent audit, which
+    # requires the persistent factory.
+    return InMemoryAuditEventStore()
 
 
 def _build_parser_registry() -> ParserRegistry:
@@ -253,6 +292,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         entity_extractor=_maybe_build_entity_extractor(settings),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        audit_events=_build_audit_store(settings),
         settings=settings,
     )
 
@@ -307,5 +347,6 @@ def build_persistent_services(
         entity_extractor=_maybe_build_entity_extractor(settings),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        audit_events=_build_audit_store(settings, default_dir=root),
         settings=settings,
     )
