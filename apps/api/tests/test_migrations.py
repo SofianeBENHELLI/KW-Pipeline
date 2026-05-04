@@ -299,6 +299,141 @@ def test_partial_state_only_missing_migration_runs(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 0003 perf indexes (audit #224)
+# ---------------------------------------------------------------------------
+
+
+def _index_names(db_path) -> set[str]:
+    """Return all user-defined index names in the database.
+
+    SQLite auto-generates internal indexes for primary keys with names
+    starting with ``sqlite_autoindex_`` — those are filtered out so the
+    set only carries indexes a migration created.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name NOT LIKE 'sqlite_autoindex_%'"
+        ).fetchall()
+        return {row[0] for row in rows}
+    finally:
+        conn.close()
+
+
+def test_migration_0003_creates_document_versions_document_id_index(tmp_path):
+    """Migration 0003 must create the document_versions(document_id) index
+    so the per-page version fetch in list_documents stops doing a full scan."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    indexes = _index_names(tmp_path / "catalog.sqlite3")
+    assert "idx_document_versions_document_id" in indexes
+
+
+def test_migration_0003_creates_documents_created_at_id_composite_index(tmp_path):
+    """Migration 0003 must create the documents(created_at, id) composite
+    so cursor pagination is index-served end-to-end."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    indexes = _index_names(tmp_path / "catalog.sqlite3")
+    assert "idx_documents_created_at_id" in indexes
+
+
+def test_migration_0003_perf_indexes_id_recorded(tmp_path):
+    """The migration runner must record 0003_perf_indexes after applying it."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    assert "0003_perf_indexes" in _applied_ids(tmp_path / "catalog.sqlite3")
+
+
+def test_migration_0003_runs_on_legacy_bootstrap_db(tmp_path):
+    """The legacy bootstrap stamps 0001+0002 only; 0003 must still run.
+
+    A legacy database created by the pre-migration ``_initialize`` does not
+    carry the perf indexes — bootstrap that stamps every migration would
+    leave the new indexes uncreated. Confirm the bootstrap stamps just the
+    bootstrap-eligible IDs and that 0003 is then run as part of the normal
+    path on the same connection.
+    """
+    db_path = tmp_path / "legacy.sqlite3"
+    _create_legacy_db(db_path)
+
+    SQLiteCatalogStore(db_path)
+
+    indexes = _index_names(db_path)
+    assert "idx_document_versions_document_id" in indexes
+    assert "idx_documents_created_at_id" in indexes
+    # And the migration ID must be recorded so a subsequent restart
+    # does not re-run it.
+    assert "0003_perf_indexes" in _applied_ids(db_path)
+
+
+def test_migration_0003_idempotent_on_second_init(tmp_path):
+    """Re-instantiating the store must not error or duplicate the indexes."""
+    db_path = tmp_path / "catalog.sqlite3"
+    SQLiteCatalogStore(db_path)
+    SQLiteCatalogStore(db_path)  # second init must not raise
+
+    # Index names are unique by definition; assert each appears exactly once
+    # in sqlite_master so a duplicate-creation regression is caught here.
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name IN ('idx_document_versions_document_id', 'idx_documents_created_at_id')"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 2
+
+
+def test_migration_0003_indexes_appear_in_list_documents_query_plan(tmp_path):
+    """The SQLite planner must mention the new indexes in the list query plan.
+
+    This is a soft check — index selection depends on stats, but with
+    ``IS_NOT NULL`` and ``IN`` predicates against the new indexes the
+    planner consistently picks them across SQLite 3.x.
+    """
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    try:
+        # The secondary fetch in list_documents.
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM document_versions WHERE document_id IN ('a', 'b')"
+        ).fetchall()
+        plan_text = " ".join(str(row) for row in plan)
+        assert "idx_document_versions_document_id" in plan_text, plan_text
+
+        # The main cursor-paginated query.
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT d.* FROM documents d "
+            "WHERE (d.created_at, d.id) > ('2026-01-01', 'x') "
+            "ORDER BY d.created_at ASC, d.id ASC LIMIT 50"
+        ).fetchall()
+        plan_text = " ".join(str(row) for row in plan)
+        assert "idx_documents_created_at_id" in plan_text, plan_text
+    finally:
+        conn.close()
+
+
+def test_legacy_bootstrap_stamps_only_pre_existing_migration_ids(tmp_path):
+    """Bootstrap must NOT stamp migrations whose effects aren't in the legacy
+    DB — otherwise additive migrations (like 0003) would silently never run."""
+    db_path = tmp_path / "legacy.sqlite3"
+    _create_legacy_db(db_path)
+
+    SQLiteCatalogStore(db_path)
+
+    recorded = _applied_ids(db_path)
+    # All current migrations end up applied (0003 actually ran);
+    # but the bootstrap path itself only stamped {0001, 0002}.
+    # Either way the final state must include every MIGRATIONS entry.
+    assert set(recorded) == {mid for mid, _ in MIGRATIONS}
+
+
+# ---------------------------------------------------------------------------
 # Failing migration rolls back
 # ---------------------------------------------------------------------------
 

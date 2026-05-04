@@ -125,6 +125,31 @@ def _migrate_0002_add_review_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT")
 
 
+def _migrate_0003_perf_indexes(conn: sqlite3.Connection) -> None:
+    """Add indexes on hot read paths uncovered by the 2026-05-04 audit (#224).
+
+    1. ``idx_document_versions_document_id`` — the ``list_documents`` page
+       fetches versions for the returned slice via
+       ``WHERE document_id IN (...)``. Without this index that secondary
+       query scans the full ``document_versions`` table on every page.
+    2. ``idx_documents_created_at_id`` — cursor pagination orders by
+       ``(d.created_at, d.id)`` and predicates the cursor as
+       ``(d.created_at, d.id) > (?, ?)``. The composite covers both the
+       sort and the cursor predicate so the planner can serve pages
+       directly from the index.
+
+    Both indexes use ``IF NOT EXISTS`` so re-running this migration on a
+    database where the indexes were created out-of-band is safe.
+    """
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_versions_document_id "
+        "ON document_versions (document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_created_at_id ON documents (created_at, id)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ordered registry — append only, never renumber
 # ---------------------------------------------------------------------------
@@ -132,12 +157,26 @@ def _migrate_0002_add_review_columns(conn: sqlite3.Connection) -> None:
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
+    ("0003_perf_indexes", _migrate_0003_perf_indexes),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
-# Used by the bootstrap detection to decide whether to stamp all migrations
-# without running them.
+# Used by the bootstrap detection to decide whether to stamp the
+# bootstrap-eligible migrations without running them.
 _LEGACY_TABLES = frozenset({"documents", "document_versions"})
+
+# Migrations whose effects are guaranteed to already be present in any DB
+# that triggers the legacy bootstrap path (i.e. the original ``_initialize``
+# created these structures). New migrations added after the bootstrap rule
+# was written must NOT be added here — they need to actually run on legacy
+# databases too. Per audit #224, the perf indexes (0003) are intentionally
+# not bootstrap-eligible because they did not exist before this commit.
+_BOOTSTRAP_STAMPED_MIGRATION_IDS = frozenset(
+    {
+        "0001_initial",
+        "0002_add_review_columns",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +217,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
     # --- Backwards-compatibility bootstrap --------------------------------
     # If schema_migrations is empty but the legacy tables already exist,
-    # stamp all current migrations as applied without running their callables.
-    # This adopts existing on-disk databases without touching their data.
+    # stamp the migrations whose effects are known to already be present
+    # (``_BOOTSTRAP_STAMPED_MIGRATION_IDS``) without running their callables.
+    # Any later migration drops through to the normal path so it actually
+    # runs on the legacy database — required for additive migrations like
+    # the perf indexes added by 0003 (audit #224).
     if not applied:
         existing_tables = {
             row[0]
@@ -189,9 +231,13 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             now = datetime.now(UTC).isoformat()
             conn.executemany(
                 "INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)",
-                [(migration_id, now) for migration_id, _ in MIGRATIONS],
+                [
+                    (migration_id, now)
+                    for migration_id, _ in MIGRATIONS
+                    if migration_id in _BOOTSTRAP_STAMPED_MIGRATION_IDS
+                ],
             )
-            return
+            applied = set(_BOOTSTRAP_STAMPED_MIGRATION_IDS)
 
     # --- Normal path: run unapplied migrations in order -------------------
     for migration_id, migrate_fn in MIGRATIONS:
