@@ -52,19 +52,26 @@ LEGAL_TRANSITIONS: list[tuple[DocumentVersionStatus, DocumentVersionStatus]] = [
     (DocumentVersionStatus.NEEDS_REVIEW, DocumentVersionStatus.REJECTED),
     # The retry-extraction edge introduced by #87.
     (DocumentVersionStatus.FAILED, DocumentVersionStatus.EXTRACTING),
+    # ADR-025: VALIDATED → SUPERSEDED, fired automatically by
+    # ``ReviewService.handle_validation`` when a newer sibling
+    # validates. ``SUPERSEDED`` itself is fully terminal.
+    (DocumentVersionStatus.VALIDATED, DocumentVersionStatus.SUPERSEDED),
 ]
 
 # Truly-terminal states — once reached, no outgoing transitions exist.
 # ``FAILED`` is intentionally NOT here: issue #87 added a controlled
 # ``FAILED → EXTRACTING`` edge for the retry-extraction surface. The
 # transition is exercised separately in
-# :class:`TestFailedRetryTransition` below; the review-gate states
-# (``VALIDATED``, ``REJECTED``) and ``DUPLICATE_DETECTED`` remain
-# fully terminal.
+# :class:`TestFailedRetryTransition` below.
+# ``VALIDATED`` is also intentionally NOT here: ADR-025 added a
+# controlled ``VALIDATED → SUPERSEDED`` edge fired automatically by
+# the review service when a newer sibling validates. The other
+# review-gate state (``REJECTED``), ``DUPLICATE_DETECTED``, and the
+# new ADR-025 terminal ``SUPERSEDED`` remain fully terminal.
 TERMINAL_STATES: list[DocumentVersionStatus] = [
     DocumentVersionStatus.DUPLICATE_DETECTED,
-    DocumentVersionStatus.VALIDATED,
     DocumentVersionStatus.REJECTED,
+    DocumentVersionStatus.SUPERSEDED,
 ]
 
 

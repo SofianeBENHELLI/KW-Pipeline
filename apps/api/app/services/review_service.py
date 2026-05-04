@@ -195,6 +195,17 @@ class ReviewService:
         )
 
         if decision == "validated":
+            # ADR-025: auto-transition the most recent prior VALIDATED
+            # sibling (if any) to SUPERSEDED so catalog consumers see
+            # only the latest validated version per family. Runs after
+            # the catalog write that landed the new VALIDATED row, with
+            # fire-and-log discipline (ADR-012): a supersede failure is
+            # logged but never rolls the validation back.
+            self._maybe_supersede_prior_validated(
+                document_id=document_id,
+                new_version_id=version_id,
+                actor=actor,
+            )
             self._fire_knowledge_layer_side_effects(
                 document_id=document_id,
                 version=version,
@@ -202,6 +213,64 @@ class ReviewService:
             )
 
         return result
+
+    def _maybe_supersede_prior_validated(
+        self,
+        *,
+        document_id: str,
+        new_version_id: str,
+        actor: str | None,
+    ) -> None:
+        """Find the most recent prior VALIDATED sibling and mark it SUPERSEDED.
+
+        Idempotent / no-op when:
+        - the document family cannot be loaded (defensive);
+        - there is no prior VALIDATED version (first validation of the
+          family);
+        - the prior VALIDATED is the version we just validated (race
+          shouldn't happen, but the explicit skip keeps the contract
+          obvious).
+
+        Errors during the supersede transition are caught and logged —
+        the validation MUST stay durable even if the supersede write
+        fails (ADR-012 fire-and-log).
+        """
+        try:
+            document = self._documents.get_document(document_id)
+        except Exception:
+            log.exception(
+                "version.supersede.lookup_failed",
+                extra={"document_id": document_id, "version_id": new_version_id},
+            )
+            return
+        if document is None:
+            return
+
+        candidates = [
+            sibling
+            for sibling in document.versions
+            if sibling.id != new_version_id and sibling.status == DocumentVersionStatus.VALIDATED
+        ]
+        if not candidates:
+            return
+        prior_validated = max(candidates, key=lambda v: v.version_number)
+
+        try:
+            self._documents.mark_superseded(
+                document_id=document_id,
+                version_id=prior_validated.id,
+                actor=actor,
+                superseded_by_version_id=new_version_id,
+            )
+        except Exception:
+            log.exception(
+                "version.supersede.failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": prior_validated.id,
+                    "superseded_by_version_id": new_version_id,
+                },
+            )
 
     def _fire_knowledge_layer_side_effects(
         self,

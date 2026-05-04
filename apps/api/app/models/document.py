@@ -13,18 +13,29 @@ class DocumentVersionStatus(StrEnum):
     VALIDATED = "VALIDATED"
     REJECTED = "REJECTED"
     FAILED = "FAILED"
+    # ADR-025: terminal status assigned to a previously-validated version
+    # when a newer version of the same document family is validated.
+    # ``SUPERSEDED`` is filtered out by catalog/search/chat consumers but
+    # remains visible to the audit/Orbital surfaces so the version
+    # history is preserved.
+    SUPERSEDED = "SUPERSEDED"
 
 
 # Lifecycle FSM for a DocumentVersion. Maps each state to the set of states
 # it is allowed to transition to. Terminal states (DUPLICATE_DETECTED,
-# VALIDATED, REJECTED) map to the empty set — once reached, a version is
+# REJECTED, SUPERSEDED) map to the empty set — once reached, a version is
 # frozen.
+#
+# ``VALIDATED`` is mostly terminal but has a single outgoing edge to
+# ``SUPERSEDED`` — fired by ``ReviewService.handle_validation`` when a
+# newer sibling version is validated (ADR-025). No other path may
+# transition out of ``VALIDATED``.
 #
 # ``FAILED`` is *not* fully terminal: it allows a single ``FAILED →
 # EXTRACTING`` edge so a reviewer can retry extraction after the
 # underlying issue (missing parser, transient infra error, bad config)
-# is fixed (#87). Validated and rejected versions stay frozen — retry
-# never bypasses the review gate.
+# is fixed (#87). Validated, rejected, and superseded versions stay
+# frozen — retry never bypasses the review gate.
 #
 # ``UPLOADED`` and ``HASHED`` are defensive entries: not every flow walks
 # through them today, but if a future ingestion path does, the only
@@ -56,8 +67,10 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
         {DocumentVersionStatus.VALIDATED, DocumentVersionStatus.REJECTED}
     ),
     DocumentVersionStatus.DUPLICATE_DETECTED: frozenset(),
-    DocumentVersionStatus.VALIDATED: frozenset(),
+    # ADR-025: VALIDATED → SUPERSEDED is the only legal exit edge.
+    DocumentVersionStatus.VALIDATED: frozenset({DocumentVersionStatus.SUPERSEDED}),
     DocumentVersionStatus.REJECTED: frozenset(),
+    DocumentVersionStatus.SUPERSEDED: frozenset(),
     DocumentVersionStatus.FAILED: frozenset({DocumentVersionStatus.EXTRACTING}),
 }
 
