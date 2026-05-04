@@ -11,8 +11,10 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { TaxonomyResponse } from "../api/types";
 import {
   SAMPLE_SNAPSHOT,
+  adaptTaxonomy,
   chunkById,
   chunksForConcept,
   chunksForDoc,
@@ -66,5 +68,55 @@ describe("explorer-data lookup helpers", () => {
     // UI silently in production.
     expect(chunksForDoc(SAMPLE_SNAPSHOT, "nope")).toEqual([]);
     expect(chunksForConcept(SAMPLE_SNAPSHOT, "nope")).toEqual([]);
+  });
+});
+
+describe("adaptTaxonomy — source flag flows through from the API (#249)", () => {
+  it("propagates each category's source verbatim to the cluster meta", () => {
+    const response: TaxonomyResponse = {
+      schema_version: "v0.1",
+      is_configured: true,
+      source_path: "/etc/kw/taxonomy.yml",
+      categories: [
+        {
+          id: "hr",
+          label: "HR",
+          description: "Operator-authored HR.",
+          subcategories: [],
+          source: "imposed",
+        },
+        {
+          id: "topic-cluster-42",
+          label: "Compliance memos",
+          description: "Auto-deduced.",
+          subcategories: [],
+          source: "computed",
+        },
+      ],
+    };
+    const { clusters } = adaptTaxonomy(response);
+    expect(clusters.hr.source).toBe("imposed");
+    expect(clusters["topic-cluster-42"].source).toBe("computed");
+  });
+
+  it("treats a missing source field as 'computed' (forward-compat fallback)", () => {
+    // Older API builds that haven't shipped the #249 ``source`` field
+    // yet still flow through; we default the badge to "auto" rather
+    // than mislabel an unknown cluster as operator-owned.
+    const response: TaxonomyResponse = {
+      schema_version: "v0.1",
+      is_configured: true,
+      source_path: null,
+      categories: [
+        {
+          id: "legacy",
+          label: "Legacy",
+          description: "Pre-#249 server.",
+          subcategories: [],
+        },
+      ],
+    };
+    const { clusters } = adaptTaxonomy(response);
+    expect(clusters.legacy.source).toBe("computed");
   });
 });

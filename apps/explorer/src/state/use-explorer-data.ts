@@ -175,17 +175,20 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
 
         // Build the per-snapshot cluster catalogue.
         //
-        //   1. If the operator authored a taxonomy, every category id
-        //      becomes an "imposed" cluster. The seed CLUSTERS dict is
-        //      ignored — the taxonomy is the source of truth.
+        //   1. If the API returned a configured taxonomy, every
+        //      category becomes a cluster. The category's
+        //      ``source`` (imposed | computed) flows straight through
+        //      from the backend (#249) — the Explorer no longer
+        //      derives source client-side, the API owns the merge.
+        //      The seed CLUSTERS dict is ignored in this branch
+        //      because the taxonomy is the source of truth.
         //   2. Otherwise, start from the seed CLUSTERS dict (for the
         //      stable sample-corpus colours) marked as "computed".
         //   3. Either way, walk the live documents and add a
         //      "computed" entry for any cluster id we haven't seen yet
-        //      (auto-deduced from topic clustering / document profile).
-        //      We never overwrite an imposed entry — an operator-named
-        //      category that happens to share an id with a topic is the
-        //      authoritative definition.
+        //      (e.g. a doc tagged to a category the topic-clustering
+        //      didn't surface). We never overwrite an entry from the
+        //      taxonomy — that came from the authoritative merge.
         //
         // Important: we no longer mutate the module-level CLUSTERS
         // dict. That used to leak across refreshes and across tests;
@@ -193,8 +196,6 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
         const taxonomyAdapter = adaptTaxonomy(taxonomy);
         const clusters: Record<string, ClusterMeta> = {};
         if (Object.keys(taxonomyAdapter.clusters).length > 0) {
-          // Imposed taxonomy wins — only operator-authored ids appear
-          // in the rail.
           for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
             clusters[id] = meta;
           }

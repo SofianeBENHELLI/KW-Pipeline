@@ -539,15 +539,32 @@ export interface paths {
         };
         /**
          * Get Knowledge Taxonomy
-         * @description Read the operator-imposed taxonomy (ADR-017).
+         * @description Read the hybrid taxonomy (ADR-017, #249).
          *
-         *     Returns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points
-         *     at a YAML file the loader could parse; returns
-         *     ``is_configured=false`` with empty ``categories`` otherwise.
-         *     Never 404s — a missing taxonomy is a valid deployment state
-         *     (the platform falls back to auto-deduced topic clustering)
-         *     and the frontend uses ``is_configured`` to decide which empty
-         *     state to render.
+         *     The response merges two halves under one ``categories`` list:
+         *
+         *     * **Imposed** — categories parsed out of the operator-authored
+         *       YAML at ``KW_TAXONOMY_PATH``. Each one is tagged
+         *       ``source="imposed"`` by the loader.
+         *     * **Computed** — categories synthesised from the topic-
+         *       clustering output the projector wrote into the graph store
+         *       (one ``topic`` node per cluster). Each one is tagged
+         *       ``source="computed"``.
+         *
+         *     **Merge rule:** dedupe by ``id``; **imposed wins on conflict**.
+         *     That is, if the YAML defines ``id="hr"`` and a topic cluster
+         *     also happens to land on ``id="hr"``, the operator's definition
+         *     is the one that flows out — operators get the final say over
+         *     what the catalog calls a category. The computed entry is
+         *     dropped in that case (we do not merge labels / descriptions
+         *     across sources).
+         *
+         *     ``is_configured`` is ``true`` when **either** half has at
+         *     least one category — an operator with no YAML but a populated
+         *     topic-clustering output still gets a configured response.
+         *     Only an entirely empty result (no YAML, no topic clusters)
+         *     returns ``is_configured=false`` with an empty list. Never
+         *     404s — a missing taxonomy is a valid deployment state.
          */
         get: operations["get_knowledge_taxonomy"];
         put?: never;
@@ -1450,6 +1467,15 @@ export interface components {
          *     once at taxonomy-publish time and compares against chunk
          *     embeddings via cosine similarity. Operators write this with the
          *     metier vocabulary they want to match.
+         *
+         *     ``source`` records which half of the hybrid taxonomy this
+         *     category came from (#249, ADR-017): ``"imposed"`` for nodes
+         *     parsed out of the operator-authored YAML, ``"computed"`` for
+         *     nodes auto-deduced from topic clustering on the corpus. The
+         *     field defaults to ``"imposed"`` because the YAML loader is the
+         *     dominant call site and that path always sets it; the route
+         *     layer overrides to ``"computed"`` when synthesising entries
+         *     from the topic-clustering output.
          */
         TaxonomyCategory: {
             /** Description */
@@ -1458,6 +1484,12 @@ export interface components {
             id: string;
             /** Label */
             label: string;
+            /**
+             * Source
+             * @default imposed
+             * @enum {string}
+             */
+            source: "computed" | "imposed";
             /** Subcategories */
             subcategories: components["schemas"]["TaxonomyCategory"][];
         };

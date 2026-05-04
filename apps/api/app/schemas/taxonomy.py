@@ -56,12 +56,22 @@ class TaxonomyCategory(BaseModel):
     once at taxonomy-publish time and compares against chunk
     embeddings via cosine similarity. Operators write this with the
     metier vocabulary they want to match.
+
+    ``source`` records which half of the hybrid taxonomy this
+    category came from (#249, ADR-017): ``"imposed"`` for nodes
+    parsed out of the operator-authored YAML, ``"computed"`` for
+    nodes auto-deduced from topic clustering on the corpus. The
+    field defaults to ``"imposed"`` because the YAML loader is the
+    dominant call site and that path always sets it; the route
+    layer overrides to ``"computed"`` when synthesising entries
+    from the topic-clustering output.
     """
 
     id: str = Field(min_length=1, max_length=200)
     label: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=2000)
     subcategories: list[TaxonomyCategory] = Field(default_factory=list)
+    source: Literal["computed", "imposed"] = "imposed"
 
     @model_validator(mode="after")
     def _check_fanout(self) -> TaxonomyCategory:

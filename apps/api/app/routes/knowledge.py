@@ -29,7 +29,7 @@ from app.schemas.knowledge import (
     KnowledgeGraphProjection,
 )
 from app.schemas.scope import ScopeRef
-from app.schemas.taxonomy import TaxonomyResponse
+from app.schemas.taxonomy import TaxonomyCategory, TaxonomyResponse
 from app.services.auth import (
     User,
     assert_can_access_document,
@@ -278,22 +278,53 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         response_model=TaxonomyResponse,
     )
     def get_knowledge_taxonomy() -> Any:
-        """Read the operator-imposed taxonomy (ADR-017).
+        """Read the hybrid taxonomy (ADR-017, #249).
 
-        Returns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points
-        at a YAML file the loader could parse; returns
-        ``is_configured=false`` with empty ``categories`` otherwise.
-        Never 404s — a missing taxonomy is a valid deployment state
-        (the platform falls back to auto-deduced topic clustering)
-        and the frontend uses ``is_configured`` to decide which empty
-        state to render.
+        The response merges two halves under one ``categories`` list:
+
+        * **Imposed** — categories parsed out of the operator-authored
+          YAML at ``KW_TAXONOMY_PATH``. Each one is tagged
+          ``source="imposed"`` by the loader.
+        * **Computed** — categories synthesised from the topic-
+          clustering output the projector wrote into the graph store
+          (one ``topic`` node per cluster). Each one is tagged
+          ``source="computed"``.
+
+        **Merge rule:** dedupe by ``id``; **imposed wins on conflict**.
+        That is, if the YAML defines ``id="hr"`` and a topic cluster
+        also happens to land on ``id="hr"``, the operator's definition
+        is the one that flows out — operators get the final say over
+        what the catalog calls a category. The computed entry is
+        dropped in that case (we do not merge labels / descriptions
+        across sources).
+
+        ``is_configured`` is ``true`` when **either** half has at
+        least one category — an operator with no YAML but a populated
+        topic-clustering output still gets a configured response.
+        Only an entirely empty result (no YAML, no topic clusters)
+        returns ``is_configured=false`` with an empty list. Never
+        404s — a missing taxonomy is a valid deployment state.
         """
         taxonomy = services.taxonomy
-        is_configured = taxonomy is not None
+        imposed: list[TaxonomyCategory] = list(taxonomy.categories) if taxonomy is not None else []
+        computed = _load_computed_categories(services)
+
+        # Imposed wins on conflict. Walk imposed first so its ids
+        # become the authoritative set, then append computed entries
+        # whose ids haven't been claimed.
+        seen_ids = {category.id for category in imposed}
+        merged: list[TaxonomyCategory] = list(imposed)
+        for category in computed:
+            if category.id in seen_ids:
+                continue
+            merged.append(category)
+            seen_ids.add(category.id)
+
+        is_configured = len(merged) > 0
         return TaxonomyResponse(
             is_configured=is_configured,
             source_path=services.taxonomy_source_path,
-            categories=taxonomy.categories if taxonomy is not None else [],
+            categories=merged,
         )
 
     # ─── EPIC-C C.3 catalog view (ADR-025 §3) ─────────────────────────
@@ -544,3 +575,89 @@ def _build_catalog_item(
         sha256=latest.sha256,
         scopes=scopes,
     )
+
+
+def _load_computed_categories(services: PipelineServices) -> list[TaxonomyCategory]:
+    """Synthesise ``TaxonomyCategory`` entries from topic-clustering output.
+
+    Reads every ``kind="topic"`` node out of the graph store (the
+    projector emits one per cluster; see
+    :mod:`app.services.knowledge.topic_clustering` and
+    :class:`KnowledgeProjector.project_topics`) and shapes it into the
+    taxonomy wire model with ``source="computed"``.
+
+    Defensive against:
+
+    * a graph store that doesn't yet support
+      :meth:`GraphStore.find_nodes_by_kind` (e.g. an older test fake)
+      → returns an empty list rather than 500ing.
+    * topic nodes whose properties are missing required fields
+      → that one node is skipped (logged at debug); the others still
+      flow through.
+    * topics whose ``label`` is empty or whose synthesised
+      ``description`` would be empty → padded with a deterministic
+      fallback so the schema's ``min_length=1`` validators don't
+      reject the synthesised category.
+    """
+    graph_store = getattr(services, "graph_store", None)
+    if graph_store is None:
+        return []
+    finder = getattr(graph_store, "find_nodes_by_kind", None)
+    if finder is None:
+        # Backwards-compat: a third-party store that hasn't been
+        # updated to the #249 protocol still serves Phase 1/2/3.
+        return []
+    try:
+        topic_nodes = finder("topic")
+    except Exception:  # noqa: BLE001 - defensive
+        log.warning("knowledge.taxonomy.computed_lookup_failed", exc_info=True)
+        return []
+
+    categories: list[TaxonomyCategory] = []
+    for node in topic_nodes:
+        props = node.properties or {}
+        label = (node.label or "").strip() or _string_prop(props, "label").strip()
+        if not label:
+            # Last-resort: use the topic id so the rail still has
+            # something legible. Schemas reject empty labels.
+            label = node.id
+        keywords = _string_list_prop(props, "keywords")
+        summary = _string_prop(props, "summary").strip()
+        description = summary or (
+            f"Auto-deduced topic cluster covering: {', '.join(keywords)}."
+            if keywords
+            else f"Auto-deduced topic cluster {node.id}."
+        )
+        try:
+            categories.append(
+                TaxonomyCategory(
+                    id=node.id,
+                    label=label,
+                    description=description,
+                    subcategories=[],
+                    source="computed",
+                )
+            )
+        except Exception:  # noqa: BLE001 - skip malformed cluster
+            log.debug(
+                "knowledge.taxonomy.computed_node_skipped",
+                extra={"topic_id": node.id},
+                exc_info=True,
+            )
+            continue
+    # Stable ordering — find_nodes_by_kind already sorts by id, but
+    # repeat the guarantee here so future callers can depend on it.
+    categories.sort(key=lambda c: c.id)
+    return categories
+
+
+def _string_prop(props: dict[str, Any], key: str) -> str:
+    value = props.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _string_list_prop(props: dict[str, Any], key: str) -> list[str]:
+    value = props.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]

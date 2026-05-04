@@ -759,9 +759,17 @@ export function adaptDocContent(
 
 /**
  * Map a ``TaxonomyResponse`` onto the explorer's per-cluster metadata
- * shape. Top-level categories become clusters with
- * ``source: "imposed"`` and a deterministic hue derived from the
- * category id so the left rail keeps stable colours across reloads.
+ * shape. Top-level categories become clusters with a deterministic
+ * hue derived from the category id (so the left rail keeps stable
+ * colours across reloads) and the ``source`` flag taken **directly
+ * from the API response** (#249).
+ *
+ * Before #249 the Explorer derived ``source: "computed"`` client-side
+ * by checking whether a cluster id appeared in the document snapshot
+ * but not in the taxonomy response. The backend now owns that merge:
+ * ``GET /knowledge/taxonomy`` returns a single hybrid list where every
+ * category carries ``source: "computed" | "imposed"``. The Explorer
+ * just reflects what the API said.
  *
  * Subcategories aren't surfaced as separate clusters in v1 — the
  * left rail is one level deep — but they're carried forward so a
@@ -778,7 +786,13 @@ export function adaptTaxonomy(
     clusters[c.id] = {
       label: c.label,
       hue: hashHueDeterministic(c.id),
-      source: "imposed",
+      // Authoritative — the backend tags each category as "imposed"
+      // (operator YAML) or "computed" (auto-deduced topic cluster).
+      // We default to "computed" only if a future server forgets to
+      // set the field, which is treated as the safer assumption
+      // (the badge then says "auto" — operators won't think they
+      // own a cluster they didn't author).
+      source: c.source ?? "computed",
     };
   }
   return { clusters, categories: response.categories };
