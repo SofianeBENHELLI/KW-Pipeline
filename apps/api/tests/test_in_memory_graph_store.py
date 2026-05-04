@@ -265,3 +265,115 @@ def test_delete_subgraph_for_version_drops_chunk_embedding():
 
     hits = store.find_chunks_by_similarity([1.0, 0.0], limit=5)
     assert hits == []
+
+
+# ─── Reverse-index correctness (audit #226) ──────────────────────────────
+
+
+def _shared_entity_node(node_id: str, *, version_id: str) -> GraphNode:
+    """Entity-shaped node that two versions can both upsert with the same
+    id — mirrors Phase 2's canonical entity ids hashed by
+    ``(subject, subject_type)`` so the same business entity appears in
+    every version that mentions it."""
+    return GraphNode(
+        id=node_id,
+        kind="entity",
+        label=f"label-{node_id}",
+        properties={"document_id": "doc-A", "version_id": version_id},
+    )
+
+
+def test_shared_entity_survives_until_last_owning_version_is_deleted():
+    """Entity nodes claimed by multiple versions must NOT be removed when
+    only one of those versions is deleted; they must be removed exactly
+    when the last owning version goes away. This is the invariant the
+    reverse-index makes O(1) (audit #226)."""
+    store = InMemoryGraphStore()
+    # Two versions both upsert the same entity id.
+    store.upsert_nodes(
+        [
+            _node("ver-1", kind="version", version_id="ver-1"),
+            _shared_entity_node("ent-shared", version_id="ver-1"),
+            _node("ver-2", kind="version", version_id="ver-2"),
+            _shared_entity_node("ent-shared", version_id="ver-2"),
+        ]
+    )
+
+    # Delete ver-1: the shared entity is still claimed by ver-2.
+    store.delete_subgraph_for_version(document_id="doc-A", version_id="ver-1")
+    surviving = {n.id for n in store.find_subgraph(limit=100).nodes}
+    assert "ent-shared" in surviving
+    assert "ver-1" not in surviving
+    assert "ver-2" in surviving
+
+    # Delete ver-2: now no version claims the entity, it must be removed.
+    store.delete_subgraph_for_version(document_id="doc-A", version_id="ver-2")
+    surviving = {n.id for n in store.find_subgraph(limit=100).nodes}
+    assert "ent-shared" not in surviving
+    assert "ver-2" not in surviving
+
+
+def test_reverse_index_invariant_holds_under_arbitrary_delete_order():
+    """Project N versions that all share an entity. For every deletion
+    permutation, the entity must survive while at least one version
+    still claims it, and disappear exactly when the last one is gone.
+
+    Iterates all 24 permutations of 4 versions — equivalent to a small
+    Hypothesis run, but deterministic and dep-free.
+    """
+    import itertools
+
+    version_ids = ("v1", "v2", "v3", "v4")
+
+    for ordering in itertools.permutations(version_ids):
+        store = InMemoryGraphStore()
+        # Each version upserts: a unique version node + the shared entity.
+        for vid in version_ids:
+            store.upsert_nodes(
+                [
+                    _node(vid, kind="version", version_id=vid),
+                    _shared_entity_node("ent-shared", version_id=vid),
+                ]
+            )
+
+        # Delete versions in this permutation order; track at every step.
+        remaining_owners = set(version_ids)
+        for vid in ordering:
+            store.delete_subgraph_for_version(document_id="doc-A", version_id=vid)
+            remaining_owners.discard(vid)
+
+            surviving = {n.id for n in store.find_subgraph(limit=100).nodes}
+            # The version node we just deleted must be gone.
+            assert vid not in surviving, f"vid {vid} survived its own delete in {ordering}"
+            # The shared entity survives iff at least one version still claims it.
+            if remaining_owners:
+                assert "ent-shared" in surviving, (
+                    f"shared entity vanished too early in {ordering}; "
+                    f"remaining owners: {remaining_owners}"
+                )
+            else:
+                assert "ent-shared" not in surviving, (
+                    f"shared entity outlived all owners in {ordering}"
+                )
+
+
+def test_reverse_index_is_drained_when_last_owner_is_deleted():
+    """After the last owning version is removed, the reverse index must
+    not retain a dangling entry for the orphan node. Asserting on the
+    internal map is fine here — the invariant matters for memory growth
+    in long-running processes (audit #226 secondary concern)."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes(
+        [
+            _node("ver-1", kind="version", version_id="ver-1"),
+            _shared_entity_node("ent-shared", version_id="ver-1"),
+        ]
+    )
+
+    store.delete_subgraph_for_version(document_id="doc-A", version_id="ver-1")
+
+    # No entries should remain in either reverse map for that version.
+    # pylint: disable=protected-access
+    assert "ver-1" not in store._version_to_node_ids
+    assert "ent-shared" not in store._node_to_versions
+    assert "ver-1" not in store._node_to_versions
