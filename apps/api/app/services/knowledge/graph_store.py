@@ -685,13 +685,21 @@ class Neo4jGraphStore:
         # projector used to do (audit #225). Empty mapping is a no-op
         # so the projection path can call this unconditionally without
         # an ``if mapping`` guard at the call site.
+        #
+        # The MATCH-then-WHERE shape mirrors ``upsert_edges`` (the only
+        # other UNWIND+MATCH pattern in this module): match by id alone
+        # and filter the ``kind`` in a WHERE clause. The inline-map form
+        # ``{id: row.chunk_id, kind: 'chunk'}`` is also valid Cypher, but
+        # the explicit form keeps every UNWIND+MATCH in this module
+        # using one shape.
         if not mapping:
             return
         rows = [{"chunk_id": cid, "embedding": list(emb)} for cid, emb in mapping.items()]
         self._write(
             """
             UNWIND $rows AS row
-            MATCH (n:KnowledgeNode {id: row.chunk_id, kind: 'chunk'})
+            MATCH (n:KnowledgeNode {id: row.chunk_id})
+            WHERE n.kind = 'chunk'
             SET n.embedding = row.embedding
             """,
             {"rows": rows},
