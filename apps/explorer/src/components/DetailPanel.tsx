@@ -120,6 +120,8 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
       .map((e) => docById(snapshot, e.a === d.id ? e.b : e.a))
       .filter((x): x is ExplorerDocument => Boolean(x))
       .slice(0, 5);
+    const versionCount = d.versionCount ?? d.versions?.length ?? 1;
+    const latestVersion = d.latestVersion ?? d.versions?.[d.versions.length - 1]?.versionNumber ?? 1;
     return (
       <div className="kx-detail">
         <div className="kx-detail-head">
@@ -128,7 +130,15 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
           </span>
           <div>
             <div className="kx-kind">DOCUMENT</div>
-            <div className="kx-detail-title">{d.title}</div>
+            <div className="kx-detail-title">
+              {d.title}
+              <span className="kx-ver-badge kx-mono" title={`Latest version v${latestVersion}`}>
+                v{latestVersion}
+              </span>
+              {versionCount > 1 && (
+                <span className="kx-ver-count kx-mute">({versionCount} versions)</span>
+              )}
+            </div>
           </div>
         </div>
         <div className="kx-section">
@@ -197,6 +207,33 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
               );
             })}
             {docChunks.length === 0 && <li className="kx-mute">No chunks indexed</li>}
+          </ul>
+        </div>
+        {/*
+          Versions section — surfaces every version_number in the
+          family with its status + ingested_at. Earlier versions are
+          read-only (no actions) per the sprint scope; the lineage
+          modal (EPIC-C C.5) lands later when the
+          ``/documents/{id}/lineage`` endpoint exists.
+        */}
+        <div className="kx-section" data-testid="kx-versions-section">
+          <div className="kx-sec-h">VERSIONS · {versionCount}</div>
+          <ul className="kx-list kx-version-list">
+            {(d.versions ?? [{ id: d.id, versionNumber: 1, status: "UPLOADED", createdAt: d.date, filename: d.title }])
+              .slice()
+              .sort((a, b) => b.versionNumber - a.versionNumber)
+              .map((v) => {
+                const isLatest = v.versionNumber === latestVersion;
+                return (
+                  <li key={v.id} data-version-number={v.versionNumber}>
+                    <span className={"kx-ver-badge kx-mono" + (isLatest ? " kx-ver-latest" : "")}>
+                      v{v.versionNumber}
+                    </span>
+                    <span className="kx-list-t">{v.status}</span>
+                    <span className="kx-mono kx-mute">{v.createdAt.slice(0, 10)}</span>
+                  </li>
+                );
+              })}
           </ul>
         </div>
         <div className="kx-actions">
