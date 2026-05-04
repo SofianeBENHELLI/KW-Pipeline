@@ -260,6 +260,17 @@ export function uploadDocumentWithProgress(
     signal?: AbortSignal;
     /** Receives a fraction in `[0, 1]`. Called only when total is known. */
     onProgress?: (fraction: number) => void;
+    /**
+     * Optional workspace-scope query params (EPIC-D #218 / #250).
+     *
+     * When omitted, the backend auto-fills ``personal:<current_user.id>``
+     * via the ``get_current_user`` dependency. Pass both to land the
+     * upload into a different scope (e.g. a 3DSwym community). The
+     * route reads them as ``?scope_kind=…&scope_ref=…`` query params,
+     * not form fields, so they're appended to the URL below.
+     */
+    scope_kind?: string;
+    scope_ref?: string;
   } = {},
 ): Promise<DocumentVersion> {
   return new Promise<DocumentVersion>((resolve, reject) => {
@@ -267,8 +278,15 @@ export function uploadDocumentWithProgress(
     const form = new FormData();
     form.append("file", file);
 
+    // Scope params ride on the query string per #250. Only append when
+    // the caller actually picked something — letting both stay absent
+    // means the backend falls back to ``personal:<current_user.id>``.
+    const url = new URL(baseUrl.replace(/\/$/, "") + "/documents/upload");
+    if (opts.scope_kind) url.searchParams.set("scope_kind", opts.scope_kind);
+    if (opts.scope_ref) url.searchParams.set("scope_ref", opts.scope_ref);
+
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", baseUrl.replace(/\/$/, "") + "/documents/upload");
+    xhr.open("POST", url.toString());
 
     if (opts.onProgress) {
       xhr.upload.addEventListener("progress", (evt) => {

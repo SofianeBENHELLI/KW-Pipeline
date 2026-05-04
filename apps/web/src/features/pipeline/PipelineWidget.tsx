@@ -5,7 +5,8 @@ import type {
   ApiUploadResponse,
 } from "../../api/types";
 import { ApiError, uploadDocument, uploadDocumentsBatch } from "../../api/client";
-import { latestVersion } from "../../domain/document";
+import { documentScopes, latestVersion } from "../../domain/document";
+import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 
 const ACCEPTED_MIME_TYPES =
@@ -306,6 +307,13 @@ export function PipelineWidget({
                     >
                       v{version.version_number}
                     </span>
+                    {/* Scope chip — surfaces the workspace this doc
+                        was uploaded into (EPIC-D #218 / #250). Pulls
+                        ``Document.scopes`` defensively because the
+                        catalog schema doesn't yet carry the field;
+                        renders a "No scope info" placeholder when
+                        absent. */}
+                    <ScopeChip scopes={documentScopes(document)} />
                   </small>
                 </span>
                 <span className="document-row-meta">
