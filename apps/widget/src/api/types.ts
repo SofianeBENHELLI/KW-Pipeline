@@ -145,4 +145,5 @@ export interface ChatResponse {
   embedding_model: string | null;
   llm_model: string;
   token_usage: Record<string, number>;
+  warnings: string[];
 }

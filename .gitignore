@@ -28,6 +28,10 @@ secrets/
 .DS_Store
 *.egg-info/
 .kw-pipeline/
+# also covers worktree-local symlinks pointing at the main repo's
+# .kw-pipeline (used to resolve the @widget-lab file: dep when running
+# vitest / npm install from a fresh worktree)
+.kw-pipeline
 .coverage
 .coverage.*
 coverage.xml

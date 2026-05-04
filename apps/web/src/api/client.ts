@@ -33,6 +33,13 @@ import type {
 
 const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+/** Resolved API base URL — exposed so the Settings surface can show
+ *  what's actually being targeted at runtime. Build-time only; the
+ *  web app does not let users mutate it (unlike the widget tile). */
+export function getApiBaseUrl(): string {
+  return BASE_URL;
+}
+
 // Delegate to `globalThis.fetch` at call time (rather than letting
 // openapi-fetch capture a reference at construction). This keeps test
 // spies on `globalThis.fetch` effective even though the client is

@@ -114,7 +114,11 @@ export const SearchPanel: React.FC<Props> = ({
       : undefined;
 
   return (
-    <section className="kw-section" aria-label="Knowledge search">
+    <section
+      className="kw-section"
+      aria-label="Knowledge search"
+      data-testid="search-panel"
+    >
       <SectionHeader icon="search" title="Search" meta={meta} />
 
       <div className="kw-search">
@@ -125,11 +129,12 @@ export const SearchPanel: React.FC<Props> = ({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search query"
+          data-testid="search-panel-input"
         />
       </div>
 
       {isDisabled && error instanceof ApiError && (
-        <div className="kw-empty" role="status">
+        <div className="kw-empty" role="status" data-testid="search-panel-disabled">
           <span className="kw-empty__glyph" aria-hidden="true">
             <Icon name="info" size={18} />
           </span>
@@ -144,7 +149,7 @@ export const SearchPanel: React.FC<Props> = ({
       )}
 
       {error !== null && !isDisabled && (
-        <div className="kw-error" role="alert">
+        <div className="kw-error" role="alert" data-testid="search-panel-error">
           {error instanceof ApiError
             ? `${error.code}: ${error.detail}`
             : error}
@@ -157,7 +162,7 @@ export const SearchPanel: React.FC<Props> = ({
         error === null &&
         debouncedQuery.trim() !== "" &&
         results.length === 0 && (
-          <div className="kw-empty">
+          <div className="kw-empty" data-testid="search-panel-empty">
             <span className="kw-empty__glyph" aria-hidden="true">
               <Icon name="search" size={18} />
             </span>
@@ -170,7 +175,7 @@ export const SearchPanel: React.FC<Props> = ({
         )}
 
       {results.length > 0 && (
-        <ol className="kw-search-results">
+        <ol className="kw-search-results" data-testid="search-panel-results">
           {results.map((result) => {
             const score = (result.score * 100).toFixed(1);
             const interactive = onSelectResult !== undefined;
@@ -190,7 +195,11 @@ export const SearchPanel: React.FC<Props> = ({
               </>
             );
             return (
-              <li key={result.chunk_id} className="kw-search-results__item">
+              <li
+                key={result.chunk_id}
+                className="kw-search-results__item"
+                data-testid="search-panel-result"
+              >
                 {interactive ? (
                   <button
                     type="button"

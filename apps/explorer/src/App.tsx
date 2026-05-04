@@ -29,6 +29,7 @@ import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/Gr
 import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
 import { DocViewer } from "./components/DocViewer";
 import { Icon, NAVY2 } from "./components/icons";
+import { SettingsModal } from "./components/SettingsModal";
 import { getApiBaseUrl } from "./api/client";
 import {
   CLUSTERS,
@@ -95,6 +96,7 @@ export default function App(): React.ReactElement {
     () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
   );
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Keep selection / open-doc / concept-focus in sync with the data
   // refresh — the sample → live transition can rename ids out from
@@ -604,6 +606,15 @@ export default function App(): React.ReactElement {
           >
             <Icon name="settings" size={15} />
           </button>
+          <button
+            className="kx-icon-btn"
+            title="Knowledge Forge settings"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Knowledge Forge settings"
+            data-testid="explorer-settings-launcher"
+          >
+            <Icon name="info" size={15} />
+          </button>
           <div className="kx-user" aria-hidden="true">
             EM
           </div>
@@ -906,6 +917,11 @@ export default function App(): React.ReactElement {
       </div>
 
       {tweaksOpen && <TweaksOverlay tweaks={tweaks} setTweak={setTweak} onClose={() => setTweaksOpen(false)} />}
+      <SettingsModal
+        apiBaseUrl={apiBaseUrl}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }
