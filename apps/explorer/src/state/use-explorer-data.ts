@@ -86,15 +86,18 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           return;
         }
 
-        // Pull the global graph projection in parallel — best-effort,
-        // a missing knowledge layer is not an error for the Explorer.
+        // Pull the global graph projection — best-effort. A missing
+        // knowledge layer is not an error for the Explorer (the
+        // doc-level snapshot still renders without it).
+        //
+        // The route is cursor-paginated and the per-page cap is 200
+        // (DEFAULT_GRAPH_PAGE_LIMIT). For corpora that fit inside one
+        // page this is one request; for larger corpora we walk the
+        // cursor up to a hard ceiling so we don't pin the UI thread
+        // on a runaway corpus.
         let graphPage: KnowledgeGraphPage | null = null;
         try {
-          graphPage = await getKnowledgeGraph({
-            baseUrl: apiBaseUrl,
-            limit: 200,
-            signal: controller.signal,
-          });
+          graphPage = await fetchFullGraph(apiBaseUrl, controller.signal);
         } catch (err: unknown) {
           if (!isAbortError(err) && !(err instanceof ApiError && err.status === 503)) {
             // Tolerate — the explorer falls back to derived edges.
@@ -199,6 +202,48 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
   }, [apiBaseUrl, refreshTick]);
 
   return useMemo(() => state, [state]);
+}
+
+// Backend page cap is 200 (DEFAULT_GRAPH_PAGE_LIMIT in
+// app.services.knowledge.graph_store) — the route refuses anything
+// larger. For very large corpora we walk the cursor up to this
+// many pages then stop. The Explorer surfaces this fact in the
+// data-mode banner once we wire it.
+const GRAPH_PAGE_LIMIT = 200;
+const MAX_GRAPH_PAGES = 25; // 5,000 nodes — well above demo corpora.
+
+async function fetchFullGraph(
+  baseUrl: string,
+  signal: AbortSignal,
+): Promise<KnowledgeGraphPage | null> {
+  const merged: KnowledgeGraphPage = {
+    schema_version: "v0.2",
+    nodes: [],
+    edges: [],
+    next_cursor: null,
+  };
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_GRAPH_PAGES; page += 1) {
+    if (signal.aborted) return null;
+    const result: KnowledgeGraphPage = await getKnowledgeGraph({
+      baseUrl,
+      limit: GRAPH_PAGE_LIMIT,
+      cursor: cursor ?? undefined,
+      signal,
+    });
+    merged.nodes.push(...result.nodes);
+    merged.edges.push(...result.edges);
+    merged.schema_version = result.schema_version;
+    if (!result.next_cursor) {
+      merged.next_cursor = null;
+      return merged;
+    }
+    cursor = result.next_cursor;
+  }
+  // Hit the page ceiling — return what we have plus the live cursor
+  // so the consumer can flag the truncation in the UI.
+  merged.next_cursor = cursor;
+  return merged;
 }
 
 function isAbortError(err: unknown): boolean {
