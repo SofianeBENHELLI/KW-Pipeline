@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote as urlquote
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
 
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
@@ -32,12 +32,20 @@ from app.schemas.document import (
     SimilarDocumentsResponse,
 )
 from app.schemas.extraction import RawExtraction
+from app.schemas.scope import ScopeRef
 from app.schemas.semantic_document import SemanticDocument
-from app.services.auth import User, get_current_user
-from app.services.catalog_store import InvalidCursor
+from app.services.auth import (
+    User,
+    assert_can_access_document,
+    get_caller_scopes,
+    get_current_user,
+)
+from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
+from app.services.catalog_store import InvalidCursor, _encode_cursor
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import hash_json_body
+from app.settings import Settings
 
 from ._helpers import (
     DEFAULT_PAGE_LIMIT,
@@ -67,6 +75,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         cursor: str | None = None,
         status: list[str] | None = Query(default=None),
         q: str | None = Query(default=None, max_length=200),
+        caller_scopes: tuple[ScopeRef, ...] = Depends(get_caller_scopes),
     ) -> Any:
         """List document families with optional status / filename filters (#86).
 
@@ -79,6 +88,11 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
           string after trim is treated as "no filter".
         - Filters apply before pagination. Re-walking with a different
           filter requires dropping the cursor.
+
+        Scope filter (EPIC-D D.5, ADR-020 §2): the response is filtered
+        to documents linked to the caller's allowed scopes (default
+        ``personal:<current_user.id>``). ``KW_AUTH_MODE=disabled``
+        skips the predicate for back-compat.
         """
         if limit < MIN_PAGE_LIMIT or limit > MAX_PAGE_LIMIT:
             raise HTTPException(
@@ -109,7 +123,9 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             filename_query = None
 
         try:
-            items, next_cursor = services.documents.list_documents_page(
+            items, next_cursor = _list_documents_with_scope(
+                services=services,
+                caller_scopes=caller_scopes,
                 limit=limit,
                 cursor=cursor,
                 status_filter=status_set,
@@ -127,10 +143,18 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         operation_id="get_document",
         response_model=Document,
     )
-    def get_document(document_id: str) -> Any:
+    def get_document(
+        request: Request,
+        document_id: str,
+        current_user: User = Depends(get_current_user),
+    ) -> Any:
         document = services.documents.get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+        # Hidden-existence semantics (D.5): a 404 here is indistinguishable
+        # from "document doesn't exist", so an enumeration probe can't
+        # tell whether the row is missing or owned by another user.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         return document
 
     @router.post(
@@ -139,10 +163,16 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=RawExtraction,
     )
     def extract_document(
+        request: Request,
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
+        # D.5: hidden-existence semantics — a 404 here is indistinguishable
+        # from "no such document" so we don't leak that another user
+        # owns this row.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         _route = "/documents/{document_id}/versions/{version_id}/extract"
         _req_hash = hash_json_body(
             None,
@@ -244,10 +274,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=SemanticDocument,
     )
     def generate_semantic_document(
+        request: Request,
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
+        # D.5: hidden-existence — refuse before any catalog work happens.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         _route = "/documents/{document_id}/versions/{version_id}/semantic"
         _req_hash = hash_json_body(
             None,
@@ -359,6 +393,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=LineageResponse,
     )
     def get_document_lineage(
+        request: Request,
         document_id: str,
         current_user: User = Depends(get_current_user),
     ) -> Any:
@@ -376,13 +411,16 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         next-higher version-numbered sibling that exists in the
         family", not an arbitrary pointer.
 
-        Returns ``404`` when the document does not exist; never raises
-        on an empty family (a freshly-created family with one version
-        is a valid response).
+        Returns ``404`` when the document does not exist OR when the
+        caller's scope set does not include this document — D.5's
+        hidden-existence rule: enumeration probes can't distinguish
+        the two cases. Never raises on an empty family (a
+        freshly-created family with one version is a valid response).
         """
         document = services.documents.get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         return _build_lineage_response(document)
 
     @router.get(
@@ -391,6 +429,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=SimilarDocumentsResponse,
     )
     def get_similar_documents(
+        request: Request,
         document_id: str,
         k: int = Query(default=5, ge=1, le=50),
         current_user: User = Depends(get_current_user),
@@ -406,13 +445,31 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
 
         ``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;
         out-of-range values produce a 422 from FastAPI itself.
+
+        D.5: 404 when the base document is hidden from the caller, AND
+        neighbour rows are filtered down to documents in the caller's
+        scope set so we don't surface "you have a similar doc you
+        can't actually open".
         """
         document = services.documents.get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         ranked = services.document_similarity.top_k(document_id, k=k)
+        settings = Settings()
         results: list[SimilarDocument] = []
         for neighbor_id, score in ranked:
+            # Filter neighbours to scopes the caller can read. Cheap on
+            # the in-memory store (set lookup per neighbour) and
+            # acceptable on SQLite (one ``list_scopes_for_document``
+            # round-trip per neighbour, bounded by ``k <= 50``).
+            if not user_can_access(
+                user=current_user,
+                document_id=neighbor_id,
+                catalog=services.documents.catalog,
+                settings=settings,
+            ):
+                continue
             row = _build_similar_row(
                 neighbor_id=neighbor_id,
                 similarity=score,
@@ -432,11 +489,15 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=SemanticDocument,
     )
     def validate_version(
+        http_request: Request,
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
         current_user: User = Depends(get_current_user),
     ) -> Any:
+        # D.5: refuse before any review work happens. A scope-blocked
+        # caller must not be able to flip another user's doc status.
+        assert_can_access_document(request=http_request, document_id=document_id, user=current_user)
         return _dispatch_review(
             handler=services.review.handle_validation,
             document_id=document_id,
@@ -451,11 +512,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=SemanticDocument,
     )
     def reject_version(
+        http_request: Request,
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
         current_user: User = Depends(get_current_user),
     ) -> Any:
+        # D.5: refuse before any review work happens.
+        assert_can_access_document(request=http_request, document_id=document_id, user=current_user)
         return _dispatch_review(
             handler=services.review.handle_rejection,
             document_id=document_id,
@@ -546,6 +610,151 @@ def _build_similar_row(
         similarity=similarity,
         latest_version_status=latest.status,
     )
+
+
+def _list_documents_with_scope(
+    *,
+    services: PipelineServices,
+    caller_scopes: tuple[ScopeRef, ...],
+    limit: int,
+    cursor: str | None,
+    status_filter: frozenset[DocumentVersionStatus] | None,
+    filename_query: str | None,
+) -> tuple[list[Document], str | None]:
+    """Paginate ``GET /documents`` honouring the caller's scope set.
+
+    Two paths:
+
+    - :data:`ALL_SCOPES_SENTINEL` (legacy ``KW_AUTH_MODE=disabled``)
+      → fall back to the unscoped ``list_documents_page``. Same shape,
+      same cursor codec, every document visible.
+    - Scoped path → for the strict default (a single
+      ``personal:<user.id>``) we delegate to
+      :meth:`CatalogStore.list_documents_in_scope` so the predicate
+      runs at the SQL layer. The status / filename filters are applied
+      in-memory because the scoped store method doesn't index them
+      yet — at the catalog sizes D.5 covers (a single user's personal
+      scope), this is a tiny set.
+
+    Multi-scope merges (the future case where the caller's scope set
+    has both ``personal:*`` and ``swym_community:*``) are not wired
+    yet — D.3 will add the membership lookup and this helper will
+    iterate the scope set and merge cursor-comparable. The strict
+    "personal-only" default keeps that follow-up small.
+    """
+    if caller_scopes == ALL_SCOPES_SENTINEL:
+        # Legacy disabled-mode bypass: behaviour matches the pre-D.5
+        # route. Documented in :mod:`app.services.auth.disabled` /
+        # :func:`scope_filter.resolve_caller_scopes`.
+        return services.documents.list_documents_page(
+            limit=limit,
+            cursor=cursor,
+            status_filter=status_filter,
+            filename_query=filename_query,
+        )
+
+    if len(caller_scopes) == 1:
+        scope = caller_scopes[0]
+        page, _store_cursor = services.documents.catalog.list_documents_in_scope(
+            scope.kind,
+            scope.ref,
+            cursor=cursor,
+            limit=limit,
+        )
+        # Apply the post-fetch filters in-memory. The scope-indexed
+        # path doesn't accept ``status_filter`` / ``filename_query``
+        # today — adding them is a follow-up once the SQLite reverse
+        # index proves out under heavier scope membership.
+        if status_filter is not None or filename_query is not None:
+            page = _filter_scoped_page_in_memory(
+                services=services,
+                scope=scope,
+                page=page,
+                limit=limit,
+                status_filter=status_filter,
+                filename_query=filename_query,
+                seed_cursor=cursor,
+            )
+        # Mirror the legacy ``list_documents_page`` cursor contract: a
+        # full page (``len(items) == limit``) always emits a cursor
+        # even when nothing follows it, so the caller's "walk until
+        # next_cursor is None" loop terminates with one extra empty
+        # page rather than mid-stream. A short page signals end-of-
+        # stream by emitting ``None``.
+        if len(page) < limit:
+            return page, None
+        last = page[-1]
+        return page, _encode_cursor((last.created_at, last.id))
+
+    # Multi-scope merge — placeholder for D.3 community + project
+    # membership. Intentionally raises so we don't silently degrade to
+    # "no filter" if a future caller path forgets to widen this branch.
+    raise NotImplementedError("Multi-scope reads ship with EPIC-D D.3 (Swym membership client).")
+
+
+def _filter_scoped_page_in_memory(
+    *,
+    services: PipelineServices,
+    scope: ScopeRef,
+    page: list[Document],
+    limit: int,
+    status_filter: frozenset[DocumentVersionStatus] | None,
+    filename_query: str | None,
+    seed_cursor: str | None,
+) -> list[Document]:
+    """Apply status / filename filters on top of a scoped page.
+
+    The scoped store method already paginated, so a filter that drops
+    rows from the page would silently shorten it. Walk forward inside
+    the same scope until we either fill ``limit`` matches or run out
+    of data. Returns the (possibly trimmed) match list; the caller
+    derives the next cursor from the last returned doc, mirroring the
+    legacy ``list_documents_page`` contract.
+    """
+
+    def _matches(doc: Document) -> bool:
+        if (
+            filename_query is not None
+            and filename_query.lower() not in doc.original_filename.lower()
+        ):
+            return False
+        if status_filter is not None:
+            if not doc.versions:
+                return False
+            latest = next(
+                (v for v in doc.versions if v.id == doc.latest_version_id),
+                doc.versions[-1],
+            )
+            if latest.status not in status_filter:
+                return False
+        return True
+
+    matches: list[Document] = [d for d in page if _matches(d)]
+    if len(matches) >= limit:
+        return matches[:limit]
+
+    # Walk forward inside this scope until we fill ``limit`` matches.
+    walk_cursor = seed_cursor
+    while len(matches) < limit:
+        if not page:
+            break
+        # Use the last doc of the previous fetch to seed the next page.
+        walk_cursor = _encode_cursor((page[-1].created_at, page[-1].id))
+        page, _ = services.documents.catalog.list_documents_in_scope(
+            scope.kind,
+            scope.ref,
+            cursor=walk_cursor,
+            limit=limit,
+        )
+        if not page:
+            break
+        for doc in page:
+            if _matches(doc):
+                matches.append(doc)
+                if len(matches) >= limit:
+                    break
+
+    return matches[:limit]
 
 
 def _dispatch_review(

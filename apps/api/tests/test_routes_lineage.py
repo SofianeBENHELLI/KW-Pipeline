@@ -11,11 +11,26 @@ shape the lineage modal renders, with two derived fields:
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
 from app.models.document import DocumentVersionStatus
+
+
+@pytest.fixture(autouse=True)
+def _disable_scope_filter(monkeypatch):
+    """Bypass the D.5 scope filter for this module.
+
+    These tests upload via the in-process ``services.documents.upload``
+    helper which doesn't write a ``personal:dev`` scope link (the
+    scope row is written by the upload route, not the service). The
+    legacy ``KW_AUTH_MODE=disabled`` mode skips the scope predicate
+    entirely so the tests keep exercising lineage semantics without
+    threading a per-call scope link.
+    """
+    monkeypatch.setenv("KW_AUTH_MODE", "disabled")
 
 
 def _client_with_services():

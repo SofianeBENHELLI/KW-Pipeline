@@ -19,12 +19,27 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
 from app.models.document import DocumentVersionStatus
 from app.schemas.scope import Scope
+
+
+@pytest.fixture(autouse=True)
+def _disable_scope_filter(monkeypatch):
+    """Bypass the D.5 scope filter for this module.
+
+    The catalog-view tests use ``services.documents.upload`` directly,
+    which does NOT write a ``personal:dev`` scope link (that's the
+    upload route's responsibility). Legacy ``KW_AUTH_MODE=disabled``
+    skips the read-side scope predicate so the SUPERSEDED + visibility
+    contracts under test remain reachable. A dedicated read-side
+    coverage suite lives in ``test_scope_filter_reads.py``.
+    """
+    monkeypatch.setenv("KW_AUTH_MODE", "disabled")
 
 
 def _client_with_services():

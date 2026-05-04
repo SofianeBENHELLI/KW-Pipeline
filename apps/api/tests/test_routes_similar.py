@@ -8,11 +8,22 @@ requiring the knowledge-layer projection chain to run end-to-end.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
 from app.services.document_similarity_service import DocumentSimilarityService
+
+
+@pytest.fixture(autouse=True)
+def _disable_scope_filter(monkeypatch):
+    """Bypass the D.5 scope filter — these tests seed via
+    ``services.documents.upload`` which doesn't write a scope link
+    (that's the upload-route's job). Legacy ``KW_AUTH_MODE=disabled``
+    skips the predicate so the topic-ranking + identity-exclusion
+    contracts under test remain reachable."""
+    monkeypatch.setenv("KW_AUTH_MODE", "disabled")
 
 
 class _FakeTopicProvider:

@@ -44,6 +44,16 @@ def _seed_chunks(store: InMemoryGraphStore, *texts: str) -> None:
         store.set_chunk_embedding(chunk_id=f"chunk-{i}", embedding=vector)
 
 
+@pytest.fixture(autouse=True)
+def _disable_scope_filter(monkeypatch):
+    """Bypass the D.5 scope filter — these tests seed chunk hits whose
+    ``document_id`` ("doc-A") does not exist in the catalog, so the
+    scope predicate would 404 them. Legacy ``KW_AUTH_MODE=disabled``
+    skips the predicate so the search-service contract remains the
+    primary subject under test."""
+    monkeypatch.setenv("KW_AUTH_MODE", "disabled")
+
+
 @pytest.fixture
 def services_with_search() -> PipelineServices:
     base = build_services()

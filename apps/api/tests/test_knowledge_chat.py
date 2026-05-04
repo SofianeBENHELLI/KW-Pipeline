@@ -25,6 +25,16 @@ from app.services.knowledge import (
 # ─── Helpers ─────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _disable_scope_filter(monkeypatch):
+    """Bypass the D.5 scope filter — these tests seed chunk graph
+    nodes referencing synthetic ``doc-A`` ids that don't live in the
+    catalog, so the scope predicate would drop every retrieval hit.
+    Legacy ``KW_AUTH_MODE=disabled`` skips the predicate so the chat
+    grounding contract under test remains reachable."""
+    monkeypatch.setenv("KW_AUTH_MODE", "disabled")
+
+
 def _chunk_node(chunk_id: str, *, snippet: str | None = None) -> GraphNode:
     return GraphNode(
         id=chunk_id,
