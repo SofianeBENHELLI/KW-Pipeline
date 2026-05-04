@@ -1,0 +1,52 @@
+{
+  "_doc": [
+    "Least-privilege IAM policy for the deploy IAM user/role.",
+    "Attach this policy (and ONLY this policy) to the IAM identity",
+    "whose access keys end up in ~/.aws/credentials. The policy lets",
+    "the deploy script publish to the explorer prefix and nothing",
+    "else; it cannot delete the bucket, modify CORS, touch the",
+    "ingestion widget's prefix, or read other AWS services.",
+    "",
+    "Apply via the AWS console (IAM > Policies > Create policy > JSON",
+    "tab > paste this) or via CLI:",
+    "  aws iam create-policy \\",
+    "    --policy-name KWExplorerS3Deploy \\",
+    "    --policy-document file://apps/explorer/aws/iam-policy.json",
+    "",
+    "Then attach to your deploy user:",
+    "  aws iam attach-user-policy \\",
+    "    --user-name <username> \\",
+    "    --policy-arn arn:aws:iam::467685081786:policy/KWExplorerS3Deploy"
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListBucketScopedToExplorerPrefix",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::3dx-kwforge-widgets",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["3dx-knowledge-explorer/*", "3dx-knowledge-explorer"]
+        }
+      }
+    },
+    {
+      "Sid": "ReadWriteExplorerObjectsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::3dx-kwforge-widgets/3dx-knowledge-explorer/*"
+    },
+    {
+      "Sid": "ConfirmIdentity",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    }
+  ]
+}

@@ -15,6 +15,16 @@ node_modules/
 *.pem
 *.key
 secrets/
+
+# AWS credentials — belt-and-braces guard alongside `.env*` and the
+# gitleaks pre-commit hook. Real credentials live in `~/.aws/` on a
+# developer's machine or in a CI secret manager — never in the repo.
+**/aws/credentials
+**/aws/credentials.local
+.aws/credentials
+.aws/credentials.local
+*aws-credentials*
+*.aws-credentials
 .DS_Store
 *.egg-info/
 .kw-pipeline/
