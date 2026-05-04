@@ -22,6 +22,8 @@ import type {
   KnowledgeGraphProjection,
   RawExtraction,
   SemanticDocument,
+  TaxonomyCategory,
+  TaxonomyResponse,
 } from "../api/types";
 
 // ─── Document type registry ──────────────────────────────────────────────────
@@ -57,17 +59,47 @@ export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
 
 // ─── Cluster registry ────────────────────────────────────────────────────────
 
+/**
+ * Provenance of a cluster row in the left rail.
+ *
+ *   * ``"imposed"`` — comes from the operator-authored YAML taxonomy
+ *     (ADR-017), surfaced via ``GET /knowledge/taxonomy``.
+ *   * ``"computed"`` — auto-deduced from topic clustering on the
+ *     ingested corpus. This is what the existing explorer already
+ *     renders when no taxonomy is configured.
+ *
+ * The UI surfaces this as a small badge so operators can tell which
+ * categories they own (imposed) vs which are derived from the data
+ * (computed) at a glance.
+ */
+export type ClusterSource = "computed" | "imposed";
+
 export interface ClusterMeta {
   label: string;
   hue: number;
+  source: ClusterSource;
 }
 
+/**
+ * The default sample-corpus clusters. Kept as a starter set so the
+ * fallback rendering and the topic-derived path both have legible
+ * names + hues for the sample documents. All entries are
+ * ``source: "computed"`` because, in the absence of a taxonomy, the
+ * explorer always derives clusters from the data.
+ *
+ * NOTE: this is a *seed*, not a fixed registry. The runtime explorer
+ * builds its cluster catalogue from snapshot.clusters (which is
+ * either the live taxonomy or the topic-derived set). Treating
+ * CLUSTERS as a dictionary mutated at runtime — what the previous
+ * implementation did — is a known footgun (#229 audit), and the
+ * snapshot now carries its own ``clusters`` field.
+ */
 export const CLUSTERS: Record<string, ClusterMeta> = {
-  hr: { label: "People & HR", hue: 200 },
-  product: { label: "Product", hue: 32 },
-  eng: { label: "Engineering", hue: 220 },
-  legal: { label: "Legal & Risk", hue: 340 },
-  finance: { label: "Finance", hue: 150 },
+  hr: { label: "People & HR", hue: 200, source: "computed" },
+  product: { label: "Product", hue: 32, source: "computed" },
+  eng: { label: "Engineering", hue: 220, source: "computed" },
+  legal: { label: "Legal & Risk", hue: 340, source: "computed" },
+  finance: { label: "Finance", hue: 150, source: "computed" },
 };
 
 // ─── Core entities the explorer renders ──────────────────────────────────────
@@ -84,6 +116,32 @@ export interface ExplorerDocument {
   x: number;
   y: number;
   confidence: number;
+  /**
+   * Number of versions in the doc family (1+). Surfaced in the
+   * cluster rail, catalog, and DetailPanel as a "v{N}" badge + a
+   * "(N versions)" affordance when N > 1. Optional so the sample
+   * corpus literal stays compact — call sites use ``?? 1``.
+   */
+  versionCount?: number;
+  /**
+   * Latest version_number — what the v{N} badge shows. The API
+   * returns version_number as a 1-based integer (1, 2, 3, …).
+   * Optional — call sites default to 1.
+   */
+  latestVersion?: number;
+  /**
+   * Per-version metadata. Populated for live docs from the catalog
+   * envelope. Optional in the sample corpus; the DetailPanel
+   * "Versions" section degrades to a single-row v1 entry when
+   * absent.
+   */
+  versions?: Array<{
+    id: string;
+    versionNumber: number;
+    status: string;
+    createdAt: string;
+    filename: string;
+  }>;
 }
 
 export type DocEdgeType = "reference" | "similar" | "contains" | "contradict";
@@ -332,6 +390,16 @@ export interface ExplorerSnapshot {
   chunkConcept: ChunkConceptLink[];
   conceptEdges: ConceptEdge[];
   docContent: Record<string, DocContent>;
+  /**
+   * Per-cluster metadata, keyed by cluster id. Runtime-shaped so the
+   * left rail can render a badge per row marking the source as
+   * ``"computed"`` or ``"imposed"`` (ADR-017). The previous
+   * implementation read straight from the module-level ``CLUSTERS``
+   * dict and mutated it on every refresh — this snapshot field
+   * isolates the per-fetch cluster catalogue and lets the same UI
+   * code render either source.
+   */
+  clusters: Record<string, ClusterMeta>;
   /** When true, the data is the design's sample fallback. */
   isSample: boolean;
   /** Display name shown in the header (corpus name). */
@@ -346,6 +414,7 @@ export const SAMPLE_SNAPSHOT: ExplorerSnapshot = {
   chunkConcept: SAMPLE_CHUNK_CONCEPT,
   conceptEdges: SAMPLE_CONCEPT_EDGES,
   docContent: SAMPLE_DOC_CONTENT,
+  clusters: { ...CLUSTERS },
   isSample: true,
   corpusLabel: "Acme Corp HQ · sample",
 };
@@ -430,6 +499,19 @@ export function adaptDocument(
     x: 0.5 + Math.cos(angle) * 0.3,
     y: 0.5 + Math.sin(angle) * 0.3,
     confidence,
+    // Version metadata — populated from the catalog envelope so the
+    // cluster rail, the catalog, and DetailPanel can all surface
+    // ``v{N}`` + ``(N versions)`` without re-fetching the doc.
+    versionCount: doc.versions.length,
+    latestVersion:
+      latest?.version_number ?? doc.versions[doc.versions.length - 1]?.version_number ?? 1,
+    versions: doc.versions.map((v) => ({
+      id: v.id,
+      versionNumber: v.version_number,
+      status: v.status,
+      createdAt: v.created_at,
+      filename: v.filename,
+    })),
   };
 }
 
@@ -664,6 +746,47 @@ export function adaptDocContent(
     pages: pages.length > 0 ? pages : [{ n: 1, heading: extraction.parser_name, paras: [extraction.text || "(empty)"] }],
     chunkAnchors,
   };
+}
+
+/**
+ * Map a ``TaxonomyResponse`` onto the explorer's per-cluster metadata
+ * shape. Top-level categories become clusters with
+ * ``source: "imposed"`` and a deterministic hue derived from the
+ * category id so the left rail keeps stable colours across reloads.
+ *
+ * Subcategories aren't surfaced as separate clusters in v1 — the
+ * left rail is one level deep — but they're carried forward so a
+ * future drill-down can render them without another fetch.
+ */
+export function adaptTaxonomy(
+  response: TaxonomyResponse | null,
+): { clusters: Record<string, ClusterMeta>; categories: TaxonomyCategory[] } {
+  if (!response || !response.is_configured || response.categories.length === 0) {
+    return { clusters: {}, categories: [] };
+  }
+  const clusters: Record<string, ClusterMeta> = {};
+  for (const c of response.categories) {
+    clusters[c.id] = {
+      label: c.label,
+      hue: hashHueDeterministic(c.id),
+      source: "imposed",
+    };
+  }
+  return { clusters, categories: response.categories };
+}
+
+/**
+ * Deterministic hue from an arbitrary string id. Mirrors the
+ * fallback used in ``use-explorer-data`` for unknown clusters so
+ * imposed and computed categories share the same colour distribution
+ * in the rail.
+ */
+export function hashHueDeterministic(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) % 360;
 }
 
 function splitParagraphs(text: string): string[] {
