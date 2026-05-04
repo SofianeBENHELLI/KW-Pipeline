@@ -362,6 +362,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/taxonomy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Taxonomy
+         * @description Read the operator-imposed taxonomy (ADR-017).
+         *
+         *     Returns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points
+         *     at a YAML file the loader could parse; returns
+         *     ``is_configured=false`` with empty ``categories`` otherwise.
+         *     Never 404s — a missing taxonomy is a valid deployment state
+         *     (the platform falls back to auto-deduced topic clustering)
+         *     and the frontend uses ``is_configured`` to decide which empty
+         *     state to render.
+         */
+        get: operations["get_knowledge_taxonomy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -975,6 +1003,59 @@ export interface components {
             /** Snippet */
             snippet: string;
         };
+        /**
+         * TaxonomyCategory
+         * @description One node in the taxonomy tree.
+         *
+         *     ``id`` is stable across runs and is what the classifier writes
+         *     onto chunks/documents (``taxonomy_category_id``). The convention
+         *     is dot-separated lower-snake (``hr.hybrid_work``); the id format
+         *     is enforced at load time, not by this schema, so the wire shape
+         *     stays permissive enough to describe a future v0.2 with different
+         *     rules.
+         *
+         *     ``description`` is a free-text paragraph the classifier embeds
+         *     once at taxonomy-publish time and compares against chunk
+         *     embeddings via cosine similarity. Operators write this with the
+         *     metier vocabulary they want to match.
+         */
+        TaxonomyCategory: {
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Subcategories */
+            subcategories: components["schemas"]["TaxonomyCategory"][];
+        };
+        /**
+         * TaxonomyResponse
+         * @description Response shape for ``GET /knowledge/taxonomy``.
+         *
+         *     ``is_configured`` is ``False`` when no YAML file was found at
+         *     the configured path. The frontend uses it to decide whether to
+         *     render the auto-deduction-only state or the imposed taxonomy
+         *     tree. ``source_path`` carries the resolved absolute path when
+         *     configured, ``None`` otherwise — useful for operator debugging.
+         *
+         *     The route never returns 404: a missing taxonomy is a valid
+         *     deployment state, not an error.
+         */
+        TaxonomyResponse: {
+            /** Categories */
+            categories: components["schemas"]["TaxonomyCategory"][];
+            /** Is Configured */
+            is_configured: boolean;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Source Path */
+            source_path: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1585,6 +1666,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_taxonomy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyResponse"];
                 };
             };
         };

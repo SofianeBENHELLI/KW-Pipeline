@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.schemas.taxonomy import Taxonomy
 from app.services.audit_event_store import (
     AuditEventStore,
     InMemoryAuditEventStore,
@@ -39,6 +40,7 @@ from app.services.storage_service import (
     InMemoryStorageService,
     StorageService,
 )
+from app.services.taxonomy_loader import load_taxonomy
 from app.settings import Settings
 
 
@@ -91,6 +93,16 @@ class PipelineServices:
     # the test-suite default and the SQLite store lights up only when
     # ``KW_AUDIT_ENABLED=true`` plus a persistent wiring.
     audit_events: AuditEventStore = field(default_factory=InMemoryAuditEventStore)
+    # Operator-imposed taxonomy (ADR-017). Loaded once at startup
+    # from ``KW_TAXONOMY_PATH`` (or left ``None`` when no path is
+    # configured / the file is missing). The ``GET /knowledge/taxonomy``
+    # route reads from this; the classifier (B3) reads from this.
+    # ``None`` means "fall back to auto-deduced clustering".
+    taxonomy: Taxonomy | None = None
+    # Resolved absolute path the taxonomy was read from, surfaced in
+    # the route response so operators can verify which file the API
+    # is reading. ``None`` when no taxonomy is configured.
+    taxonomy_source_path: str | None = None
     # Snapshot of the typed settings used to construct this container
     # (issue #43). Routes read settings *fresh per request* via
     # ``Settings()`` so per-test ``monkeypatch.setenv`` is observable;
@@ -359,6 +371,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     llm_pair = _maybe_build_anthropic_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
+    taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -385,6 +398,8 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
             graph_store=graph_store,
         ),
         audit_events=_build_audit_store(settings),
+        taxonomy=taxonomy,
+        taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
     )
 
@@ -423,6 +438,7 @@ def build_persistent_services(
     llm_pair = _maybe_build_anthropic_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
+    taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -449,5 +465,7 @@ def build_persistent_services(
             graph_store=graph_store,
         ),
         audit_events=_build_audit_store(settings, default_dir=root),
+        taxonomy=taxonomy,
+        taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
     )
