@@ -46,6 +46,12 @@ interface Props {
   selectedId: string | null;
   /** Click handler — opens the doc in the DetailPanel via the App's selectById. */
   onSelectDocument: (doc: Document) => void;
+  /**
+   * Open the version-history modal for the supplied API document.
+   * Optional so the table degrades gracefully if the host doesn't
+   * route the modal — clicking the v{N} badge then becomes inert.
+   */
+  onOpenLineage?: (doc: Document) => void;
 }
 
 function classifyExt(filename: string): DocTypeKey {
@@ -91,7 +97,13 @@ function statusClass(status: DocumentVersionStatus): string {
   }
 }
 
-export const Catalog: React.FC<Props> = ({ apiBaseUrl, refreshTick, selectedId, onSelectDocument }) => {
+export const Catalog: React.FC<Props> = ({
+  apiBaseUrl,
+  refreshTick,
+  selectedId,
+  onSelectDocument,
+  onOpenLineage,
+}) => {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filterId, setFilterId] = useState("all");
@@ -289,7 +301,13 @@ export const Catalog: React.FC<Props> = ({ apiBaseUrl, refreshTick, selectedId, 
                 >
                   <td className="kx-cat-name" title={doc.original_filename}>
                     <span className="kx-cat-fname">{doc.original_filename}</span>
-                    <VersionBadges versionCount={versionCount} latest={latest?.version_number ?? 1} />
+                    <VersionBadges
+                      versionCount={versionCount}
+                      latest={latest?.version_number ?? 1}
+                      onOpenLineage={
+                        onOpenLineage ? () => onOpenLineage(doc) : undefined
+                      }
+                    />
                   </td>
                   <td className="kx-cat-type">
                     <span
@@ -338,15 +356,47 @@ export const Catalog: React.FC<Props> = ({ apiBaseUrl, refreshTick, selectedId, 
  * Compact "v{N}" badge + "(N versions)" text affordance for a doc
  * row. Surfaced separately so the catalog and the cluster rail can
  * both render the same combo without duplicating the conditional.
+ *
+ * When ``onOpenLineage`` is provided AND ``versionCount > 1`` the
+ * badge becomes interactive (button) and clicking it opens the
+ * version-history modal at the App layer. The badge stays static
+ * (single span) when there's nothing to show — single-version docs
+ * don't have a history to surface.
  */
-export const VersionBadges: React.FC<{ versionCount: number; latest: number }> = ({
-  versionCount,
-  latest,
-}) => (
-  <span className="kx-ver-wrap">
-    <span className="kx-ver-badge kx-mono" title={`Latest version v${latest}`}>v{latest}</span>
-    {versionCount > 1 && (
-      <span className="kx-ver-count kx-mute">({versionCount} versions)</span>
-    )}
-  </span>
-);
+export const VersionBadges: React.FC<{
+  versionCount: number;
+  latest: number;
+  onOpenLineage?: () => void;
+}> = ({ versionCount, latest, onOpenLineage }) => {
+  const interactive = versionCount > 1 && typeof onOpenLineage === "function";
+  return (
+    <span className="kx-ver-wrap">
+      {interactive ? (
+        <button
+          type="button"
+          className="kx-ver-badge kx-mono kx-ver-badge--button"
+          title={`View version history (latest v${latest})`}
+          aria-label={`View version history (${versionCount} versions, latest v${latest})`}
+          onClick={(e) => {
+            // Prevent the parent row's onClick from firing — the
+            // catalog row + the cluster-rail doc row both delegate
+            // selection on click, and we want the badge to be a
+            // pure modal-open affordance.
+            e.stopPropagation();
+            onOpenLineage?.();
+          }}
+          data-testid="kx-version-badge-button"
+        >
+          v{latest}
+        </button>
+      ) : (
+        <span className="kx-ver-badge kx-mono" title={`Latest version v${latest}`}>
+          v{latest}
+        </span>
+      )}
+      {versionCount > 1 && (
+        <span className="kx-ver-count kx-mute">({versionCount} versions)</span>
+      )}
+    </span>
+  );
+};

@@ -64,6 +64,13 @@ interface Props {
    * orange bracket in the viewer corresponds to.
    */
   highlightChunkId?: string | null;
+  /**
+   * Open the lineage modal for the supplied document. When omitted,
+   * the "View history" link in the Versions section is hidden — the
+   * link is purely a discoverability affordance for the modal that
+   * the v{N} badge already opens.
+   */
+  onOpenLineage?: (doc: ExplorerDocument) => void;
 }
 
 const DetailRow: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
@@ -84,7 +91,14 @@ const ConfBar: React.FC<{ value: number }> = ({ value }) => (
   </div>
 );
 
-export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelectId, highlightChunkId }) => {
+export const DetailPanel: React.FC<Props> = ({
+  snapshot,
+  node,
+  onAction,
+  onSelectId,
+  highlightChunkId,
+  onOpenLineage,
+}) => {
   // Bug B — when the highlighted chunk changes, scroll its row into
   // view in whichever section is rendering the chunk list (doc detail
   // chunks list, or concept evidence list). ``block: "nearest"`` keeps
@@ -217,7 +231,19 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
           ``/documents/{id}/lineage`` endpoint exists.
         */}
         <div className="kx-section" data-testid="kx-versions-section">
-          <div className="kx-sec-h">VERSIONS · {versionCount}</div>
+          <div className="kx-sec-h kx-versions-h">
+            <span>VERSIONS · {versionCount}</span>
+            {versionCount > 1 && onOpenLineage && (
+              <button
+                type="button"
+                className="kx-link kx-versions-history"
+                onClick={() => onOpenLineage(d)}
+                data-testid="kx-versions-history-link"
+              >
+                View history
+              </button>
+            )}
+          </div>
           <ul className="kx-list kx-version-list">
             {(d.versions ?? [{ id: d.id, versionNumber: 1, status: "UPLOADED", createdAt: d.date, filename: d.title }])
               .slice()
