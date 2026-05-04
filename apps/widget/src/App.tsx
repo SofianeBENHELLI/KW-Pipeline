@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { getApiBaseUrl, getHealth } from "./api/client";
 import { Header } from "./components/Header";
 import { SideRail, type ActiveMode } from "./components/SideRail";
+import { ChatPanel } from "./sections/ChatPanel";
 import { DocumentsList } from "./sections/DocumentsList";
 import { HealthCard } from "./sections/HealthCard";
 import { KnowledgeSummary } from "./sections/KnowledgeSummary";
@@ -107,6 +108,9 @@ const App: React.FC = () => {
           )}
           {activeMode === "search" && (
             <SearchPanel apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />
+          )}
+          {activeMode === "chat" && (
+            <ChatPanel apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />
           )}
           {activeMode === "kg" && (
             <KnowledgeSummary apiBaseUrl={apiBaseUrl} refreshTick={refreshTick} />

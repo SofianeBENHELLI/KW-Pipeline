@@ -15,7 +15,7 @@ import React, { useCallback } from "react";
 
 import { Icon, type IconName } from "./icons";
 
-export type ActiveMode = "health" | "upload" | "docs" | "kg" | "search";
+export type ActiveMode = "health" | "upload" | "docs" | "kg" | "search" | "chat";
 
 interface RailItem {
   id: ActiveMode;
@@ -30,6 +30,7 @@ const ITEMS: RailItem[] = [
   { id: "upload", icon: "upload-cloud", label: "Upload" },
   { id: "docs", icon: "docs", label: "Recent documents" },
   { id: "search", icon: "search", label: "Knowledge search" },
+  { id: "chat", icon: "info", label: "Knowledge chat" },
   { id: "kg", icon: "graph", label: "Knowledge layer" },
 ];
 
