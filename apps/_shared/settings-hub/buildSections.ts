@@ -230,13 +230,10 @@ export function buildSettingsSections(
 
   // HITL routing — every row stays "active" (or "secret-redacted" for
   // the auth row) because operators always want to see what the
-  // current routing is, even if external is disabled.
-  const externalActive =
-    config.hitl.default_validation_method === "external" &&
-    config.hitl.iterop.enabled &&
-    config.hitl.iterop.base_url_configured &&
-    config.hitl.iterop.auth_configured;
-
+  // current routing is, even if external is disabled. The full
+  // "external is fully wired" check (default method + adapter on +
+  // base URL + auth) is computed instead by ``buildDiagnosticTiles``
+  // below — kept there to keep this transform a pure row map.
   sections.push({
     id: "hitl",
     title: "Human-in-the-loop routing",
@@ -273,10 +270,6 @@ export function buildSettingsSections(
       ),
     ],
   });
-  // Suppress the unused-binding lint locally — `externalActive` is
-  // intentionally surfaced in DiagnosticTile derivation below, not
-  // here.
-  void externalActive;
 
   sections.push({
     id: "logging",
