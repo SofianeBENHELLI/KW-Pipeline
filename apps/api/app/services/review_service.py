@@ -89,6 +89,7 @@ class ReviewService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        actor: str | None = None,
     ) -> SemanticDocument:
         """Drive a version from NEEDS_REVIEW to VALIDATED.
 
@@ -97,6 +98,13 @@ class ReviewService:
         knowledge-graph projection and (if Phase 2 is wired) the LLM
         entity extraction as side-effects — both fire-and-log so the
         validation never rolls back if the side-effect fails.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4) and
+        lands on the ``review.validated`` audit event so "who validated
+        doc X" is a SQL query. ``None`` is allowed for callers that
+        haven't been migrated yet — those paths land an audit row
+        without an actor and the slicing plan in ADR-019 covers them
+        next.
 
         Raises:
             KeyError: when the document or version cannot be found.
@@ -110,6 +118,7 @@ class ReviewService:
             reviewer_note=reviewer_note,
             mark=self._documents.mark_validated,
             decision="validated",
+            actor=actor,
         )
 
     def handle_rejection(
@@ -118,6 +127,7 @@ class ReviewService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        actor: str | None = None,
     ) -> SemanticDocument:
         """Drive a version from NEEDS_REVIEW to REJECTED.
 
@@ -126,6 +136,9 @@ class ReviewService:
         knowledge-graph projection entirely — only validated content
         becomes graph knowledge (ADR-012's "nothing without provenance"
         rule).
+
+        ``actor`` lands on the ``review.rejected`` audit event; see
+        :meth:`handle_validation` for the contract.
 
         Raises:
             KeyError: when the document or version cannot be found.
@@ -137,6 +150,7 @@ class ReviewService:
             reviewer_note=reviewer_note,
             mark=self._documents.mark_rejected,
             decision="rejected",
+            actor=actor,
         )
 
     def _record_review(
@@ -147,6 +161,7 @@ class ReviewService:
         reviewer_note: str | None,
         mark: Callable[..., Any],
         decision: ReviewDecision,
+        actor: str | None,
     ) -> SemanticDocument:
         # FSM precheck — the catalog's ``update_version_status`` enforces
         # this at write time too, but doing it here gives the caller a
@@ -171,6 +186,7 @@ class ReviewService:
             document_id=document_id,
             version_id=version_id,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
         result = self._semantic_outputs.record_validation(
             document_id=document_id,

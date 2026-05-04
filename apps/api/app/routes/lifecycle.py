@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote as urlquote
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response
 
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
@@ -25,6 +25,7 @@ from app.models.document import DocumentVersionStatus
 from app.schemas.document import Document, DocumentListResponse, DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.semantic_document import SemanticDocument
+from app.services.auth import User, get_current_user
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.idempotency_store import hash_json_body
@@ -352,12 +353,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
         return _dispatch_review(
             handler=services.review.handle_validation,
             document_id=document_id,
             version_id=version_id,
             reviewer_note=request.reviewer_note,
+            actor=current_user.id,
         )
 
     @router.post(
@@ -369,12 +372,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
         return _dispatch_review(
             handler=services.review.handle_rejection,
             document_id=document_id,
             version_id=version_id,
             reviewer_note=request.reviewer_note,
+            actor=current_user.id,
         )
 
     return router
@@ -386,6 +391,7 @@ def _dispatch_review(
     document_id: str,
     version_id: str,
     reviewer_note: str | None,
+    actor: str,
 ) -> Any:
     """Translate :class:`ReviewService` domain exceptions into HTTP envelopes.
 
@@ -400,6 +406,7 @@ def _dispatch_review(
             document_id=document_id,
             version_id=version_id,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

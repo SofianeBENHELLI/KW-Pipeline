@@ -310,6 +310,51 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Authentication (ADR-019). Three modes selected by ``KW_AUTH_MODE``:
+    # ``dev`` (default — fixed identity from ``KW_AUTH_DEV_USER``,
+    # falls back to a ``"dev"`` admin user so existing tests / demos
+    # work out of the box and the audit trail is attributed to a
+    # recognisable actor), ``disabled`` (legacy escape hatch — anonymous
+    # admin user, kept for back-compat), and ``bearer`` (HS256 JWT
+    # validated against ``KW_AUTH_SECRET`` — MVP scheme; production
+    # scheme is the deferred 3DEXPERIENCE context handoff).
+    # ------------------------------------------------------------------
+    auth_mode: str = Field(
+        default="dev",
+        validation_alias=AliasChoices("KW_AUTH_MODE"),
+        description=(
+            "Active auth mode. One of ``dev`` / ``disabled`` / "
+            "``bearer`` (case-insensitive). Default ``dev`` stamps a "
+            "fixed ``dev`` admin user on every request so existing "
+            "tests / demos / frontend calls keep working AND every "
+            "review decision lands a recognisable actor in the audit "
+            "table. ``disabled`` is the legacy escape hatch (anonymous "
+            "actor); ``bearer`` is the MVP signed-token mode. See "
+            "ADR-019."
+        ),
+    )
+    auth_dev_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_AUTH_DEV_USER"),
+        description=(
+            "Fixed user id for ``KW_AUTH_MODE=dev``. Empty (default) "
+            'falls back to the literal ``"dev"`` so the mode is '
+            "usable without further configuration. The role is fixed "
+            "to ``admin`` in dev mode."
+        ),
+    )
+    auth_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_AUTH_SECRET"),
+        description=(
+            "HS256 secret used by ``KW_AUTH_MODE=bearer`` to verify "
+            "incoming JWTs. Required when bearer mode is selected; "
+            "the service refuses to construct otherwise. Empty "
+            "(default) is fine for ``disabled`` / ``dev``."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Logging (issue #42). ``json`` is the production / container shape
     # that the on-call workflow greps; ``text`` is the stdlib default
     # used for local development to keep tracebacks human-readable.
