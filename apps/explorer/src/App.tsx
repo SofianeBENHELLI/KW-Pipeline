@@ -274,6 +274,53 @@ export default function App(): React.ReactElement {
     return () => window.removeEventListener("keydown", onKey);
   }, [goBack, goForward]);
 
+  // ── Item #5 — URL hash deep linking ─────────────────────────────────
+  // The hash format is `#<kind>/<id>` (e.g. `#doc/d4`, `#concept/k2`,
+  // `#chunk/c4.1`). On mount, parse the hash and select the matching
+  // entity. On selection change, write the hash back so the URL is
+  // shareable and "Back" in the host browser tab restores the focus.
+  const hashAppliedRef = useRef(false);
+  useEffect(() => {
+    if (hashAppliedRef.current) return;
+    if (snapshot.documents.length === 0) return;
+    const raw = typeof window !== "undefined" ? window.location.hash : "";
+    if (!raw || raw.length < 2) {
+      hashAppliedRef.current = true;
+      return;
+    }
+    const [kind, ...rest] = raw.slice(1).split("/");
+    const id = rest.join("/");
+    if (!kind || !id) {
+      hashAppliedRef.current = true;
+      return;
+    }
+    if (kind === "doc" && docById(snapshot, id)) {
+      selectById(id, "doc");
+      hashAppliedRef.current = true;
+    } else if (kind === "chunk" && chunkById(snapshot, id)) {
+      selectById(id, "chunk");
+      hashAppliedRef.current = true;
+    } else if (kind === "concept" && conceptById(snapshot, id)) {
+      selectById(id, "concept");
+      hashAppliedRef.current = true;
+    }
+  }, [snapshot, selectById]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!selected) return;
+    const next = `#${selected.kind}/${selected.id}`;
+    if (window.location.hash === next) return;
+    // history.replaceState avoids polluting the browser back-stack on
+    // every selection — the focus history inside the app already covers
+    // intra-corpus navigation. The hash is purely a deep-link write.
+    try {
+      window.history.replaceState(null, "", next);
+    } catch {
+      // Some hosts disable replaceState — fall back silently.
+    }
+  }, [selected]);
+
   const handleAction = useCallback(
     (action: DetailAction) => {
       if (action.kind === "focusRoot") {
@@ -326,14 +373,27 @@ export default function App(): React.ReactElement {
   const searchResults = useMemo(() => {
     if (!search) return null;
     const q = search.toLowerCase();
+    // Item #5: index extends past `title`/`name` into description-
+    // adjacent fields so a query like "compliance" matches a doc by
+    // its source/cluster, a chunk by its summary/kind, or a concept
+    // by its synonyms/kind.
+    const docMatch = (d: typeof snapshot.documents[number]): boolean =>
+      d.title.toLowerCase().includes(q) ||
+      d.cluster.toLowerCase().includes(q) ||
+      d.source.toLowerCase().includes(q) ||
+      d.type.toLowerCase().includes(q);
+    const conceptMatch = (k: typeof snapshot.concepts[number]): boolean =>
+      k.name.toLowerCase().includes(q) ||
+      k.kind.toLowerCase().includes(q) ||
+      k.syn.some((s) => s.toLowerCase().includes(q));
+    const chunkMatch = (c: typeof snapshot.chunks[number]): boolean =>
+      c.label.toLowerCase().includes(q) ||
+      c.summary.toLowerCase().includes(q) ||
+      c.kind.toLowerCase().includes(q);
     return {
-      docs: snapshot.documents.filter((d) => d.title.toLowerCase().includes(q)).slice(0, 4),
-      concepts: snapshot.concepts
-        .filter((k) => k.name.toLowerCase().includes(q) || k.syn.some((s) => s.toLowerCase().includes(q)))
-        .slice(0, 4),
-      chunks: snapshot.chunks
-        .filter((c) => c.label.toLowerCase().includes(q) || c.summary.toLowerCase().includes(q))
-        .slice(0, 4),
+      docs: snapshot.documents.filter(docMatch).slice(0, 4),
+      concepts: snapshot.concepts.filter(conceptMatch).slice(0, 4),
+      chunks: snapshot.chunks.filter(chunkMatch).slice(0, 4),
     };
   }, [search, snapshot]);
 

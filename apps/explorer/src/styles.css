@@ -639,3 +639,179 @@ body {
 .kx-density-dense .kx-page { margin: 10px 10px; padding: 12px 14px; }
 .kx-density-dense .kx-para { margin-bottom: 6px; font-size: 12px; }
 .kx-density-dense .kx-sec { padding: 6px 12px; }
+
+/* ────────────────────────────────────────────────────────────────────
+ * v2 polish — items #1..#5 + tech-note edges
+ *
+ * Layered ON TOP of the design's CSS so we can ship the v2 polish
+ * pass without re-flowing the existing tokens or class hierarchy.
+ *
+ *   * .kx-zoom-pill      — viewport status + zoom controls overlay
+ *                          on the canvas (pairs with the new pan/zoom
+ *                          implementation in GraphCanvas).
+ *   * .kx-right (glass)  — glassmorphism on the document viewer +
+ *                          detail column. Falls back to the original
+ *                          solid background where backdrop-filter is
+ *                          unsupported.
+ *   * .kx-detail-head    — sticky panel header with a gradient mask
+ *                          that blends with scrolling content.
+ *   * @keyframes kx-slide-in — slide-in animation when the right
+ *                          column mounts.
+ *   * .kx-detail-empty + .kx-viewer-empty — center stays uncluttered.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* ── Zoom pill (overlay on canvas) ───────────────────────────────── */
+.kx-zoom-pill {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
+  z-index: 5;
+}
+.kx-theme-dark .kx-zoom-pill { background: rgba(20, 35, 57, 0.6); }
+.kx-zoom-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  background: var(--bg);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--mono);
+  padding: 0;
+  line-height: 1;
+}
+.kx-zoom-btn:hover {
+  background: var(--navy);
+  color: white;
+  border-color: var(--navy);
+}
+
+/* ── Glassmorphism on the right rail (item #2) ───────────────────── */
+.kx-right {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(244, 246, 251, 0.85) 100%
+  );
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border-left: 1px solid rgba(14, 42, 74, 0.08);
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.6) inset, -8px 0 24px -16px rgba(14, 42, 74, 0.08);
+  animation: kx-slide-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kx-theme-dark .kx-right {
+  background: linear-gradient(
+    180deg,
+    rgba(14, 29, 51, 0.78) 0%,
+    rgba(10, 22, 40, 0.85) 100%
+  );
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.04) inset, -8px 0 24px -16px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes kx-slide-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Sticky viewer header with a gradient mask so paragraphs scroll
+ * underneath without a hard line. */
+.kx-viewer-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.94) 0%,
+    rgba(255, 255, 255, 0.94) 70%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(14, 42, 74, 0.06);
+}
+.kx-theme-dark .kx-viewer-head {
+  background: linear-gradient(
+    180deg,
+    rgba(14, 29, 51, 0.92) 0%,
+    rgba(14, 29, 51, 0.92) 70%,
+    rgba(14, 29, 51, 0) 100%
+  );
+}
+
+.kx-detail {
+  background: transparent;
+  position: relative;
+}
+/* Detail panel header — sticky inside the .kx-detail scroll container. */
+.kx-detail-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -12px -14px 0;
+  padding: 12px 14px 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(244, 246, 251, 0.92) 0%,
+    rgba(244, 246, 251, 0.78) 70%,
+    rgba(244, 246, 251, 0) 100%
+  );
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.kx-theme-dark .kx-detail-head {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 35, 57, 0.92) 0%,
+    rgba(20, 35, 57, 0.78) 70%,
+    rgba(20, 35, 57, 0) 100%
+  );
+}
+
+/* Sections inside the glass panel — pull contrast so they read on
+ * the translucent backdrop. */
+.kx-section {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(14, 42, 74, 0.08);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.kx-theme-dark .kx-section {
+  background: rgba(20, 35, 57, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Hover glow / selection glow are handled in node renderers via
+ *    `filter: drop-shadow()`; the keyframe below isn't strictly
+ *    required but ramps the glow in over 120ms when a node first
+ *    enters the hovered state, which feels more deliberate than an
+ *    instant filter pop. */
+@keyframes kx-glow-in {
+  from {
+    filter: drop-shadow(0 0 0 rgba(232, 162, 63, 0));
+  }
+  to {
+    filter: drop-shadow(0 0 12px rgba(232, 162, 63, 0.7));
+  }
+}
