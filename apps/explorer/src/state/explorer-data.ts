@@ -134,6 +134,11 @@ export interface ExplorerDocument {
    * envelope. Optional in the sample corpus; the DetailPanel
    * "Versions" section degrades to a single-row v1 entry when
    * absent.
+   *
+   * ``sha256`` and ``duplicateOfVersionId`` are surfaced for the
+   * lineage modal so it can render the integrity hash + the "duplicate
+   * of v{X}" caption client-side without a second API hop. They're
+   * optional so the sample corpus literal stays compact.
    */
   versions?: Array<{
     id: string;
@@ -141,6 +146,8 @@ export interface ExplorerDocument {
     status: string;
     createdAt: string;
     filename: string;
+    sha256?: string;
+    duplicateOfVersionId?: string | null;
   }>;
 }
 
@@ -511,6 +518,8 @@ export function adaptDocument(
       status: v.status,
       createdAt: v.created_at,
       filename: v.filename,
+      sha256: v.sha256,
+      duplicateOfVersionId: v.duplicate_of_version_id,
     })),
   };
 }

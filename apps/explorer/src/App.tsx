@@ -31,6 +31,7 @@ import { DocViewer } from "./components/DocViewer";
 import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
 import { SettingsModal } from "./components/SettingsModal";
+import { LineageModal } from "./components/LineageModal";
 import { getApiBaseUrl } from "./api/client";
 import type { Document as ApiDocument } from "./api/types";
 import {
@@ -41,6 +42,7 @@ import {
   chunksForDoc,
   conceptById,
   docById,
+  type ExplorerDocument,
 } from "./state/explorer-data";
 import { useExplorerData } from "./state/use-explorer-data";
 
@@ -102,6 +104,13 @@ export default function App(): React.ReactElement {
   );
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Version-history modal — lifted to App level so a click on any
+  // v{N} badge (cluster rail, catalog row) or the "View history" link
+  // in the DetailPanel "VERSIONS" section can mount the same modal.
+  // Null when closed; carries the full ExplorerDocument so the modal
+  // can render directly from ``doc.versions`` without re-fetching.
+  const [lineageDocument, setLineageDocument] = useState<ExplorerDocument | null>(null);
+  const closeLineage = useCallback(() => setLineageDocument(null), []);
 
   // Keep selection / open-doc / concept-focus in sync with the data
   // refresh — the sample → live transition can rename ids out from
@@ -775,6 +784,7 @@ export default function App(): React.ReactElement {
                               <VersionBadges
                                 versionCount={d.versionCount ?? 1}
                                 latest={d.latestVersion ?? 1}
+                                onOpenLineage={() => setLineageDocument(d)}
                               />
                               <span className="kx-mono kx-mute">{d.chunks}</span>
                             </div>
@@ -961,6 +971,20 @@ export default function App(): React.ReactElement {
                 apiBaseUrl={apiBaseUrl}
                 refreshTick={refreshTick}
                 selectedId={selected?.kind === "doc" ? selected.id : null}
+                onOpenLineage={(apiDoc: ApiDocument) => {
+                  // Prefer the explorer snapshot copy so we get a
+                  // fully-fledged ExplorerDocument (cluster, hue,
+                  // confidence, …); fall back to a thin projection
+                  // built straight from the API row so the modal can
+                  // still render its versions list when the doc isn't
+                  // in the snapshot (e.g. paginated past page 1).
+                  const known = docById(snapshot, apiDoc.id);
+                  if (known) {
+                    setLineageDocument(known);
+                    return;
+                  }
+                  setLineageDocument(toLineageOnlyDocument(apiDoc));
+                }}
                 onSelectDocument={(apiDoc: ApiDocument) => {
                   // Try to resolve via the snapshot first so we get the
                   // existing ExplorerDocument shape (cluster, hue, etc.).
@@ -1028,6 +1052,7 @@ export default function App(): React.ReactElement {
               onAction={handleAction}
               onSelectId={selectById}
               highlightChunkId={highlightChunk}
+              onOpenLineage={setLineageDocument}
             />
           </aside>
         )}
@@ -1039,8 +1064,49 @@ export default function App(): React.ReactElement {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      {lineageDocument && (
+        <LineageModal document={lineageDocument} onClose={closeLineage} />
+      )}
     </div>
   );
+}
+
+/**
+ * Build a minimal ``ExplorerDocument`` shape from a catalog API row so
+ * the lineage modal can render its versions list even when the doc
+ * isn't part of the snapshot (e.g. catalog paginated past the first
+ * page). The modal only consumes ``title`` + ``versions`` + the
+ * ``versionCount`` / ``latestVersion`` shorthand, so we don't need to
+ * fabricate cluster / x / y / confidence values that wouldn't be
+ * shown.
+ */
+function toLineageOnlyDocument(apiDoc: ApiDocument): ExplorerDocument {
+  const latest =
+    apiDoc.versions.find((v) => v.id === apiDoc.latest_version_id) ??
+    apiDoc.versions[apiDoc.versions.length - 1];
+  return {
+    id: apiDoc.id,
+    title: apiDoc.original_filename,
+    type: "doc",
+    source: "—",
+    date: (latest?.created_at ?? apiDoc.created_at).slice(0, 10),
+    chunks: 0,
+    cluster: "unknown",
+    x: 0,
+    y: 0,
+    confidence: 0,
+    versionCount: apiDoc.versions.length,
+    latestVersion: latest?.version_number ?? 1,
+    versions: apiDoc.versions.map((v) => ({
+      id: v.id,
+      versionNumber: v.version_number,
+      status: v.status,
+      createdAt: v.created_at,
+      filename: v.filename,
+      sha256: v.sha256,
+      duplicateOfVersionId: v.duplicate_of_version_id,
+    })),
+  };
 }
 
 // ─── Sub-components (kept inline because they're tightly coupled) ────────────
