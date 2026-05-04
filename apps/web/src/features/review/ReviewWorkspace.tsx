@@ -7,7 +7,8 @@ import {
   rejectVersion,
   validateVersion,
 } from "../../api/client";
-import { latestVersion } from "../../domain/document";
+import { documentScopes, latestVersion } from "../../domain/document";
+import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
 import { ReviewActions } from "./ReviewActions";
@@ -162,6 +163,12 @@ export function ReviewWorkspace({
             >
               v{latestVersionNumber}
             </span>
+            {/* Scope chip — same component as the catalog row so the
+                review header reflects the workspace the doc was
+                uploaded into (EPIC-D #218 / #250). Falls back to a
+                "No scope info" placeholder until ``GET /documents``
+                is extended to carry ``scopes`` (D.5). */}
+            <ScopeChip scopes={documentScopes(document)} />
             {totalVersions > 1 ? (
               <span
                 className="version-count muted"

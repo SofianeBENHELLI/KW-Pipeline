@@ -255,6 +255,56 @@ h3 {
   color: var(--danger);
 }
 
+/* Scope chip (EPIC-D #218 / #250). Compact pill rendered next to the
+   filename in catalog rows and the review header. The ``-group`` is
+   the inline wrapper that holds the primary chip plus the optional
+   "+N more" badge on multi-scope documents. */
+.scope-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.scope-chip--personal {
+  background: #eef2f7;
+  color: #304052;
+}
+.scope-chip--swym_community {
+  background: #e6f0fb;
+  color: var(--action-strong);
+}
+.scope-chip--project {
+  background: #efeafa;
+  color: #4d3a8c;
+}
+.scope-chip--more {
+  background: var(--panel-muted);
+  color: var(--muted);
+  cursor: help;
+}
+.scope-chip--empty {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-style: italic;
+}
+.scope-chip__icon {
+  font-size: 0.85em;
+  line-height: 1;
+}
+
 .workspace {
   min-width: 0;
   padding: 16px;

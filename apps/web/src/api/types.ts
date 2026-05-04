@@ -37,9 +37,17 @@ export type ApiSemanticDocument = Schemas["SemanticDocument"];
 export type ReviewStatus = ApiSemanticAsset["review_status"];
 export type ValidationStatus = ApiSemanticDocument["validation_status"];
 
+// ─── Workspace scope (EPIC-D #218 / #250) ───────────────────────────────────
+// One row of the ``document_scopes`` join table. The upload response
+// surfaces the full list at upload time; ``GET /documents`` does not
+// yet — see ``ScopeChip`` for how the missing-field case is handled.
+export type ApiScope = Schemas["Scope"];
+
 // ─── Upload response ─────────────────────────────────────────────────────────
-// POST /documents/upload returns a DocumentVersion.
-export type ApiUploadResponse = ApiDocumentVersion;
+// POST /documents/upload now returns a payload that extends DocumentVersion
+// with ``scopes: list[Scope]`` (#250). Use the schema-generated alias so
+// the call site stays pinned to the regenerated OpenAPI contract.
+export type ApiUploadResponse = Schemas["UploadDocumentResponse"];
 
 // ─── Knowledge graph ─────────────────────────────────────────────────────────
 

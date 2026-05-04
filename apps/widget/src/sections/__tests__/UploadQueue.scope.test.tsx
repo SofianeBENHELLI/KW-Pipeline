@@ -1,14 +1,22 @@
 /**
- * Scope picker mockup tests (EPIC-D #218).
+ * Scope picker wire-up tests (EPIC-D #218 / #250).
  *
- * The Swym scope dropdown is a pure UX preview — it must NOT alter
- * the upload wire contract. These tests pin three things:
+ * The picker now drives the wire: ``POST /documents/upload`` accepts
+ * optional ``scope_kind`` / ``scope_ref`` query params, and the queue
+ * forwards them only when the user actively picked a non-default
+ * scope. The default personal scope is sent as "no params" so the
+ * backend can auto-fill ``personal:<current_user.id>``.
+ *
+ * These tests pin five things:
  *
  * 1. Default state — Personal selected, Swym disabled.
  * 2. Selection — Personal stays selectable, Swym is rejected.
- * 3. Wire contract — submit() still posts only `file`, no `scope_kind`,
- *    no `scope_ref`. If a future change accidentally promotes the
- *    mockup to a real field on the request, this test breaks.
+ * 3. Default personal scope → upload omits ``scope_kind`` / ``scope_ref``
+ *    (so the backend's ``get_current_user`` default kicks in).
+ * 4. Explicit non-default scope → upload includes both ``scope_kind``
+ *    and ``scope_ref`` verbatim (state-driven, since the dropdown is
+ *    still locked to personal until D.3 ships the membership client).
+ * 5. The Swym option's "Coming soon" tooltip points at ADR-020.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -31,9 +39,7 @@ vi.mock("../../api/client", async () => {
 
 import { uploadDocumentWithProgress } from "../../api/client";
 
-const mockedUpload = uploadDocumentWithProgress as unknown as ReturnType<
-  typeof vi.fn
->;
+const mockedUpload = vi.mocked(uploadDocumentWithProgress);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -96,7 +102,27 @@ describe("UploadQueue — scope picker mockup", () => {
     expect(select.value).toBe("personal");
   });
 
-  it("submit still posts only `file` — no scope_kind, no scope_ref on the wire", async () => {
+  it("Swym option tooltip points at ADR-020", () => {
+    render(<UploadQueue apiBaseUrl="http://test.local" onUploaded={() => {}} />);
+
+    const select = screen.getByTestId(
+      "kw-upload-scope-select",
+    ) as HTMLSelectElement;
+    const swymOption = Array.from(select.options).find(
+      (opt) => opt.value === "swym_community",
+    );
+    expect(swymOption).toBeDefined();
+    // The pre-#250 tooltip mentioned "EPIC-D"; post-wire-up we
+    // point at the ADR that owns the scope contract so curious
+    // operators can find the rationale without a code dive.
+    expect(swymOption!.title).toMatch(/ADR-020/);
+    // The "Coming soon" pill alongside the dropdown gets the same
+    // refresh — the two surfaces must stay in sync.
+    const pill = document.querySelector(".kw-scope__pill") as HTMLElement;
+    expect(pill.title).toMatch(/ADR-020/);
+  });
+
+  it("default personal scope → omits scope_kind / scope_ref", async () => {
     mockedUpload.mockResolvedValue({
       id: "ver-1",
       document_id: "doc-1",
@@ -132,19 +158,20 @@ describe("UploadQueue — scope picker mockup", () => {
       expect(mockedUpload).toHaveBeenCalledTimes(1);
     });
 
-    // The wire contract: first arg is the File, second is an options
-    // bag with baseUrl + onProgress only. NO scope_kind, NO scope_ref,
-    // NO `scope` property of any kind. The mockup cannot leak into the
-    // request.
+    // The wire contract for the default personal scope: omit both
+    // ``scope_kind`` and ``scope_ref`` so the backend auto-fills with
+    // ``personal:<current_user.id>`` from ``get_current_user``.
     const [submittedFile, submittedOpts] = mockedUpload.mock.calls[0];
     expect(submittedFile).toBe(file);
     expect(submittedOpts).toBeDefined();
-    expect(Object.keys(submittedOpts)).toEqual(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opts = submittedOpts as any;
+    expect(Object.keys(opts)).toEqual(
       expect.arrayContaining(["baseUrl", "onProgress"]),
     );
-    // Defensive: assert the absence of the future-contract fields.
-    expect(submittedOpts.scope_kind).toBeUndefined();
-    expect(submittedOpts.scope_ref).toBeUndefined();
-    expect(submittedOpts.scope).toBeUndefined();
+    expect(opts.scope_kind).toBeUndefined();
+    expect(opts.scope_ref).toBeUndefined();
+    expect(opts.scope).toBeUndefined();
   });
+
 });
