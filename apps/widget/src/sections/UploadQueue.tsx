@@ -7,6 +7,20 @@ import { StatusBadge } from "../components/StatusBadge";
 
 const CONCURRENCY = 2;
 
+/**
+ * Upload scope (EPIC-D #218 — UX preview only).
+ *
+ * Models the future selector ahead of the backend — today the upload
+ * still POSTs only `file`. When `/documents/upload` accepts
+ * `scope_kind` / `scope_ref`, the dropdown's value is already shaped
+ * correctly and only `submit()` needs to change.
+ */
+export type Scope =
+  | { kind: "personal"; ref: string }
+  | { kind: "swym_community"; ref: string };
+
+const DEFAULT_SCOPE: Scope = { kind: "personal", ref: "me" };
+
 interface Props {
   apiBaseUrl: string;
   /** Bumped after each successful upload so sibling sections refresh. */
@@ -52,6 +66,10 @@ function folderRootOf(relativePath: string): string | null {
 export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFlightChange }) => {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  // Scope selection (EPIC-D #218 mockup). Component-only state — no
+  // localStorage, no URL, no wire field. The selected value is purely
+  // visual until the backend lands; see the TODO near the upload call.
+  const [selectedScope, setSelectedScope] = useState<Scope>(DEFAULT_SCOPE);
   const inflightRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -81,6 +99,7 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
         // block the React commit. Uses item id to address the row later.
         void (async () => {
           try {
+            // TODO(EPIC-D): pass selectedScope to uploadDocument once /documents/upload accepts scope_kind + scope_ref. ADR-020.
             await uploadDocumentWithProgress(it.file, {
               baseUrl: apiBaseUrl,
               onProgress: (fraction) => updateItem(it.id, { progress: fraction }),
@@ -202,6 +221,20 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
     [enqueueDataTransfer],
   );
 
+  // Scope picker change handler — only the personal option is real.
+  // The Swym option is disabled at the <option> level so this guard
+  // is belt-and-braces: even if a synthetic event slips through (or a
+  // future browser ignores `disabled`), we never accept it.
+  const handleScopeChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      if (event.target.value === "personal") {
+        setSelectedScope({ kind: "personal", ref: "me" });
+      }
+      // Swym option is disabled — ignore any other value silently.
+    },
+    [],
+  );
+
   return (
     <section className="kw-section" aria-label="Upload">
       <SectionHeader
@@ -213,6 +246,49 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
             : undefined
         }
       />
+
+      {/* Scope picker (EPIC-D #218 mockup). UX-only — does NOT change
+          the upload wire contract. The Swym option is disabled until
+          the backend can accept scope_kind / scope_ref. */}
+      <div className="kw-scope" aria-label="Upload destination">
+        <label className="kw-scope__label" htmlFor="kw-upload-scope">
+          Destination
+        </label>
+        <select
+          id="kw-upload-scope"
+          className="kw-scope__select"
+          value={selectedScope.kind}
+          onChange={handleScopeChange}
+          data-testid="kw-upload-scope-select"
+        >
+          <option value="personal">Personal workspace — Visible only to you</option>
+          <option
+            value="swym_community"
+            disabled
+            title="Available once your 3DSwym communities are connected (EPIC-D)"
+          >
+            Swym community… (Coming soon)
+          </option>
+        </select>
+        {selectedScope.kind === "personal" && (
+          <div className="kw-scope__sub">Visible only to you</div>
+        )}
+        <div
+          className="kw-scope__pill"
+          aria-hidden="true"
+          title="Available once your 3DSwym communities are connected (EPIC-D)"
+        >
+          Coming soon
+        </div>
+        <div
+          className="kw-scope__banner"
+          role="note"
+          data-testid="kw-upload-scope-banner"
+        >
+          <Icon name="info" size={12} /> New: pick where your document goes.
+          Scope-aware filtering arrives with the next ingestion update.
+        </div>
+      </div>
 
       <div
         className={isDragging ? "kw-drop kw-drop--active" : "kw-drop"}
