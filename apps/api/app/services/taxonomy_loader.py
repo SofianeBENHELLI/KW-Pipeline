@@ -188,6 +188,11 @@ def _parse_category(raw: Any, *, path: str, source: str) -> TaxonomyCategory:
             label=label,
             description=description,
             subcategories=subcategories,
+            # Operator-authored YAML always emits ``source="imposed"``.
+            # The default on the schema is also ``"imposed"`` so this
+            # is mostly defensive — the route layer relies on the
+            # explicit tag when merging with computed clusters (#249).
+            source="imposed",
         )
     except Exception as exc:  # noqa: BLE001
         raise TaxonomyLoadError(

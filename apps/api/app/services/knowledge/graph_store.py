@@ -124,6 +124,18 @@ class GraphStore(Protocol):
         node_id)`` so pages are stable across calls.
         """
 
+    def find_nodes_by_kind(self, kind: str) -> list[GraphNode]:
+        """Return every node currently stored with the given ``kind``.
+
+        Used by the hybrid taxonomy route (#249) to enumerate the
+        ``topic`` nodes the projector emitted from topic clustering
+        — those become the ``"computed"`` half of
+        ``GET /knowledge/taxonomy``. The result is sorted by node id
+        for byte-stability across calls. Empty graph (or no nodes of
+        that kind) is a valid response: an empty list, not an
+        exception.
+        """
+
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
 
     def ensure_vector_index(self, *, name: str, dim: int) -> None:
@@ -312,6 +324,13 @@ class InMemoryGraphStore:
                 nodes=page,
                 edges=sorted(page_edges, key=lambda e: (e.kind, e.id)),
                 next_cursor=next_cursor,
+            )
+
+    def find_nodes_by_kind(self, kind: str) -> list[GraphNode]:
+        with self._lock:
+            return sorted(
+                (n for n in self._nodes.values() if n.kind == kind),
+                key=lambda n: n.id,
             )
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
@@ -621,6 +640,18 @@ class Neo4jGraphStore:
             last = nodes[-1]
             next_cursor = _encode_cursor((last.kind, last.id))
         return KnowledgeGraphPage(nodes=nodes, edges=edges, next_cursor=next_cursor)
+
+    def find_nodes_by_kind(  # pragma: no cover - exercised behind pytest -m integration
+        self, kind: str
+    ) -> list[GraphNode]:
+        rows = self._read(
+            """
+            MATCH (n:KnowledgeNode {kind: $kind})
+            RETURN n ORDER BY n.id
+            """,
+            {"kind": kind},
+        )
+        return [_row_to_node(row["n"]) for row in rows]
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
     # Each method below is exercised end-to-end by

@@ -123,18 +123,16 @@ describe("Knowledge Explorer — sprint additions (taxonomy + catalog + versions
 
   // ── 1. Taxonomy live fetch ───────────────────────────────────────────────
   describe("Live taxonomy fetch", () => {
-    it("renders an 'imposed' badge for taxonomy categories returned by the API", async () => {
-      // The taxonomy endpoint returns one category. The catalog is
-      // empty so the explorer would otherwise fall through to the
-      // sample fallback and surface every seed cluster as
-      // "computed". With an imposed taxonomy, only the API's
-      // categories appear in the rail (live mode), and they all
-      // carry "imposed".
+    it("renders both 'imposed' and 'computed' badges based on the API source flag (#249)", async () => {
+      // The hybrid taxonomy endpoint (#249) returns BOTH operator-
+      // imposed and auto-deduced clusters in one payload, each
+      // carrying a ``source: "computed" | "imposed"`` flag. The
+      // Explorer no longer derives source client-side — it just
+      // reflects what the API said, so we fixture both kinds and
+      // assert the matching badge renders for each.
       const docs: ApiDocument[] = [
         fixtureDoc({ id: "doc-a", original_filename: "Compliance Brief.pdf" }, 1),
       ];
-      // Tag the doc to a known-imposed category id so we land in
-      // live mode with a category to display.
       const taxonomy: TaxonomyResponse = {
         schema_version: "v0.1",
         is_configured: true,
@@ -145,12 +143,21 @@ describe("Knowledge Explorer — sprint additions (taxonomy + catalog + versions
             label: "Compliance",
             description: "Regulatory and compliance docs",
             subcategories: [],
+            source: "imposed",
           },
           {
             id: "engineering",
             label: "Engineering",
             description: "Technical RFCs and design docs",
             subcategories: [],
+            source: "imposed",
+          },
+          {
+            id: "topic-cluster-42",
+            label: "Auto cluster",
+            description: "Auto-deduced topic cluster covering some keywords.",
+            subcategories: [],
+            source: "computed",
           },
         ],
       };
@@ -172,12 +179,17 @@ describe("Knowledge Explorer — sprint additions (taxonomy + catalog + versions
 
       const list = document.querySelector(".kx-cluster-list") as HTMLElement;
       expect(list).not.toBeNull();
-      // Both taxonomy categories should appear with the "imposed" badge.
-      // (One of them is live-classified so it has a doc, the other
-      // is empty — the rail filters out empty clusters today, so we
-      // only assert the populated one.)
+      // Both source values flowed through the API and are reflected
+      // verbatim in the rail's badges — the imposed-tagged categories
+      // get the "imposed" badge, the computed-tagged one gets "auto".
+      const imposedBadges = document.querySelectorAll('[data-testid="kx-cl-src-imposed"]');
+      const autoBadges = document.querySelectorAll('[data-testid="kx-cl-src-auto"]');
+      expect(imposedBadges.length).toBeGreaterThan(0);
+      expect(autoBadges.length).toBeGreaterThan(0);
       const labels = Array.from(list.querySelectorAll(".kx-cl-name")).map((el) => el.textContent);
-      expect(labels.some((l) => l && /Compliance|Engineering|unknown/.test(l))).toBe(true);
+      expect(
+        labels.some((l) => l && /Compliance|Engineering|Auto cluster|unknown/.test(l)),
+      ).toBe(true);
     });
 
     it("falls back to topic-derived ('auto') clusters when the taxonomy endpoint 404s", async () => {
