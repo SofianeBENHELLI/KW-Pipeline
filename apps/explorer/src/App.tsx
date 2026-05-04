@@ -107,11 +107,26 @@ export default function App(): React.ReactElement {
     if (conceptFocus === "" || !conceptById(snapshot, conceptFocus)) {
       setConceptFocus(snapshot.concepts[0]?.id ?? "");
     }
-    if (expandedClusters.size === 0) {
-      const firstCluster = snapshot.documents[0]?.cluster;
-      if (firstCluster) setExpandedClusters(new Set([firstCluster]));
-    }
-  }, [snapshot, openDocId, conceptFocus, expandedClusters.size]);
+  }, [snapshot, openDocId, conceptFocus]);
+
+  // Bug A — Seed `expandedClusters` with the first cluster only on
+  // initial corpus load. The previous implementation lived in the
+  // sync effect above and re-fired whenever ``expandedClusters.size``
+  // dropped back to 0 (i.e. every time the user toggled off the
+  // last expanded row). Result: the first cluster ("People & HR" in
+  // the sample) appeared "stuck on" — clicks looked like a no-op
+  // because the auto-init re-added it on the very next render. We
+  // gate the seed with a ref so it only runs once per corpus, and
+  // an empty ``expandedClusters`` afterwards is honoured as the
+  // user's intent rather than overwritten.
+  const clusterSeedDoneRef = useRef(false);
+  useEffect(() => {
+    if (clusterSeedDoneRef.current) return;
+    if (snapshot.documents.length === 0) return;
+    const firstCluster = snapshot.documents[0]?.cluster;
+    if (firstCluster) setExpandedClusters(new Set([firstCluster]));
+    clusterSeedDoneRef.current = true;
+  }, [snapshot]);
 
   const allClusters = useMemo(() => {
     const set = new Set<string>();
@@ -842,6 +857,24 @@ export default function App(): React.ReactElement {
                 <Icon name="warn" size={12} />
                 Confidence
               </button>
+              {/*
+                Bug C — side-panel toggle is now first-class on the
+                main toolbar. It used to live in the Tweaks overlay
+                (gear menu), where users couldn't find it. The state
+                key (`tweaks.showViewer`) is unchanged so existing
+                consumers keep working.
+              */}
+              <button
+                className="kx-tool-btn"
+                onClick={() => setTweak("showViewer", !tweaks.showViewer)}
+                aria-pressed={tweaks.showViewer}
+                title="Toggle side panel"
+                aria-label="Toggle side panel"
+                data-testid="kx-toggle-side-panel"
+              >
+                <Icon name="layers" size={12} />
+                Side panel
+              </button>
               {focusRoot && (
                 <span className="kx-pill kx-pill-focus">
                   <Icon name="focus" size={11} />
@@ -899,8 +932,15 @@ export default function App(): React.ReactElement {
               highlightChunkId={highlightChunk}
               onPrevChunk={() => navChunk(-1)}
               onNextChunk={() => navChunk(1)}
+              onSelectChunk={setHighlightChunk}
             />
-            <DetailPanel snapshot={snapshot} node={detailNode} onAction={handleAction} onSelectId={selectById} />
+            <DetailPanel
+              snapshot={snapshot}
+              node={detailNode}
+              onAction={handleAction}
+              onSelectId={selectById}
+              highlightChunkId={highlightChunk}
+            />
           </aside>
         )}
       </div>
@@ -1040,9 +1080,12 @@ const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose
     <TweaksRow label="Cluster halos">
       <Toggle value={tweaks.showClusters} onChange={(v) => setTweak("showClusters", v)} />
     </TweaksRow>
-    <TweaksRow label="Viewer panel">
-      <Toggle value={tweaks.showViewer} onChange={(v) => setTweak("showViewer", v)} />
-    </TweaksRow>
+    {/*
+      Bug C — "Viewer panel" used to live here. It's now a first-class
+      toolbar button (data-testid="kx-toggle-side-panel"). The
+      `tweaks.showViewer` state key is intentionally unchanged so this
+      relocation is UI-only.
+    */}
     <TweaksRow label="Confidence heatmap">
       <Toggle value={tweaks.showConfHeat} onChange={(v) => setTweak("showConfHeat", v)} />
     </TweaksRow>

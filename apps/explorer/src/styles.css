@@ -497,6 +497,10 @@ body {
   background: rgba(232, 162, 63, 0.14);
   box-shadow: inset 3px 0 0 0 var(--accent-warm);
 }
+/* Bug B — paragraphs that anchor a chunk are clickable; the
+ * pointer cursor + subtle hover surface signal the affordance. */
+.kx-para.kx-para-link { cursor: pointer; }
+.kx-para.kx-para-link:hover { background: rgba(232, 162, 63, 0.06); }
 .kx-hl-tag {
   position: absolute;
   top: -8px; left: 8px;
@@ -606,6 +610,17 @@ body {
 .kx-list li:last-child { border-bottom: 0; }
 .kx-list li:hover .kx-list-t { color: var(--navy); }
 .kx-list-t { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Bug B — chunk list cross-highlight: the active row mirrors the
+ * orange bracket in the document viewer so the panel ↔ viewer
+ * round-trip is visible without scrubbing. */
+.kx-chunk-list li.kx-on {
+  background: var(--bg-3);
+  outline: 1px solid var(--accent, #D9892C);
+  border-radius: 3px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.kx-chunk-list li.kx-on .kx-list-t { color: var(--ink); font-weight: 500; }
 
 .kx-link { color: var(--navy); cursor: pointer; text-decoration: none; border-bottom: 1px dotted var(--line-2); }
 .kx-link:hover { border-bottom-color: var(--navy); }
