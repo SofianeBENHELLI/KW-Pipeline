@@ -1,0 +1,351 @@
+/**
+ * Right-rail detail panel — adapts to the selected node kind.
+ *
+ *   * Document → type / source / cluster / chunks / confidence,
+ *     concept tags, related documents, action row.
+ *   * Chunk → parent doc, location, confidence, extracted summary,
+ *     related concepts.
+ *   * Concept → frequency / synonyms / confidence, evidence chunks,
+ *     related concepts.
+ *
+ * Port of `panels.jsx::DetailPanel`. The action callbacks are
+ * deliberately string-tagged ("open" / "expand" / "highlight" /
+ * "evidence" / "focusRoot") so the host App can route them onto
+ * either local state or graph history without re-typing the contract.
+ */
+
+import React from "react";
+
+import { confColor } from "./GraphCanvas";
+import {
+  CLUSTERS,
+  DOC_TYPES,
+  type ExplorerChunk,
+  type ExplorerConcept,
+  type ExplorerDocument,
+  type ExplorerSnapshot,
+  chunksForConcept,
+  chunksForDoc,
+  conceptById,
+  conceptsForChunk,
+  docById,
+  docsForConcept,
+} from "../state/explorer-data";
+import { Icon, ACCENT, NAVY, NAVY2 } from "./icons";
+
+export type DetailKind = "cluster" | "doc" | "chunk" | "concept";
+
+export interface DetailNode {
+  kind: DetailKind;
+  id: string;
+  doc?: ExplorerDocument;
+  chunk?: ExplorerChunk;
+  concept?: ExplorerConcept;
+  cluster?: string;
+}
+
+export type DetailAction =
+  | { kind: "open"; doc: ExplorerDocument }
+  | { kind: "expand"; doc: ExplorerDocument }
+  | { kind: "highlight"; chunk: ExplorerChunk }
+  | { kind: "evidence"; concept: ExplorerConcept }
+  | { kind: "focusRoot"; node: DetailNode };
+
+interface Props {
+  snapshot: ExplorerSnapshot;
+  node: DetailNode | null;
+  onAction: (action: DetailAction) => void;
+  onSelectId: (id: string, kind: "doc" | "chunk" | "concept") => void;
+}
+
+const DetailRow: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
+  <div className="kx-row">
+    <div className="kx-row-l">{label}</div>
+    <div className={"kx-row-v" + (mono ? " kx-mono" : "")}>{value}</div>
+  </div>
+);
+
+const ConfBar: React.FC<{ value: number }> = ({ value }) => (
+  <div className="kx-conf">
+    <div className="kx-conf-track">
+      <div className="kx-conf-fill" style={{ width: `${value * 100}%`, background: confColor(value) }} />
+    </div>
+    <span className="kx-mono" style={{ color: confColor(value) }}>
+      {value.toFixed(2)}
+    </span>
+  </div>
+);
+
+export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelectId }) => {
+  if (!node) {
+    return (
+      <div className="kx-detail kx-detail-empty">
+        <Icon name="info" size={20} stroke={NAVY2} />
+        <div className="kx-detail-empty-t">Nothing selected</div>
+        <div className="kx-detail-empty-s">
+          Select a node to inspect its metadata, evidence and relationships.
+        </div>
+      </div>
+    );
+  }
+
+  if (node.kind === "doc") {
+    const d = node.doc ?? docById(snapshot, node.id);
+    if (!d) return null;
+    const dt = DOC_TYPES[d.type];
+    const concepts = [
+      ...new Set(chunksForDoc(snapshot, d.id).flatMap((c) => conceptsForChunk(snapshot, c.id).map((k) => k.id))),
+    ]
+      .map((id) => conceptById(snapshot, id))
+      .filter((x): x is ExplorerConcept => Boolean(x));
+    const related = snapshot.docEdges
+      .filter((e) => e.a === d.id || e.b === d.id)
+      .map((e) => docById(snapshot, e.a === d.id ? e.b : e.a))
+      .filter((x): x is ExplorerDocument => Boolean(x))
+      .slice(0, 5);
+    return (
+      <div className="kx-detail">
+        <div className="kx-detail-head">
+          <span className="kx-doc-chip" style={{ background: dt?.color ?? "#888" }}>
+            {dt?.short ?? "DOC"}
+          </span>
+          <div>
+            <div className="kx-kind">DOCUMENT</div>
+            <div className="kx-detail-title">{d.title}</div>
+          </div>
+        </div>
+        <div className="kx-section">
+          <DetailRow label="TYPE" value={dt?.label ?? d.type} />
+          <DetailRow label="SOURCE" value={d.source} />
+          <DetailRow label="IMPORTED" value={d.date} mono />
+          <DetailRow label="CHUNKS" value={d.chunks} mono />
+          <DetailRow label="CLUSTER" value={CLUSTERS[d.cluster]?.label ?? d.cluster} />
+          <DetailRow label="CONFIDENCE" value={<ConfBar value={d.confidence} />} />
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">MAIN CONCEPTS</div>
+          <div className="kx-tags">
+            {concepts.slice(0, 6).map((k) => (
+              <button key={k.id} className="kx-tag" onClick={() => onSelectId(k.id, "concept")}>
+                <Icon name="concept" size={10} />
+                {k.name}
+              </button>
+            ))}
+            {concepts.length === 0 && <span className="kx-mute">No concepts extracted</span>}
+          </div>
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">RELATED DOCUMENTS</div>
+          <ul className="kx-list">
+            {related.map((rd) => (
+              <li key={rd.id} onClick={() => onSelectId(rd.id, "doc")}>
+                <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[rd.type]?.color ?? "#888" }}>
+                  {DOC_TYPES[rd.type]?.short ?? "DOC"}
+                </span>
+                <span className="kx-list-t">{rd.title}</span>
+                <Icon name="chevron-right" size={12} stroke={NAVY2} />
+              </li>
+            ))}
+            {related.length === 0 && <li className="kx-mute">No related documents</li>}
+          </ul>
+        </div>
+        <div className="kx-actions">
+          <button className="kx-btn kx-btn-pri" onClick={() => onAction({ kind: "open", doc: d })}>
+            <Icon name="external" size={12} />
+            Open document
+          </button>
+          <button className="kx-btn" onClick={() => onAction({ kind: "expand", doc: d })}>
+            <Icon name="expand" size={12} />
+            Expand to chunks
+          </button>
+          <button className="kx-btn" onClick={() => onAction({ kind: "focusRoot", node: { kind: "doc", id: d.id, doc: d } })}>
+            <Icon name="focus" size={12} />
+            Focus from here
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (node.kind === "chunk") {
+    const c = node.chunk ?? snapshot.chunks.find((x) => x.id === node.id);
+    if (!c) return null;
+    const parent = docById(snapshot, c.doc);
+    const concepts = conceptsForChunk(snapshot, c.id);
+    return (
+      <div className="kx-detail">
+        <div className="kx-detail-head">
+          <div className="kx-chunk-mark">
+            <Icon name="chunk" size={14} stroke={ACCENT} />
+          </div>
+          <div>
+            <div className="kx-kind">CHUNK</div>
+            <div className="kx-detail-title">{c.label}</div>
+          </div>
+        </div>
+        <div className="kx-section">
+          <DetailRow label="ID" value={c.id} mono />
+          <DetailRow
+            label="PARENT DOC"
+            value={
+              parent ? (
+                <a className="kx-link" onClick={() => onSelectId(parent.id, "doc")}>
+                  {parent.title}
+                </a>
+              ) : (
+                "—"
+              )
+            }
+          />
+          <DetailRow label="LOCATION" value={`p.${c.page} · ${c.kind}`} mono />
+          <DetailRow label="CONFIDENCE" value={<ConfBar value={c.confidence} />} />
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">EXTRACTED SUMMARY</div>
+          <div className="kx-summary">{c.summary}</div>
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">RELATED CONCEPTS</div>
+          <div className="kx-tags">
+            {concepts.map((k) => (
+              <button key={k.id} className="kx-tag" onClick={() => onSelectId(k.id, "concept")}>
+                <Icon name="concept" size={10} />
+                {k.name}
+              </button>
+            ))}
+            {concepts.length === 0 && <span className="kx-mute">No concepts linked</span>}
+          </div>
+        </div>
+        <div className="kx-actions">
+          <button className="kx-btn kx-btn-pri" onClick={() => onAction({ kind: "highlight", chunk: c })}>
+            <Icon name="highlight" size={12} />
+            Highlight in document
+          </button>
+          <button
+            className="kx-btn"
+            onClick={() => onAction({ kind: "focusRoot", node: { kind: "chunk", id: c.id, chunk: c } })}
+          >
+            <Icon name="focus" size={12} />
+            Focus from here
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (node.kind === "concept") {
+    const k = node.concept ?? conceptById(snapshot, node.id);
+    if (!k) return null;
+    const evidence = chunksForConcept(snapshot, k.id);
+    void docsForConcept(snapshot, k.id); // accessed through the evidence list rendering
+    const related = snapshot.conceptEdges
+      .filter(([a, b]) => a === k.id || b === k.id)
+      .map(([a, b]) => (a === k.id ? b : a))
+      .map((id) => conceptById(snapshot, id))
+      .filter((x): x is ExplorerConcept => Boolean(x));
+    return (
+      <div className="kx-detail">
+        <div className="kx-detail-head">
+          <div className="kx-concept-mark">
+            <Icon name="concept" size={14} stroke={NAVY} />
+          </div>
+          <div>
+            <div className="kx-kind">CONCEPT</div>
+            <div className="kx-detail-title">{k.name}</div>
+          </div>
+        </div>
+        <div className="kx-section">
+          <DetailRow label="TYPE" value={k.kind} />
+          <DetailRow
+            label="FREQUENCY"
+            value={
+              <span>
+                <span className="kx-mono">{k.freq}</span> mentions
+              </span>
+            }
+          />
+          <DetailRow label="CONFIDENCE" value={<ConfBar value={k.confidence} />} />
+          <DetailRow label="SYNONYMS" value={k.syn.join(", ") || "—"} mono />
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">EVIDENCE CHUNKS · {evidence.length}</div>
+          <ul className="kx-list">
+            {evidence.map((ec) => (
+              <li key={ec.id} onClick={() => onSelectId(ec.id, "chunk")}>
+                <span className="kx-mono kx-mute kx-sm">{ec.id}</span>
+                <span className="kx-list-t">{ec.label}</span>
+                <Icon name="chevron-right" size={12} stroke={NAVY2} />
+              </li>
+            ))}
+            {evidence.length === 0 && <li className="kx-mute">No evidence chunks</li>}
+          </ul>
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">RELATED CONCEPTS</div>
+          <div className="kx-tags">
+            {related.map((r) => (
+              <button key={r.id} className="kx-tag" onClick={() => onSelectId(r.id, "concept")}>
+                <Icon name="concept" size={10} />
+                {r.name}
+              </button>
+            ))}
+            {related.length === 0 && <span className="kx-mute">No related concepts</span>}
+          </div>
+        </div>
+        <div className="kx-actions">
+          <button className="kx-btn kx-btn-pri" onClick={() => onAction({ kind: "evidence", concept: k })}>
+            <Icon name="highlight" size={12} />
+            Show evidence in source
+          </button>
+          <button
+            className="kx-btn"
+            onClick={() => onAction({ kind: "focusRoot", node: { kind: "concept", id: k.id, concept: k } })}
+          >
+            <Icon name="focus" size={12} />
+            Focus from here
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Cluster — minimal panel (the design omits this, we add a stub).
+  if (node.kind === "cluster") {
+    const cluster = node.cluster ?? node.id;
+    const meta = CLUSTERS[cluster];
+    const docs = snapshot.documents.filter((d) => d.cluster === cluster);
+    return (
+      <div className="kx-detail">
+        <div className="kx-detail-head">
+          <div className="kx-concept-mark">
+            <Icon name="clusters" size={14} stroke={NAVY} />
+          </div>
+          <div>
+            <div className="kx-kind">CLUSTER</div>
+            <div className="kx-detail-title">{meta?.label ?? cluster}</div>
+          </div>
+        </div>
+        <div className="kx-section">
+          <DetailRow label="DOCUMENTS" value={docs.length} mono />
+          <DetailRow label="CHUNKS" value={docs.reduce((a, d) => a + d.chunks, 0)} mono />
+        </div>
+        <div className="kx-section">
+          <div className="kx-sec-h">DOCUMENTS</div>
+          <ul className="kx-list">
+            {docs.slice(0, 8).map((d) => (
+              <li key={d.id} onClick={() => onSelectId(d.id, "doc")}>
+                <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}>
+                  {DOC_TYPES[d.type]?.short ?? "DOC"}
+                </span>
+                <span className="kx-list-t">{d.title}</span>
+                <Icon name="chevron-right" size={12} stroke={NAVY2} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};

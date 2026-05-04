@@ -1,190 +1,388 @@
 /**
- * Inline SVG icon set for the widget.
+ * Line-art icon set for the Knowledge Explorer (port of the design's
+ * icons.jsx). All icons are 24x24 viewBox, drawn with `currentColor`,
+ * stroke-only, 1.5 width — same visual register as the navy-blue
+ * design language.
  *
- * Lifted from the design handoff mockup (`hifi.js` `HFIcon`) so the
- * line weight, cap, and visual register match what the designer
- * approved. All icons are 24x24 viewBox, drawn with `currentColor`
- * so callers control colour via CSS, and use `strokeWidth=1.5` for
- * the DS-platform line-icon look.
- *
- * Add a new icon by appending a case to the switch — keep the
- * 24x24 viewBox and `strokeWidth=1.5` to stay visually consistent.
+ * Add a new icon by appending a case to the switch — keep the 24x24
+ * viewBox and stroke-only style to stay consistent.
  */
 
 import React from "react";
 
 export type IconName =
-  | "arrow-down"
-  | "check"
-  | "clock"
-  | "cog"
-  | "cross"
-  | "docs"
-  | "files"
-  | "folder"
-  | "graph"
-  | "info"
-  | "more"
-  | "plus"
-  | "pulse"
-  | "refresh"
   | "search"
-  | "upload"
-  | "upload-cloud"
-  | "warn";
+  | "graph"
+  | "doc"
+  | "chunk"
+  | "concept"
+  | "filter"
+  | "depth"
+  | "expand"
+  | "collapse"
+  | "focus"
+  | "x"
+  | "chevron-right"
+  | "chevron-left"
+  | "home"
+  | "chevron-down"
+  | "chevron-up"
+  | "external"
+  | "highlight"
+  | "info"
+  | "stack"
+  | "tag"
+  | "clusters"
+  | "share"
+  | "settings"
+  | "compass"
+  | "layers"
+  | "menu"
+  | "arrow-right"
+  | "play"
+  | "puzzle"
+  | "globe"
+  | "shield"
+  | "people"
+  | "wallet"
+  | "rocket"
+  | "scale"
+  | "warn"
+  | "check"
+  | "minus"
+  | "plus"
+  | "reset"
+  | "page";
 
 interface IconProps {
   name: IconName;
-  /** px size; defaults to 14 to match the mockup density. */
+  /** px size; defaults to 16 to match the design density. */
   size?: number;
-  /** Optional aria-label; if omitted the icon is decorative (`aria-hidden`). */
-  label?: string;
-  /** Pass-through className for layout-level overrides. */
+  /** Stroke colour; defaults to `currentColor`. */
+  stroke?: string;
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export const Icon: React.FC<IconProps> = ({ name, size = 14, label, className }) => {
-  const common = {
+export const Icon: React.FC<IconProps> = ({
+  name,
+  size = 16,
+  stroke = "currentColor",
+  className,
+  style,
+}) => {
+  const props = {
     width: size,
     height: size,
     viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
+    fill: "none" as const,
+    stroke,
     strokeWidth: 1.5,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     className,
-    role: label ? "img" : undefined,
-    "aria-hidden": label ? undefined : true,
-    "aria-label": label,
+    style,
+    "aria-hidden": true as const,
   };
-
   switch (name) {
-    case "pulse":
+    case "search":
       return (
-        <svg {...common}>
-          <path d="M3 12h3l3-7 4 14 3-7h5" />
-        </svg>
-      );
-    case "upload":
-      return (
-        <svg {...common}>
-          <path d="M12 4v12M6 10l6-6 6 6" />
-          <path d="M4 20h16" />
-        </svg>
-      );
-    case "upload-cloud":
-      return (
-        <svg {...common}>
-          <path d="M16 16a5 5 0 1 0-9-3" />
-          <path d="M7 13a4 4 0 0 0 0 8h11a4 4 0 0 0 1-7.9" />
-          <path d="M12 12v8M9 15l3-3 3 3" />
-        </svg>
-      );
-    case "docs":
-      return (
-        <svg {...common}>
-          <path d="M6 3h9l4 4v14H6z" />
-          <path d="M15 3v4h4" />
+        <svg {...props}>
+          <circle cx="11" cy="11" r="6" />
+          <path d="M20 20l-4-4" />
         </svg>
       );
     case "graph":
       return (
-        <svg {...common}>
-          <circle cx="6" cy="6" r="2" />
-          <circle cx="18" cy="6" r="2" />
-          <circle cx="12" cy="18" r="2" />
-          <circle cx="6" cy="14" r="1.4" />
-          <circle cx="18" cy="14" r="1.4" />
-          <path d="M7 7l4 9M17 7l-4 9M7.5 8l9 5.5M16.5 8l-9 5.5" />
+        <svg {...props}>
+          <circle cx="6" cy="7" r="2.2" />
+          <circle cx="18" cy="9" r="2.2" />
+          <circle cx="11" cy="17" r="2.2" />
+          <path d="M8 8l8 1M8 8l3 7M16 10l-5 6" />
         </svg>
       );
-    case "cog":
+    case "doc":
       return (
-        <svg {...common}>
+        <svg {...props}>
+          <path d="M7 3h7l4 4v14H7z" />
+          <path d="M14 3v4h4" />
+          <path d="M9 12h7M9 15h7M9 18h4" />
+        </svg>
+      );
+    case "chunk":
+      return (
+        <svg {...props}>
+          <rect x="4" y="5" width="6" height="6" rx="1" />
+          <rect x="14" y="5" width="6" height="6" rx="1" />
+          <rect x="4" y="13" width="6" height="6" rx="1" />
+          <rect x="14" y="13" width="6" height="6" rx="1" />
+        </svg>
+      );
+    case "concept":
+      return (
+        <svg {...props}>
+          <polygon points="12,3 20,7.5 20,16.5 12,21 4,16.5 4,7.5" />
+        </svg>
+      );
+    case "filter":
+      return (
+        <svg {...props}>
+          <path d="M3 5h18l-7 8v6l-4 2v-8z" />
+        </svg>
+      );
+    case "depth":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="2.5" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="9.5" />
+        </svg>
+      );
+    case "expand":
+      return (
+        <svg {...props}>
+          <path d="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6M20 20v-6" />
+        </svg>
+      );
+    case "collapse":
+      return (
+        <svg {...props}>
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+        </svg>
+      );
+    case "focus":
+      return (
+        <svg {...props}>
           <circle cx="12" cy="12" r="3" />
-          <path d="M19 12a7 7 0 0 1-.2 1.6l2 1.5-2 3.4-2.3-.9a7 7 0 0 1-2.7 1.6l-.4 2.5h-3.8l-.4-2.5a7 7 0 0 1-2.7-1.6l-2.3.9-2-3.4 2-1.5A7 7 0 0 1 5 12a7 7 0 0 1 .2-1.6l-2-1.5 2-3.4 2.3.9a7 7 0 0 1 2.7-1.6L10.6 2h3.8l.4 2.5a7 7 0 0 1 2.7 1.6l2.3-.9 2 3.4-2 1.5A7 7 0 0 1 19 12z" />
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
         </svg>
       );
-    case "search":
+    case "x":
       return (
-        <svg {...common}>
-          <circle cx="11" cy="11" r="6" />
-          <path d="m20 20-3.5-3.5" />
+        <svg {...props}>
+          <path d="M5 5l14 14M19 5L5 19" />
         </svg>
       );
-    case "more":
+    case "chevron-right":
       return (
-        <svg {...common}>
-          <circle cx="5" cy="12" r="1" />
-          <circle cx="12" cy="12" r="1" />
-          <circle cx="19" cy="12" r="1" />
+        <svg {...props}>
+          <path d="M9 6l6 6-6 6" />
         </svg>
       );
-    case "plus":
+    case "chevron-left":
       return (
-        <svg {...common}>
-          <path d="M12 5v14M5 12h14" />
+        <svg {...props}>
+          <path d="M15 6l-6 6 6 6" />
         </svg>
       );
-    case "folder":
+    case "home":
       return (
-        <svg {...common}>
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        <svg {...props}>
+          <path d="M3 11l9-8 9 8M5 9v11h14V9" />
         </svg>
       );
-    case "files":
+    case "chevron-down":
       return (
-        <svg {...common}>
-          <rect x="7" y="3" width="11" height="14" rx="1" />
-          <path d="M5 7v12a2 2 0 0 0 2 2h10" />
+        <svg {...props}>
+          <path d="M6 9l6 6 6-6" />
         </svg>
       );
-    case "check":
+    case "chevron-up":
       return (
-        <svg {...common}>
-          <path d="m4 12 5 5L20 6" />
+        <svg {...props}>
+          <path d="M6 15l6-6 6 6" />
         </svg>
       );
-    case "cross":
+    case "external":
       return (
-        <svg {...common}>
-          <path d="m6 6 12 12M18 6 6 18" />
+        <svg {...props}>
+          <path d="M14 4h6v6M20 4l-9 9M19 13v6H5V5h6" />
         </svg>
       );
-    case "warn":
+    case "highlight":
       return (
-        <svg {...common}>
-          <path d="M12 3 2 20h20zM12 10v4M12 17v0" />
-        </svg>
-      );
-    case "clock":
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
+        <svg {...props}>
+          <path d="M5 16l4 4 10-10-4-4z" />
+          <path d="M14 6l4 4M5 20h6" />
         </svg>
       );
     case "info":
       return (
-        <svg {...common}>
+        <svg {...props}>
           <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v5M12 8v0" />
+          <path d="M12 11v6M12 7.5v.5" />
         </svg>
       );
-    case "refresh":
+    case "stack":
       return (
-        <svg {...common}>
-          <path d="M4 12a8 8 0 0 1 14-5l2-2v6h-6l2-2a6 6 0 1 0 1 7" />
+        <svg {...props}>
+          <path d="M12 3l9 5-9 5-9-5z" />
+          <path d="M3 13l9 5 9-5M3 17l9 5 9-5" />
         </svg>
       );
-    case "arrow-down":
+    case "tag":
       return (
-        <svg {...common}>
-          <path d="M12 5v14M6 13l6 6 6-6" />
+        <svg {...props}>
+          <path d="M12 3H4v8l9 9 8-8z" />
+          <circle cx="8" cy="7" r="1.2" />
+        </svg>
+      );
+    case "clusters":
+      return (
+        <svg {...props}>
+          <circle cx="7" cy="8" r="3" />
+          <circle cx="17" cy="8" r="3" />
+          <circle cx="12" cy="17" r="3" />
+        </svg>
+      );
+    case "share":
+      return (
+        <svg {...props}>
+          <circle cx="6" cy="12" r="2" />
+          <circle cx="18" cy="6" r="2" />
+          <circle cx="18" cy="18" r="2" />
+          <path d="M8 11l8-4M8 13l8 4" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      );
+    case "compass":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M15.5 8.5l-2 5-5 2 2-5z" />
+        </svg>
+      );
+    case "layers":
+      return (
+        <svg {...props}>
+          <path d="M12 3l9 5-9 5-9-5z" />
+          <path d="M3 13l9 5 9-5" />
+        </svg>
+      );
+    case "menu":
+      return (
+        <svg {...props}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      );
+    case "arrow-right":
+      return (
+        <svg {...props}>
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      );
+    case "play":
+      return (
+        <svg {...props}>
+          <polygon points="6,4 20,12 6,20" />
+        </svg>
+      );
+    case "puzzle":
+      return (
+        <svg {...props}>
+          <path d="M10 4h4v3a1.5 1.5 0 0 0 3 0V4h3v4h-2.5a1.5 1.5 0 0 0 0 3H20v4h-3v-2.5a1.5 1.5 0 0 0-3 0V14h-4v-2.5a1.5 1.5 0 0 1-3 0V14H4v-4h2.5a1.5 1.5 0 0 0 0-3H4V4h3v2.5a1.5 1.5 0 0 0 3 0z" />
+        </svg>
+      );
+    case "globe":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...props}>
+          <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />
+        </svg>
+      );
+    case "people":
+      return (
+        <svg {...props}>
+          <circle cx="9" cy="8" r="3" />
+          <circle cx="17" cy="9" r="2.5" />
+          <path d="M3 20c0-3.5 2.7-5.5 6-5.5s6 2 6 5.5M14.5 20c0-2.5 1.7-4.2 4.5-4.2" />
+        </svg>
+      );
+    case "wallet":
+      return (
+        <svg {...props}>
+          <rect x="3" y="6" width="18" height="13" rx="2" />
+          <path d="M3 10h18" />
+          <circle cx="16" cy="14" r="1" />
+        </svg>
+      );
+    case "rocket":
+      return (
+        <svg {...props}>
+          <path d="M12 2c4 3 6 7 6 12l-3 2-3 2-3-2-3-2c0-5 2-9 6-12z" />
+          <circle cx="12" cy="10" r="1.5" />
+          <path d="M9 18l-3 4M15 18l3 4" />
+        </svg>
+      );
+    case "scale":
+      return (
+        <svg {...props}>
+          <path d="M12 3v18M5 6h14M8 6l-3 6h6zM19 6l-3 6h6z" />
+        </svg>
+      );
+    case "warn":
+      return (
+        <svg {...props}>
+          <path d="M12 3l10 18H2z" />
+          <path d="M12 10v5M12 18v.5" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...props}>
+          <path d="M5 12l4 4 10-10" />
+        </svg>
+      );
+    case "minus":
+      return (
+        <svg {...props}>
+          <path d="M5 12h14" />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg {...props}>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+    case "reset":
+      return (
+        <svg {...props}>
+          <path d="M3 12a9 9 0 1 0 3-6.7" />
+          <path d="M3 4v5h5" />
+        </svg>
+      );
+    case "page":
+      return (
+        <svg {...props}>
+          <rect x="5" y="3" width="14" height="18" rx="1" />
+          <path d="M8 8h8M8 12h8M8 16h5" />
         </svg>
       );
     default:
-      return null;
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="6" />
+        </svg>
+      );
   }
 };
+
+// Design palette tokens used in inline SVG strokes outside the
+// CSS-token system. Kept here so consumers can colour design-spec
+// strokes without re-deriving the navy.
+export const NAVY = "#0E2A4A";
+export const NAVY2 = "#1B3E6F";
+export const ACCENT = "#2D5BA8";
