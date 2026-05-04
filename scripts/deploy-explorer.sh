@@ -69,12 +69,23 @@ if [ ! -f "$EXPLORER_DIR/dist/index.html" ] || [ ! -f "$EXPLORER_DIR/dist/main.j
 fi
 
 # 2. Sync everything except index.html with content-type-by-extension.
+#
+# AWS CLI v2 defaults `s3 sync` to ``binary/octet-stream`` and only
+# guesses MIME from the extension when ``--content-type-by-extension``
+# is passed. AWS CLI v1 always guesses by extension and rejects the
+# flag as unknown. Detect the major version and only pass the flag on
+# v2, so the script works on both.
+SYNC_EXTRA=()
+if aws --version 2>&1 | grep -qE '^aws-cli/2'; then
+  SYNC_EXTRA+=(--content-type-by-extension)
+fi
+
 echo "→ syncing dist/ to s3://$BUCKET/$PREFIX/$VERSION/"
 aws s3 sync "$EXPLORER_DIR/dist/" \
   "s3://$BUCKET/$PREFIX/$VERSION/" \
   --region "$REGION" \
   --cache-control "no-cache" \
-  --content-type-by-extension \
+  "${SYNC_EXTRA[@]}" \
   --exclude "index.html"
 
 # 3. Force text/html on the XHTML entry.
