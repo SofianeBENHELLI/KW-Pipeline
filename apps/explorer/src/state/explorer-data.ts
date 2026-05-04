@@ -415,11 +415,15 @@ export function adaptDocument(
     id: doc.id,
     title: doc.original_filename,
     type,
-    source: latest?.storage_uri.startsWith("memory://")
-      ? "Local Drive"
-      : latest?.storage_uri.startsWith("file://")
-        ? "Local Drive"
-        : "SharePoint",
+    // Storage URI scheme is the only source signal we have today —
+    // ``memory://``, ``file://`` and ``s3://`` are the schemes the
+    // pipeline emits via :class:`StorageService`. We map each one
+    // to a human-readable label rather than fabricating an external
+    // origin (the previous code defaulted everything else to
+    // "SharePoint" which lied to operators). When the pipeline
+    // grows a real source-of-record link (#89), this is the seam
+    // that opens to it.
+    source: storageSourceLabel(latest?.storage_uri),
     date: (latest?.created_at ?? doc.created_at).slice(0, 10),
     chunks,
     cluster,
@@ -427,6 +431,17 @@ export function adaptDocument(
     y: 0.5 + Math.sin(angle) * 0.3,
     confidence,
   };
+}
+
+function storageSourceLabel(storageUri: string | undefined): string {
+  if (!storageUri) return "Unknown";
+  if (storageUri.startsWith("memory://")) return "In-memory";
+  if (storageUri.startsWith("file://")) return "Local Drive";
+  if (storageUri.startsWith("s3://")) return "S3";
+  if (storageUri.startsWith("http://") || storageUri.startsWith("https://")) return "Web";
+  // Unknown scheme — surface verbatim instead of inventing an origin.
+  const scheme = storageUri.split("://", 1)[0];
+  return scheme || "Unknown";
 }
 
 const CONTENT_TYPE_TO_DOC_KEY: Array<[RegExp, DocTypeKey]> = [
@@ -464,9 +479,29 @@ function classifyContentType(ct: string, filename: string): DocTypeKey {
 
 /**
  * Project the catalog-wide knowledge graph page into explorer concepts
- * + chunk↔concept + concept↔concept links. Keeps the design's shape
- * but tolerates partial data — when the graph is empty we just emit
- * empty arrays.
+ * + chunk↔concept + concept↔concept links + doc↔doc links.
+ *
+ * Backend-side, edges are emitted in lower-snake form per
+ * ``app.schemas.knowledge::GraphEdgeKind``:
+ *
+ *   - structural: ``part_of``, ``has_chunk``, ``has_version``, ``belongs_to``
+ *   - deterministic semantic (chunk↔chunk): ``related_to``,
+ *     ``shares_keyword``, ``same_topic_as``
+ *   - LLM-emitted: ``has_entity`` (section→entity)
+ *
+ * The Explorer's design renders **document** edges (a/b/type/weight),
+ * not chunk-level edges, so we **aggregate** the chunk-chunk semantic
+ * edges into doc-doc edges by walking each end's ``document_id``
+ * property. A pair (docA, docB) gets a single edge whose weight is
+ * the per-pair sum of underlying chunk-edge weights, capped at 1.0.
+ * This collapses N chunk relations between two docs into one
+ * legible relation in the canvas.
+ *
+ * Concepts come from the typed ``entity`` nodes (Phase 2 LLM
+ * extraction). ``topic`` nodes — the deterministic auto-deduced
+ * clusters — are surfaced as concepts too in v1, with ``kind: "topic"``
+ * so the UI can later branch on it. Separating ``topic`` from
+ * ``concept`` is tracked as a follow-up to ADR-017.
  */
 export function adaptGraph(page: KnowledgeGraphPage | KnowledgeGraphProjection | null): {
   concepts: ExplorerConcept[];
@@ -475,39 +510,96 @@ export function adaptGraph(page: KnowledgeGraphPage | KnowledgeGraphProjection |
   docEdges: ExplorerDocEdge[];
 } {
   if (!page) return { concepts: [], chunkConcept: [], conceptEdges: [], docEdges: [] };
+
   const concepts: ExplorerConcept[] = page.nodes
     .filter((n) => isConceptKind(n.kind))
     .map((n) => ({
       id: n.id,
       name: n.label || n.id,
       kind: n.kind.toLowerCase(),
-      freq: numProp(n.properties, "frequency") ?? numProp(n.properties, "count") ?? 1,
-      confidence: numProp(n.properties, "confidence") ?? 0.85,
+      // Don't fabricate a frequency — leave at 0 when the projector
+      // didn't write one. The renderer can hide the ×N counter when
+      // the value is 0 rather than show a misleading ×1.
+      freq: numProp(n.properties, "frequency") ?? numProp(n.properties, "count") ?? 0,
+      // Default 1.0 when the projector produces a deterministic
+      // node (topics) — it's not a "we guessed" 0.85; leaving it
+      // unset would force callers to handle ``undefined`` everywhere.
+      confidence: numProp(n.properties, "confidence") ?? 1.0,
       syn: stringArrayProp(n.properties, "synonyms") ?? [],
     }));
+  const conceptIds = new Set(concepts.map((c) => c.id));
+
+  // Map every chunk node id → its document_id so we can aggregate
+  // chunk-chunk edges into doc-doc edges below. Chunk nodes are
+  // emitted by the projector with ``document_id`` in their
+  // properties (apps/api/app/services/knowledge/projector.py).
+  const chunkToDoc = new Map<string, string>();
+  for (const node of page.nodes) {
+    if (node.kind.toLowerCase() === "chunk") {
+      const docId = stringProp(node.properties, "document_id");
+      if (docId) chunkToDoc.set(node.id, docId);
+    }
+  }
+
   const chunkConcept: ChunkConceptLink[] = [];
   const conceptEdges: ConceptEdge[] = [];
-  const docEdges: ExplorerDocEdge[] = [];
-  const conceptIds = new Set(concepts.map((c) => c.id));
+  // (docA, docB, kind) → accumulated weight. Keys are normalised to
+  // (min, max, kind) so an A↔B and B↔A pair collapse to one entry.
+  const docEdgeAcc = new Map<string, { a: string; b: string; type: DocEdgeType; weight: number }>();
+
   for (const e of page.edges) {
     const aIsConcept = conceptIds.has(e.source_id);
     const bIsConcept = conceptIds.has(e.target_id);
+
     if (aIsConcept && bIsConcept) {
       conceptEdges.push([e.source_id, e.target_id, "related"] as const);
-    } else if (aIsConcept || bIsConcept) {
+      continue;
+    }
+    if (aIsConcept || bIsConcept) {
       const chunk = aIsConcept ? e.target_id : e.source_id;
       const concept = aIsConcept ? e.source_id : e.target_id;
       chunkConcept.push([chunk, concept] as const);
-    } else if (e.kind === "REFERENCES" || e.kind === "SIMILAR_TO" || e.kind === "CONTRADICTS") {
-      docEdges.push({
-        a: e.source_id,
-        b: e.target_id,
-        type: e.kind === "CONTRADICTS" ? "contradict" : e.kind === "SIMILAR_TO" ? "similar" : "reference",
-        weight: numProp(e.properties, "weight") ?? 0.6,
-      });
+      continue;
+    }
+
+    // Chunk↔chunk semantic edges — aggregate to doc-doc.
+    const kindKey = mapEdgeKind(e.kind);
+    if (!kindKey) continue;
+    const docA = chunkToDoc.get(e.source_id);
+    const docB = chunkToDoc.get(e.target_id);
+    if (!docA || !docB || docA === docB) continue;
+    const [lo, hi] = docA < docB ? [docA, docB] : [docB, docA];
+    const accKey = `${lo}|${hi}|${kindKey}`;
+    const existing = docEdgeAcc.get(accKey);
+    const weight = numProp(e.properties, "weight") ?? 0.5;
+    if (existing) {
+      existing.weight = Math.min(existing.weight + weight, 1.0);
+    } else {
+      docEdgeAcc.set(accKey, { a: lo, b: hi, type: kindKey, weight });
     }
   }
+  const docEdges = [...docEdgeAcc.values()];
+
   return { concepts, chunkConcept, conceptEdges, docEdges };
+}
+
+/**
+ * Map a backend edge kind to the Explorer's coarse doc-edge type.
+ * Returns ``null`` for kinds that shouldn't aggregate to doc-doc
+ * (structural ``part_of`` / ``has_chunk`` / ``has_version`` /
+ * ``belongs_to`` / ``has_entity``).
+ */
+function mapEdgeKind(kind: string): DocEdgeType | null {
+  switch (kind.toLowerCase()) {
+    case "same_topic_as":
+      return "similar";
+    case "related_to":
+      return "reference";
+    case "shares_keyword":
+      return "reference";
+    default:
+      return null;
+  }
 }
 
 function isConceptKind(kind: string): boolean {
@@ -518,6 +610,11 @@ function isConceptKind(kind: string): boolean {
 function numProp(props: Record<string, unknown>, key: string): number | null {
   const v = props[key];
   return typeof v === "number" ? v : null;
+}
+
+function stringProp(props: Record<string, unknown>, key: string): string | null {
+  const v = props[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
 }
 
 function stringArrayProp(props: Record<string, unknown>, key: string): string[] | null {
