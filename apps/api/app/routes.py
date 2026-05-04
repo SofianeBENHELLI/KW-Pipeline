@@ -23,6 +23,8 @@ from app.schemas.document import (
 )
 from app.schemas.extraction import RawExtraction
 from app.schemas.knowledge import (
+    ChatRequest,
+    ChatResponse,
     ChunkSearchResponse,
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
@@ -945,5 +947,47 @@ def build_router(services: PipelineServices) -> APIRouter:
             return services.knowledge_search.search(q, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post(
+        "/knowledge/chat",
+        operation_id="chat_with_knowledge",
+        response_model=ChatResponse,
+    )
+    def chat_with_knowledge(payload: ChatRequest) -> Any:
+        """Grounded chat surface (Phase 3 follow-up).
+
+        Builds a RAG / GraphRAG / Hybrid context from the configured
+        retrieval primitives, asks the LLM for a free-text answer, and
+        returns the answer alongside the citations the prompt was
+        grounded in. Requires both ``ANTHROPIC_API_KEY`` and
+        ``VOYAGE_API_KEY`` (the chat service seeds graph traversal
+        from vector hits, so the search service must be wired). When
+        either gate is off the route returns 503 with
+        ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+        """
+        if services.knowledge_chat is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.CHAT_DISABLED,
+                message=(
+                    "Grounded chat is disabled. The Phase 3 chat surface "
+                    "requires KW_KNOWLEDGE_LAYER_ENABLED=true plus both "
+                    "ANTHROPIC_API_KEY and VOYAGE_API_KEY to be configured."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set KW_KNOWLEDGE_LAYER_ENABLED=true and provide both "
+                    "ANTHROPIC_API_KEY and VOYAGE_API_KEY (or the KW_-prefixed "
+                    "aliases) in the API environment, then restart the service."
+                ),
+            )
+        try:
+            return services.knowledge_chat.answer(
+                payload.question,
+                mode=payload.mode,
+                top_k=payload.top_k,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return router

@@ -281,6 +281,154 @@ describe("PipelineWidget", () => {
   });
 });
 
+describe("PipelineWidget — batch upload (#82)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const BATCH_REPORT = {
+    summary: {
+      total: 3,
+      uploaded: 2,
+      duplicate: 0,
+      failed: 1,
+      empty: 0,
+      too_large: 0,
+      rejected_content_type: 0,
+    },
+    results: [
+      {
+        filename: "a.txt",
+        status: "uploaded",
+        document_id: "doc-A",
+        version_id: "ver-A",
+        sha256: "a".repeat(64),
+        bytes: 10,
+        content_type: "text/plain",
+        error_code: null,
+        error_message: null,
+      },
+      {
+        filename: "b.txt",
+        status: "uploaded",
+        document_id: "doc-B",
+        version_id: "ver-B",
+        sha256: "b".repeat(64),
+        bytes: 12,
+        content_type: "text/plain",
+        error_code: null,
+        error_message: null,
+      },
+      {
+        filename: "broken.bin",
+        status: "rejected_content_type",
+        document_id: null,
+        version_id: null,
+        sha256: null,
+        bytes: 4,
+        content_type: "application/octet-stream",
+        error_code: "KW_UPLOAD_UNSUPPORTED_TYPE",
+        error_message: "Content type 'application/octet-stream' is not allowed.",
+      },
+    ],
+  } as const;
+
+  it("dispatches to /documents/upload/batch when multiple files are selected", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(makeJsonResponse(BATCH_REPORT));
+    const onUploaded = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        onUploaded={onUploaded}
+      />,
+    );
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(["aa"], "a.txt", { type: "text/plain" }),
+      new File(["bb"], "b.txt", { type: "text/plain" }),
+      new File(["cc"], "broken.bin", { type: "application/octet-stream" }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-upload-report")).toBeInTheDocument();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(urlOf(fetchSpy.mock.calls[0][0])).toContain("/documents/upload/batch");
+
+    // Per-file rows render with the per-outcome status.
+    const rows = screen.getAllByTestId("batch-upload-report-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent("a.txt");
+    expect(rows[2]).toHaveTextContent("rejected_content_type");
+    expect(rows[2]).toHaveTextContent(
+      /Content type .* is not allowed\./,
+    );
+
+    // Aggregate banner text.
+    expect(screen.getByText(/2\/3 new/)).toBeInTheDocument();
+
+    // First successful upload's document_id is bubbled up so the
+    // catalog can refocus.
+    expect(onUploaded).toHaveBeenCalledWith("doc-A");
+  });
+
+  it("uses the single-file endpoint when exactly one file is selected", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(makeJsonResponse(UPLOAD_RESPONSE));
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["aa"], "a.txt", { type: "text/plain" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    const url = urlOf(fetchSpy.mock.calls[0][0]);
+    expect(url).toContain("/documents/upload");
+    expect(url).not.toContain("/documents/upload/batch");
+    expect(screen.queryByTestId("batch-upload-report")).toBeNull();
+  });
+
+  it("renders an inline alert if the batch endpoint itself returns a non-200", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({ detail: "No files attached." }, 400),
+    );
+    render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+      />,
+    );
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(["aa"], "a.txt", { type: "text/plain" }),
+      new File(["bb"], "b.txt", { type: "text/plain" }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/No files attached\./)).toBeInTheDocument();
+    expect(screen.queryByTestId("batch-upload-report")).toBeNull();
+  });
+});
+
 describe("PipelineWidget — metric counts", () => {
   function makeDoc(id: string, status: ApiDocument["versions"][number]["status"]): ApiDocument {
     return {

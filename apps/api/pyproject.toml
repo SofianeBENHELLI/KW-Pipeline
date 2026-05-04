@@ -55,6 +55,16 @@ test = [
   "pytest==8.3.5",
   "pytest-cov==6.0.0",
 ]
+# Optional spaCy NER enricher (#190 / closes the rest of #48). The
+# default install never pulls these — operators install with
+# ``pip install -e .[ner]`` and run ``python -m spacy download
+# en_core_web_sm`` to actually load the model. The enricher itself is
+# wired in :func:`app.dependencies.build_services` only when
+# ``KW_NER_ENABLED=true`` is set, so the wheel size and import path
+# stay slim for contributors who don't need person/org NER.
+ner = [
+  "spacy>=3.7",
+]
 
 # Restrict setuptools' flat-layout package discovery to the real
 # Python package. Without this, the new `fixtures/demo/` directory

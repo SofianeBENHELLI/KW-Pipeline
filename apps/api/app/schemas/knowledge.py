@@ -338,3 +338,75 @@ class ChunkSearchResponse(BaseModel):
     embedding_model: str
     query_embedding_dim: int
     results: list[ChunkSearchResult] = Field(default_factory=list)
+
+
+# ─── Chat (Phase 3 follow-up; grounded RAG / GraphRAG / Hybrid) ──────────
+
+# Mode taxonomy is intentionally short. ``rag`` is the default
+# vector-similarity-only path; ``graph`` substitutes graph-projected
+# entity triples for the chunk excerpts; ``hybrid`` concatenates both
+# contexts. Adding a new mode requires:
+#
+# 1. A branch in ``KnowledgeChatService._build_context``.
+# 2. A regression test pinning the prompt shape it produces.
+# 3. A bump to the docs in ``docs/architecture/knowledge_layer.md``.
+ChatMode = Literal["rag", "graph", "hybrid"]
+
+
+class ChatRequest(BaseModel):
+    """Request body for ``POST /knowledge/chat`` (Phase 3 chat surface).
+
+    ``mode`` selects the retrieval strategy used to build the grounded
+    context the LLM sees. ``top_k`` bounds the number of vector hits
+    retrieval will consider — the same ceiling applies to GraphRAG and
+    Hybrid because both modes seed the graph traversal from the
+    vector-search hits today.
+    """
+
+    question: str = Field(min_length=1, max_length=2000)
+    mode: ChatMode = "rag"
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class ChatCitation(BaseModel):
+    """One context source the chat answer was grounded in.
+
+    Today the only citation kind is ``chunk`` (vector-retrieval hits);
+    ``graph`` mode also produces chunk citations because the graph
+    traversal currently seeds from the same vector hits. A future
+    GraphRAG mode that seeds from entity-name matching will introduce
+    an ``entity`` citation kind.
+    """
+
+    chunk_id: str
+    document_id: str
+    version_id: str
+    section_id: str
+    snippet: str | None = None
+    score: float = Field(ge=-1.0, le=1.0)
+
+
+class ChatResponse(BaseModel):
+    """Response body for ``POST /knowledge/chat``.
+
+    ``answer`` is the free-text response from the LLM; ``citations``
+    lists the chunks/triples the prompt grounded the model in. Empty
+    ``citations`` with a non-empty ``answer`` is possible — the LLM
+    answered from the question alone, which the system prompt asks it
+    to flag with an explicit "no supporting context" preamble.
+
+    ``warnings`` carries server-side validation findings — today,
+    citation markers in ``answer`` that don't resolve against
+    ``citations``. The renderer surfaces these so reviewers can spot
+    a hallucinated reference without trusting it.
+    """
+
+    schema_version: Literal["v0.1"] = "v0.1"
+    question: str
+    mode: ChatMode
+    answer: str
+    citations: list[ChatCitation] = Field(default_factory=list)
+    embedding_model: str | None = None
+    llm_model: str
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

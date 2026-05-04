@@ -134,6 +134,115 @@ def test_anthropic_client_satisfies_protocol():
     assert isinstance(llm, LLMClient)
 
 
+def _make_mock_anthropic_text_client(
+    *,
+    text_blocks: list[str] | None = None,
+) -> MagicMock:
+    """Build a mock anthropic client whose response carries text blocks."""
+    blocks = []
+    for text in text_blocks if text_blocks is not None else ["hello world"]:
+        b = MagicMock()
+        b.type = "text"
+        b.text = text
+        blocks.append(b)
+    response = MagicMock()
+    response.content = blocks
+    response.usage = MagicMock(
+        input_tokens=7,
+        output_tokens=3,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    client = MagicMock()
+    client.messages.create.return_value = response
+    return client
+
+
+def test_anthropic_client_complete_text_returns_joined_text_and_usage():
+    mock_client = _make_mock_anthropic_text_client(
+        text_blocks=["chunk one ", "chunk two"],
+    )
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client)
+
+    answer, usage = llm.complete_text(
+        system="grounded system",
+        user="question?",
+        max_tokens=512,
+    )
+
+    assert answer == "chunk one chunk two"
+    assert usage == {
+        "input_tokens": 7,
+        "output_tokens": 3,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    # No tools / tool_choice on the text path.
+    assert "tools" not in call_kwargs
+    assert "tool_choice" not in call_kwargs
+    # max_tokens override is forwarded verbatim.
+    assert call_kwargs["max_tokens"] == 512
+    # System prompt still carries the ephemeral cache_control wrap.
+    assert call_kwargs["system"] == [
+        {
+            "type": "text",
+            "text": "grounded system",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def test_anthropic_client_complete_text_uses_default_max_tokens_when_none():
+    mock_client = _make_mock_anthropic_text_client()
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client, max_tokens=999)
+    llm.complete_text(system="s", user="u", max_tokens=None)
+    assert mock_client.messages.create.call_args.kwargs["max_tokens"] == 999
+
+
+def test_anthropic_client_complete_text_skips_non_text_blocks():
+    """Defensive: tolerate the SDK returning a mixed content list."""
+    odd_block = MagicMock()
+    odd_block.type = "image"
+    odd_block.text = "should be ignored"
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "kept"
+    response = MagicMock()
+    response.content = [odd_block, text_block]
+    response.usage = MagicMock(
+        input_tokens=1,
+        output_tokens=1,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    client = MagicMock()
+    client.messages.create.return_value = response
+
+    llm = AnthropicLLMClient(api_key="unused", client=client)
+    answer, _ = llm.complete_text(system="s", user="u")
+    assert answer == "kept"
+
+
+def test_fake_llm_client_complete_text_round_trip():
+    """FakeLLMClient.enqueue_text → complete_text returns the queued answer."""
+    fake = FakeLLMClient()
+    fake.enqueue_text("answer", token_usage={"input_tokens": 5, "output_tokens": 2})
+
+    answer, usage = fake.complete_text(system="s", user="u", max_tokens=128)
+
+    assert answer == "answer"
+    assert usage == {"input_tokens": 5, "output_tokens": 2}
+    assert len(fake.text_calls) == 1
+    assert fake.text_calls[0] == {"system": "s", "user": "u", "max_tokens": 128}
+
+
+def test_fake_llm_client_complete_text_raises_when_queue_empty():
+    fake = FakeLLMClient()
+    with pytest.raises(RuntimeError):
+        fake.complete_text(system="s", user="u")
+
+
 def test_fake_llm_client_records_system_as_passed():
     """FakeLLMClient stores the system arg verbatim — backwards-compatible str shape."""
     fake = FakeLLMClient()
@@ -183,6 +292,52 @@ def _ok_response(tool_input: dict | None = None) -> MagicMock:
         cache_creation_input_tokens=0,
     )
     return response
+
+
+def _ok_text_response(text: str = "ok") -> MagicMock:
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    response = MagicMock()
+    response.content = [block]
+    response.usage = MagicMock(
+        input_tokens=1,
+        output_tokens=1,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+    return response
+
+
+def test_complete_text_retries_once_on_429_then_succeeds():
+    """ADR-014 §4 retry semantics also apply to free-text chat calls."""
+    sleeps: list[float] = []
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _StubAPIError(429),
+        _ok_text_response("retried"),
+    ]
+    llm = AnthropicLLMClient(
+        api_key="unused",
+        client=mock_client,
+        sleep=sleeps.append,
+        rng=lambda: 0.0,
+    )
+
+    answer, _ = llm.complete_text(system="s", user="u")
+    assert answer == "retried"
+    assert mock_client.messages.create.call_count == 2
+    assert len(sleeps) == 1
+
+
+def test_complete_text_does_not_retry_on_400():
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [_StubAPIError(400)]
+    llm = AnthropicLLMClient(api_key="unused", client=mock_client, rng=lambda: 0.0)
+
+    with pytest.raises(_StubAPIError):
+        llm.complete_text(system="s", user="u")
+    assert mock_client.messages.create.call_count == 1
 
 
 def test_retries_once_on_429_then_succeeds():

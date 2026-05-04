@@ -16,6 +16,9 @@
 import { widget } from "@widget-lab/3ddashboard-utils";
 
 import type {
+  ChatMode,
+  ChatResponse,
+  ChunkSearchResponse,
   Document,
   DocumentListResponse,
   DocumentVersion,
@@ -176,6 +179,63 @@ export function getDocument(
   return request<Document>(
     `/documents/${encodeURIComponent(documentId)}`,
     opts,
+  );
+}
+
+/**
+ * POST /knowledge/chat (Phase 3 grounded chat / ADR-016).
+ *
+ * Asks the backend to answer ``question`` grounded in the configured
+ * retrieval mode. ``mode`` selects RAG / GraphRAG / Hybrid; ``top_k``
+ * bounds the number of vector hits the prompt is grounded in.
+ *
+ * Returns 503 with ``KW_CHAT_DISABLED`` when any of the three gates
+ * (knowledge layer enabled, Anthropic key, Voyage key) is missing;
+ * the ``ApiError`` envelope carries the operator-facing remediation
+ * copy verbatim.
+ */
+export function askKnowledgeChat(
+  question: string,
+  opts: {
+    mode?: ChatMode;
+    top_k?: number;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ChatResponse> {
+  const body = {
+    question,
+    mode: opts.mode ?? "rag",
+    top_k: opts.top_k ?? 5,
+  };
+  return request<ChatResponse>("/knowledge/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    baseUrl: opts.baseUrl,
+    signal: opts.signal,
+  });
+}
+
+/**
+ * GET /knowledge/search (Phase 3 / ADR-015).
+ *
+ * Returns top-K chunks ranked by cosine similarity to ``q``. Phase 3
+ * is gated server-side: when ``KW_KNOWLEDGE_LAYER_ENABLED`` is off or
+ * ``VOYAGE_API_KEY`` is unset, the backend returns 503 with the
+ * ``KW_VECTOR_SEARCH_DISABLED`` envelope code and the operator-facing
+ * remediation copy. The widget surfaces both verbatim.
+ */
+export function searchKnowledgeChunks(
+  q: string,
+  opts: { limit?: number; baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<ChunkSearchResponse> {
+  const params = new URLSearchParams();
+  params.set("q", q);
+  params.set("limit", String(opts.limit ?? 10));
+  return request<ChunkSearchResponse>(
+    `/knowledge/search?${params.toString()}`,
+    { baseUrl: opts.baseUrl, signal: opts.signal },
   );
 }
 
