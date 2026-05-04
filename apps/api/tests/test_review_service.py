@@ -1,0 +1,133 @@
+"""Direct unit tests for ``ReviewService`` (audit P0 #223).
+
+These tests exercise the service in isolation — no FastAPI, no
+TestClient, no HTTP. The collaborator wiring uses the same in-memory
+adapters that the rest of the suite already trusts (the
+``build_services`` factory plus a one-shot upload + extract +
+semantic round-trip to land a version in NEEDS_REVIEW).
+
+Three contracts are pinned:
+
+1. ``handle_validation`` drives a NEEDS_REVIEW version to VALIDATED
+   and returns the persisted ``SemanticDocument`` with
+   ``validation_status="validated"``.
+2. ``handle_rejection`` drives the same path to REJECTED with
+   ``validation_status="rejected"``.
+3. The service raises ``KeyError`` (missing entity) and ``ValueError``
+   (FSM precondition failure) — never an HTTP exception. The route
+   layer is responsible for translating to HTTP envelopes.
+
+A separate test pins the fire-and-log discipline: a flaky knowledge
+projector must NOT roll back the FSM transition.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.dependencies import build_services
+from app.models.document import DocumentVersionStatus
+
+
+def _land_version_in_needs_review(services) -> tuple[str, str]:
+    """Drive a fresh upload through the pipeline so the returned
+    ``(document_id, version_id)`` is in NEEDS_REVIEW.
+    """
+    version = services.documents.upload(
+        filename="policy.txt",
+        content_type="text/plain",
+        content=b"Hello world. This is a tiny test fixture.",
+    )
+    services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
+    services.semantic_outputs.generate(document_id=version.document_id, version_id=version.id)
+    refreshed = services.documents.get_version(
+        document_id=version.document_id, version_id=version.id
+    )
+    assert refreshed.status == DocumentVersionStatus.NEEDS_REVIEW
+    return version.document_id, version.id
+
+
+def test_handle_validation_drives_needs_review_to_validated():
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    result = services.review.handle_validation(
+        document_id=document_id,
+        version_id=version_id,
+        reviewer_note="Looks good.",
+    )
+
+    assert result.validation_status == "validated"
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
+    assert final.status == DocumentVersionStatus.VALIDATED
+    assert final.reviewer_note == "Looks good."
+
+
+def test_handle_rejection_drives_needs_review_to_rejected():
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    result = services.review.handle_rejection(
+        document_id=document_id,
+        version_id=version_id,
+        reviewer_note="Wrong document.",
+    )
+
+    assert result.validation_status == "rejected"
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
+    assert final.status == DocumentVersionStatus.REJECTED
+    assert final.reviewer_note == "Wrong document."
+
+
+def test_handle_validation_raises_key_error_for_missing_version():
+    """Service contract: raise plain ``KeyError`` for missing entity.
+    The route layer translates this to HTTP 404."""
+    services = build_services()
+    with pytest.raises(KeyError):
+        services.review.handle_validation(
+            document_id="ghost-doc",
+            version_id="ghost-ver",
+        )
+
+
+def test_handle_validation_raises_value_error_when_not_in_needs_review():
+    """Service contract: raise ``ValueError`` when the FSM precondition
+    fails. The route layer translates this to HTTP 409 with the
+    ``LIFECYCLE_CONFLICT`` envelope."""
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    # First validation succeeds; the version is now VALIDATED, no
+    # longer NEEDS_REVIEW.
+    services.review.handle_validation(document_id=document_id, version_id=version_id)
+
+    with pytest.raises(ValueError, match="not NEEDS_REVIEW"):
+        services.review.handle_validation(document_id=document_id, version_id=version_id)
+
+
+def test_handle_validation_does_not_roll_back_on_projector_failure():
+    """ADR-012 fire-and-log: a knowledge-projector failure must NOT
+    roll back the FSM transition. The catalog stays the source of
+    truth; the graph catches up via re-projection."""
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    # Replace the projector on the service with one that always raises.
+    class _FlakyProjector:
+        def project(self, *, document, version, semantic):
+            raise RuntimeError("simulated projector outage")
+
+        def project_entities(self, *args, **kwargs):  # pragma: no cover - unused here
+            raise RuntimeError("unreachable")
+
+    # ``ReviewService`` holds the projector reference privately; reach
+    # into the attribute directly so the test exercises the actual
+    # service code path.
+    services.review._knowledge_projector = _FlakyProjector()  # type: ignore[attr-defined]
+
+    # Even with a guaranteed projector failure, the validation must
+    # complete and persist.
+    result = services.review.handle_validation(document_id=document_id, version_id=version_id)
+    assert result.validation_status == "validated"
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
+    assert final.status == DocumentVersionStatus.VALIDATED

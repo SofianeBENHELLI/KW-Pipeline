@@ -8,20 +8,13 @@ rejected one:
 - semantic-document trigger / read
 - generated Markdown read
 - raw bytes read (powers Knowledge Explorer's per-type viewers)
-- validate / reject endpoints + the shared review side-effect chain.
-
-The validate / reject side-effect chain (FSM transition, semantic
-persistence, knowledge-graph projection, optional LLM entity
-extraction) lives here in ``_record_review`` and will move into a
-dedicated ``ReviewService`` in audit P0 #223 — see PR #223 for that
-follow-up.
+- validate / reject endpoints — the side-effect chain now lives in
+  :class:`app.services.review_service.ReviewService` (audit #223).
 """
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import quote as urlquote
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Response
@@ -48,8 +41,6 @@ from ._helpers import (
 # Re-exported so existing test imports of ``DocumentVersion`` etc. via
 # ``app.routes`` keep working through the package façade.
 __all__ = ["build_lifecycle_router", "DocumentVersion"]
-
-log = logging.getLogger(__name__)
 
 
 def build_lifecycle_router(services: PipelineServices) -> APIRouter:
@@ -362,12 +353,11 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
     ) -> Any:
-        return _record_review(
+        return _dispatch_review(
+            handler=services.review.handle_validation,
             document_id=document_id,
             version_id=version_id,
-            request=request,
-            mark=services.documents.mark_validated,
-            cached_status="validated",
+            reviewer_note=request.reviewer_note,
         )
 
     @router.post(
@@ -380,112 +370,48 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
     ) -> Any:
-        return _record_review(
+        return _dispatch_review(
+            handler=services.review.handle_rejection,
             document_id=document_id,
             version_id=version_id,
-            request=request,
-            mark=services.documents.mark_rejected,
-            cached_status="rejected",
+            reviewer_note=request.reviewer_note,
         )
 
-    def _record_review(
-        *,
-        document_id: str,
-        version_id: str,
-        request: ReviewRequest,
-        mark: Callable[..., Any],
-        cached_status: Literal["validated", "rejected"],
-    ) -> Any:
-        try:
-            version = services.documents.get_version(
-                document_id=document_id,
-                version_id=version_id,
-            )
-            if version.status != DocumentVersionStatus.NEEDS_REVIEW:
-                raise ValueError(
-                    f"Version is in {version.status.value}, not NEEDS_REVIEW; "
-                    f"cannot transition to {cached_status.upper()}."
-                )
-            services.semantic_outputs.get(document_id=document_id, version_id=version_id)
-            mark(
-                document_id=document_id,
-                version_id=version_id,
-                reviewer_note=request.reviewer_note,
-            )
-            result = services.semantic_outputs.record_validation(
-                document_id=document_id,
-                version_id=version_id,
-                status=cached_status,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise ApiError(
-                status_code=409,
-                code=ErrorCode.LIFECYCLE_CONFLICT,
-                message=str(exc),
-                retryable=False,
-                remediation=(
-                    "The version's lifecycle status doesn't permit this "
-                    "transition. Refresh the document and re-evaluate the "
-                    "available actions."
-                ),
-            ) from exc
-
-        # Knowledge layer side-effect (ADR-012). Fire-and-log: a graph
-        # outage must not roll back validation. The catalog is already
-        # the authoritative record; the graph catches up via
-        # re-projection or out-of-band reconciliation.
-        if cached_status == "validated" and services.knowledge_projector is not None:
-            document_for_projection = None
-            try:
-                document_for_projection = services.documents.get_document(document_id)
-                if document_for_projection is not None:
-                    services.knowledge_projector.project(
-                        document=document_for_projection,
-                        version=version,
-                        semantic=result,
-                    )
-            except Exception:
-                log.exception(
-                    "knowledge.projection.failed",
-                    extra={"document_id": document_id, "version_id": version_id},
-                )
-
-            # Phase 2 (ADR-013): LLM-driven entity extraction. Same
-            # fire-and-log discipline — extraction failures must not
-            # roll back validation. Runs after projection so the
-            # entity edges land in the same graph the projector just
-            # primed; the projector's ``delete_subgraph_for_version``
-            # already cleaned old entity edges, so the upserts are
-            # against a fresh slate.
-            if services.entity_extractor is not None and document_for_projection is not None:
-                try:
-                    extraction_result = services.entity_extractor.extract(
-                        document=document_for_projection,
-                        version=version,
-                        semantic=result,
-                    )
-                    services.knowledge_projector.project_entities(extraction_result)
-                    log.info(
-                        "knowledge.entity_extraction.completed",
-                        extra={
-                            "document_id": document_id,
-                            "version_id": version_id,
-                            "triple_count": len(extraction_result.triples),
-                            "warning_count": len(extraction_result.warnings),
-                            "token_usage": extraction_result.token_usage,
-                        },
-                    )
-                except Exception:
-                    log.exception(
-                        "knowledge.entity_extraction.failed",
-                        extra={
-                            "document_id": document_id,
-                            "version_id": version_id,
-                        },
-                    )
-
-        return result
-
     return router
+
+
+def _dispatch_review(
+    *,
+    handler: Any,
+    document_id: str,
+    version_id: str,
+    reviewer_note: str | None,
+) -> Any:
+    """Translate :class:`ReviewService` domain exceptions into HTTP envelopes.
+
+    The service raises plain ``KeyError`` (missing entity → 404) and
+    ``ValueError`` (FSM precondition failure → 409 with the structured
+    ``LIFECYCLE_CONFLICT`` envelope). Side-effect failures (projector,
+    entity extractor) are caught and logged inside the service — they
+    never reach this layer.
+    """
+    try:
+        return handler(
+            document_id=document_id,
+            version_id=version_id,
+            reviewer_note=reviewer_note,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise ApiError(
+            status_code=409,
+            code=ErrorCode.LIFECYCLE_CONFLICT,
+            message=str(exc),
+            retryable=False,
+            remediation=(
+                "The version's lifecycle status doesn't permit this "
+                "transition. Refresh the document and re-evaluate the "
+                "available actions."
+            ),
+        ) from exc
