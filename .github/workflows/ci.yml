@@ -227,6 +227,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Lint (eslint)
+        run: npm run lint
+
       - name: Run vitest
         run: npx vitest run
 
