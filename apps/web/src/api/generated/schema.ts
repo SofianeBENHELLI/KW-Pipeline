@@ -709,7 +709,7 @@ export interface components {
          * DocumentVersionStatus
          * @enum {string}
          */
-        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED";
+        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED";
         /**
          * GraphEdge
          * @description One directed edge in the knowledge graph projection.

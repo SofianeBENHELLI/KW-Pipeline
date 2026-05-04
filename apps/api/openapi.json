@@ -682,7 +682,8 @@
           "NEEDS_REVIEW",
           "VALIDATED",
           "REJECTED",
-          "FAILED"
+          "FAILED",
+          "SUPERSEDED"
         ],
         "title": "DocumentVersionStatus",
         "type": "string"

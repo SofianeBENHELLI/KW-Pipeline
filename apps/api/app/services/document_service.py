@@ -403,6 +403,47 @@ class DocumentService:
             actor=actor,
         )
 
+    def mark_superseded(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        actor: str | None = None,
+        superseded_by_version_id: str | None = None,
+    ) -> DocumentVersion:
+        """Mark a previously-VALIDATED version SUPERSEDED (ADR-025).
+
+        The transition is enforced by the FSM — only a ``VALIDATED``
+        version may move to ``SUPERSEDED``. Emits a
+        ``version.superseded`` audit event carrying the actor that
+        triggered the supersede (typically the reviewer that validated
+        the newer sibling) and the id of the version that replaced
+        this one.
+
+        Raises :class:`IllegalTransition` (subclass of ``ValueError``)
+        when the version is not currently ``VALIDATED``.
+        """
+        version = self.catalog.get_version(document_id=document_id, version_id=version_id)
+        assert_transition(version.status, DocumentVersionStatus.SUPERSEDED)
+        previous = version.status
+        updated = self.catalog.update_version_status(
+            document_id=document_id,
+            version_id=version_id,
+            status=DocumentVersionStatus.SUPERSEDED,
+        )
+        _log_status_changed(updated, previous=previous)
+        log.info(
+            "version.superseded",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "version_number": updated.version_number,
+                "superseded_by_version_id": superseded_by_version_id,
+                "actor": actor,
+            },
+        )
+        return updated
+
     def _record_review(
         self,
         *,
