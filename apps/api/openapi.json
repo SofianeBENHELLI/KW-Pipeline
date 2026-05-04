@@ -1883,7 +1883,7 @@
         "type": "object"
       },
       "TaxonomyCategory": {
-        "description": "One node in the taxonomy tree.\n\n``id`` is stable across runs and is what the classifier writes\nonto chunks/documents (``taxonomy_category_id``). The convention\nis dot-separated lower-snake (``hr.hybrid_work``); the id format\nis enforced at load time, not by this schema, so the wire shape\nstays permissive enough to describe a future v0.2 with different\nrules.\n\n``description`` is a free-text paragraph the classifier embeds\nonce at taxonomy-publish time and compares against chunk\nembeddings via cosine similarity. Operators write this with the\nmetier vocabulary they want to match.",
+        "description": "One node in the taxonomy tree.\n\n``id`` is stable across runs and is what the classifier writes\nonto chunks/documents (``taxonomy_category_id``). The convention\nis dot-separated lower-snake (``hr.hybrid_work``); the id format\nis enforced at load time, not by this schema, so the wire shape\nstays permissive enough to describe a future v0.2 with different\nrules.\n\n``description`` is a free-text paragraph the classifier embeds\nonce at taxonomy-publish time and compares against chunk\nembeddings via cosine similarity. Operators write this with the\nmetier vocabulary they want to match.\n\n``source`` records which half of the hybrid taxonomy this\ncategory came from (#249, ADR-017): ``\"imposed\"`` for nodes\nparsed out of the operator-authored YAML, ``\"computed\"`` for\nnodes auto-deduced from topic clustering on the corpus. The\nfield defaults to ``\"imposed\"`` because the YAML loader is the\ndominant call site and that path always sets it; the route\nlayer overrides to ``\"computed\"`` when synthesising entries\nfrom the topic-clustering output.",
         "properties": {
           "description": {
             "maxLength": 2000,
@@ -1903,6 +1903,15 @@
             "title": "Label",
             "type": "string"
           },
+          "source": {
+            "default": "imposed",
+            "enum": [
+              "computed",
+              "imposed"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "subcategories": {
             "items": {
               "$ref": "#/components/schemas/TaxonomyCategory"
@@ -1915,7 +1924,8 @@
           "id",
           "label",
           "description",
-          "subcategories"
+          "subcategories",
+          "source"
         ],
         "title": "TaxonomyCategory",
         "type": "object"
@@ -3409,7 +3419,7 @@
     },
     "/knowledge/taxonomy": {
       "get": {
-        "description": "Read the operator-imposed taxonomy (ADR-017).\n\nReturns the loaded taxonomy when ``KW_TAXONOMY_PATH`` points\nat a YAML file the loader could parse; returns\n``is_configured=false`` with empty ``categories`` otherwise.\nNever 404s — a missing taxonomy is a valid deployment state\n(the platform falls back to auto-deduced topic clustering)\nand the frontend uses ``is_configured`` to decide which empty\nstate to render.",
+        "description": "Read the hybrid taxonomy (ADR-017, #249).\n\nThe response merges two halves under one ``categories`` list:\n\n* **Imposed** — categories parsed out of the operator-authored\n  YAML at ``KW_TAXONOMY_PATH``. Each one is tagged\n  ``source=\"imposed\"`` by the loader.\n* **Computed** — categories synthesised from the topic-\n  clustering output the projector wrote into the graph store\n  (one ``topic`` node per cluster). Each one is tagged\n  ``source=\"computed\"``.\n\n**Merge rule:** dedupe by ``id``; **imposed wins on conflict**.\nThat is, if the YAML defines ``id=\"hr\"`` and a topic cluster\nalso happens to land on ``id=\"hr\"``, the operator's definition\nis the one that flows out — operators get the final say over\nwhat the catalog calls a category. The computed entry is\ndropped in that case (we do not merge labels / descriptions\nacross sources).\n\n``is_configured`` is ``true`` when **either** half has at\nleast one category — an operator with no YAML but a populated\ntopic-clustering output still gets a configured response.\nOnly an entirely empty result (no YAML, no topic clusters)\nreturns ``is_configured=false`` with an empty list. Never\n404s — a missing taxonomy is a valid deployment state.",
         "operationId": "get_knowledge_taxonomy",
         "responses": {
           "200": {
