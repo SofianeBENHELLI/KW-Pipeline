@@ -690,6 +690,70 @@ body {
 
 /* ── Upload card ───────────────────────────────────────────────── */
 
+/* Scope picker mockup (EPIC-D #218). UX-only preview of where the
+   document will land. Disabled-option styling for the Swym entry is
+   handled by the browser; the "Coming soon" pill makes the state
+   explicit alongside the dropdown. */
+.kw-scope {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+}
+.kw-scope__label {
+  font-size: 11px;
+  color: var(--ds-ink-500);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kw-scope__select {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--ds-ink-300);
+  border-radius: var(--ds-radius);
+  background: #fff;
+  color: var(--ds-ink-900);
+  width: 100%;
+  min-width: 0;
+}
+.kw-scope__select:focus-visible {
+  outline: 2px solid var(--ds-blue-500);
+  outline-offset: 1px;
+}
+.kw-scope__sub {
+  grid-column: 2 / 3;
+  font-size: 11px;
+  color: var(--ds-ink-500);
+}
+.kw-scope__pill {
+  grid-row: 1 / 2;
+  grid-column: 3 / 4;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--ds-ink-100, #eef2f5);
+  color: var(--ds-ink-500);
+  border: 1px solid var(--ds-ink-300);
+  white-space: nowrap;
+}
+.kw-scope__banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ds-ink-500);
+  background: #F8FAFB;
+  border: 1px solid var(--ds-ink-300);
+  border-radius: var(--ds-radius);
+  padding: 6px 8px;
+}
+.kw-scope__banner svg { color: var(--ds-blue-500); }
+
 .kw-drop {
   border: 1.5px dashed var(--ds-ink-500);
   border-radius: var(--ds-radius);

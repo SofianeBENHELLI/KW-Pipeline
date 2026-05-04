@@ -780,7 +780,8 @@
           "NEEDS_REVIEW",
           "VALIDATED",
           "REJECTED",
-          "FAILED"
+          "FAILED",
+          "SUPERSEDED"
         ],
         "title": "DocumentVersionStatus",
         "type": "string"
@@ -1375,6 +1376,41 @@
         "title": "ReviewRequest",
         "type": "object"
       },
+      "Scope": {
+        "description": "One row of the ``document_scopes`` join table.\n\nReturned by :meth:`CatalogStore.list_scopes_for_document` and by\nthe upload-route response when a scope link was created. The pair\n``(kind, ref)`` identifies the scope; ``added_at`` / ``added_by``\nrecord who linked the document into that scope and when.\n\nThe ``ref`` field is intentionally opaque to this layer: its\ninterpretation depends on ``kind`` (a 3DSwym community id, a\nuser id, an internal project id) and is owned by ADR-026 / the\nmembership client. The catalog persists it as a flat string.",
+        "properties": {
+          "added_at": {
+            "format": "date-time",
+            "title": "Added At",
+            "type": "string"
+          },
+          "added_by": {
+            "title": "Added By",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "personal",
+              "swym_community",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref",
+          "added_at",
+          "added_by"
+        ],
+        "title": "Scope",
+        "type": "object"
+      },
       "SemanticAsset": {
         "description": "Typed semantic claim or asset extracted from the document.",
         "properties": {
@@ -1732,6 +1768,122 @@
         "title": "UploadConfig",
         "type": "object"
       },
+      "UploadDocumentResponse": {
+        "description": "Response body for ``POST /documents/upload`` (EPIC-D D.1, #218).\n\nExtends :class:`DocumentVersion` with the workspace-scope links\nthat were created at upload time. ``scopes`` is the read-side\ncounterpart to the optional ``scope_kind`` / ``scope_ref`` query\nparams on the upload route — it surfaces every scope this upload\nlanded in so the client can refresh its workspace picker without\na follow-up ``list_scopes_for_document`` call.\n\nDefaults to a single ``personal:<user_id>`` link via the\n``current_user`` resolved by :func:`get_current_user` when neither\nquery param is provided. Pre-D.1 callers ignore ``scopes`` because\nevery other field is unchanged from :class:`DocumentVersion`.",
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "duplicate_of_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of Version Id"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "file_size": {
+            "title": "File Size",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Note"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentVersionStatus"
+          },
+          "storage_uri": {
+            "title": "Storage Uri",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "document_id",
+          "version_number",
+          "filename",
+          "content_type",
+          "file_size",
+          "sha256",
+          "storage_uri",
+          "status",
+          "duplicate_of_version_id",
+          "failure_reason",
+          "reviewer_note",
+          "reviewed_at",
+          "created_at",
+          "scopes"
+        ],
+        "title": "UploadDocumentResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1914,6 +2066,38 @@
             }
           },
           {
+            "in": "query",
+            "name": "scope_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Ref"
+            }
+          },
+          {
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -1945,7 +2129,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DocumentVersion"
+                  "$ref": "#/components/schemas/UploadDocumentResponse"
                 }
               }
             },

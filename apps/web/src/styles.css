@@ -200,6 +200,27 @@ h3 {
   color: var(--muted);
 }
 
+/* Latest-version badge (#59 surface, EPIC-C #217). Brand-coloured,
+   compact pill rendered inline with the document title or below it.
+   Same visual rhythm as the existing status-badge but deliberately
+   smaller so it doesn't compete with the row's primary affordance. */
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--action);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.version-count {
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
 .status-badge {
   display: inline-flex;
   flex: 0 0 auto;

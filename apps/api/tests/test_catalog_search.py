@@ -93,10 +93,13 @@ def test_filters_compose_with_each_other() -> None:
 
 def test_filters_compose_with_cursor_pagination() -> None:
     documents = DocumentService(storage=InMemoryStorageService())
-    # Six matching docs to walk through across two pages.
+    # Six matching docs to walk through across two pages. Bodies are
+    # distinct per file — anonymous duplicate uploads now stitch into
+    # one family (issue #59) so we'd otherwise end up with a single
+    # contract document instead of six.
     for i in range(6):
-        documents.upload(f"contract-{i:02d}.txt", PLAIN, b"x")
-    documents.upload("supplier.docx", PLAIN, b"y")  # Filter target — excluded.
+        documents.upload(f"contract-{i:02d}.txt", PLAIN, f"contract-body-{i}".encode())
+    documents.upload("supplier.docx", PLAIN, b"supplier-body")  # Filter target — excluded.
 
     page1, cursor = documents.list_documents_page(
         limit=4,
@@ -178,9 +181,12 @@ def test_route_unknown_status_returns_400(client: TestClient) -> None:
 
 
 def test_route_filename_query_substring_case_insensitive(client: TestClient) -> None:
-    _upload(client, "Procurement-Policy.txt")
-    _upload(client, "Procurement_Annex.txt")
-    _upload(client, "supplier.txt")
+    # Distinct bodies per upload — anonymous duplicate uploads stitch
+    # into one family (issue #59), which would collapse three uploads
+    # of `b"x"` into a single document.
+    _upload(client, "Procurement-Policy.txt", body=b"policy-body")
+    _upload(client, "Procurement_Annex.txt", body=b"annex-body")
+    _upload(client, "supplier.txt", body=b"supplier-body")
 
     response = client.get("/documents", params={"q": "procurement"})
     assert response.status_code == 200
@@ -189,8 +195,8 @@ def test_route_filename_query_substring_case_insensitive(client: TestClient) -> 
 
 
 def test_route_filename_query_empty_string_acts_as_no_filter(client: TestClient) -> None:
-    _upload(client, "alpha.txt")
-    _upload(client, "beta.txt")
+    _upload(client, "alpha.txt", body=b"alpha-body")
+    _upload(client, "beta.txt", body=b"beta-body")
 
     response = client.get("/documents", params={"q": "   "})
     assert response.status_code == 200
@@ -199,9 +205,9 @@ def test_route_filename_query_empty_string_acts_as_no_filter(client: TestClient)
 
 
 def test_route_filters_compose_at_http_layer(client: TestClient) -> None:
-    a = _upload(client, "Procurement-Policy.txt")
-    b = _upload(client, "Procurement_Annex.txt")
-    _upload(client, "supplier.txt")
+    a = _upload(client, "Procurement-Policy.txt", body=b"policy-body")
+    b = _upload(client, "Procurement_Annex.txt", body=b"annex-body")
+    _upload(client, "supplier.txt", body=b"supplier-body")
 
     # Park `a` in NEEDS_REVIEW, leave the rest in STORED.
     client.post(f"/documents/{a['document_id']}/versions/{a['id']}/extract")

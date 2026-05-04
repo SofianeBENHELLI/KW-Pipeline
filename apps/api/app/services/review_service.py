@@ -29,10 +29,10 @@ straightforward:
   ``KnowledgeChatService``-style adapters — without churning this
   module.
 - **External-workflow integration (audit EPIC-B, #216).** The
-  Iterop adapter callback path constructs a ``ReviewResult``
+  ITEROP adapter callback path constructs a ``ReviewResult``
   through the same service, so the FSM transition + side-effects
   happen identically whether the decision came from Orbital or
-  Iterop.
+  ITEROP.
 
 Error-mapping contract
 ----------------------
@@ -89,6 +89,7 @@ class ReviewService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        actor: str | None = None,
     ) -> SemanticDocument:
         """Drive a version from NEEDS_REVIEW to VALIDATED.
 
@@ -97,6 +98,13 @@ class ReviewService:
         knowledge-graph projection and (if Phase 2 is wired) the LLM
         entity extraction as side-effects — both fire-and-log so the
         validation never rolls back if the side-effect fails.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4) and
+        lands on the ``review.validated`` audit event so "who validated
+        doc X" is a SQL query. ``None`` is allowed for callers that
+        haven't been migrated yet — those paths land an audit row
+        without an actor and the slicing plan in ADR-019 covers them
+        next.
 
         Raises:
             KeyError: when the document or version cannot be found.
@@ -110,6 +118,7 @@ class ReviewService:
             reviewer_note=reviewer_note,
             mark=self._documents.mark_validated,
             decision="validated",
+            actor=actor,
         )
 
     def handle_rejection(
@@ -118,6 +127,7 @@ class ReviewService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        actor: str | None = None,
     ) -> SemanticDocument:
         """Drive a version from NEEDS_REVIEW to REJECTED.
 
@@ -126,6 +136,9 @@ class ReviewService:
         knowledge-graph projection entirely — only validated content
         becomes graph knowledge (ADR-012's "nothing without provenance"
         rule).
+
+        ``actor`` lands on the ``review.rejected`` audit event; see
+        :meth:`handle_validation` for the contract.
 
         Raises:
             KeyError: when the document or version cannot be found.
@@ -137,6 +150,7 @@ class ReviewService:
             reviewer_note=reviewer_note,
             mark=self._documents.mark_rejected,
             decision="rejected",
+            actor=actor,
         )
 
     def _record_review(
@@ -147,6 +161,7 @@ class ReviewService:
         reviewer_note: str | None,
         mark: Callable[..., Any],
         decision: ReviewDecision,
+        actor: str | None,
     ) -> SemanticDocument:
         # FSM precheck — the catalog's ``update_version_status`` enforces
         # this at write time too, but doing it here gives the caller a
@@ -171,6 +186,7 @@ class ReviewService:
             document_id=document_id,
             version_id=version_id,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
         result = self._semantic_outputs.record_validation(
             document_id=document_id,
@@ -179,6 +195,17 @@ class ReviewService:
         )
 
         if decision == "validated":
+            # ADR-025: auto-transition the most recent prior VALIDATED
+            # sibling (if any) to SUPERSEDED so catalog consumers see
+            # only the latest validated version per family. Runs after
+            # the catalog write that landed the new VALIDATED row, with
+            # fire-and-log discipline (ADR-012): a supersede failure is
+            # logged but never rolls the validation back.
+            self._maybe_supersede_prior_validated(
+                document_id=document_id,
+                new_version_id=version_id,
+                actor=actor,
+            )
             self._fire_knowledge_layer_side_effects(
                 document_id=document_id,
                 version=version,
@@ -186,6 +213,64 @@ class ReviewService:
             )
 
         return result
+
+    def _maybe_supersede_prior_validated(
+        self,
+        *,
+        document_id: str,
+        new_version_id: str,
+        actor: str | None,
+    ) -> None:
+        """Find the most recent prior VALIDATED sibling and mark it SUPERSEDED.
+
+        Idempotent / no-op when:
+        - the document family cannot be loaded (defensive);
+        - there is no prior VALIDATED version (first validation of the
+          family);
+        - the prior VALIDATED is the version we just validated (race
+          shouldn't happen, but the explicit skip keeps the contract
+          obvious).
+
+        Errors during the supersede transition are caught and logged —
+        the validation MUST stay durable even if the supersede write
+        fails (ADR-012 fire-and-log).
+        """
+        try:
+            document = self._documents.get_document(document_id)
+        except Exception:
+            log.exception(
+                "version.supersede.lookup_failed",
+                extra={"document_id": document_id, "version_id": new_version_id},
+            )
+            return
+        if document is None:
+            return
+
+        candidates = [
+            sibling
+            for sibling in document.versions
+            if sibling.id != new_version_id and sibling.status == DocumentVersionStatus.VALIDATED
+        ]
+        if not candidates:
+            return
+        prior_validated = max(candidates, key=lambda v: v.version_number)
+
+        try:
+            self._documents.mark_superseded(
+                document_id=document_id,
+                version_id=prior_validated.id,
+                actor=actor,
+                superseded_by_version_id=new_version_id,
+            )
+        except Exception:
+            log.exception(
+                "version.supersede.failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": prior_validated.id,
+                    "superseded_by_version_id": new_version_id,
+                },
+            )
 
     def _fire_knowledge_layer_side_effects(
         self,

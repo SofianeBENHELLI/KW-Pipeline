@@ -497,6 +497,10 @@ body {
   background: rgba(232, 162, 63, 0.14);
   box-shadow: inset 3px 0 0 0 var(--accent-warm);
 }
+/* Bug B — paragraphs that anchor a chunk are clickable; the
+ * pointer cursor + subtle hover surface signal the affordance. */
+.kx-para.kx-para-link { cursor: pointer; }
+.kx-para.kx-para-link:hover { background: rgba(232, 162, 63, 0.06); }
 .kx-hl-tag {
   position: absolute;
   top: -8px; left: 8px;
@@ -606,6 +610,17 @@ body {
 .kx-list li:last-child { border-bottom: 0; }
 .kx-list li:hover .kx-list-t { color: var(--navy); }
 .kx-list-t { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Bug B — chunk list cross-highlight: the active row mirrors the
+ * orange bracket in the document viewer so the panel ↔ viewer
+ * round-trip is visible without scrubbing. */
+.kx-chunk-list li.kx-on {
+  background: var(--bg-3);
+  outline: 1px solid var(--accent, #D9892C);
+  border-radius: 3px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.kx-chunk-list li.kx-on .kx-list-t { color: var(--ink); font-weight: 500; }
 
 .kx-link { color: var(--navy); cursor: pointer; text-decoration: none; border-bottom: 1px dotted var(--line-2); }
 .kx-link:hover { border-bottom-color: var(--navy); }
@@ -814,4 +829,222 @@ body {
   to {
     filter: drop-shadow(0 0 12px rgba(232, 162, 63, 0.7));
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Sprint additions — taxonomy source badges, catalog tab,
+ * document version count + v{N} latest badge.
+ *
+ * Layered on top of the existing tokens so the additions never need
+ * to re-flow the design language. All colours pull from the existing
+ * --navy / --accent / --ink / --line palette.
+ * ──────────────────────────────────────────────────────────────── */
+
+/* Cluster row source badge — "auto" (gray italic) / "imposed"
+ * (brand-coloured solid). Sized to fit alongside the existing dot +
+ * label + count without re-flowing the row. */
+.kx-cl-src {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 7px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.kx-cl-src-auto {
+  font-style: italic;
+  color: var(--ink-3);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+}
+.kx-cl-src-imposed {
+  color: white;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+
+/* "v{N}" latest-version badge + "(N versions)" affordance. Surfaced
+ * in the catalog rows, the cluster rail under each doc, and the
+ * DetailPanel header. */
+.kx-ver-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kx-ver-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: white;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.kx-detail-title .kx-ver-badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.kx-ver-badge.kx-ver-latest {
+  background: var(--accent);
+  color: white;
+}
+.kx-version-list .kx-ver-badge:not(.kx-ver-latest) {
+  background: var(--bg-3);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+.kx-ver-count {
+  font-size: 11px;
+  font-style: italic;
+}
+.kx-detail-title .kx-ver-count {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: normal;
+  vertical-align: middle;
+}
+
+/* ── Catalog tab ─────────────────────────────────────────────────── */
+.kx-catalog {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: auto;
+  padding: 12px 16px;
+}
+.kx-cat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.kx-cat-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 30px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  flex: 1 1 240px;
+  min-width: 180px;
+  max-width: 400px;
+}
+.kx-cat-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+}
+.kx-cat-search input::placeholder { color: var(--ink-3); }
+.kx-cat-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.kx-cat-chip {
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  border-radius: 14px;
+  cursor: pointer;
+}
+.kx-cat-chip:hover { background: var(--bg-2); color: var(--ink); }
+.kx-cat-chip.kx-on {
+  background: var(--navy);
+  color: white;
+  border-color: var(--navy);
+}
+
+.kx-cat-error { margin-bottom: 8px; }
+
+.kx-cat-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--ink-3);
+}
+.kx-cat-empty-t { font-size: 14px; color: var(--ink); margin-top: 12px; font-weight: 500; }
+.kx-cat-empty-s { font-size: 12px; margin-top: 6px; line-height: 1.5; max-width: 380px; margin-left: auto; margin-right: auto; }
+
+.kx-cat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--bg);
+}
+.kx-cat-table thead {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.kx-cat-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.kx-cat-table th:hover { color: var(--navy); }
+.kx-cat-table th.kx-cat-col-type { cursor: default; }
+.kx-cat-table th.kx-cat-col-type:hover { color: var(--ink-3); }
+.kx-cat-table tbody tr {
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.kx-cat-table tbody tr:hover { background: var(--bg-2); }
+.kx-cat-table tbody tr.kx-on {
+  background: var(--bg-3);
+  outline: 1px solid var(--navy-2);
+}
+.kx-cat-table td { padding: 8px 10px; vertical-align: middle; color: var(--ink); }
+.kx-cat-name { min-width: 0; max-width: 360px; }
+.kx-cat-fname {
+  font-weight: 500;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.kx-cat-name .kx-ver-wrap { margin-top: 2px; }
+.kx-cat-status .kx-cat-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.kx-stat-good { background: rgba(63, 142, 96, 0.12); color: var(--good); border: 1px solid rgba(63, 142, 96, 0.3); }
+.kx-stat-warn { background: rgba(232, 162, 63, 0.14); color: var(--accent-warm); border: 1px solid rgba(232, 162, 63, 0.35); }
+.kx-stat-bad { background: rgba(194, 69, 58, 0.12); color: var(--bad); border: 1px solid rgba(194, 69, 58, 0.3); }
+.kx-stat-info { background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); }
+
+.kx-cat-loadmore { margin-top: 12px; align-self: flex-start; }
+
+/* DetailPanel — versions list rows. */
+.kx-version-list li {
+  grid-template-columns: auto 1fr auto;
+}
+.kx-version-list li .kx-list-t {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
 }

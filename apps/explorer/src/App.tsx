@@ -28,9 +28,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/GraphCanvas";
 import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
 import { DocViewer } from "./components/DocViewer";
+import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
 import { SettingsModal } from "./components/SettingsModal";
 import { getApiBaseUrl } from "./api/client";
+import type { Document as ApiDocument } from "./api/types";
 import {
   CLUSTERS,
   DOC_TYPES,
@@ -42,9 +44,12 @@ import {
 } from "./state/explorer-data";
 import { useExplorerData } from "./state/use-explorer-data";
 
-const VIEWS: Array<{ id: "corpus" | "concepts"; label: string; icon: "globe" | "concept" }> = [
+type ViewId = "corpus" | "concepts" | "catalog";
+
+const VIEWS: Array<{ id: ViewId; label: string; icon: "globe" | "concept" | "doc" }> = [
   { id: "corpus", label: "Corpus Overview", icon: "globe" },
   { id: "concepts", label: "Concept Map", icon: "concept" },
+  { id: "catalog", label: "Catalog", icon: "doc" },
 ];
 
 const DEPTHS = [1, 2, 3, 4, 5, 10, 99] as const;
@@ -79,7 +84,7 @@ export default function App(): React.ReactElement {
   const data = useExplorerData(apiBaseUrl, refreshTick);
   const snapshot = data.snapshot;
 
-  const [view, setView] = useState<"corpus" | "concepts">("corpus");
+  const [view, setView] = useState<ViewId>("corpus");
   const [selected, setSelected] = useState<NodeSelection | null>(null);
   const [openDocId, setOpenDocId] = useState<string | null>(null);
   const [highlightChunk, setHighlightChunk] = useState<string | null>(null);
@@ -109,15 +114,39 @@ export default function App(): React.ReactElement {
     if (conceptFocus === "" || !conceptById(snapshot, conceptFocus)) {
       setConceptFocus(snapshot.concepts[0]?.id ?? "");
     }
-    if (expandedClusters.size === 0) {
-      const firstCluster = snapshot.documents[0]?.cluster;
-      if (firstCluster) setExpandedClusters(new Set([firstCluster]));
-    }
-  }, [snapshot, openDocId, conceptFocus, expandedClusters.size]);
+  }, [snapshot, openDocId, conceptFocus]);
+
+  // Bug A — Seed `expandedClusters` with the first cluster only on
+  // initial corpus load. The previous implementation lived in the
+  // sync effect above and re-fired whenever ``expandedClusters.size``
+  // dropped back to 0 (i.e. every time the user toggled off the
+  // last expanded row). Result: the first cluster ("People & HR" in
+  // the sample) appeared "stuck on" — clicks looked like a no-op
+  // because the auto-init re-added it on the very next render. We
+  // gate the seed with a ref so it only runs once per corpus, and
+  // an empty ``expandedClusters`` afterwards is honoured as the
+  // user's intent rather than overwritten.
+  const clusterSeedDoneRef = useRef(false);
+  useEffect(() => {
+    if (clusterSeedDoneRef.current) return;
+    if (snapshot.documents.length === 0) return;
+    const firstCluster = snapshot.documents[0]?.cluster;
+    if (firstCluster) setExpandedClusters(new Set([firstCluster]));
+    clusterSeedDoneRef.current = true;
+  }, [snapshot]);
 
   const allClusters = useMemo(() => {
+    // Cluster id sourcing, in priority order:
+    //   1. Every id mentioned by a live document.
+    //   2. Every id in the snapshot's runtime ``clusters`` catalogue
+    //      (taxonomy ids surface here even when no doc has been
+    //      classified to them yet — operators want to see their
+    //      categories listed even if they're empty).
+    //   3. Module-level CLUSTERS as a final fallback for the sample
+    //      corpus shape.
     const set = new Set<string>();
     snapshot.documents.forEach((d) => set.add(d.cluster));
+    Object.keys(snapshot.clusters).forEach((k) => set.add(k));
     Object.keys(CLUSTERS).forEach((k) => set.add(k));
     return [...set];
   }, [snapshot]);
@@ -305,13 +334,33 @@ export default function App(): React.ReactElement {
     } else if (kind === "concept" && conceptById(snapshot, id)) {
       selectById(id, "concept");
       hashAppliedRef.current = true;
+    } else if (kind === "catalog") {
+      // Catalog deep-link — open the Catalog tab. If an id is
+      // provided AND the doc exists in the snapshot, also select it
+      // so the DetailPanel renders the matching row's metadata. The
+      // catalog component itself handles "doc not in snapshot but
+      // returned by /documents" by updating the selection through
+      // its own click handler when the user lands on the row.
+      setView("catalog");
+      if (id && docById(snapshot, id)) selectById(id, "doc");
+      hashAppliedRef.current = true;
     }
   }, [snapshot, selectById]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!selected) return;
-    const next = `#${selected.kind}/${selected.id}`;
+    // Catalog tab — write ``#catalog/<doc_id>`` (or just ``#catalog``
+    // when nothing is selected) so refreshing the page returns to the
+    // tab. This mirrors the doc/chunk/concept hash format below.
+    let next: string;
+    if (view === "catalog") {
+      const docId = selected?.kind === "doc" ? selected.id : "";
+      next = docId ? `#catalog/${docId}` : "#catalog";
+    } else if (selected) {
+      next = `#${selected.kind}/${selected.id}`;
+    } else {
+      return;
+    }
     if (window.location.hash === next) return;
     // history.replaceState avoids polluting the browser back-stack on
     // every selection — the focus history inside the app already covers
@@ -321,7 +370,7 @@ export default function App(): React.ReactElement {
     } catch {
       // Some hosts disable replaceState — fall back silently.
     }
-  }, [selected]);
+  }, [selected, view]);
 
   const handleAction = useCallback(
     (action: DetailAction) => {
@@ -668,16 +717,31 @@ export default function App(): React.ReactElement {
               {allClusters.map((ck) => {
                 const isExp = expandedClusters.has(ck);
                 const docs = snapshot.documents.filter((d) => d.cluster === ck);
-                if (docs.length === 0) return null;
+                // Prefer the snapshot's runtime catalogue (which carries
+                // the live ``source`` flag from the taxonomy fetch);
+                // fall back to the seed CLUSTERS dict for label/hue if
+                // the runtime catalogue doesn't know this id (e.g. a
+                // document classified to a stale category that's not
+                // in the current taxonomy).
+                const meta = snapshot.clusters[ck] ?? CLUSTERS[ck];
+                const source = meta?.source ?? "computed";
+                // Hide computed clusters that the corpus doesn't
+                // actually populate — they'd be visual noise. But
+                // *imposed* (operator-authored) categories are kept
+                // even when empty: the operator wants to see their
+                // tree, and "no docs classified to this category"
+                // is itself useful information.
+                if (docs.length === 0 && source !== "imposed") return null;
                 return (
                   <div key={ck} className="kx-cl-block">
                     <div className={"kx-cl-row" + (isExp ? " kx-on" : "")} onClick={() => toggleCluster(ck)}>
                       <Icon name={isExp ? "chevron-down" : "chevron-right"} size={11} />
                       <span
                         className="kx-cl-dot"
-                        style={{ background: `oklch(0.78 0.06 ${CLUSTERS[ck]?.hue ?? 200})` }}
+                        style={{ background: `oklch(0.78 0.06 ${meta?.hue ?? 200})` }}
                       />
-                      <span className="kx-cl-name">{CLUSTERS[ck]?.label ?? ck}</span>
+                      <span className="kx-cl-name">{meta?.label ?? ck}</span>
+                      <ClusterSourceBadge source={source} />
                       <span className="kx-mono kx-mute">{docs.length}</span>
                     </div>
                     {isExp && (
@@ -708,6 +772,10 @@ export default function App(): React.ReactElement {
                                 {DOC_TYPES[d.type]?.short ?? "DOC"}
                               </span>
                               <span className="kx-cl-doc-t">{truncate(d.title, 22)}</span>
+                              <VersionBadges
+                                versionCount={d.versionCount ?? 1}
+                                latest={d.latestVersion ?? 1}
+                              />
                               <span className="kx-mono kx-mute">{d.chunks}</span>
                             </div>
                           );
@@ -853,6 +921,24 @@ export default function App(): React.ReactElement {
                 <Icon name="warn" size={12} />
                 Confidence
               </button>
+              {/*
+                Bug C — side-panel toggle is now first-class on the
+                main toolbar. It used to live in the Tweaks overlay
+                (gear menu), where users couldn't find it. The state
+                key (`tweaks.showViewer`) is unchanged so existing
+                consumers keep working.
+              */}
+              <button
+                className="kx-tool-btn"
+                onClick={() => setTweak("showViewer", !tweaks.showViewer)}
+                aria-pressed={tweaks.showViewer}
+                title="Toggle side panel"
+                aria-label="Toggle side panel"
+                data-testid="kx-toggle-side-panel"
+              >
+                <Icon name="layers" size={12} />
+                Side panel
+              </button>
               {focusRoot && (
                 <span className="kx-pill kx-pill-focus">
                   <Icon name="focus" size={11} />
@@ -870,25 +956,49 @@ export default function App(): React.ReactElement {
           </div>
 
           <div className="kx-canvas">
-            <GraphCanvas
-              snapshot={snapshot}
-              view={view}
-              selectedId={selected?.id ?? null}
-              conceptFocus={conceptFocus}
-              onSelect={handleSelect}
-              onToggleCluster={toggleCluster}
-              onToggleDoc={toggleDoc}
-              expandedClusters={expandedClusters}
-              expandedDocs={expandedDocs}
-              showClusters={tweaks.showClusters && view === "corpus"}
-              showConfHeat={tweaks.showConfHeat}
-              theme={tweaks.theme}
-              depth={depth}
-              hoveredId={hovered}
-              onHover={setHovered}
-              search={search}
-              focusRoot={focusRoot}
-            />
+            {view === "catalog" ? (
+              <Catalog
+                apiBaseUrl={apiBaseUrl}
+                refreshTick={refreshTick}
+                selectedId={selected?.kind === "doc" ? selected.id : null}
+                onSelectDocument={(apiDoc: ApiDocument) => {
+                  // Try to resolve via the snapshot first so we get the
+                  // existing ExplorerDocument shape (cluster, hue, etc.).
+                  // If the catalog returned a doc the snapshot doesn't
+                  // know about (e.g. paginated past the first page), we
+                  // still surface a minimal selection so the DetailPanel
+                  // renders the doc's title + status from the API row.
+                  const known = docById(snapshot, apiDoc.id);
+                  if (known) {
+                    handleSelect({ kind: "doc", id: apiDoc.id, doc: known });
+                  } else {
+                    setSelected({ kind: "doc", id: apiDoc.id });
+                    setOpenDocId(apiDoc.id);
+                    setHighlightChunk(null);
+                  }
+                }}
+              />
+            ) : (
+              <GraphCanvas
+                snapshot={snapshot}
+                view={view === "corpus" ? "corpus" : "concepts"}
+                selectedId={selected?.id ?? null}
+                conceptFocus={conceptFocus}
+                onSelect={handleSelect}
+                onToggleCluster={toggleCluster}
+                onToggleDoc={toggleDoc}
+                expandedClusters={expandedClusters}
+                expandedDocs={expandedDocs}
+                showClusters={tweaks.showClusters && view === "corpus"}
+                showConfHeat={tweaks.showConfHeat}
+                theme={tweaks.theme}
+                depth={depth}
+                hoveredId={hovered}
+                onHover={setHovered}
+                search={search}
+                focusRoot={focusRoot}
+              />
+            )}
             <div className="kx-readonly">
               <Icon name="shield" size={11} stroke="#3F8E60" /> READ-ONLY
             </div>
@@ -910,8 +1020,15 @@ export default function App(): React.ReactElement {
               highlightChunkId={highlightChunk}
               onPrevChunk={() => navChunk(-1)}
               onNextChunk={() => navChunk(1)}
+              onSelectChunk={setHighlightChunk}
             />
-            <DetailPanel snapshot={snapshot} node={detailNode} onAction={handleAction} onSelectId={selectById} />
+            <DetailPanel
+              snapshot={snapshot}
+              node={detailNode}
+              onAction={handleAction}
+              onSelectId={selectById}
+              highlightChunkId={highlightChunk}
+            />
           </aside>
         )}
       </div>
@@ -948,6 +1065,34 @@ const Stat: React.FC<{ n: number; l: string }> = ({ n, l }) => (
     <div className="kx-stat-l">{l}</div>
   </div>
 );
+
+/**
+ * Tiny "auto" / "imposed" badge next to a cluster row in the left
+ * rail. Surfaces ADR-017's hybrid taxonomy provenance:
+ *
+ *   * ``auto`` — auto-deduced from topic clustering, gray italic.
+ *   * ``imposed`` — operator-authored YAML category, brand-coloured.
+ *
+ * Tooltip explains the source so the affordance is discoverable
+ * without opening a modal.
+ */
+const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({ source }) => {
+  const isImposed = source === "imposed";
+  return (
+    <span
+      className={"kx-cl-src" + (isImposed ? " kx-cl-src-imposed" : " kx-cl-src-auto")}
+      title={
+        isImposed
+          ? "Imposed by operator (YAML taxonomy)"
+          : "Auto-deduced from topic clustering"
+      }
+      data-testid={isImposed ? "kx-cl-src-imposed" : "kx-cl-src-auto"}
+      aria-label={isImposed ? "imposed taxonomy category" : "auto-deduced cluster"}
+    >
+      {isImposed ? "imposed" : "auto"}
+    </span>
+  );
+};
 
 interface FilterRowProps {
   checked: boolean;
@@ -1056,9 +1201,12 @@ const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose
     <TweaksRow label="Cluster halos">
       <Toggle value={tweaks.showClusters} onChange={(v) => setTweak("showClusters", v)} />
     </TweaksRow>
-    <TweaksRow label="Viewer panel">
-      <Toggle value={tweaks.showViewer} onChange={(v) => setTweak("showViewer", v)} />
-    </TweaksRow>
+    {/*
+      Bug C — "Viewer panel" used to live here. It's now a first-class
+      toolbar button (data-testid="kx-toggle-side-panel"). The
+      `tweaks.showViewer` state key is intentionally unchanged so this
+      relocation is UI-only.
+    */}
     <TweaksRow label="Confidence heatmap">
       <Toggle value={tweaks.showConfHeat} onChange={(v) => setTweak("showConfHeat", v)} />
     </TweaksRow>

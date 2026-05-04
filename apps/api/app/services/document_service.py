@@ -39,13 +39,30 @@ class DocumentService:
 
         When ``document_id`` is provided, the upload is appended to the
         existing document family as a new version (``version_number =
-        max(existing) + 1``). Without it, a new document family is created
-        with ``version_number = 1``. Hash-based duplicate detection runs in
-        both cases and wins over version creation: matching bytes always
-        produce a ``DUPLICATE_DETECTED`` version pointing at the original.
+        max(existing) + 1``). Without it, hash-based duplicate detection
+        decides the family: matching bytes route the new
+        ``DUPLICATE_DETECTED`` version into the original family (ADR-002 —
+        every upload is a ``DocumentVersion`` within a stable
+        ``Document`` identity, see issue #59); non-matching bytes create
+        a fresh family with ``version_number = 1``.
         """
         if document_id is None:
-            version = self._upload_new_family(filename, content_type, content)
+            digest = compute_sha256(content)
+            duplicate = self.catalog.find_version_by_hash(digest)
+            existing_family = self._resolve_duplicate_family(duplicate)
+            if existing_family is not None:
+                version = self._append_new_version(
+                    existing_family,
+                    filename,
+                    content_type,
+                    content,
+                    digest=digest,
+                    duplicate=duplicate,
+                )
+            else:
+                version = self._upload_new_family(
+                    filename, content_type, content, digest=digest, duplicate=duplicate
+                )
         else:
             existing_document = self.catalog.get_document(document_id)
             if existing_document is None:
@@ -93,6 +110,14 @@ class DocumentService:
         digest = digest_obj.hexdigest()
         duplicate = self.catalog.find_version_by_hash(digest)
 
+        # Anonymous uploads (no ``document_id``) that hit a duplicate are
+        # routed into the original family rather than spawning a new
+        # family at v1 — ADR-002 / issue #59. The bytes are already in
+        # storage; we only re-resolve which family the version belongs
+        # to before persisting the catalog row.
+        if target_document is None and duplicate is not None:
+            target_document = self._resolve_duplicate_family(duplicate)
+
         if target_document is None:
             document_id_value = str(uuid4())
             version_number = 1
@@ -131,9 +156,13 @@ class DocumentService:
         filename: str,
         content_type: str,
         content: bytes,
+        *,
+        digest: str | None = None,
+        duplicate: DocumentVersion | None = None,
     ) -> DocumentVersion:
-        digest = compute_sha256(content)
-        duplicate = self.catalog.find_version_by_hash(digest)
+        if digest is None:
+            digest = compute_sha256(content)
+            duplicate = self.catalog.find_version_by_hash(digest)
         document_id = str(uuid4())
         version = self._build_version(
             document_id=document_id,
@@ -154,9 +183,13 @@ class DocumentService:
         filename: str,
         content_type: str,
         content: bytes,
+        *,
+        digest: str | None = None,
+        duplicate: DocumentVersion | None = None,
     ) -> DocumentVersion:
-        digest = compute_sha256(content)
-        duplicate = self.catalog.find_version_by_hash(digest)
+        if digest is None:
+            digest = compute_sha256(content)
+            duplicate = self.catalog.find_version_by_hash(digest)
         next_version_number = (
             max((v.version_number for v in existing_document.versions), default=0) + 1
         )
@@ -171,6 +204,32 @@ class DocumentService:
         )
         self.catalog.append_version_to_document(document_id=existing_document.id, version=version)
         return version
+
+    def _resolve_duplicate_family(self, duplicate: DocumentVersion | None) -> Document | None:
+        """Return the family that owns ``duplicate``, or ``None`` for a fresh upload.
+
+        ADR-002 / issue #59: when an anonymous upload (no ``document_id``)
+        matches an existing hash, the new ``DUPLICATE_DETECTED`` version
+        is appended to the matching version's family rather than
+        spawning a new family with ``version_number = 1``.
+
+        If the duplicate's owning family cannot be resolved (deleted
+        family, race), we fall back to the legacy "new family" behaviour
+        and log a warning rather than raising — the upload still
+        succeeds, just without family stitching.
+        """
+        if duplicate is None:
+            return None
+        family = self.catalog.get_document(duplicate.document_id)
+        if family is None:
+            log.warning(
+                "document.duplicate_family_missing",
+                extra={
+                    "duplicate_version_id": duplicate.id,
+                    "missing_document_id": duplicate.document_id,
+                },
+            )
+        return family
 
     def _build_version(
         self,
@@ -305,14 +364,22 @@ class DocumentService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Reviewer accepts the semantic output. Refuses transition unless the
-        version is currently in NEEDS_REVIEW."""
+        version is currently in NEEDS_REVIEW.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4); when
+        provided, the ``review.validated`` audit event records it so
+        "who validated doc X" is a SQL filter on the audit table.
+        """
         return self._record_review(
             document_id=document_id,
             version_id=version_id,
             target_status=DocumentVersionStatus.VALIDATED,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
 
     def mark_rejected(
@@ -320,15 +387,62 @@ class DocumentService:
         document_id: str,
         version_id: str,
         reviewer_note: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Reviewer rejects the semantic output. Refuses transition unless the
-        version is currently in NEEDS_REVIEW."""
+        version is currently in NEEDS_REVIEW.
+
+        See :meth:`mark_validated` for the ``actor`` contract.
+        """
         return self._record_review(
             document_id=document_id,
             version_id=version_id,
             target_status=DocumentVersionStatus.REJECTED,
             reviewer_note=reviewer_note,
+            actor=actor,
         )
+
+    def mark_superseded(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        actor: str | None = None,
+        superseded_by_version_id: str | None = None,
+    ) -> DocumentVersion:
+        """Mark a previously-VALIDATED version SUPERSEDED (ADR-025).
+
+        The transition is enforced by the FSM — only a ``VALIDATED``
+        version may move to ``SUPERSEDED``. Emits a
+        ``version.superseded`` audit event carrying the actor that
+        triggered the supersede (typically the reviewer that validated
+        the newer sibling) and the id of the version that replaced
+        this one.
+
+        Raises :class:`IllegalTransition` (subclass of ``ValueError``)
+        when the version is not currently ``VALIDATED``.
+        """
+        version = self.catalog.get_version(document_id=document_id, version_id=version_id)
+        assert_transition(version.status, DocumentVersionStatus.SUPERSEDED)
+        previous = version.status
+        updated = self.catalog.update_version_status(
+            document_id=document_id,
+            version_id=version_id,
+            status=DocumentVersionStatus.SUPERSEDED,
+        )
+        _log_status_changed(updated, previous=previous)
+        log.info(
+            "version.superseded",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "version_number": updated.version_number,
+                "superseded_by_version_id": superseded_by_version_id,
+                "actor": actor,
+            },
+        )
+        return updated
 
     def _record_review(
         self,
@@ -337,6 +451,7 @@ class DocumentService:
         version_id: str,
         target_status: DocumentVersionStatus,
         reviewer_note: str | None,
+        actor: str | None = None,
     ) -> DocumentVersion:
         version = self.catalog.get_version(document_id=document_id, version_id=version_id)
         if version.status != DocumentVersionStatus.NEEDS_REVIEW:
@@ -360,6 +475,7 @@ class DocumentService:
                     "document_id": document_id,
                     "version_id": version_id,
                     "reviewer_note": reviewer_note,
+                    "actor": actor,
                 },
             )
         else:
@@ -369,6 +485,7 @@ class DocumentService:
                     "document_id": document_id,
                     "version_id": version_id,
                     "reviewer_note": reviewer_note,
+                    "actor": actor,
                 },
             )
         return updated

@@ -20,6 +20,7 @@ import type {
   KnowledgeGraphProjection,
   RawExtraction,
   SemanticDocument,
+  TaxonomyResponse,
 } from "./types";
 
 // Re-export from the shared module so existing import sites
@@ -174,6 +175,24 @@ export function getDocumentGraph(
     `/documents/${encodeURIComponent(documentId)}/graph`,
     opts,
   );
+}
+
+/**
+ * Fetch the operator-imposed taxonomy (ADR-017). Returns the full
+ * ``TaxonomyResponse`` including ``is_configured`` so callers can
+ * distinguish "operator hasn't authored a YAML yet" (200,
+ * ``is_configured=false``, empty categories) from "auto-deduced
+ * topic clustering" (the explorer's default left rail).
+ *
+ * Per the route docstring, this never returns 404. Older API
+ * deployments without the route will surface as a 404 ApiError —
+ * the Explorer treats that the same as ``is_configured=false`` and
+ * falls back to its existing topic-clustering source.
+ */
+export function getKnowledgeTaxonomy(
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<TaxonomyResponse> {
+  return request<TaxonomyResponse>("/knowledge/taxonomy", opts);
 }
 
 export function getKnowledgeGraph(

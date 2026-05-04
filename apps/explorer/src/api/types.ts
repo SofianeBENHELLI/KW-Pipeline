@@ -166,3 +166,34 @@ export interface KnowledgeGraphPage {
   edges: GraphEdge[];
   next_cursor: string | null;
 }
+
+// ─── Taxonomy (ADR-017) ──────────────────────────────────────────────────────
+
+/**
+ * One node in the operator-imposed taxonomy tree. Mirrors
+ * ``app.schemas.taxonomy::TaxonomyCategory`` — see ADR-017 for the
+ * shape rationale (tree, not graph; ids stable across runs;
+ * description embedded by the classifier).
+ */
+export interface TaxonomyCategory {
+  id: string;
+  label: string;
+  description: string;
+  subcategories: TaxonomyCategory[];
+}
+
+/**
+ * Wire shape of ``GET /knowledge/taxonomy``. ``is_configured`` is
+ * ``false`` when the operator hasn't pointed ``KW_TAXONOMY_PATH`` at
+ * a YAML file — the route never 404s on that condition (it returns
+ * 200 with empty ``categories``). The Explorer uses ``is_configured``
+ * to decide whether the cluster rail should label categories
+ * ``imposed`` vs fall back to the auto-deduced (``computed``) source
+ * derived from snapshot data.
+ */
+export interface TaxonomyResponse {
+  schema_version: string;
+  is_configured: boolean;
+  source_path: string | null;
+  categories: TaxonomyCategory[];
+}

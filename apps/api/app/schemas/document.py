@@ -6,6 +6,7 @@ from pydantic import Field
 
 from app.models.document import DocumentVersionStatus
 from app.schemas import APISchemaModel as BaseModel
+from app.schemas.scope import Scope
 
 
 def utc_now() -> datetime:
@@ -48,6 +49,25 @@ class Document(BaseModel):
             latest_version_id=version.id,
             versions=[version],
         )
+
+
+class UploadDocumentResponse(DocumentVersion):
+    """Response body for ``POST /documents/upload`` (EPIC-D D.1, #218).
+
+    Extends :class:`DocumentVersion` with the workspace-scope links
+    that were created at upload time. ``scopes`` is the read-side
+    counterpart to the optional ``scope_kind`` / ``scope_ref`` query
+    params on the upload route — it surfaces every scope this upload
+    landed in so the client can refresh its workspace picker without
+    a follow-up ``list_scopes_for_document`` call.
+
+    Defaults to a single ``personal:<user_id>`` link via the
+    ``current_user`` resolved by :func:`get_current_user` when neither
+    query param is provided. Pre-D.1 callers ignore ``scopes`` because
+    every other field is unchanged from :class:`DocumentVersion`.
+    """
+
+    scopes: list[Scope] = Field(default_factory=list)
 
 
 class DocumentListResponse(BaseModel):

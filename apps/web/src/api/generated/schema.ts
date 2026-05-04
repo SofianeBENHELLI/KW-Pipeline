@@ -765,7 +765,7 @@ export interface components {
          * DocumentVersionStatus
          * @enum {string}
          */
-        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED";
+        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED";
         /** EmbeddingsConfig */
         EmbeddingsConfig: {
             /** Configured */
@@ -1035,6 +1035,36 @@ export interface components {
             reviewer_note?: string | null;
         };
         /**
+         * Scope
+         * @description One row of the ``document_scopes`` join table.
+         *
+         *     Returned by :meth:`CatalogStore.list_scopes_for_document` and by
+         *     the upload-route response when a scope link was created. The pair
+         *     ``(kind, ref)`` identifies the scope; ``added_at`` / ``added_by``
+         *     record who linked the document into that scope and when.
+         *
+         *     The ``ref`` field is intentionally opaque to this layer: its
+         *     interpretation depends on ``kind`` (a 3DSwym community id, a
+         *     user id, an internal project id) and is owned by ADR-026 / the
+         *     membership client. The catalog persists it as a flat string.
+         */
+        Scope: {
+            /**
+             * Added At
+             * Format: date-time
+             */
+            added_at: string;
+            /** Added By */
+            added_by: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "personal" | "swym_community" | "project";
+            /** Ref */
+            ref: string;
+        };
+        /**
          * SemanticAsset
          * @description Typed semantic claim or asset extracted from the document.
          */
@@ -1195,6 +1225,56 @@ export interface components {
             /** Max Bytes */
             max_bytes: number;
         };
+        /**
+         * UploadDocumentResponse
+         * @description Response body for ``POST /documents/upload`` (EPIC-D D.1, #218).
+         *
+         *     Extends :class:`DocumentVersion` with the workspace-scope links
+         *     that were created at upload time. ``scopes`` is the read-side
+         *     counterpart to the optional ``scope_kind`` / ``scope_ref`` query
+         *     params on the upload route — it surfaces every scope this upload
+         *     landed in so the client can refresh its workspace picker without
+         *     a follow-up ``list_scopes_for_document`` call.
+         *
+         *     Defaults to a single ``personal:<user_id>`` link via the
+         *     ``current_user`` resolved by :func:`get_current_user` when neither
+         *     query param is provided. Pre-D.1 callers ignore ``scopes`` because
+         *     every other field is unchanged from :class:`DocumentVersion`.
+         */
+        UploadDocumentResponse: {
+            /** Content Type */
+            content_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Document Id */
+            document_id: string;
+            /** Duplicate Of Version Id */
+            duplicate_of_version_id: string | null;
+            /** Failure Reason */
+            failure_reason: string | null;
+            /** File Size */
+            file_size: number;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Reviewer Note */
+            reviewer_note: string | null;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
+            /** Sha256 */
+            sha256: string;
+            status: components["schemas"]["DocumentVersionStatus"];
+            /** Storage Uri */
+            storage_uri: string;
+            /** Version Number */
+            version_number: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1271,6 +1351,8 @@ export interface operations {
         parameters: {
             query?: {
                 document_id?: string | null;
+                scope_kind?: string | null;
+                scope_ref?: string | null;
             };
             header?: {
                 "Idempotency-Key"?: string | null;
@@ -1290,7 +1372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DocumentVersion"];
+                    "application/json": components["schemas"]["UploadDocumentResponse"];
                 };
             };
             /** @description Validation Error */

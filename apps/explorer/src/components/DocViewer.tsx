@@ -27,12 +27,34 @@ import {
 } from "../state/explorer-data";
 import { Icon, NAVY2 } from "./icons";
 
+/**
+ * Bug B — given a (page, para) location in a ``DocContent``, return
+ * the chunk id whose anchor covers that paragraph, or ``null``. Used
+ * by the viewer to wire paragraph clicks back to ``setHighlightChunk``
+ * so the cross-highlight round-trip works (panel ↔ viewer).
+ */
+function paraChunkId(content: DocContent, pageNum: number, paraIdx: number): string | null {
+  for (const [chunkId, anchor] of Object.entries(content.chunkAnchors)) {
+    if (anchor.page === pageNum && anchor.paras.includes(paraIdx)) {
+      return chunkId;
+    }
+  }
+  return null;
+}
+
 interface DocViewerProps {
   snapshot: ExplorerSnapshot;
   doc: ExplorerDocument | null;
   highlightChunkId: string | null;
   onPrevChunk: () => void;
   onNextChunk: () => void;
+  /**
+   * Bug B — clicking a paragraph that anchors a chunk fires this so
+   * the host app can mirror the highlight to the side-panel chunk row.
+   * Optional so unrelated callers (chunk navigator only) don't have
+   * to wire a no-op.
+   */
+  onSelectChunk?: (chunkId: string) => void;
 }
 
 export const DocViewer: React.FC<DocViewerProps> = ({
@@ -41,6 +63,7 @@ export const DocViewer: React.FC<DocViewerProps> = ({
   highlightChunkId,
   onPrevChunk,
   onNextChunk,
+  onSelectChunk,
 }) => {
   if (!doc) {
     return (
@@ -112,8 +135,30 @@ export const DocViewer: React.FC<DocViewerProps> = ({
               <div className="kx-page-h">{page.heading}</div>
               {page.paras.map((p, i) => {
                 const hl = anchor && anchor.page === page.n && anchor.paras.includes(i);
+                // Bug B — find the chunk anchored to this paragraph
+                // (if any) so a click can mirror the highlight back
+                // to the side-panel chunk row.
+                const chunkForPara = paraChunkId(content, page.n, i);
+                const interactive = Boolean(chunkForPara && onSelectChunk);
                 return (
-                  <div key={i} className={"kx-para" + (hl ? " kx-hl" : "")}>
+                  <div
+                    key={i}
+                    className={"kx-para" + (hl ? " kx-hl" : "") + (interactive ? " kx-para-link" : "")}
+                    data-chunk-id={chunkForPara ?? undefined}
+                    onClick={interactive ? () => onSelectChunk!(chunkForPara!) : undefined}
+                    role={interactive ? "button" : undefined}
+                    tabIndex={interactive ? 0 : undefined}
+                    onKeyDown={
+                      interactive
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onSelectChunk!(chunkForPara!);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
                     {hl && chunk && <span className="kx-hl-tag">{chunk.id}</span>}
                     {p}
                   </div>
