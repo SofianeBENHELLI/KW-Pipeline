@@ -141,6 +141,21 @@ class GraphStore(Protocol):
         ``KnowledgeGraphProjection`` payload doesn't grow by 1024
         floats per chunk. ``find_chunks_by_similarity`` is the only
         public read path for these vectors.
+
+        Prefer :meth:`bulk_set_chunk_embeddings` when writing more than
+        one chunk at a time — it amortises the round-trip cost (one
+        Cypher transaction on Neo4j instead of N).
+        """
+
+    def bulk_set_chunk_embeddings(self, mapping: Mapping[str, Sequence[float]]) -> None:
+        """Write embedding vectors for many chunks in one round-trip.
+
+        ``mapping`` is keyed by chunk id and the value is the embedding
+        vector. Empty mapping is a no-op. The Neo4j path executes one
+        UNWIND-driven Cypher; the in-memory path is a dict update under
+        the store lock. The projection hot path is the primary caller
+        (audit #225); ``set_chunk_embedding`` stays for the
+        reconciliation single-chunk path.
         """
 
     def find_chunks_by_similarity(
@@ -312,6 +327,13 @@ class InMemoryGraphStore:
     def set_chunk_embedding(self, *, chunk_id: str, embedding: Sequence[float]) -> None:
         with self._lock:
             self._chunk_embeddings[chunk_id] = list(embedding)
+
+    def bulk_set_chunk_embeddings(self, mapping: Mapping[str, Sequence[float]]) -> None:
+        if not mapping:
+            return
+        with self._lock:
+            for chunk_id, embedding in mapping.items():
+                self._chunk_embeddings[chunk_id] = list(embedding)
 
     def find_chunks_by_similarity(
         self,
@@ -652,6 +674,27 @@ class Neo4jGraphStore:
             SET n.embedding = $embedding
             """,
             {"chunk_id": chunk_id, "embedding": list(embedding)},
+        )
+
+    def bulk_set_chunk_embeddings(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        mapping: Mapping[str, Sequence[float]],
+    ) -> None:
+        # One UNWIND-driven Cypher writes every chunk's embedding inside
+        # a single transaction, replacing the per-chunk round-trip the
+        # projector used to do (audit #225). Empty mapping is a no-op
+        # so the projection path can call this unconditionally without
+        # an ``if mapping`` guard at the call site.
+        if not mapping:
+            return
+        rows = [{"chunk_id": cid, "embedding": list(emb)} for cid, emb in mapping.items()]
+        self._write(
+            """
+            UNWIND $rows AS row
+            MATCH (n:KnowledgeNode {id: row.chunk_id, kind: 'chunk'})
+            SET n.embedding = row.embedding
+            """,
+            {"rows": rows},
         )
 
     def find_chunks_by_similarity(  # pragma: no cover - exercised behind pytest -m integration

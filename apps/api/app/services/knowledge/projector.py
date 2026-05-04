@@ -117,8 +117,9 @@ class KnowledgeProjector:
         self._topic_clustering_service = topic_clustering_service or TopicClusteringService()
         # Phase 3 (#186, ADR-015): when set, the projector embeds each
         # chunk's text after writing the chunk node and stores the
-        # vector via :meth:`GraphStore.set_chunk_embedding`. ``None``
-        # preserves Phase 1 / Phase 2 behaviour exactly.
+        # vectors in one round-trip via
+        # :meth:`GraphStore.bulk_set_chunk_embeddings` (audit #225).
+        # ``None`` preserves Phase 1 / Phase 2 behaviour exactly.
         self._embedding_client = embedding_client
         # Process-local embedding cache keyed by ``(model, sha256(text))``
         # so re-projections (and re-projections of the same chunk text
@@ -267,12 +268,15 @@ class KnowledgeProjector:
             for slot, vector in zip(misses_idx, new_vectors, strict=True):
                 self._embedding_cache[cache_keys[slot]] = list(vector)
 
-        for i, chunk in enumerate(chunks):
-            vector = self._embedding_cache[cache_keys[i]]
-            self._graph_store.set_chunk_embedding(
-                chunk_id=chunk.chunk_id,
-                embedding=vector,
-            )
+        # Single bulk write: one UNWIND transaction on Neo4j; one dict
+        # update under the lock on the in-memory store. Replaces the
+        # previous per-chunk round-trip (audit #225). Empty chunk lists
+        # are unreachable here because the caller checks ``chunks``
+        # before invoking this method.
+        embedding_map = {
+            chunk.chunk_id: self._embedding_cache[cache_keys[i]] for i, chunk in enumerate(chunks)
+        }
+        self._graph_store.bulk_set_chunk_embeddings(embedding_map)
 
         log.info(
             "knowledge.embeddings.computed",

@@ -340,3 +340,58 @@ def test_find_chunks_by_similarity_rejects_oversize_limit(
 ) -> None:
     with pytest.raises(ValueError):
         store.find_chunks_by_similarity([0.0, 0.0, 0.0, 0.0], limit=10_000)
+
+
+def test_bulk_set_chunk_embeddings_writes_all_in_one_unwind(
+    store: Neo4jGraphStore,
+    ns: str,
+) -> None:
+    """One UNWIND-driven Cypher must populate every chunk's embedding;
+    the search index must subsequently rank every chunk (audit #225).
+
+    The test does not directly assert the transaction count — Bolt
+    doesn't expose that easily — but it does assert that a single
+    ``bulk_set_chunk_embeddings`` call lands the same vectors that
+    three ``set_chunk_embedding`` calls did in the prior test. The
+    projection hot path's perf win comes from issuing one transaction
+    instead of N; the contract verified here is the equivalence.
+    """
+    index_name = f"chunk_embedding_{ns.replace('-', '_')}_bulk"
+    store.ensure_vector_index(name=index_name, dim=4)
+
+    store.upsert_nodes(
+        [
+            _chunk(ns, "b1", snippet="alpha"),
+            _chunk(ns, "b2", snippet="beta"),
+            _chunk(ns, "b3", snippet="gamma"),
+        ]
+    )
+
+    # One bulk call covers all three vectors.
+    store.bulk_set_chunk_embeddings(
+        {
+            f"{ns}-b1": [1.0, 0.0, 0.0, 0.0],
+            f"{ns}-b2": [0.0, 1.0, 0.0, 0.0],
+            f"{ns}-b3": [0.5, 0.5, 0.0, 0.0],
+        }
+    )
+
+    hits = store.find_chunks_by_similarity(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=3,
+        index_name=index_name,
+    )
+    chunk_ids = [h.chunk_id for h in hits]
+    assert chunk_ids[0] == f"{ns}-b1"
+    assert {h.chunk_id for h in hits} == {f"{ns}-b1", f"{ns}-b2", f"{ns}-b3"}
+
+
+def test_bulk_set_chunk_embeddings_empty_mapping_is_noop(
+    store: Neo4jGraphStore,
+) -> None:
+    """Empty mapping must not fire a Cypher; the projector relies on
+    this so the call site can stay unconditional."""
+    # Should not raise (nothing to assert on the graph; no nodes
+    # involved). The ``if not mapping: return`` guard inside the impl
+    # is what we are pinning here.
+    store.bulk_set_chunk_embeddings({})

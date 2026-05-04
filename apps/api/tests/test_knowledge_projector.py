@@ -442,3 +442,48 @@ def test_project_handles_embedding_provider_count_mismatch():
 
     proj = store.find_subgraph_for_document(document.id)
     assert "s1" in {n.id for n in proj.nodes if n.kind == "chunk"}
+
+
+def test_project_uses_bulk_embedding_write_path():
+    """The projector must write all chunk embeddings in ONE bulk call,
+    not N single-chunk calls (audit #225). This guarantees one Cypher
+    UNWIND transaction on Neo4j instead of N round-trips."""
+    from app.services.knowledge import FakeEmbeddingClient
+
+    store = InMemoryGraphStore()
+    embedder = FakeEmbeddingClient(dim=16)
+    projector = KnowledgeProjector(graph_store=store, embedding_client=embedder)
+
+    # Recording wrappers around the two write paths so the assertion
+    # is on the call shape, not on side-effects.
+    bulk_calls: list[dict[str, list[float]]] = []
+    single_calls: list[str] = []
+    real_bulk = store.bulk_set_chunk_embeddings
+    real_single = store.set_chunk_embedding
+
+    def recording_bulk(mapping):
+        bulk_calls.append(dict(mapping))
+        real_bulk(mapping)
+
+    def recording_single(*, chunk_id, embedding):
+        single_calls.append(chunk_id)
+        real_single(chunk_id=chunk_id, embedding=embedding)
+
+    store.bulk_set_chunk_embeddings = recording_bulk  # type: ignore[method-assign]
+    store.set_chunk_embedding = recording_single  # type: ignore[method-assign]
+
+    version = _make_version()
+    document = _make_document(version=version)
+    semantic = _make_semantic(
+        version=version,
+        sections=[SemanticSection(id=f"s{i}", heading=f"H{i}", text=f"text {i}") for i in range(5)],
+    )
+
+    projector.project(document=document, version=version, semantic=semantic)
+
+    # Exactly one bulk call covering all 5 chunks; zero single calls.
+    assert len(bulk_calls) == 1, f"expected one bulk call, got {len(bulk_calls)}"
+    assert set(bulk_calls[0].keys()) == {f"s{i}" for i in range(5)}
+    assert single_calls == [], (
+        f"projector should not fall back to per-chunk writes; got {single_calls}"
+    )

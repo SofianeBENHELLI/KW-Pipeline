@@ -265,3 +265,69 @@ def test_delete_subgraph_for_version_drops_chunk_embedding():
 
     hits = store.find_chunks_by_similarity([1.0, 0.0], limit=5)
     assert hits == []
+
+
+# ─── bulk_set_chunk_embeddings (audit #225) ──────────────────────────────
+
+
+def test_bulk_set_chunk_embeddings_writes_every_entry():
+    """One bulk call must populate the same vectors that N single-chunk
+    calls would have produced — the projector relies on this equivalence."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes(
+        [
+            _chunk_node("c1", snippet="alpha"),
+            _chunk_node("c2", snippet="beta"),
+            _chunk_node("c3", snippet="gamma"),
+        ]
+    )
+
+    store.bulk_set_chunk_embeddings(
+        {
+            "c1": [1.0, 0.0],
+            "c2": [0.0, 1.0],
+            "c3": [0.5, 0.5],
+        }
+    )
+
+    hits = store.find_chunks_by_similarity([1.0, 0.0], limit=3)
+    # All three chunks ranked, c1 first (identical direction).
+    assert {h.chunk_id for h in hits} == {"c1", "c2", "c3"}
+    assert hits[0].chunk_id == "c1"
+    assert hits[0].score == pytest.approx(1.0)
+
+
+def test_bulk_set_chunk_embeddings_empty_mapping_is_noop():
+    """Empty mapping must not raise — projector calls this even when
+    every chunk hits the cache and the resulting map is empty (well,
+    it's not in current code, but the contract has to hold so the call
+    site can stay unconditional)."""
+    store = InMemoryGraphStore()
+    store.bulk_set_chunk_embeddings({})  # no-op
+    # Subsequent search returns the empty list.
+    assert store.find_chunks_by_similarity([1.0], limit=5) == []
+
+
+def test_bulk_set_chunk_embeddings_overwrites_existing():
+    """Re-running the bulk path with a different vector must overwrite
+    the prior value — same contract as set_chunk_embedding."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1")])
+    store.bulk_set_chunk_embeddings({"c1": [1.0, 0.0]})
+    store.bulk_set_chunk_embeddings({"c1": [0.0, 1.0]})
+
+    hits = store.find_chunks_by_similarity([0.0, 1.0], limit=1)
+    assert hits[0].chunk_id == "c1"
+    assert hits[0].score == pytest.approx(1.0)
+
+
+def test_bulk_set_chunk_embeddings_drops_after_delete_subgraph():
+    """Embeddings written via the bulk path must be dropped by
+    delete_subgraph_for_version exactly the same as the single path."""
+    store = InMemoryGraphStore()
+    store.upsert_nodes([_chunk_node("c1", version_id="v1")])
+    store.bulk_set_chunk_embeddings({"c1": [1.0, 0.0]})
+
+    store.delete_subgraph_for_version(document_id="doc-A", version_id="v1")
+
+    assert store.find_chunks_by_similarity([1.0, 0.0], limit=5) == []
