@@ -277,6 +277,16 @@ body {
 .kx-pill-focus { background: var(--accent-warm); color: white; border-color: var(--accent-warm); font-weight: 600; }
 .kx-pill-focus button { background: rgba(255,255,255,0.2); border: 0; color: white; }
 
+/* ── Taxonomy section (ADR-017 / C1) ──────────────────────────── */
+.kx-tax-source { font-size: 10px; padding: 2px 4px; margin-bottom: 6px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kx-tax-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.kx-tax-children { list-style: none; margin: 0; padding: 0; border-left: 1px dashed var(--line); margin-left: 6px; padding-left: 4px; display: flex; flex-direction: column; gap: 2px; }
+.kx-tax-node { padding: 0; }
+.kx-tax-row { display: flex; align-items: baseline; gap: 6px; padding: 3px 5px; border-radius: 3px; }
+.kx-tax-row:hover { background: var(--bg-3); }
+.kx-tax-id { font-size: 10px; flex-shrink: 0; }
+.kx-tax-label { color: var(--ink); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Browser-style navigation bar */
 .kx-navbar {
   display: flex; align-items: center; gap: 6px;

@@ -18,6 +18,7 @@ import type {
   KnowledgeGraphProjection,
   RawExtraction,
   SemanticDocument,
+  TaxonomyResponse,
 } from "./types";
 
 const SETTINGS_KEY = "apiBaseUrl";
@@ -229,6 +230,23 @@ export function getKnowledgeGraph(
   params.set("limit", String(opts.limit ?? 200));
   if (opts.cursor) params.set("cursor", opts.cursor);
   return request<KnowledgeGraphPage>(`/knowledge/graph?${params.toString()}`, {
+    baseUrl: opts.baseUrl,
+    signal: opts.signal,
+  });
+}
+
+/**
+ * GET /knowledge/taxonomy (ADR-017 / B2)
+ *
+ * Reads the operator-imposed taxonomy. Never 404s — when no YAML is
+ * configured the route returns ``is_configured: false`` with empty
+ * categories. The Explorer uses this to decide whether to render the
+ * imposed-taxonomy axis or fall back to auto-deduced topic clusters.
+ */
+export function getKnowledgeTaxonomy(
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<TaxonomyResponse> {
+  return request<TaxonomyResponse>("/knowledge/taxonomy", {
     baseUrl: opts.baseUrl,
     signal: opts.signal,
   });

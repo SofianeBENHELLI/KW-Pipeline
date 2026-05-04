@@ -166,3 +166,32 @@ export interface KnowledgeGraphPage {
   edges: GraphEdge[];
   next_cursor: string | null;
 }
+
+// ─── Taxonomy (ADR-017 / B2 — GET /knowledge/taxonomy) ────────────────
+
+/**
+ * One node in the operator-imposed taxonomy tree. Mirrors
+ * ``apps/api/app/schemas/taxonomy.py::TaxonomyCategory``. Recursive —
+ * ``subcategories`` is the same shape — so the renderer walks the tree
+ * with one component.
+ */
+export interface TaxonomyCategory {
+  id: string;
+  label: string;
+  description: string;
+  subcategories: TaxonomyCategory[];
+}
+
+/**
+ * Response envelope for ``GET /knowledge/taxonomy``. ``is_configured``
+ * tells the UI whether to render the imposed-taxonomy section or fall
+ * back to the auto-deduced cluster axis. ``source_path`` surfaces the
+ * resolved YAML path so operators can verify which file the API is
+ * reading.
+ */
+export interface TaxonomyResponse {
+  schema_version: string;
+  is_configured: boolean;
+  source_path: string | null;
+  categories: TaxonomyCategory[];
+}

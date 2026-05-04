@@ -22,6 +22,7 @@ import type {
   KnowledgeGraphProjection,
   RawExtraction,
   SemanticDocument,
+  TaxonomyResponse,
 } from "../api/types";
 
 // ─── Document type registry ──────────────────────────────────────────────────
@@ -336,6 +337,12 @@ export interface ExplorerSnapshot {
   isSample: boolean;
   /** Display name shown in the header (corpus name). */
   corpusLabel: string;
+  /**
+   * Operator-imposed taxonomy (ADR-017 / B2). ``null`` when the
+   * backend hasn't loaded one or the fetch failed; the renderer
+   * then falls back to the auto-deduced cluster axis.
+   */
+  taxonomy: TaxonomyResponse | null;
 }
 
 export const SAMPLE_SNAPSHOT: ExplorerSnapshot = {
@@ -348,6 +355,7 @@ export const SAMPLE_SNAPSHOT: ExplorerSnapshot = {
   docContent: SAMPLE_DOC_CONTENT,
   isSample: true,
   corpusLabel: "Acme Corp HQ · sample",
+  taxonomy: null,
 };
 
 // ─── Look-up helpers (stateless; bind a snapshot at the call site) ───────────

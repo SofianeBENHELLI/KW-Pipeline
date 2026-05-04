@@ -30,6 +30,7 @@ import { DetailPanel, type DetailAction, type DetailNode } from "./components/De
 import { DocViewer } from "./components/DocViewer";
 import { Icon, NAVY2 } from "./components/icons";
 import { getApiBaseUrl } from "./api/client";
+import type { TaxonomyCategory } from "./api/types";
 import {
   CLUSTERS,
   DOC_TYPES,
@@ -626,6 +627,29 @@ export default function App(): React.ReactElement {
             )}
           </Section>
 
+          {snapshot.taxonomy?.is_configured && (
+            <Section
+              title="TAXONOMY"
+              right={
+                <span
+                  className="kx-mono kx-mute"
+                  title={snapshot.taxonomy.source_path ?? ""}
+                >
+                  imposed
+                </span>
+              }
+            >
+              <div className="kx-tax-source kx-mono kx-mute" title={snapshot.taxonomy.source_path ?? ""}>
+                {sourcePathBasename(snapshot.taxonomy.source_path)}
+              </div>
+              <ol className="kx-tax-tree" aria-label="Operator-imposed taxonomy">
+                {snapshot.taxonomy.categories.map((c) => (
+                  <TaxonomyNode key={c.id} category={c} depth={0} />
+                ))}
+              </ol>
+            </Section>
+          )}
+
           <Section title="HIERARCHY">
             <div className="kx-hier">
               <div className="kx-hier-row">
@@ -1090,4 +1114,45 @@ const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({ 
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// ─── Taxonomy section (ADR-017 / C1) ─────────────────────────────────────
+
+/**
+ * Read-only renderer for one taxonomy node + its children. Recursive,
+ * indented per ``depth``. The Explorer never modifies the taxonomy
+ * (per ADR-017's "Knowledge Explorer is strictly read-only" stance) —
+ * edits happen in KnowledgeForge / via the YAML file.
+ */
+const TaxonomyNode: React.FC<{ category: TaxonomyCategory; depth: number }> = ({
+  category,
+  depth,
+}) => (
+  <li
+    className="kx-tax-node"
+    style={{ paddingLeft: depth === 0 ? 0 : 10 }}
+  >
+    <div className="kx-tax-row" title={category.description}>
+      <span className="kx-tax-id kx-mono kx-mute">{category.id}</span>
+      <span className="kx-tax-label">{category.label}</span>
+    </div>
+    {category.subcategories.length > 0 && (
+      <ol className="kx-tax-children">
+        {category.subcategories.map((c) => (
+          <TaxonomyNode key={c.id} category={c} depth={depth + 1} />
+        ))}
+      </ol>
+    )}
+  </li>
+);
+
+/**
+ * Trim an absolute path down to its final segment so the left-rail
+ * label stays compact. The full path is exposed via ``title`` for
+ * operator debugging.
+ */
+function sourcePathBasename(path: string | null): string {
+  if (!path) return "";
+  const last = path.split("/").pop();
+  return last && last.length > 0 ? last : path;
 }

@@ -21,6 +21,7 @@ import {
   getDocument,
   getExtraction,
   getKnowledgeGraph,
+  getKnowledgeTaxonomy,
   getSemantic,
   listDocuments,
 } from "../api/client";
@@ -29,6 +30,7 @@ import type {
   KnowledgeGraphPage,
   RawExtraction,
   SemanticDocument,
+  TaxonomyResponse,
 } from "../api/types";
 import {
   CLUSTERS,
@@ -102,6 +104,22 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           if (!isAbortError(err) && !(err instanceof ApiError && err.status === 503)) {
             // Tolerate — the explorer falls back to derived edges.
           }
+        }
+
+        // Pull the operator-imposed taxonomy (ADR-017 / B2). Best-effort
+        // for the same reason as the graph fetch: a missing taxonomy is
+        // a valid deployment state. The route never 404s — when no YAML
+        // is configured it returns ``is_configured: false`` and the
+        // renderer falls back to the auto-deduced cluster axis.
+        let taxonomy: TaxonomyResponse | null = null;
+        try {
+          taxonomy = await getKnowledgeTaxonomy({
+            baseUrl: apiBaseUrl,
+            signal: controller.signal,
+          });
+        } catch (err: unknown) {
+          if (isAbortError(err)) return;
+          // Older backends (pre-#213) won't have this route; tolerate.
         }
 
         // Fetch per-document semantic + extraction with a small ceiling.
@@ -184,6 +202,7 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           docContent,
           isSample: false,
           corpusLabel: `${page.items.length} documents`,
+          taxonomy,
         };
         setState({ snapshot, mode: "live", error: null, refreshing: false });
       } catch (err: unknown) {
