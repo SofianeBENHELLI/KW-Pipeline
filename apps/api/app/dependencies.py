@@ -33,6 +33,7 @@ from app.services.knowledge import (
 )
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
+from app.services.review_service import ReviewService
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
@@ -110,6 +111,29 @@ class PipelineServices:
     # programmatically-constructed Settings) can be threaded through
     # ``build_services(settings=...)``.
     settings: Settings = field(default_factory=Settings)
+    # Review-decision orchestrator (audit #223). Constructed lazily in
+    # ``__post_init__`` from the other fields when callers don't pass
+    # one explicitly — keeps every existing test that builds a
+    # ``PipelineServices`` directly working without a review= kwarg
+    # while ``build_services`` / ``build_persistent_services`` pass
+    # the canonical instance.
+    review: ReviewService = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass — bypass the immutability guard for the
+        # sole post-init field. Every other field is set by the
+        # caller (or has a default factory) so the only allowed
+        # mutation is this one.
+        object.__setattr__(
+            self,
+            "review",
+            ReviewService(
+                documents=self.documents,
+                semantic_outputs=self.semantic_outputs,
+                knowledge_projector=self.knowledge_projector,
+                entity_extractor=self.entity_extractor,
+            ),
+        )
 
 
 def _build_enrichers(settings: Settings) -> list[SemanticEnricher]:
@@ -372,6 +396,13 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    semantic_outputs = SemanticOutputService(
+        documents=documents,
+        extraction_jobs=extraction_jobs,
+        semantic_extractor=semantic_extractor,
+        markdown_generator=markdown_generator,
+    )
+    entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -379,16 +410,11 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
-        semantic_outputs=SemanticOutputService(
-            documents=documents,
-            extraction_jobs=extraction_jobs,
-            semantic_extractor=semantic_extractor,
-            markdown_generator=markdown_generator,
-        ),
+        semantic_outputs=semantic_outputs,
         idempotency=InMemoryIdempotencyStore(),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(settings, llm=llm_client),
+        entity_extractor=entity_extractor,
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
         knowledge_chat=_maybe_build_chat_service(
@@ -439,6 +465,13 @@ def build_persistent_services(
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    semantic_outputs = SemanticOutputService(
+        documents=documents,
+        extraction_jobs=extraction_jobs,
+        semantic_extractor=semantic_extractor,
+        markdown_generator=markdown_generator,
+    )
+    entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -446,16 +479,11 @@ def build_persistent_services(
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
-        semantic_outputs=SemanticOutputService(
-            documents=documents,
-            extraction_jobs=extraction_jobs,
-            semantic_extractor=semantic_extractor,
-            markdown_generator=markdown_generator,
-        ),
+        semantic_outputs=semantic_outputs,
         idempotency=SQLiteIdempotencyStore(root / "idempotency.sqlite3"),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(settings, llm=llm_client),
+        entity_extractor=entity_extractor,
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
         knowledge_chat=_maybe_build_chat_service(
