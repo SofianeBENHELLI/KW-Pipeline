@@ -5,6 +5,7 @@ import logging
 import tempfile
 from collections.abc import Callable, Iterator
 from typing import Any, Literal
+from urllib.parse import quote as urlquote
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
@@ -737,6 +738,52 @@ def build_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(content=markdown, media_type="text/markdown")
+
+    @router.get(
+        "/documents/{document_id}/versions/{version_id}/raw",
+        operation_id="get_raw_file",
+        responses={
+            200: {
+                "content": {"application/octet-stream": {}},
+                "description": "Original uploaded binary for the version.",
+            },
+            404: {"description": "Document or version not found."},
+        },
+    )
+    def get_raw_file(document_id: str, version_id: str) -> Response:
+        """Stream the originally-uploaded binary back to the caller.
+
+        Powers the Knowledge Explorer's per-type viewers (PDF/DOCX/PPTX/
+        text/wiki). The Content-Type mirrors what the uploader declared
+        at ingest time, and ``Content-Disposition: inline`` lets browsers
+        render PDFs and images natively instead of forcing a download.
+        """
+        try:
+            version = services.documents.get_version(document_id=document_id, version_id=version_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            payload = services.documents.storage.get(version.storage_uri)
+        except (KeyError, FileNotFoundError, ValueError) as exc:
+            raise HTTPException(
+                status_code=404, detail="Raw bytes are no longer available."
+            ) from exc
+        media_type = version.content_type or "application/octet-stream"
+        # Quote the filename per RFC 5987 so non-ASCII names don't break
+        # the header. ``filename*`` is the modern form; the legacy
+        # ``filename=`` falls back to a sanitized ASCII version.
+        ascii_name = "".join(c if ord(c) < 128 else "_" for c in version.filename)
+        encoded_name = urlquote(version.filename, safe="")
+        disposition = f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
+        return Response(
+            content=payload,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": disposition,
+                "Content-Length": str(len(payload)),
+                "Cache-Control": "private, max-age=300",
+            },
+        )
 
     @router.post(
         "/documents/{document_id}/versions/{version_id}/validate",

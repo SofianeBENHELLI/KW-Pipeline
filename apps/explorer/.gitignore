@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.kw-pipeline/
+.DS_Store
+*.log

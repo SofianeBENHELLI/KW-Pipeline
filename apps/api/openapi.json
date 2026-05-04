@@ -1858,6 +1858,57 @@
         "summary": "Get Markdown"
       }
     },
+    "/documents/{document_id}/versions/{version_id}/raw": {
+      "get": {
+        "description": "Stream the originally-uploaded binary back to the caller.\n\nPowers the Knowledge Explorer's per-type viewers (PDF/DOCX/PPTX/\ntext/wiki). The Content-Type mirrors what the uploader declared\nat ingest time, and ``Content-Disposition: inline`` lets browsers\nrender PDFs and images natively instead of forcing a download.",
+        "operationId": "get_raw_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/octet-stream": {}
+            },
+            "description": "Original uploaded binary for the version."
+          },
+          "404": {
+            "description": "Document or version not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Raw File"
+      }
+    },
     "/documents/{document_id}/versions/{version_id}/reject": {
       "post": {
         "operationId": "reject_version",
