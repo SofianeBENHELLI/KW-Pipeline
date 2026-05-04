@@ -2,14 +2,16 @@
  * Thin fetch wrapper for the KW-Pipeline backend, scoped to the
  * Knowledge Explorer's read-only surface.
  *
- * Mirrors apps/widget/src/api/client.ts for envelope handling and base-URL
- * resolution (widget-store > build-time env > localhost fallback). The two
- * widgets intentionally duplicate this small layer rather than depending
- * on each other — keeps each tile self-contained on the dashboard host.
+ * Mirrors apps/widget/src/api/client.ts for envelope handling and
+ * base-URL resolution. The error class and envelope parser themselves
+ * live in ``apps/_shared/api-core`` (audit #227) so a bug fix to
+ * envelope handling lands in one place rather than every frontend's
+ * copy.
  */
 
 import { widget } from "@widget-lab/3ddashboard-utils";
 
+import { asApiError } from "../../../_shared/api-core";
 import type {
   Document,
   DocumentListResponse,
@@ -19,6 +21,10 @@ import type {
   RawExtraction,
   SemanticDocument,
 } from "./types";
+
+// Re-export from the shared module so existing import sites
+// (``import { ApiError } from "./api/client"``) keep working.
+export { ApiError } from "../../../_shared/api-core";
 
 const SETTINGS_KEY = "apiBaseUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";
@@ -56,58 +62,6 @@ export function getApiBaseUrl(): string {
 
 export function setApiBaseUrl(value: string): void {
   safeSetWidgetValue(SETTINGS_KEY, value);
-}
-
-// ─── Errors ──────────────────────────────────────────────────────────────────
-
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly detail: string,
-    public readonly code: string = "KW_HTTP_ERROR",
-    public readonly retryable: boolean = false,
-    public readonly remediation: string | null = null,
-  ) {
-    super(`API ${status}: ${detail}`);
-    this.name = "ApiError";
-  }
-}
-
-interface ErrorEnvelope {
-  code?: unknown;
-  message?: unknown;
-  retryable?: unknown;
-  remediation?: unknown;
-}
-
-interface ResponseBodyShape {
-  error?: ErrorEnvelope;
-  detail?: unknown;
-}
-
-async function asApiError(response: Response): Promise<ApiError> {
-  let body: ResponseBodyShape | null = null;
-  try {
-    body = (await response.clone().json()) as ResponseBodyShape;
-  } catch {
-    // Non-JSON or empty body.
-  }
-  let detail =
-    typeof body?.detail === "string" ? body.detail : response.statusText;
-  const env = body?.error;
-  const code =
-    typeof env?.code === "string" && env.code.length > 0
-      ? env.code
-      : "KW_HTTP_ERROR";
-  const retryable = env?.retryable === true;
-  const remediation =
-    typeof env?.remediation === "string" && env.remediation.length > 0
-      ? env.remediation
-      : null;
-  if (typeof env?.message === "string" && env.message.length > 0) {
-    detail = env.message;
-  }
-  return new ApiError(response.status, detail, code, retryable, remediation);
 }
 
 // ─── Core request helpers ────────────────────────────────────────────────────
