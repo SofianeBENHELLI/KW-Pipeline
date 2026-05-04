@@ -1,6 +1,83 @@
 {
   "components": {
     "schemas": {
+      "AdminConfigResponse": {
+        "description": "Sanitized snapshot of the running deployment's configuration.\n\nThe frontend ``apps/_shared/settings-hub`` package consumes this\nshape verbatim — keep the camelCase / snake_case posture stable.",
+        "properties": {
+          "audit": {
+            "$ref": "#/components/schemas/AuditConfig"
+          },
+          "cors": {
+            "$ref": "#/components/schemas/CorsConfig"
+          },
+          "embeddings": {
+            "$ref": "#/components/schemas/EmbeddingsConfig"
+          },
+          "hitl": {
+            "$ref": "#/components/schemas/HitlConfig"
+          },
+          "knowledge_layer": {
+            "$ref": "#/components/schemas/KnowledgeLayerConfig"
+          },
+          "llm": {
+            "$ref": "#/components/schemas/LLMConfig"
+          },
+          "logging": {
+            "$ref": "#/components/schemas/LoggingConfig"
+          },
+          "ner": {
+            "$ref": "#/components/schemas/NerConfig"
+          },
+          "persistence": {
+            "$ref": "#/components/schemas/PersistenceConfig"
+          },
+          "schema_version": {
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "taxonomy": {
+            "$ref": "#/components/schemas/TaxonomyConfig"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadConfig"
+          }
+        },
+        "required": [
+          "schema_version",
+          "upload",
+          "cors",
+          "persistence",
+          "knowledge_layer",
+          "llm",
+          "embeddings",
+          "taxonomy",
+          "ner",
+          "audit",
+          "hitl",
+          "logging"
+        ],
+        "title": "AdminConfigResponse",
+        "type": "object"
+      },
+      "AuditConfig": {
+        "properties": {
+          "db_path": {
+            "title": "Db Path",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "db_path"
+        ],
+        "title": "AuditConfig",
+        "type": "object"
+      },
       "BatchUploadOutcome": {
         "description": "Per-file result inside a :class:`BatchUploadResult`.\n\nEvery file the client sent in a batch produces exactly one of\nthese — partial-success batches keep the records for the failed\nfiles alongside the successful ones, and the route always returns\nHTTP 200 (the report itself describes failures). Clients route\non the ``status`` discriminant.",
         "properties": {
@@ -439,6 +516,27 @@
         "title": "ChunkSearchResult",
         "type": "object"
       },
+      "CorsConfig": {
+        "properties": {
+          "allowed_origin_regex": {
+            "title": "Allowed Origin Regex",
+            "type": "string"
+          },
+          "allowed_origins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Origins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowed_origins",
+          "allowed_origin_regex"
+        ],
+        "title": "CorsConfig",
+        "type": "object"
+      },
       "Document": {
         "description": "Logical document family containing one or more versions.",
         "properties": {
@@ -688,6 +786,24 @@
         "title": "DocumentVersionStatus",
         "type": "string"
       },
+      "EmbeddingsConfig": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "model"
+        ],
+        "title": "EmbeddingsConfig",
+        "type": "object"
+      },
       "GraphEdge": {
         "description": "One directed edge in the knowledge graph projection.\n\n``source_id`` and ``target_id`` reference :class:`GraphNode.id`\nvalues. Provenance requirements depend on ``kind``:\n\n- **structural** (``part_of``, ``has_version``, ``has_chunk``,\n  ``belongs_to``) — no citation required; the edge itself is the\n  provenance.\n- **deterministic semantic** (``related_to``, ``shares_keyword``,\n  ``same_topic_as``) — must carry ``source_chunk_ids`` (the two\n  chunks that produced the relation), ``reason`` (human-readable\n  explanation), and ``shared_keywords`` in ``properties``. See\n  :class:`ChunkRelationEdgeProperties`.\n- **LLM** (``has_entity``) — must carry ``source_reference_id``\n  pointing at a row in the catalog's ``source_references`` table\n  (ADR-012 §4). Triples missing citations are dropped by the\n  extractor before edges are constructed.",
         "properties": {
@@ -845,6 +961,56 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HitlConfig": {
+        "properties": {
+          "default_validation_method": {
+            "enum": [
+              "human",
+              "external",
+              "auto"
+            ],
+            "title": "Default Validation Method",
+            "type": "string"
+          },
+          "iterop": {
+            "$ref": "#/components/schemas/IteropConfig"
+          }
+        },
+        "required": [
+          "default_validation_method",
+          "iterop"
+        ],
+        "title": "HitlConfig",
+        "type": "object"
+      },
+      "IteropConfig": {
+        "properties": {
+          "auth_configured": {
+            "title": "Auth Configured",
+            "type": "boolean"
+          },
+          "base_url_configured": {
+            "title": "Base Url Configured",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "workflow_ref": {
+            "title": "Workflow Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "workflow_ref",
+          "base_url_configured",
+          "auth_configured"
+        ],
+        "title": "IteropConfig",
+        "type": "object"
+      },
       "KnowledgeGraphPage": {
         "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.",
         "properties": {
@@ -941,6 +1107,110 @@
           "generated_at"
         ],
         "title": "KnowledgeGraphProjection",
+        "type": "object"
+      },
+      "KnowledgeLayerConfig": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "neo4j_configured": {
+            "title": "Neo4J Configured",
+            "type": "boolean"
+          },
+          "neo4j_database": {
+            "title": "Neo4J Database",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "neo4j_configured",
+          "neo4j_database"
+        ],
+        "title": "KnowledgeLayerConfig",
+        "type": "object"
+      },
+      "LLMConfig": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "max_input_tokens_per_document": {
+            "title": "Max Input Tokens Per Document",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "model",
+          "max_input_tokens_per_document"
+        ],
+        "title": "LLMConfig",
+        "type": "object"
+      },
+      "LoggingConfig": {
+        "properties": {
+          "format": {
+            "enum": [
+              "json",
+              "text"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "level"
+        ],
+        "title": "LoggingConfig",
+        "type": "object"
+      },
+      "NerConfig": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "spacy_model": {
+            "title": "Spacy Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "spacy_model"
+        ],
+        "title": "NerConfig",
+        "type": "object"
+      },
+      "PersistenceConfig": {
+        "properties": {
+          "data_dir": {
+            "title": "Data Dir",
+            "type": "string"
+          },
+          "persistent": {
+            "title": "Persistent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "persistent",
+          "data_dir"
+        ],
+        "title": "PersistenceConfig",
         "type": "object"
       },
       "RawExtraction": {
@@ -1418,6 +1688,24 @@
         "title": "TaxonomyCategory",
         "type": "object"
       },
+      "TaxonomyConfig": {
+        "properties": {
+          "cosine_threshold": {
+            "title": "Cosine Threshold",
+            "type": "number"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "cosine_threshold"
+        ],
+        "title": "TaxonomyConfig",
+        "type": "object"
+      },
       "TaxonomyResponse": {
         "description": "Response shape for ``GET /knowledge/taxonomy``.\n\n``is_configured`` is ``False`` when no YAML file was found at\nthe configured path. The frontend uses it to decide whether to\nrender the auto-deduction-only state or the imposed taxonomy\ntree. ``source_path`` carries the resolved absolute path when\nconfigured, ``None`` otherwise — useful for operator debugging.\n\nThe route never returns 404: a missing taxonomy is a valid\ndeployment state, not an error.",
         "properties": {
@@ -1457,6 +1745,27 @@
           "categories"
         ],
         "title": "TaxonomyResponse",
+        "type": "object"
+      },
+      "UploadConfig": {
+        "properties": {
+          "allowed_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Content Types",
+            "type": "array"
+          },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_bytes",
+          "allowed_content_types"
+        ],
+        "title": "UploadConfig",
         "type": "object"
       },
       "UploadDocumentResponse": {
@@ -1625,6 +1934,24 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/config": {
+      "get": {
+        "operationId": "admin_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Config"
+      }
+    },
     "/documents": {
       "get": {
         "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.",

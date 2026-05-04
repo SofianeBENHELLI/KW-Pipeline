@@ -114,7 +114,11 @@ export const ChatPanel: React.FC<Props> = ({
       : undefined;
 
   return (
-    <section className="kw-section" aria-label="Knowledge chat">
+    <section
+      className="kw-section"
+      aria-label="Knowledge chat"
+      data-testid="chat-panel"
+    >
       <SectionHeader icon="search" title="Chat" meta={meta} />
 
       <div
@@ -132,6 +136,7 @@ export const ChatPanel: React.FC<Props> = ({
             className={mode === m.id ? "kw-seg__btn kw-seg__btn--active" : "kw-seg__btn"}
             disabled={loading}
             onClick={() => setMode(m.id)}
+            data-testid={`chat-mode-${m.id}`}
           >
             {m.label}
           </button>
@@ -146,18 +151,20 @@ export const ChatPanel: React.FC<Props> = ({
           onChange={(e) => setQuestion(e.target.value)}
           rows={2}
           aria-label="Question"
+          data-testid="chat-panel-input"
         />
         <button
           type="submit"
           className="kw-btn kw-btn--primary"
           disabled={loading || question.trim() === ""}
+          data-testid="chat-panel-submit"
         >
           {loading ? "Asking…" : "Ask"}
         </button>
       </form>
 
       {isDisabled && error instanceof ApiError && (
-        <div className="kw-empty" role="status">
+        <div className="kw-empty" role="status" data-testid="chat-panel-disabled">
           <span className="kw-empty__glyph" aria-hidden="true">
             <Icon name="info" size={18} />
           </span>
@@ -172,7 +179,7 @@ export const ChatPanel: React.FC<Props> = ({
       )}
 
       {error !== null && !isDisabled && (
-        <div className="kw-error" role="alert">
+        <div className="kw-error" role="alert" data-testid="chat-panel-error">
           {error instanceof ApiError
             ? `${error.code}: ${error.detail}`
             : error}
@@ -182,17 +189,36 @@ export const ChatPanel: React.FC<Props> = ({
       {loading && <div className="kw-status">Asking…</div>}
 
       {response !== null && error === null && (
-        <article className="kw-chat__answer">
+        <article className="kw-chat__answer" data-testid="chat-panel-answer">
           {response.answer.trim() === "" ? (
-            <p className="kw-status">The model did not produce an answer.</p>
+            <p className="kw-status" data-testid="chat-panel-empty-answer">
+              The model did not produce an answer.
+            </p>
           ) : (
             <p className="kw-chat__answer-text">{response.answer}</p>
+          )}
+
+          {response.warnings.length > 0 && (
+            <div
+              className="kw-chat__warnings"
+              role="status"
+              data-testid="chat-panel-warnings"
+            >
+              <strong>Unresolved citations:</strong>
+              <ul>
+                {response.warnings.map((marker) => (
+                  <li key={marker}>
+                    <code>{marker}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {response.citations.length > 0 && (
             <>
               <h3 className="kw-chat__citations-heading">Citations</h3>
-              <ol className="kw-search-results">
+              <ol className="kw-search-results" data-testid="chat-panel-citations">
                 {response.citations.map((citation) => {
                   const score = (citation.score * 100).toFixed(1);
                   const interactive = onSelectCitation !== undefined;
@@ -216,7 +242,11 @@ export const ChatPanel: React.FC<Props> = ({
                     </>
                   );
                   return (
-                    <li key={citation.chunk_id} className="kw-search-results__item">
+                    <li
+                      key={citation.chunk_id}
+                      className="kw-search-results__item"
+                      data-testid="chat-panel-citation"
+                    >
                       {interactive ? (
                         <button
                           type="button"

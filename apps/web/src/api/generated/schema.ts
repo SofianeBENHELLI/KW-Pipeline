@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/admin/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Config */
+        get: operations["admin_config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -395,6 +412,38 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdminConfigResponse
+         * @description Sanitized snapshot of the running deployment's configuration.
+         *
+         *     The frontend ``apps/_shared/settings-hub`` package consumes this
+         *     shape verbatim — keep the camelCase / snake_case posture stable.
+         */
+        AdminConfigResponse: {
+            audit: components["schemas"]["AuditConfig"];
+            cors: components["schemas"]["CorsConfig"];
+            embeddings: components["schemas"]["EmbeddingsConfig"];
+            hitl: components["schemas"]["HitlConfig"];
+            knowledge_layer: components["schemas"]["KnowledgeLayerConfig"];
+            llm: components["schemas"]["LLMConfig"];
+            logging: components["schemas"]["LoggingConfig"];
+            ner: components["schemas"]["NerConfig"];
+            persistence: components["schemas"]["PersistenceConfig"];
+            /**
+             * Schema Version
+             * @default v0.1
+             */
+            schema_version: string;
+            taxonomy: components["schemas"]["TaxonomyConfig"];
+            upload: components["schemas"]["UploadConfig"];
+        };
+        /** AuditConfig */
+        AuditConfig: {
+            /** Db Path */
+            db_path: string;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
          * BatchUploadOutcome
          * @description Per-file result inside a :class:`BatchUploadResult`.
          *
@@ -621,6 +670,13 @@ export interface components {
             /** Version Id */
             version_id: string;
         };
+        /** CorsConfig */
+        CorsConfig: {
+            /** Allowed Origin Regex */
+            allowed_origin_regex: string;
+            /** Allowed Origins */
+            allowed_origins: string[];
+        };
         /**
          * Document
          * @description Logical document family containing one or more versions.
@@ -710,6 +766,13 @@ export interface components {
          * @enum {string}
          */
         DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED";
+        /** EmbeddingsConfig */
+        EmbeddingsConfig: {
+            /** Configured */
+            configured: boolean;
+            /** Model */
+            model: string;
+        };
         /**
          * GraphEdge
          * @description One directed edge in the knowledge graph projection.
@@ -784,6 +847,26 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** HitlConfig */
+        HitlConfig: {
+            /**
+             * Default Validation Method
+             * @enum {string}
+             */
+            default_validation_method: "human" | "external" | "auto";
+            iterop: components["schemas"]["IteropConfig"];
+        };
+        /** IteropConfig */
+        IteropConfig: {
+            /** Auth Configured */
+            auth_configured: boolean;
+            /** Base Url Configured */
+            base_url_configured: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /** Workflow Ref */
+            workflow_ref: string;
+        };
         /**
          * KnowledgeGraphPage
          * @description Cursor-paginated page across all projected documents.
@@ -837,6 +920,48 @@ export interface components {
             schema_version: "v0.1" | "v0.2";
             /** Version Id */
             version_id: string;
+        };
+        /** KnowledgeLayerConfig */
+        KnowledgeLayerConfig: {
+            /** Enabled */
+            enabled: boolean;
+            /** Neo4J Configured */
+            neo4j_configured: boolean;
+            /** Neo4J Database */
+            neo4j_database: string;
+        };
+        /** LLMConfig */
+        LLMConfig: {
+            /** Configured */
+            configured: boolean;
+            /** Max Input Tokens Per Document */
+            max_input_tokens_per_document: number;
+            /** Model */
+            model: string;
+        };
+        /** LoggingConfig */
+        LoggingConfig: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "json" | "text";
+            /** Level */
+            level: string;
+        };
+        /** NerConfig */
+        NerConfig: {
+            /** Enabled */
+            enabled: boolean;
+            /** Spacy Model */
+            spacy_model: string;
+        };
+        /** PersistenceConfig */
+        PersistenceConfig: {
+            /** Data Dir */
+            data_dir: string;
+            /** Persistent */
+            persistent: boolean;
         };
         /**
          * RawExtraction
@@ -1059,6 +1184,13 @@ export interface components {
             /** Subcategories */
             subcategories: components["schemas"]["TaxonomyCategory"][];
         };
+        /** TaxonomyConfig */
+        TaxonomyConfig: {
+            /** Cosine Threshold */
+            cosine_threshold: number;
+            /** Path */
+            path: string;
+        };
         /**
          * TaxonomyResponse
          * @description Response shape for ``GET /knowledge/taxonomy``.
@@ -1085,6 +1217,13 @@ export interface components {
             schema_version: "v0.1";
             /** Source Path */
             source_path: string | null;
+        };
+        /** UploadConfig */
+        UploadConfig: {
+            /** Allowed Content Types */
+            allowed_content_types: string[];
+            /** Max Bytes */
+            max_bytes: number;
         };
         /**
          * UploadDocumentResponse
@@ -1154,6 +1293,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminConfigResponse"];
+                };
+            };
+        };
+    };
     list_documents: {
         parameters: {
             query?: {

@@ -17,5 +17,6 @@
     "noEmit": true,
     "allowJs": false
   },
-  "include": ["src", "../_shared"]
+  "include": ["src", "../_shared"],
+  "exclude": ["../_shared/**/*.test.ts", "../_shared/**/*.test.tsx"]
 }

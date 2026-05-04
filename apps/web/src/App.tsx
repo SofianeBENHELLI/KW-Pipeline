@@ -6,6 +6,7 @@ import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
+import { SettingsLauncher, SettingsModal } from "./features/settings/SettingsModal";
 
 /**
  * Centralised document-catalog hook.
@@ -205,6 +206,7 @@ export function useDocumentCatalog(): DocumentCatalog {
 
 export default function App() {
   const catalog = useDocumentCatalog();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const {
     documents,
     selected,
@@ -293,6 +295,11 @@ export default function App() {
       />
       <ChatPanel
         onSelectCitation={(citation) => selectDocument(citation.document_id)}
+      />
+      <SettingsLauncher onClick={() => setSettingsOpen(true)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </main>
   );

@@ -1,0 +1,15 @@
+{
+  "baseurl": "https://REPLACE_ME-3dswym.3dexperience.3ds.com",
+  "wiki": {
+    "communities": ["REPLACE_ME_COMMUNITY_ID"],
+    "source": {
+      "include": "docs/wiki/**/*.md",
+      "exclude": "docs/wiki/README.md"
+    },
+    "ordering": "path"
+  },
+  "persistence": {
+    "mode": "sidecar"
+  },
+  "noSignature": false
+}

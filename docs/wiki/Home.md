@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "root": true }$ -->
+
 # KW Pipeline Wiki
 
 KW Pipeline is an **auditable document-intelligence pipeline**: documents go in, schema-validated semantic Markdown comes out, a human reviewer validates or rejects each version, and an **opt-in knowledge graph + LLM entity extractor** layers on top — strictly behind the review gate.

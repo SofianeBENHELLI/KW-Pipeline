@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, listDocuments } from "../api/client";
 import type { Document, DocumentVersionStatus } from "../api/types";
@@ -12,6 +12,13 @@ const PAGE_LIMIT = 25;
 interface Props {
   apiBaseUrl: string;
   refreshTick: number;
+  /**
+   * When set, the matching row scrolls into view and gets a brief
+   * highlight flash. Used by ``App.tsx`` to land users on the right
+   * row after they click a chat citation or search result that lives
+   * in another mode.
+   */
+  highlightDocumentId?: string | null;
   /**
    * Optional click hook for opening a document in the full Orbital
    * review surface — wired by the parent when that integration lands.
@@ -62,6 +69,7 @@ function formatTimestamp(iso: string): string {
 export const DocumentsList: React.FC<Props> = ({
   apiBaseUrl,
   refreshTick,
+  highlightDocumentId,
   onOpenDocument,
 }) => {
   const [items, setItems] = useState<Document[]>([]);
@@ -119,6 +127,22 @@ export const DocumentsList: React.FC<Props> = ({
     loadFirstPage(controller.signal);
     return () => controller.abort();
   }, [loadFirstPage, refreshTick]);
+
+  // Cross-section navigation: when the parent points us at a specific
+  // document (chat citation, search result), scroll to it and flash the
+  // row briefly so the user can find their landing spot.
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  useEffect(() => {
+    if (!highlightDocumentId) return;
+    const node = rowRefs.current.get(highlightDocumentId);
+    if (!node) return;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+    node.classList.add("kw-doc-list__item--highlighted");
+    const id = window.setTimeout(() => {
+      node.classList.remove("kw-doc-list__item--highlighted");
+    }, 1700);
+    return () => window.clearTimeout(id);
+  }, [highlightDocumentId, items]);
 
   const loadMore = useCallback(() => {
     if (!cursor) return;
@@ -220,7 +244,12 @@ export const DocumentsList: React.FC<Props> = ({
             return (
               <li
                 key={doc.id}
+                ref={(el) => {
+                  if (el) rowRefs.current.set(doc.id, el);
+                  else rowRefs.current.delete(doc.id);
+                }}
                 className="kw-doc-list__item"
+                data-doc-id={doc.id}
                 onClick={onActivate}
                 style={onActivate ? { cursor: "pointer" } : undefined}
               >

@@ -550,6 +550,22 @@ body {
   font-feature-settings: "tnum";
 }
 
+/* Cross-section navigation flash — applied to the row jumped to from
+   chat citations or search results. Keeps the row visible long enough
+   for the user to find it after the mode switch, then fades out. */
+.kw-doc-list__item--highlighted {
+  background: #FFF6BF;
+  margin: 0 -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+  animation: kw-doc-flash 1.6s ease-out forwards;
+}
+@keyframes kw-doc-flash {
+  0% { background: #FFE066; }
+  60% { background: #FFF6BF; }
+  100% { background: transparent; }
+}
+
 /* File-type icon — dog-eared rectangle with extension label. */
 .kw-file-icon {
   width: 22px; height: 26px;

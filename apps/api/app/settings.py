@@ -309,7 +309,6 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ------------------------------------------------------------------
     # Authentication (ADR-019). Three modes selected by ``KW_AUTH_MODE``:
     # ``dev`` (default — fixed identity from ``KW_AUTH_DEV_USER``,
     # falls back to a ``"dev"`` admin user so existing tests / demos
@@ -351,6 +350,66 @@ class Settings(BaseSettings):
             "incoming JWTs. Required when bearer mode is selected; "
             "the service refuses to construct otherwise. Empty "
             "(default) is fine for ``disabled`` / ``dev``."
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # HITL routing + ITEROP external review workflow (roadmap
+    # 2026-05-04-hitl-and-extensions §2, future ADR-024). The adapter
+    # implementation is deferred until ITEROP auth lands; these env
+    # surfaces ship now so the Settings widget can render the
+    # deployment posture and the operator workflow ref. The pipeline
+    # routes documents per ``hitl_default_validation_method`` (``human``
+    # = Orbital queue today, ``external`` = ITEROP queue once the
+    # adapter wires up, ``auto`` = auto-validate without review).
+    # ------------------------------------------------------------------
+    hitl_default_validation_method: Literal["human", "external", "auto"] = Field(
+        default="human",
+        validation_alias=AliasChoices("KW_HITL_DEFAULT_VALIDATION_METHOD"),
+        description=(
+            "Deployment-default review routing. ``human`` keeps every "
+            "doc on the in-app Orbital queue. ``external`` hands off to "
+            "ITEROP via the configured workflow ref. ``auto`` skips the "
+            "review gate (test-only). The Smart-HITL SPC router (Feature "
+            "A) may override per-document; this is the fall-through."
+        ),
+    )
+    iterop_enabled_raw: str = Field(
+        default="",
+        alias="iterop_enabled",
+        validation_alias=AliasChoices("KW_ITEROP_ENABLED"),
+        description=(
+            "Truthy (``1``/``true``/``yes``/``on``) enables the ITEROP "
+            "external-review adapter. When off, ``validation_method = "
+            "external`` falls back to the in-app queue with a warning."
+        ),
+    )
+    iterop_workflow_ref: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_ITEROP_WORKFLOW_REF"),
+        description=(
+            "ITEROP workflow identifier the adapter targets when "
+            "issuing review packets (e.g. ``WF-KW-DOC-REVIEW-001``). "
+            "Visible in operator surfaces — not a secret."
+        ),
+    )
+    iterop_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_ITEROP_BASE_URL"),
+        description=(
+            "Base URL of the ITEROP instance the adapter polls / "
+            "callbacks. Empty disables external routing regardless of "
+            "the kill switch."
+        ),
+    )
+    iterop_auth_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_ITEROP_AUTH_TOKEN"),
+        description=(
+            "Bearer token for ITEROP API calls. Empty disables external "
+            "routing. The exact auth scheme (HMAC / OAuth / mTLS / "
+            "opaque) is TBD pending the ITEROP documentation; the "
+            "adapter treats this as an opaque secret."
         ),
     )
 
@@ -415,6 +474,11 @@ class Settings(BaseSettings):
     def audit_enabled(self) -> bool:
         """Truthy parse of the audit-store kill switch (#26 residual)."""
         return _truthy(self.audit_enabled_raw)
+
+    @property
+    def iterop_enabled(self) -> bool:
+        """Truthy parse of the ITEROP adapter kill switch."""
+        return _truthy(self.iterop_enabled_raw)
 
 
 def _truthy(raw: str) -> bool:

@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "parent": "./Home.md" }$ -->
+
 # Knowledge Layer
 
 The knowledge layer is an **opt-in** addition that turns validated documents into a queryable graph. It is dormant by default — with no env vars set, the existing pipeline behaves exactly as it did before.
