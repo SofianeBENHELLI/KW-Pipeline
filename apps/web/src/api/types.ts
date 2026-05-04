@@ -52,3 +52,20 @@ export type ApiKnowledgeGraphPage = Schemas["KnowledgeGraphPage"];
 
 export type ApiChunkSearchResult = Schemas["ChunkSearchResult"];
 export type ApiChunkSearchResponse = Schemas["ChunkSearchResponse"];
+
+// ─── Batch upload (#82) ─────────────────────────────────────────────────────
+
+export type ApiBatchUploadOutcome = Schemas["BatchUploadOutcome"];
+export type ApiBatchUploadSummary = Schemas["BatchUploadSummary"];
+export type ApiBatchUploadResult = Schemas["BatchUploadResult"];
+
+// ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
+
+export type ApiChatRequest = Schemas["ChatRequest"];
+// ``ChatMode`` is a Pydantic ``Literal`` so openapi-typescript inlines it
+// on the ``ChatRequest.mode`` field rather than emitting a named alias.
+// Re-export the value type so call sites can stay symmetric with the
+// backend taxonomy.
+export type ApiChatMode = ApiChatRequest["mode"];
+export type ApiChatCitation = Schemas["ChatCitation"];
+export type ApiChatResponse = Schemas["ChatResponse"];

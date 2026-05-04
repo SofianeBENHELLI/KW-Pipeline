@@ -1,6 +1,10 @@
 import { useRef, useState } from "react";
-import type { ApiDocument, ApiUploadResponse } from "../../api/types";
-import { ApiError, uploadDocument } from "../../api/client";
+import type {
+  ApiBatchUploadResult,
+  ApiDocument,
+  ApiUploadResponse,
+} from "../../api/types";
+import { ApiError, uploadDocument, uploadDocumentsBatch } from "../../api/client";
 import { latestVersion } from "../../domain/document";
 import { StatusBadge } from "../../ui/StatusBadge";
 
@@ -38,7 +42,10 @@ type UploadState =
   | { kind: "idle" }
   | { kind: "uploading"; filename: string }
   | { kind: "success"; version: ApiUploadResponse }
-  | { kind: "error"; message: string; remediation: string | null };
+  | { kind: "error"; message: string; remediation: string | null }
+  // Batch (#82) — N files in one request.
+  | { kind: "uploading_batch"; count: number }
+  | { kind: "batch_success"; report: ApiBatchUploadResult };
 
 export function PipelineWidget({
   documents,
@@ -68,11 +75,22 @@ export function PipelineWidget({
     (document) => latestVersion(document).status === "DUPLICATE_DETECTED",
   ).length;
 
-  const isUploading = upload.kind === "uploading";
+  const isUploading =
+    upload.kind === "uploading" || upload.kind === "uploading_batch";
 
   function openFilePicker() {
     if (isUploading) return;
     inputRef.current?.click();
+  }
+
+  async function handleSelectedFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    if (list.length === 1) {
+      void handleFile(list[0]);
+    } else {
+      void handleBatch(list);
+    }
   }
 
   async function handleFile(file: File | null | undefined) {
@@ -101,6 +119,41 @@ export function PipelineWidget({
           : err instanceof Error
             ? err.message
             : "Upload failed.";
+      const remediation = err instanceof ApiError ? err.remediation : null;
+      setUpload({ kind: "error", message, remediation });
+    }
+  }
+
+  async function handleBatch(files: File[]) {
+    setUpload({ kind: "uploading_batch", count: files.length });
+    try {
+      const report = await uploadDocumentsBatch(files);
+      setUpload({ kind: "batch_success", report });
+      if (inputRef.current) inputRef.current.value = "";
+      // Refresh the catalog after the batch lands so newly-created
+      // documents appear in the list. Pick the first successful upload
+      // (if any) to focus on, mirroring the single-file path.
+      const firstUploaded = report.results.find(
+        (outcome) =>
+          outcome.status === "uploaded" && outcome.document_id !== null,
+      );
+      if (onUploaded) {
+        if (firstUploaded?.document_id) {
+          await onUploaded(firstUploaded.document_id);
+        } else {
+          // No newly-created docs (every file was a duplicate or a
+          // failure), but the catalog may have status changes — let
+          // the parent decide how to refresh by passing an empty id.
+          await onUploaded("");
+        }
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof ApiError
+          ? err.detail
+          : err instanceof Error
+            ? err.message
+            : "Batch upload failed.";
       const remediation = err instanceof ApiError ? err.remediation : null;
       setUpload({ kind: "error", message, remediation });
     }
@@ -140,13 +193,13 @@ export function PipelineWidget({
         <input
           ref={inputRef}
           type="file"
+          multiple
           accept={ACCEPTED_MIME_TYPES}
           className="visually-hidden"
           aria-hidden="true"
           tabIndex={-1}
           onChange={(event) => {
-            const file = event.target.files?.[0];
-            void handleFile(file);
+            void handleSelectedFiles(event.target.files);
           }}
         />
       </div>
@@ -154,6 +207,12 @@ export function PipelineWidget({
       {upload.kind === "uploading" ? (
         <p className="muted upload-status" role="status" aria-live="polite">
           Uploading {upload.filename}…
+        </p>
+      ) : null}
+
+      {upload.kind === "uploading_batch" ? (
+        <p className="muted upload-status" role="status" aria-live="polite">
+          Uploading {upload.count} files…
         </p>
       ) : null}
 
@@ -173,6 +232,10 @@ export function PipelineWidget({
           copiedHashFor={copiedHashFor}
           onCopyHash={copyHash}
         />
+      ) : null}
+
+      {upload.kind === "batch_success" ? (
+        <BatchUploadReport report={upload.report} />
       ) : null}
 
       <div className="metric-grid" aria-label="Pipeline status summary">
@@ -277,6 +340,65 @@ function UploadSuccessSummary({
           Duplicate detected — this file matches an earlier version.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+interface BatchUploadReportProps {
+  report: ApiBatchUploadResult;
+}
+
+/**
+ * Per-file outcome list for ``POST /documents/upload/batch`` (#82).
+ *
+ * Renders a banner with the aggregate counters plus a row per file
+ * with its status. Failed files show their ``error_message`` inline so
+ * the operator doesn't have to dig into the network tab.
+ */
+function BatchUploadReport({ report }: BatchUploadReportProps) {
+  const { summary, results } = report;
+  return (
+    <div
+      className="batch-upload-report"
+      role="status"
+      aria-live="polite"
+      data-testid="batch-upload-report"
+    >
+      <div className="batch-upload-report__summary">
+        <strong>
+          Batch complete: {summary.uploaded}/{summary.total} new,{" "}
+          {summary.duplicate} duplicate, {summary.failed} failed
+        </strong>
+        {(summary.too_large > 0 ||
+          summary.rejected_content_type > 0 ||
+          summary.empty > 0) && (
+          <span className="muted small">
+            {summary.too_large > 0 ? `${summary.too_large} too large · ` : ""}
+            {summary.rejected_content_type > 0
+              ? `${summary.rejected_content_type} unsupported type · `
+              : ""}
+            {summary.empty > 0 ? `${summary.empty} empty` : ""}
+          </span>
+        )}
+      </div>
+      <ul
+        className="batch-upload-report__list"
+        data-testid="batch-upload-report-list"
+      >
+        {results.map((outcome, index) => (
+          <li
+            key={`${outcome.filename}-${index}`}
+            className={`batch-upload-report__row batch-upload-report__row--${outcome.status}`}
+            data-testid="batch-upload-report-row"
+          >
+            <span className="batch-upload-report__file">{outcome.filename}</span>
+            <span className="batch-upload-report__status">{outcome.status}</span>
+            {outcome.error_message ? (
+              <span className="muted small">{outcome.error_message}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

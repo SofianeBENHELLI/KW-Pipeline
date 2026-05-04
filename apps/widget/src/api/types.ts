@@ -77,3 +77,72 @@ export interface KnowledgeGraphPage {
   edges: GraphEdge[];
   next_cursor: string | null;
 }
+
+/**
+ * Single hit returned by ``GET /knowledge/search`` (Phase 3 / ADR-015).
+ * Mirrors ``apps/api/app/schemas/knowledge.py::ChunkSearchResult``.
+ */
+export interface ChunkSearchResult {
+  chunk_id: string;
+  document_id: string;
+  version_id: string;
+  section_id: string;
+  snippet: string | null;
+  score: number;
+}
+
+/**
+ * Response envelope for ``GET /knowledge/search``. Mirrors
+ * ``apps/api/app/schemas/knowledge.py::ChunkSearchResponse``.
+ */
+export interface ChunkSearchResponse {
+  schema_version: string;
+  query: string;
+  embedding_model: string;
+  query_embedding_dim: number;
+  results: ChunkSearchResult[];
+}
+
+/**
+ * Chat retrieval mode (ADR-016). One of ``rag`` (vector only),
+ * ``graph`` (projected entity triples only), or ``hybrid`` (both).
+ */
+export type ChatMode = "rag" | "graph" | "hybrid";
+
+/**
+ * Request body for ``POST /knowledge/chat``. Mirrors
+ * ``apps/api/app/schemas/knowledge.py::ChatRequest``.
+ */
+export interface ChatRequest {
+  question: string;
+  mode?: ChatMode;
+  top_k?: number;
+}
+
+/**
+ * One context source the chat answer was grounded in. Mirrors
+ * ``apps/api/app/schemas/knowledge.py::ChatCitation``.
+ */
+export interface ChatCitation {
+  chunk_id: string;
+  document_id: string;
+  version_id: string;
+  section_id: string;
+  snippet: string | null;
+  score: number;
+}
+
+/**
+ * Response body for ``POST /knowledge/chat``. Mirrors
+ * ``apps/api/app/schemas/knowledge.py::ChatResponse``.
+ */
+export interface ChatResponse {
+  schema_version: string;
+  question: string;
+  mode: ChatMode;
+  answer: string;
+  citations: ChatCitation[];
+  embedding_model: string | null;
+  llm_model: string;
+  token_usage: Record<string, number>;
+}

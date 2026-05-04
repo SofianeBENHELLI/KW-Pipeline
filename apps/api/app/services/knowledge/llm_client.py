@@ -18,9 +18,15 @@ Three implementations live here:
 - The :class:`LLMClient` Protocol itself is ``@runtime_checkable`` so
   tests can assert conformance with ``isinstance``.
 
-The Protocol surface is intentionally one method: forced structured
-output via tool-use. Free-text chat is added in Phase 3 as a separate
-method when needed; we don't speculate the shape now.
+The Protocol surface has two methods today:
+
+- :meth:`LLMClient.complete_with_tool` — Phase 2 entity extraction.
+  Forces structured output via tool-use; the model is required to
+  invoke a named tool whose ``input_schema`` is the desired shape.
+- :meth:`LLMClient.complete_text` — Phase 3 chat. Free-text
+  generation for the grounded chat surface; the chat service builds
+  a context-augmented prompt and calls this method to produce a
+  natural-language answer.
 """
 
 from __future__ import annotations
@@ -79,6 +85,22 @@ class LLMClient(Protocol):
         tool_schema: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, int]]:
         """Run one structured-output call and return the parsed tool input."""
+
+    def complete_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
+        """Run one free-text call and return ``(answer_text, token_usage)``.
+
+        Phase 3 chat surface. ``max_tokens`` is optional; ``None``
+        means "use the implementation's default". The returned text
+        is the joined contents of every ``text`` block the model
+        produced. ``token_usage`` follows the same shape as
+        :meth:`complete_with_tool`.
+        """
 
 
 # ─── Anthropic implementation ────────────────────────────────────────────
@@ -198,6 +220,56 @@ class AnthropicLLMClient:
         }
         return tool_input, token_usage
 
+    def complete_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
+        """Run one free-text call against Anthropic.
+
+        Phase 3 chat surface. The system prompt is wrapped with the
+        same ``cache_control: ephemeral`` block as
+        :meth:`complete_with_tool` (ADR-014 §2) — chat re-uses the
+        invariant grounding instructions across questions, so the
+        cache amortization applies the same way.
+
+        Retry semantics mirror :meth:`complete_with_tool`: 429s and
+        5xxes get one jittered exponential-backoff retry by default,
+        ``Retry-After`` is honoured, and connect/timeout errors are
+        classified as transient.
+        """
+        response = self._call_text_with_retry(
+            system=system,
+            user=user,
+            max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
+        )
+
+        # Concatenate every ``text`` block. Anthropic returns a list of
+        # content blocks; for free-text completions there is usually
+        # exactly one but we tolerate the multi-block shape so callers
+        # receive the full answer if the model decides to emit it in
+        # parts.
+        parts: list[str] = []
+        for block in getattr(response, "content", []) or []:
+            if getattr(block, "type", None) == "text":
+                text = getattr(block, "text", None)
+                if isinstance(text, str):
+                    parts.append(text)
+        answer = "".join(parts)
+
+        usage = getattr(response, "usage", None)
+        token_usage: dict[str, int] = {
+            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+            "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            "cache_creation_input_tokens": int(
+                getattr(usage, "cache_creation_input_tokens", 0) or 0
+            ),
+        }
+        return answer, token_usage
+
     def _call_with_retry(
         self,
         *,
@@ -251,6 +323,51 @@ class AnthropicLLMClient:
                         "delay_seconds": round(delay, 3),
                         "error_type": type(exc).__name__,
                         "status_code": getattr(exc, "status_code", None),
+                    },
+                )
+                self._sleep(delay)
+                attempt += 1
+
+    def _call_text_with_retry(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int,
+    ) -> Any:
+        """Issue a free-text SDK call, retrying transient upstream failures.
+
+        Mirrors :meth:`_call_with_retry` but does not pass ``tools`` or
+        ``tool_choice`` — the call returns plain text content blocks.
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._client.messages.create(
+                    model=self._model,
+                    max_tokens=max_tokens,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user}],
+                )
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if attempt >= self._max_retries or not _is_retryable(exc):
+                    raise
+                delay = self._retry_delay(exc, attempt)
+                log.warning(
+                    "knowledge.llm.retrying",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": self._max_retries,
+                        "delay_seconds": round(delay, 3),
+                        "error_type": type(exc).__name__,
+                        "status_code": getattr(exc, "status_code", None),
+                        "call_kind": "complete_text",
                     },
                 )
                 self._sleep(delay)
@@ -338,7 +455,9 @@ class FakeLLMClient:
         responses: list[tuple[dict[str, Any], dict[str, int]]] | None = None,
     ) -> None:
         self._responses: deque[tuple[dict[str, Any], dict[str, int]]] = deque(responses or [])
+        self._text_responses: deque[tuple[str, dict[str, int]]] = deque()
         self.calls: list[dict[str, Any]] = []
+        self.text_calls: list[dict[str, Any]] = []
 
     def enqueue(
         self,
@@ -346,6 +465,14 @@ class FakeLLMClient:
         token_usage: dict[str, int] | None = None,
     ) -> None:
         self._responses.append((parsed_tool_input, token_usage or {}))
+
+    def enqueue_text(
+        self,
+        answer: str,
+        token_usage: dict[str, int] | None = None,
+    ) -> None:
+        """Queue a free-text response for the next :meth:`complete_text` call."""
+        self._text_responses.append((answer, token_usage or {}))
 
     def complete_with_tool(
         self,
@@ -361,6 +488,21 @@ class FakeLLMClient:
                 "Call `enqueue(...)` once per expected LLM call."
             )
         return self._responses.popleft()
+
+    def complete_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
+        self.text_calls.append({"system": system, "user": user, "max_tokens": max_tokens})
+        if not self._text_responses:
+            raise RuntimeError(
+                "FakeLLMClient: no recorded text responses left to return. "
+                "Call `enqueue_text(...)` once per expected complete_text call."
+            )
+        return self._text_responses.popleft()
 
 
 __all__ = [

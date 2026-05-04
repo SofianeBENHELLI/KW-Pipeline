@@ -15,6 +15,9 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiBatchUploadResult,
+  ApiChatMode,
+  ApiChatResponse,
   ApiChunkSearchResponse,
   ApiDocument,
   ApiDocumentVersion,
@@ -237,6 +240,44 @@ export async function uploadDocument(
   return (await response.json()) as ApiUploadResponse;
 }
 
+/**
+ * POST /documents/upload/batch (#82)
+ *
+ * Multipart upload of N files in a single request. The route never
+ * raises on per-file failure — it returns a structured report with
+ * one ``BatchUploadOutcome`` per attached file. Clients route on the
+ * ``status`` discriminant for each outcome and on the aggregate
+ * counters in ``summary``.
+ *
+ * NOTE: openapi-fetch's typed body helpers don't model
+ * ``multipart/form-data`` request bodies cleanly, so we drop down to
+ * native fetch here. Path and response shape stay pinned via the
+ * imported response type.
+ */
+export async function uploadDocumentsBatch(
+  files: File[],
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiBatchUploadResult> {
+  if (files.length === 0) {
+    throw new ApiError(
+      400,
+      "No files attached. Include at least one file.",
+      "KW_UPLOAD_EMPTY",
+    );
+  }
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file);
+  }
+  const response = await fetch(`${BASE_URL}/documents/upload/batch`, {
+    method: "POST",
+    body: form,
+    signal: options.signal,
+  });
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as ApiBatchUploadResult;
+}
+
 // ─── Version endpoints ───────────────────────────────────────────────────────
 
 /**
@@ -440,6 +481,35 @@ export async function searchKnowledgeChunks(
   return unwrap(
     await http.GET("/knowledge/search", {
       params: { query: { q, limit } },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /knowledge/chat (Phase 3 grounded chat surface)
+ *
+ * Asks the backend to answer ``question`` grounded in the configured
+ * retrieval mode. ``mode`` selects RAG / GraphRAG / Hybrid; ``top_k``
+ * bounds the number of vector hits the prompt is grounded in.
+ *
+ * Returns 503 with ``KW_CHAT_DISABLED`` when any of the three gates
+ * (knowledge layer enabled, Anthropic key, Voyage key) is missing;
+ * the ``ApiError`` envelope carries the operator-facing remediation
+ * copy verbatim.
+ */
+export async function askKnowledgeChat(
+  question: string,
+  options: {
+    mode?: ApiChatMode;
+    top_k?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiChatResponse> {
+  const { mode = "rag", top_k = 5, signal } = options;
+  return unwrap(
+    await http.POST("/knowledge/chat", {
+      body: { question, mode, top_k },
       signal,
     }),
   );

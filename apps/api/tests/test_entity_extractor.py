@@ -443,6 +443,337 @@ def test_circuit_breaker_rejects_invalid_cap():
         raise AssertionError("Expected ValueError on cap=0")
 
 
+# ─── Section batching (#195) ─────────────────────────────────────────────
+
+
+def test_batching_packs_multiple_sections_into_one_call():
+    """``max_sections_per_call=8`` ⇒ one LLM call covers the full doc."""
+    fake = FakeLLMClient()
+    fake.enqueue(
+        {
+            "triples": [
+                {
+                    "section_id": "s1",
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "rel",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": 0.9,
+                    "source_reference_ids": ["src-1"],
+                },
+                {
+                    "section_id": "s2",
+                    "subject": "C",
+                    "subject_type": "T",
+                    "predicate": "rel",
+                    "object": "D",
+                    "object_type": "T",
+                    "confidence": 0.9,
+                    "source_reference_ids": ["src-2"],
+                },
+            ]
+        },
+        {"input_tokens": 50, "output_tokens": 30},
+    )
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=8)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+            SemanticSection(id="s2", heading="B", text="y", source_reference_ids=["src-2"]),
+        ],
+    )
+
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+
+    # Exactly one batched call; both sections' triples land.
+    assert len(fake.calls) == 1
+    assert len(result.triples) == 2
+    assert {t.source_section_id for t in result.triples} == {"s1", "s2"}
+    # Both sections are listed in the prompt.
+    assert "s1" in fake.calls[0]["user"]
+    assert "s2" in fake.calls[0]["user"]
+    # The schema carried both ids in the section_id enum.
+    schema_section_id = fake.calls[0]["tool_schema"]["properties"]["triples"]["items"][
+        "properties"
+    ]["section_id"]
+    assert sorted(schema_section_id["enum"]) == ["s1", "s2"]
+
+
+def test_batching_chunks_when_doc_exceeds_max_per_call():
+    """5 sections with max=2 ⇒ 3 batches (2+2+1) ⇒ 3 LLM calls."""
+    fake = FakeLLMClient()
+    for _ in range(3):
+        fake.enqueue({"triples": []}, {"input_tokens": 10, "output_tokens": 1})
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=2)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id=f"s{i}", heading="x", text="x", source_reference_ids=[f"src-{i}"])
+            for i in range(1, 6)
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    assert len(fake.calls) == 3
+    assert result.token_usage["input_tokens"] == 30
+
+
+def test_batching_drops_triple_tagged_for_section_outside_batch():
+    """LLM tags a triple with a section_id not in the batch ⇒ warning + drop."""
+    fake = FakeLLMClient()
+    fake.enqueue(
+        {
+            "triples": [
+                {
+                    # Tagged as 's-other' which isn't part of this batch.
+                    "section_id": "s-other",
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": 1.0,
+                    "source_reference_ids": ["src-1"],
+                }
+            ]
+        },
+        {"input_tokens": 10, "output_tokens": 5},
+    )
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=4)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    assert result.triples == []
+    assert any("unknown section" in w for w in result.warnings)
+
+
+def test_batching_enforces_per_section_allowed_refs():
+    """A triple whose refs aren't in *its tagged section's* allowed set is dropped."""
+    fake = FakeLLMClient()
+    fake.enqueue(
+        {
+            "triples": [
+                {
+                    "section_id": "s1",
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": 1.0,
+                    # 'src-2' belongs to s2, not s1; must be dropped.
+                    "source_reference_ids": ["src-2"],
+                },
+                {
+                    "section_id": "s2",
+                    "subject": "C",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "D",
+                    "object_type": "T",
+                    "confidence": 1.0,
+                    "source_reference_ids": ["src-2"],
+                },
+            ]
+        },
+        {"input_tokens": 10, "output_tokens": 5},
+    )
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=4)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+            SemanticSection(id="s2", heading="B", text="y", source_reference_ids=["src-2"]),
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    # Only the s2 triple survived; the cross-section ref was dropped.
+    assert len(result.triples) == 1
+    assert result.triples[0].source_section_id == "s2"
+    assert any("unknown source_reference_ids" in w for w in result.warnings)
+
+
+def test_batching_skips_sections_without_refs_before_grouping():
+    """A section without source_refs ⇒ early-skip warning, not packed into the batch."""
+    fake = FakeLLMClient()
+    fake.enqueue({"triples": []}, {"input_tokens": 10, "output_tokens": 1})
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=4)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="x", text="x", source_reference_ids=[]),
+            SemanticSection(id="s2", heading="y", text="y", source_reference_ids=["src-2"]),
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    # One batched call covering only s2; s1 was filtered upstream.
+    assert len(fake.calls) == 1
+    schema_enum = fake.calls[0]["tool_schema"]["properties"]["triples"]["items"]["properties"][
+        "section_id"
+    ]["enum"]
+    assert schema_enum == ["s2"]
+    assert any("s1" in w and "no source_reference_ids" in w for w in result.warnings)
+
+
+def test_batching_circuit_breaker_skips_remaining_batches():
+    """When the cap trips between batches, every remaining section warns."""
+    fake = FakeLLMClient()
+    fake.enqueue({"triples": []}, {"input_tokens": 1000, "output_tokens": 5})
+
+    extractor = EntityExtractor(
+        llm=fake,
+        max_sections_per_call=2,
+        max_input_tokens_per_document=500,
+    )
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id=f"s{i}", heading="x", text="x", source_reference_ids=["src-1"])
+            for i in range(1, 5)
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    # Only one batch (s1+s2) ran; s3 and s4 are skipped by the cap.
+    assert len(fake.calls) == 1
+    assert sum("circuit breaker" in w for w in result.warnings) == 2
+
+
+def test_batching_defensive_paths_drop_malformed_triples():
+    """Cover non-object, missing-section_id, missing-refs, malformed-triple paths."""
+    fake = FakeLLMClient()
+    fake.enqueue(
+        {
+            "triples": [
+                # Non-object triple — dropped with a "batch: ignored" warning.
+                "not a dict",
+                # Missing section_id — dropped.
+                {
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": 0.5,
+                    "source_reference_ids": ["src-1"],
+                },
+                # Missing source_reference_ids entirely.
+                {
+                    "section_id": "s1",
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": 0.5,
+                },
+                # Malformed triple — confidence is a non-numeric string,
+                # forcing the EntityTriple constructor to raise.
+                {
+                    "section_id": "s1",
+                    "subject": "A",
+                    "subject_type": "T",
+                    "predicate": "p",
+                    "object": "B",
+                    "object_type": "T",
+                    "confidence": "not-a-number",
+                    "source_reference_ids": ["src-1"],
+                },
+            ]
+        },
+        {"input_tokens": 10, "output_tokens": 5},
+    )
+
+    extractor = EntityExtractor(llm=fake, max_sections_per_call=4)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+            SemanticSection(id="s2", heading="B", text="y", source_reference_ids=["src-2"]),
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    assert result.triples == []
+    assert any("ignored non-object" in w for w in result.warnings)
+    assert any("missing/invalid section_id" in w for w in result.warnings)
+    assert any("dropped triple with no" in w for w in result.warnings)
+    assert any("malformed triple" in w for w in result.warnings)
+
+
+def test_batching_llm_failure_warns_every_section_in_batch():
+    """When the LLM raises, every section in the batch gets a warning."""
+
+    class FailingLLM:
+        name = "failing"
+
+        def complete_with_tool(self, *, system, user, tool_schema):
+            raise RuntimeError("rate limited")
+
+    extractor = EntityExtractor(llm=FailingLLM(), max_sections_per_call=4)
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(id="s1", heading="A", text="x", source_reference_ids=["src-1"]),
+            SemanticSection(id="s2", heading="B", text="y", source_reference_ids=["src-2"]),
+        ],
+    )
+    result = extractor.extract(
+        document=_make_document(version),
+        version=version,
+        semantic=semantic,
+    )
+    assert result.triples == []
+    failure_warnings = [w for w in result.warnings if "LLM call failed" in w]
+    assert len(failure_warnings) == 2
+    assert any("s1" in w for w in failure_warnings)
+    assert any("s2" in w for w in failure_warnings)
+
+
 def test_extract_rejects_mismatched_semantic_doc():
     fake = FakeLLMClient()
     extractor = EntityExtractor(llm=fake)

@@ -263,6 +263,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chat With Knowledge
+         * @description Grounded chat surface (Phase 3 follow-up).
+         *
+         *     Builds a RAG / GraphRAG / Hybrid context from the configured
+         *     retrieval primitives, asks the LLM for a free-text answer, and
+         *     returns the answer alongside the citations the prompt was
+         *     grounded in. Requires both ``ANTHROPIC_API_KEY`` and
+         *     ``VOYAGE_API_KEY`` (the chat service seeds graph traversal
+         *     from vector hits, so the search service must be wired). When
+         *     either gate is off the route returns 503 with
+         *     ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+         */
+        post: operations["chat_with_knowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/graph": {
         parameters: {
             query?: never;
@@ -394,6 +423,99 @@ export interface components {
         Body_upload_documents_batch: {
             /** Files */
             files: string[];
+        };
+        /**
+         * ChatCitation
+         * @description One context source the chat answer was grounded in.
+         *
+         *     Today the only citation kind is ``chunk`` (vector-retrieval hits);
+         *     ``graph`` mode also produces chunk citations because the graph
+         *     traversal currently seeds from the same vector hits. A future
+         *     GraphRAG mode that seeds from entity-name matching will introduce
+         *     an ``entity`` citation kind.
+         */
+        ChatCitation: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string;
+            /** Snippet */
+            snippet: string | null;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ChatRequest
+         * @description Request body for ``POST /knowledge/chat`` (Phase 3 chat surface).
+         *
+         *     ``mode`` selects the retrieval strategy used to build the grounded
+         *     context the LLM sees. ``top_k`` bounds the number of vector hits
+         *     retrieval will consider — the same ceiling applies to GraphRAG and
+         *     Hybrid because both modes seed the graph traversal from the
+         *     vector-search hits today.
+         */
+        ChatRequest: {
+            /**
+             * Mode
+             * @default rag
+             * @enum {string}
+             */
+            mode: "rag" | "graph" | "hybrid";
+            /** Question */
+            question: string;
+            /**
+             * Top K
+             * @default 5
+             */
+            top_k: number;
+        };
+        /**
+         * ChatResponse
+         * @description Response body for ``POST /knowledge/chat``.
+         *
+         *     ``answer`` is the free-text response from the LLM; ``citations``
+         *     lists the chunks/triples the prompt grounded the model in. Empty
+         *     ``citations`` with a non-empty ``answer`` is possible — the LLM
+         *     answered from the question alone, which the system prompt asks it
+         *     to flag with an explicit "no supporting context" preamble.
+         *
+         *     ``warnings`` carries server-side validation findings — today,
+         *     citation markers in ``answer`` that don't resolve against
+         *     ``citations``. The renderer surfaces these so reviewers can spot
+         *     a hallucinated reference without trusting it.
+         */
+        ChatResponse: {
+            /** Answer */
+            answer: string;
+            /** Citations */
+            citations: components["schemas"]["ChatCitation"][];
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Llm Model */
+            llm_model: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "rag" | "graph" | "hybrid";
+            /** Question */
+            question: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Token Usage */
+            token_usage: {
+                [key: string]: number;
+            };
+            /** Warnings */
+            warnings: string[];
         };
         /**
          * ChunkSearchResponse
@@ -1301,6 +1423,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    chat_with_knowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

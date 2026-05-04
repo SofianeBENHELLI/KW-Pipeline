@@ -221,6 +221,34 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # Optional spaCy NER enricher (#190). Off by default — the spaCy
+    # install lives behind the ``ner`` extra so the default wheel stays
+    # slim. The enricher only loads when both this flag is truthy and
+    # the optional dependency is available.
+    # ------------------------------------------------------------------
+    ner_enabled_raw: str = Field(
+        default="",
+        alias="ner_enabled",
+        validation_alias=AliasChoices("KW_NER_ENABLED"),
+        description=(
+            "Truthy (``1``/``true``/``yes``/``on``) enables the opt-in "
+            "spaCy NER enricher (person / organization). Requires the "
+            "``ner`` extra to be installed and ``en_core_web_sm`` to be "
+            "available; otherwise the enricher fails to construct and "
+            "the API logs the misconfiguration at startup."
+        ),
+    )
+    ner_spacy_model: str = Field(
+        default="en_core_web_sm",
+        validation_alias=AliasChoices("KW_NER_SPACY_MODEL"),
+        description=(
+            "spaCy model id loaded by the NER enricher. Defaults to "
+            "``en_core_web_sm`` (small + English). Override only when "
+            "the operator has installed a heavier model intentionally."
+        ),
+    )
+
+    # ------------------------------------------------------------------
     # Audit event store (#26 residual). Off by default so the in-memory
     # unit suite never opens a SQLite handle. Persistent deployments
     # enable it explicitly; the documented event vocabulary then lands
@@ -297,14 +325,19 @@ class Settings(BaseSettings):
         ``{"1", "true", "yes", "on"}`` (case-insensitive). Anything else
         — including the empty string — is False.
         """
-        return self.knowledge_layer_enabled_raw.strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        return _truthy(self.knowledge_layer_enabled_raw)
+
+    @property
+    def ner_enabled(self) -> bool:
+        """Truthy parse of the spaCy NER kill switch (#190)."""
+        return _truthy(self.ner_enabled_raw)
 
     @property
     def audit_enabled(self) -> bool:
         """Truthy parse of the audit-store kill switch (#26 residual)."""
-        return self.audit_enabled_raw.strip().lower() in {"1", "true", "yes", "on"}
+        return _truthy(self.audit_enabled_raw)
+
+
+def _truthy(raw: str) -> bool:
+    """Same case-insensitive truthiness rule used by every kill switch."""
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

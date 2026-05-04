@@ -9,7 +9,8 @@ from app.services.audit_event_store import (
 from app.services.catalog_store import SQLiteCatalogStore
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
-from app.services.enrichers import RuleBasedEntityEnricher
+from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
+from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.idempotency_store import (
     IdempotencyStore,
@@ -22,8 +23,10 @@ from app.services.knowledge import (
     EntityExtractor,
     GraphStore,
     InMemoryGraphStore,
+    KnowledgeChatService,
     KnowledgeProjector,
     KnowledgeSearchService,
+    LLMClient,
     Neo4jGraphStore,
     VoyageEmbeddingClient,
 )
@@ -77,6 +80,12 @@ class PipelineServices:
     # returns 503.
     embedding_client: EmbeddingClient | None = None
     knowledge_search: KnowledgeSearchService | None = None
+    # Phase 3 chat surface. Constructed iff
+    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND ``ANTHROPIC_API_KEY`` is set
+    # AND a ``knowledge_search`` is wired (i.e. ``VOYAGE_API_KEY`` is also
+    # set). Otherwise ``None`` and the route returns 503 with
+    # ``KW_CHAT_DISABLED``.
+    knowledge_chat: KnowledgeChatService | None = None
     # Audit event store (#26 residual). Always present so the
     # logging-handler wiring is unconditional; the in-memory fake is
     # the test-suite default and the SQLite store lights up only when
@@ -89,6 +98,24 @@ class PipelineServices:
     # programmatically-constructed Settings) can be threaded through
     # ``build_services(settings=...)``.
     settings: Settings = field(default_factory=Settings)
+
+
+def _build_enrichers(settings: Settings) -> list[SemanticEnricher]:
+    """Assemble the semantic-enricher chain for this wiring.
+
+    Always includes the deterministic :class:`RuleBasedEntityEnricher`
+    (date / monetary / requirement). When ``KW_NER_ENABLED=true`` and
+    the optional ``ner`` extra is installed, also includes the
+    :class:`SpacyNerEnricher` for person / organization assets (#190).
+    A misconfigured NER opt-in (flag on but spaCy or the model is
+    missing) raises :class:`RuntimeError` at construction time so the
+    operator sees the failure at startup rather than silently shipping
+    no NER assets.
+    """
+    chain: list[SemanticEnricher] = [RuleBasedEntityEnricher()]
+    if settings.ner_enabled:
+        chain.append(SpacyNerEnricher(model=settings.ner_spacy_model.strip() or "en_core_web_sm"))
+    return chain
 
 
 def _build_audit_store(
@@ -138,19 +165,15 @@ def _build_parser_registry() -> ParserRegistry:
     )
 
 
-def _maybe_build_entity_extractor(settings: Settings | None = None) -> EntityExtractor | None:
-    """Build the LLM-driven entity extractor if enabled (ADR-013).
+def _maybe_build_anthropic_llm(
+    settings: Settings | None = None,
+) -> tuple[LLMClient, str] | None:
+    """Build the Anthropic LLM client + return its model id, if enabled.
 
     Returns ``None`` unless **both** the knowledge-layer kill switch is
-    truthy **and** the Anthropic API key is set. The Phase 1a-only path
-    (graph projection without entities) is preserved when the API key
-    is absent so contributors who don't have an Anthropic account can
-    still run the knowledge layer end-to-end against the in-memory
-    graph store.
-
-    All env reads flow through :class:`app.settings.Settings` (issue
-    #43); the legacy unprefixed ``ANTHROPIC_API_KEY`` keeps working
-    via :class:`pydantic.AliasChoices`.
+    truthy **and** the Anthropic API key is set. Callers (entity
+    extractor, chat service) reuse the same client so the prompt cache
+    and retry budgets are amortised across phases.
     """
     settings = settings or Settings()
     if not settings.knowledge_layer_enabled or not settings.anthropic_api_key.strip():
@@ -162,6 +185,38 @@ def _maybe_build_entity_extractor(settings: Settings | None = None) -> EntityExt
         if model
         else AnthropicLLMClient(api_key=api_key)
     )
+    # ``AnthropicLLMClient.__init__`` defaults ``model`` to
+    # ``DEFAULT_ANTHROPIC_MODEL`` when not passed; mirror that here so
+    # the returned tuple always carries a non-empty model id.
+    from app.services.knowledge.llm_client import DEFAULT_ANTHROPIC_MODEL  # noqa: PLC0415
+
+    return llm, (model or DEFAULT_ANTHROPIC_MODEL)
+
+
+def _maybe_build_entity_extractor(
+    settings: Settings | None = None,
+    *,
+    llm: LLMClient | None = None,
+) -> EntityExtractor | None:
+    """Build the LLM-driven entity extractor if enabled (ADR-013).
+
+    Returns ``None`` unless **both** the knowledge-layer kill switch is
+    truthy **and** the Anthropic API key is set. The Phase 1a-only path
+    (graph projection without entities) is preserved when the API key
+    is absent so contributors who don't have an Anthropic account can
+    still run the knowledge layer end-to-end against the in-memory
+    graph store.
+
+    Callers may pass a pre-built ``llm`` to share one client across
+    Phase 2 (entity extractor) and Phase 3 (chat service); when omitted
+    a fresh one is constructed from settings.
+    """
+    settings = settings or Settings()
+    if llm is None:
+        built = _maybe_build_anthropic_llm(settings)
+        if built is None:
+            return None
+        llm = built[0]
     # ADR-014 §3 circuit breaker. ``0`` means disabled; any positive
     # value caps cumulative input_tokens per document.
     cap = settings.entity_extractor_max_input_tokens_per_document
@@ -244,6 +299,31 @@ def _maybe_build_knowledge_layer(
     )
 
 
+def _maybe_build_chat_service(
+    *,
+    llm: LLMClient | None,
+    llm_model: str | None,
+    knowledge_search: KnowledgeSearchService | None,
+    graph_store: GraphStore,
+) -> KnowledgeChatService | None:
+    """Wire the Phase 3 chat service when every dependency is available.
+
+    The chat surface needs all three of: an LLM client (Anthropic key),
+    a vector retrieval service (Voyage key + embedding write path),
+    and a graph store (always present, but only meaningful once the
+    knowledge layer is enabled). Any missing dependency yields
+    ``None`` and the route returns 503 with ``KW_CHAT_DISABLED``.
+    """
+    if llm is None or llm_model is None or knowledge_search is None:
+        return None
+    return KnowledgeChatService(
+        search=knowledge_search,
+        graph_store=graph_store,
+        llm=llm,
+        llm_model=llm_model,
+    )
+
+
 def build_services(settings: Settings | None = None) -> PipelineServices:
     """Create fresh in-memory services for tests and ephemeral demos.
 
@@ -259,7 +339,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # Default enricher chain: deterministic rule-based entity extraction
     # (#48). Pure regex / no model dep, safe to run on every wiring path
     # including the in-memory unit suite.
-    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
+    semantic_extractor = SemanticExtractor(enrichers=_build_enrichers(settings))
     markdown_generator = MarkdownGenerator()
     embedding_client = _maybe_build_embedding_client(settings)
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
@@ -273,6 +353,12 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         if embedding_client is not None
         else None
     )
+    # Build the LLM once and share it between the entity extractor and
+    # the chat service so they amortise the same prompt cache and
+    # respect the same retry budget.
+    llm_pair = _maybe_build_anthropic_llm(settings)
+    llm_client = llm_pair[0] if llm_pair else None
+    llm_model = llm_pair[1] if llm_pair else None
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -289,9 +375,15 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         idempotency=InMemoryIdempotencyStore(),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(settings),
+        entity_extractor=_maybe_build_entity_extractor(settings, llm=llm_client),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        knowledge_chat=_maybe_build_chat_service(
+            llm=llm_client,
+            llm_model=llm_model,
+            knowledge_search=knowledge_search,
+            graph_store=graph_store,
+        ),
         audit_events=_build_audit_store(settings),
         settings=settings,
     )
@@ -314,7 +406,7 @@ def build_persistent_services(
     # Default enricher chain: deterministic rule-based entity extraction
     # (#48). Pure regex / no model dep, safe to run on every wiring path
     # including the in-memory unit suite.
-    semantic_extractor = SemanticExtractor(enrichers=[RuleBasedEntityEnricher()])
+    semantic_extractor = SemanticExtractor(enrichers=_build_enrichers(settings))
     markdown_generator = MarkdownGenerator()
     embedding_client = _maybe_build_embedding_client(settings)
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
@@ -328,6 +420,9 @@ def build_persistent_services(
         if embedding_client is not None
         else None
     )
+    llm_pair = _maybe_build_anthropic_llm(settings)
+    llm_client = llm_pair[0] if llm_pair else None
+    llm_model = llm_pair[1] if llm_pair else None
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -344,9 +439,15 @@ def build_persistent_services(
         idempotency=SQLiteIdempotencyStore(root / "idempotency.sqlite3"),
         graph_store=graph_store,
         knowledge_projector=knowledge_projector,
-        entity_extractor=_maybe_build_entity_extractor(settings),
+        entity_extractor=_maybe_build_entity_extractor(settings, llm=llm_client),
         embedding_client=embedding_client,
         knowledge_search=knowledge_search,
+        knowledge_chat=_maybe_build_chat_service(
+            llm=llm_client,
+            llm_model=llm_model,
+            knowledge_search=knowledge_search,
+            graph_store=graph_store,
+        ),
         audit_events=_build_audit_store(settings, default_dir=root),
         settings=settings,
     )
