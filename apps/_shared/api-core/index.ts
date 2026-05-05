@@ -6,4 +6,9 @@
  * internal reorganisation.
  */
 
-export { ApiError, asApiError } from "./ApiError";
+export {
+  ApiError,
+  asApiError,
+  setSessionTrigger,
+  clearSessionTrigger,
+} from "./ApiError";

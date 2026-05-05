@@ -15,7 +15,20 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "allowJs": false
+    "allowJs": false,
+
+    // Map react / react-dom to this app's installed types so files
+    // in ``apps/_shared/`` (#83 slice 3 React-using modules) can
+    // resolve them. With moduleResolution=bundler TypeScript walks
+    // up the directory tree looking for ``node_modules``; _shared/
+    // has none, so we redirect the bare specifiers explicitly.
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
   },
   "include": ["src", "../_shared"],
   "exclude": ["../_shared/**/*.test.ts", "../_shared/**/*.test.tsx"]
