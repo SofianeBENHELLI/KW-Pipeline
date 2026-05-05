@@ -59,7 +59,29 @@ function Assert-Docker {
     }
 }
 
+function Update-PathFromRegistry {
+    <#
+    .SYNOPSIS
+        Refresh ``$env:Path`` for the current process from the Machine
+        and User registry values.
+
+    .DESCRIPTION
+        winget MSI installers (cloudflared, git, …) update the machine
+        ``PATH`` registry key, but the running PowerShell process keeps
+        its own snapshot of ``PATH`` taken at shell start. Without a
+        refresh the freshly-installed CLI is invisible to
+        ``Get-Command`` until the user closes and reopens the shell —
+        which breaks the chained Bootstrap flow that runs install +
+        use back-to-back.
+    #>
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ';'
+}
+
 function Assert-Cloudflared {
+    if (Get-Command cloudflared -ErrorAction SilentlyContinue) { return }
+    Update-PathFromRegistry
     if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
         throw "cloudflared CLI not found. Run scripts\windows\00-Install-Prereqs.ps1 first."
     }
