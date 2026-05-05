@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     End-to-end smoke test for the KW-Pipeline workstation deploy.
