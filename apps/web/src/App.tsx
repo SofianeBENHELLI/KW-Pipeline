@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import "./styles.css";
 import {
@@ -13,7 +13,6 @@ import {
   setSessionTrigger,
 } from "./api/client";
 import type { ApiDocument } from "./api/types";
-import { AdminArchiveView } from "./features/admin/AdminArchiveView";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
@@ -226,10 +225,27 @@ export function useDocumentCatalog(): DocumentCatalog {
  *    role client-side — the backend is the single source of truth.
  *  - everything else falls through to the legacy reviewer workbench.
  */
+// Lazy-load the admin view so it doesn't ship in the initial app
+// chunk — admin routes are admin-only and most users never land here.
+// Keeps the index bundle under the 80 KB budget enforced by
+// `scripts/check-bundle-size.mjs`.
+const AdminArchiveView = lazy(() =>
+  import("./features/admin/AdminArchiveView").then((mod) => ({
+    default: mod.AdminArchiveView,
+  })),
+);
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/admin/archive" element={<AdminArchiveView />} />
+      <Route
+        path="/admin/archive"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+            <AdminArchiveView />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<ReviewerWorkbench />} />
     </Routes>
   );
