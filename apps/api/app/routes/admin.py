@@ -6,12 +6,12 @@ Holds:
 * ``GET /admin/config`` — sanitized configuration snapshot consumed by
   the Knowledge Forge Settings widget (``apps/_shared/settings-hub``).
   Strips every secret (API keys, auth tokens, DB passwords) before
-  returning. No auth — same posture as ``/health`` until #83 lands.
+  returning. Gated on the ``admin`` role (#83 slice 2 / ADR-019 §3).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.dependencies import PipelineServices
 from app.schemas.admin_config import (
@@ -30,6 +30,7 @@ from app.schemas.admin_config import (
     UploadConfig,
 )
 from app.schemas.document import HealthResponse
+from app.services.auth import User, require_admin
 from app.settings import Settings
 
 
@@ -116,7 +117,9 @@ def build_admin_router(services: PipelineServices) -> APIRouter:  # noqa: ARG001
         operation_id="admin_config",
         response_model=AdminConfigResponse,
     )
-    def admin_config() -> AdminConfigResponse:
+    def admin_config(
+        _user: User = Depends(require_admin),
+    ) -> AdminConfigResponse:
         # Re-read settings on every request so ``monkeypatch.setenv``
         # in tests is observed without restarting the app — same
         # posture every other call site uses.

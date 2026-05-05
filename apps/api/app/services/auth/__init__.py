@@ -22,6 +22,14 @@ from .dev_mode import DEFAULT_DEV_ROLE, DEFAULT_DEV_USER_ID, DevModeAuthService
 from .disabled import ANONYMOUS_USER_ID, DisabledAuthService
 from .factory import build_auth_service
 from .protocol import AuthError, AuthService, Role, User
+from .role_dependencies import (
+    ROLE_RANK,
+    require_admin,
+    require_contributor,
+    require_reviewer,
+    require_role,
+    require_viewer,
+)
 from .scope_dependencies import assert_can_access_document, get_caller_scopes
 from .scope_filter import (
     ALL_SCOPES_SENTINEL,
@@ -41,6 +49,7 @@ __all__ = [
     "DEFAULT_DEV_USER_ID",
     "DevModeAuthService",
     "DisabledAuthService",
+    "ROLE_RANK",
     "Role",
     "ScopeAccessDenied",
     "User",
@@ -50,6 +59,11 @@ __all__ = [
     "encode_hs256",
     "get_caller_scopes",
     "get_current_user",
+    "require_admin",
+    "require_contributor",
+    "require_reviewer",
+    "require_role",
+    "require_viewer",
     "resolve_caller_scopes",
     "user_can_access",
 ]
