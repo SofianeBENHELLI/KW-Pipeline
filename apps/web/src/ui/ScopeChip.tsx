@@ -1,21 +1,22 @@
 /**
  * Scope chip — surfaces the workspace scopes a document was uploaded
- * into (EPIC-D #218 / #250).
+ * into (EPIC-D #218 / #250 / #258).
  *
  * The backend persists one row per ``(kind, ref)`` link in the
- * ``document_scopes`` join table; the upload route returns the full
- * list as ``UploadDocumentResponse.scopes``. This component renders
- * the first scope as a compact icon+label chip, with an explicit
- * "+N more" badge when the document is linked into multiple scopes
- * (the badge's tooltip lists the rest so reviewers don't have to
- * dig into the audit trail to know where the doc landed).
+ * ``document_scopes`` join table; the upload route and every catalog
+ * read endpoint return the full list as ``Document.scopes``
+ * (#258 wired the read side). This component renders the first scope
+ * as a compact icon+label chip, with an explicit "+N more" badge
+ * when the document is linked into multiple scopes (the badge's
+ * tooltip lists the rest so reviewers don't have to dig into the
+ * audit trail to know where the doc landed).
  *
- * Pre-#250 the read-side ``Document`` shape did NOT carry ``scopes``
- * (only the upload-time response did), so this component accepts an
- * optional ``scopes`` prop and renders a "No scope info" placeholder
- * when the field is missing or empty. When ``GET /documents`` is
- * extended to surface scopes (tracked alongside D.5), the placeholder
- * branch is dead code and can be deleted.
+ * The ``scopes`` prop accepts ``null`` / ``undefined`` for resilience
+ * against pre-#258 cached schemas, but in steady state the empty-array
+ * branch is the only fallback callers hit when a document has no
+ * active scope link (e.g. all links soft-removed per the no-delete
+ * policy). Either way the chip surfaces a neutral "No scope info"
+ * placeholder so the row layout is stable.
  *
  * Visual layout choice: icon + short label, with the ref folded into
  * the title attribute rather than the chip body. This keeps the chip
@@ -66,18 +67,17 @@ function refTooltip(scope: Scope): string {
 }
 
 export function ScopeChip({ scopes }: ScopeChipProps) {
-  // Pre-#250 ``Document`` doesn't carry scopes on the catalog read
-  // path (#250 only added the field on ``UploadDocumentResponse``).
-  // TODO(EPIC-D D.5): drop this branch once ``GET /documents`` exposes
-  // ``scopes`` on every document — until then, surface a neutral
-  // placeholder so reviewers know the chip slot is intentional rather
-  // than a render bug.
+  // Empty / missing scopes both render the neutral placeholder. With
+  // #258 wired, ``scopes`` is always present on read responses; the
+  // ``null`` / ``undefined`` guard stays for resilience against
+  // pre-#258 cached schemas. An empty list means the document has no
+  // active scope link (e.g. every link was soft-removed per #262).
   if (!scopes || scopes.length === 0) {
     return (
       <span
         className="scope-chip scope-chip--empty"
         data-testid="scope-chip-empty"
-        title="Scope info is not available on this view yet (EPIC-D D.5)."
+        title="No active scope links on this document."
         aria-label="No scope information available"
       >
         <span aria-hidden="true">—</span> No scope info

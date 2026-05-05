@@ -41,6 +41,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
       created_at: "2026-05-01T00:00:00Z",
     },
   ],
+  scopes: [],
 };
 
 const UPLOAD_RESPONSE: ApiUploadResponse = {

@@ -37,10 +37,10 @@ export type ApiSemanticDocument = Schemas["SemanticDocument"];
 export type ReviewStatus = ApiSemanticAsset["review_status"];
 export type ValidationStatus = ApiSemanticDocument["validation_status"];
 
-// ─── Workspace scope (EPIC-D #218 / #250) ───────────────────────────────────
-// One row of the ``document_scopes`` join table. The upload response
-// surfaces the full list at upload time; ``GET /documents`` does not
-// yet — see ``ScopeChip`` for how the missing-field case is handled.
+// ─── Workspace scope (EPIC-D #218 / #250 / #258) ───────────────────────────
+// One row of the ``document_scopes`` join table. Surfaced on every
+// catalog read endpoint as ``Document.scopes`` since #258, and on
+// upload-time as ``UploadDocumentResponse.scopes`` since #250.
 export type ApiScope = Schemas["Scope"];
 
 // ─── Upload response ─────────────────────────────────────────────────────────

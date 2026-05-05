@@ -29,6 +29,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   latest_version_id: "ver-policy-002",
   created_at: "2026-04-30T08:42:00Z",
   versions: [FIXTURE_VERSION],
+  scopes: [],
 };
 
 const FIXTURE_LIST: ListDocumentsResponse = {
