@@ -28,6 +28,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   original_filename: "supplier-quality-policy.txt",
   latest_version_id: "ver-policy-002",
   created_at: "2026-04-30T08:42:00Z",
+  archived_at: null,
   versions: [FIXTURE_VERSION],
 };
 

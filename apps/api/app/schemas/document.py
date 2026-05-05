@@ -33,12 +33,23 @@ class DocumentVersion(BaseModel):
 
 
 class Document(BaseModel):
-    """Logical document family containing one or more versions."""
+    """Logical document family containing one or more versions.
+
+    ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
+    §4). Set when the orphan cascade flags a document as archived
+    because it lost its last active scope link (see
+    :class:`app.services.scope_cascade_service.ScopeCascadeService`).
+    Default read paths hide rows where ``archived_at IS NOT NULL`` so
+    archived documents are invisible to the standard surface while the
+    bytes / extractions / semantic JSON / markdown assets stay on disk
+    until the future Archive/Purge Admin tool acts on them.
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     original_filename: str
     latest_version_id: str
     created_at: datetime = Field(default_factory=utc_now)
+    archived_at: datetime | None = None
     versions: list[DocumentVersion] = Field(default_factory=list)
 
     @classmethod

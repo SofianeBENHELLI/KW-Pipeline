@@ -538,8 +538,20 @@
         "type": "object"
       },
       "Document": {
-        "description": "Logical document family containing one or more versions.",
+        "description": "Logical document family containing one or more versions.\n\n``archived_at`` is the soft-archive flag (no-delete policy, ADR-020\n§4). Set when the orphan cascade flags a document as archived\nbecause it lost its last active scope link (see\n:class:`app.services.scope_cascade_service.ScopeCascadeService`).\nDefault read paths hide rows where ``archived_at IS NOT NULL`` so\narchived documents are invisible to the standard surface while the\nbytes / extractions / semantic JSON / markdown assets stay on disk\nuntil the future Archive/Purge Admin tool acts on them.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -570,6 +582,7 @@
           "original_filename",
           "latest_version_id",
           "created_at",
+          "archived_at",
           "versions"
         ],
         "title": "Document",
