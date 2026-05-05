@@ -59,6 +59,7 @@ After it returns, `https://kw-api.<your-zone>/health` should answer
 | `Logs.ps1` | Tail one container's logs. `-Service api|cloudflared|neo4j` (default `api`). |
 | `Update.ps1` | `git pull` + rebuild api image + recreate api container. |
 | `Setup-AutoStart.ps1` | Register / remove the logon scheduled task. |
+| `Test-Deploy.ps1` | End-to-end smoke: `/health` → `/admin/config` → upload a tiny fixture → fetch it back. Exits non-zero on any failure. |
 | `_lib.ps1` | Shared helpers. Dot-sourced by every other script. |
 
 ## Day-to-day flow
@@ -69,6 +70,9 @@ After it returns, `https://kw-api.<your-zone>/health` should answer
 
 # See what's happening
 .\Status.ps1
+
+# End-to-end smoke (health + upload + round-trip; ~5 s)
+.\Test-Deploy.ps1
 
 # Tail logs from one container
 .\Logs.ps1 -Service api
