@@ -89,39 +89,78 @@ $envFile = Get-DockerEnvFile
 
 if (-not $SkipNeo4jPatch) {
     Write-Step "Patching Neo4j password in docker-compose.yml"
-    # Loop the prompt so a too-short password gives a second chance
-    # instead of throwing. Neo4j 5.x community refuses to start with
-    # a password under 8 characters and the failure mode is opaque
-    # (the container restart-loops with InvalidPasswordException),
-    # so catch it here.
     $minLength = 8
-    $plainNeo4j = $null
-    while (-not $plainNeo4j) {
-        if (-not $Neo4jPassword) {
-            $Neo4jPassword = Read-Host -Prompt "Neo4j password (will replace 'test_password_change_me'; min $minLength chars)" -AsSecureString
-        }
-        $plainNeo4j = ConvertFrom-SecureStringToPlain $Neo4jPassword
-        if ([string]::IsNullOrEmpty($plainNeo4j)) {
-            throw "Neo4j password cannot be empty. Re-run with a value or pass -SkipNeo4jPatch."
-        }
-        if ($plainNeo4j.Length -lt $minLength) {
-            Write-Warn2 "Password is $($plainNeo4j.Length) characters; Neo4j 5.x community requires at least $minLength."
-            Write-Host "  Pick a longer one, or pass -SkipNeo4jPatch and edit docker\docker-compose.yml manually."
-            $Neo4jPassword = $null
-            $plainNeo4j = $null
-            continue
-        }
-    }
+
+    # Detect the current password sitting in the compose. Three cases:
+    #
+    #   1. ``test_password_change_me`` placeholder still in place
+    #      → first run; prompt + patch.
+    #   2. Already-patched and >= ``$minLength`` characters
+    #      → keep as-is unless the caller explicitly passes -Neo4jPassword.
+    #   3. Already-patched but < ``$minLength`` characters
+    #      → previous run accepted a too-short password (pre-validation
+    #        ship of this script). Force a re-patch so Neo4j stops
+    #        restart-looping with ``InvalidPasswordException``.
     $compose = Get-Content $composeFile -Raw
-    if ($compose.Contains('test_password_change_me')) {
-        # ``String.Replace`` is a literal substitution — no regex
-        # interpretation of the password value, so a ``$``-bearing
-        # password won't accidentally inject a backreference.
-        $compose = $compose.Replace('test_password_change_me', $plainNeo4j)
-        Set-Content -Encoding UTF8 -Path $composeFile -Value $compose
-        Write-Done "Neo4j password patched in $composeFile"
+    $currentMatch = [regex]::Match($compose, 'NEO4J_AUTH:\s*neo4j/(\S+)')
+    $currentPassword = if ($currentMatch.Success) { $currentMatch.Groups[1].Value } else { $null }
+
+    $needsPatch = $false
+    $reason = $null
+    if (-not $currentPassword) {
+        $needsPatch = $true
+        $reason = "couldn't find NEO4J_AUTH in compose"
+    } elseif ($currentPassword -eq 'test_password_change_me') {
+        $needsPatch = $true
+        $reason = "placeholder password still present"
+    } elseif ($currentPassword.Length -lt $minLength) {
+        $needsPatch = $true
+        $reason = "current password is $($currentPassword.Length) characters; Neo4j 5.x requires >= $minLength"
+        Write-Warn2 "Detected too-short password in compose: $reason. Forcing a re-patch."
+    } elseif ($Neo4jPassword) {
+        # Caller explicitly passed -Neo4jPassword on a previously-patched
+        # file — they want to rotate. Re-patch.
+        $needsPatch = $true
+        $reason = "caller supplied -Neo4jPassword to rotate"
+    }
+
+    if (-not $needsPatch) {
+        Write-Done "Neo4j password already set ($($currentPassword.Length) chars) — leaving compose alone. Pass -Neo4jPassword to rotate."
     } else {
-        Write-Warn2 "Placeholder already replaced — leaving compose file alone."
+        # Loop the prompt so a too-short password gives a second chance
+        # instead of throwing.
+        $plainNeo4j = $null
+        while (-not $plainNeo4j) {
+            if (-not $Neo4jPassword) {
+                $Neo4jPassword = Read-Host -Prompt "Neo4j password (min $minLength chars; replaces the value currently in docker-compose.yml)" -AsSecureString
+            }
+            $plainNeo4j = ConvertFrom-SecureStringToPlain $Neo4jPassword
+            if ([string]::IsNullOrEmpty($plainNeo4j)) {
+                throw "Neo4j password cannot be empty. Re-run with a value or pass -SkipNeo4jPatch."
+            }
+            if ($plainNeo4j.Length -lt $minLength) {
+                Write-Warn2 "Password is $($plainNeo4j.Length) characters; Neo4j 5.x community requires at least $minLength."
+                Write-Host "  Pick a longer one, or pass -SkipNeo4jPatch and edit docker\docker-compose.yml manually."
+                $Neo4jPassword = $null
+                $plainNeo4j = $null
+                continue
+            }
+        }
+
+        # Always patch BOTH NEO4J_AUTH (neo4j service) and KW_NEO4J_PASSWORD
+        # (api service) so they stay in sync — the api dies on bolt auth
+        # mismatch otherwise. Use anchored regex replace so we don't
+        # accidentally rewrite anything else that happens to match.
+        $patched = $compose -replace 'NEO4J_AUTH:\s*neo4j/\S+', ('NEO4J_AUTH: neo4j/' + $plainNeo4j)
+        $patched = $patched -replace 'KW_NEO4J_PASSWORD:\s*\S+', ('KW_NEO4J_PASSWORD: ' + $plainNeo4j)
+        if ($patched -eq $compose) {
+            throw "Could not find NEO4J_AUTH / KW_NEO4J_PASSWORD lines in $composeFile to patch. Inspect the file manually."
+        }
+        Set-Content -Encoding UTF8 -Path $composeFile -Value $patched
+        Write-Done "Neo4j password patched in $composeFile ($reason)."
+        Write-Warn2 "If you previously brought up the stack, you must wipe the Neo4j volume so the new password takes effect:"
+        Write-Host "    docker compose --profile deploy down -v"
+        Write-Host "    docker compose --profile deploy up -d"
     }
 }
 
