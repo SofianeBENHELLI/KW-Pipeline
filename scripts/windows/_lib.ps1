@@ -88,8 +88,8 @@ function Get-DefaultHostname {
         :data:`KW_DEFAULT_HOSTNAME` if neither file is parseable.
     #>
     $candidates = @(
-        Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml',
-        Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml.example'
+        (Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml')
+        (Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml.example')
     )
     foreach ($path in $candidates) {
         if (-not (Test-Path $path)) { continue }
