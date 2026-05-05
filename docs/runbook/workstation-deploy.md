@@ -2,6 +2,8 @@
 
 Run the KW-Pipeline backend (FastAPI + Neo4j) on a workstation, expose it at a stable HTTPS hostname, and let the deployed 3DEXPERIENCE widget call it without any port-forwarding, public IP, or DNS-record juggling.
 
+> **Windows operators:** every manual step in this runbook is automated by the PowerShell toolkit at [`scripts/windows/`](../../scripts/windows/README.md). Run `.\Bootstrap.ps1 -Hostname <yours>` from `scripts\windows\` for the one-shot setup, or use the individual numbered scripts to step through each phase. The runbook below stays as the canonical Linux/macOS path; the Windows scripts mirror it command-for-command.
+
 ## What this deploys
 
 ```
