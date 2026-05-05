@@ -19,6 +19,7 @@ function makeDocument(overrides: Partial<ApiDocument> = {}): ApiDocument {
     created_at: "2026-05-01T00:00:00Z",
     versions: [],
     scopes: [],
+    archived_at: null,
     ...overrides,
   };
 }
