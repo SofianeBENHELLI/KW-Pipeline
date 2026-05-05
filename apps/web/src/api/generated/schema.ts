@@ -161,6 +161,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/hitl/run_auto_promote_pass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Auto Promote Pass
+         * @description Run one HITL auto-promotion pass (ADR-023 §6, slice 3, #215).
+         *
+         *     Synchronous: the worker runs in-line within the request and
+         *     the structured :class:`AutoPromoteResult` is returned directly
+         *     so operators see the full per-version outcome without grepping
+         *     logs. A future cron scheduler will call this same route on an
+         *     interval; for now manual trigger.
+         *
+         *     Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the route's
+         *     admin gate) when the auto-promoter is not wired —
+         *     ``KW_HITL_DISABLE_SCORER=true`` disables the scorer, the router
+         *     and (transitively) the worker. The empty result is also a
+         *     valid response: an admin clicking the button when no rows are
+         *     pending sees ``scanned=0, promoted=[], skipped=[], failed=[]``
+         *     and a 200.
+         */
+        post: operations["admin_hitl_run_auto_promote_pass"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -759,6 +793,27 @@ export interface components {
             enabled: boolean;
         };
         /**
+         * AutoPromoteResult
+         * @description One pass over the pending auto-routed versions (slice 3, #215).
+         *
+         *     Returned by :meth:`HITLAutoPromoter.run_pass` and surfaced by the
+         *     admin trigger route so operators see the exact set of versions the
+         *     pass touched, with the reason for every skip and the message for
+         *     every failure. ``scanned`` counts every row pulled from the store
+         *     in the pass — it equals ``len(promoted) + len(skipped) + len(failed)``
+         *     by construction.
+         */
+        AutoPromoteResult: {
+            /** Failed */
+            failed: components["schemas"]["FailedVersion"][];
+            /** Promoted */
+            promoted: components["schemas"]["PromotedVersion"][];
+            /** Scanned */
+            scanned: number;
+            /** Skipped */
+            skipped: components["schemas"]["SkippedVersion"][];
+        };
+        /**
          * BatchUploadOutcome
          * @description Per-file result inside a :class:`BatchUploadResult`.
          *
@@ -1113,6 +1168,22 @@ export interface components {
             model: string;
         };
         /**
+         * FailedVersion
+         * @description One version whose promotion raised an exception.
+         *
+         *     The error string carries the exception's message; the worker logs
+         *     the full traceback at ``error`` level so operators can correlate
+         *     via the structured event ``hitl.auto_promote.version_failed``.
+         */
+        FailedVersion: {
+            /** Document Id */
+            document_id: string;
+            /** Error */
+            error: string;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
          * GraphEdge
          * @description One directed edge in the knowledge graph projection.
          *
@@ -1393,6 +1464,22 @@ export interface components {
             data_dir: string;
             /** Persistent */
             persistent: boolean;
+        };
+        /**
+         * PromotedVersion
+         * @description One version the worker successfully promoted to VALIDATED.
+         *
+         *     ``score_overall`` is the ``ConfidenceScore.overall`` the router
+         *     used to pick ``auto`` — surfaced so the admin response carries the
+         *     audit-relevant context without a follow-up read.
+         */
+        PromotedVersion: {
+            /** Document Id */
+            document_id: string;
+            /** Score Overall */
+            score_overall: number;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * PurgeArtifactsRequest
@@ -1754,6 +1841,24 @@ export interface components {
             document_id: string;
             /** Results */
             results: components["schemas"]["SimilarDocument"][];
+        };
+        /**
+         * SkippedVersion
+         * @description One version the worker skipped (race-safe no-op).
+         *
+         *     ``reason`` is one of :data:`SkippedReason`; see the docstring for
+         *     the vocabulary.
+         */
+        SkippedVersion: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "already_validated" | "version_no_longer_needs_review" | "document_not_found" | "version_not_found";
+            /** Version Id */
+            version_id: string;
         };
         /**
          * SourceReference
@@ -2161,6 +2266,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConfigResponse"];
+                };
+            };
+        };
+    };
+    admin_hitl_run_auto_promote_pass: {
+        parameters: {
+            query?: {
+                /** @description Optional cap on the number of pending versions the pass touches. Pass ``null`` (omit the param) to process every pending row. Bounded ``[1, 1000]`` to keep the synchronous request shape responsive — a real scheduler will pick the right batch size when it lands. */
+                max_versions?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoPromoteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

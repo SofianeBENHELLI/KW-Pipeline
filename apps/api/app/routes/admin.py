@@ -21,6 +21,10 @@ Holds:
 * ``POST /admin/archive/purge_batch`` — bulk wrapper around
   ``purge_artifacts``, capped at 100 ids per call, best-effort with
   per-doc error reporting. ADR-027 §4, slice 5 of D.9.
+* ``POST /admin/hitl/run_auto_promote_pass`` — runs one synchronous
+  pass of the HITL auto-promotion worker. ADR-023 §6, EPIC-A slice 3
+  (#215). A future scheduler will call this on a cron / asyncio
+  interval; for now manual trigger only.
 
 Every archive route requires the ``admin`` role (ADR-019 §3 / #264) AND
 ``?confirm=true`` for non-dry-run mutating actions (defence in depth,
@@ -28,6 +32,13 @@ per ADR-027 §5). ``?dry_run=true`` returns the impact summary with no
 state change and no audit row. The 410 Gone read response for purged
 versions / fully-purged documents is wired in
 :mod:`app.routes.lifecycle` (slice 6 of D.9).
+
+The HITL auto-promotion route is admin-only too but does NOT use the
+``?confirm=true`` defence-in-depth pattern: the pass is idempotent
+(already-promoted rows are skipped, race-detected rows are skipped,
+failed rows continue) and the side-effect (NEEDS_REVIEW → VALIDATED
+on pre-decided rows) reflects what the router already chose, so a
+second invocation cannot drift the catalog further than the first did.
 """
 
 from __future__ import annotations
@@ -69,6 +80,7 @@ from app.schemas.admin_config import (
 )
 from app.schemas.document import HealthResponse
 from app.schemas.scope import Scope
+from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.auth import User, require_admin
 from app.settings import Settings
 
@@ -696,5 +708,67 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             )
 
         return PurgeBatchResponse(results=results, dry_run=dry_run)
+
+    @router.post(
+        "/admin/hitl/run_auto_promote_pass",
+        operation_id="admin_hitl_run_auto_promote_pass",
+        response_model=AutoPromoteResult,
+    )
+    def run_auto_promote_pass(
+        max_versions: int | None = Query(
+            None,
+            ge=1,
+            le=1000,
+            description=(
+                "Optional cap on the number of pending versions the "
+                "pass touches. Pass ``null`` (omit the param) to "
+                "process every pending row. Bounded ``[1, 1000]`` to "
+                "keep the synchronous request shape responsive — a "
+                "real scheduler will pick the right batch size when "
+                "it lands."
+            ),
+        ),
+        user: User = Depends(require_admin),
+    ) -> AutoPromoteResult:
+        """Run one HITL auto-promotion pass (ADR-023 §6, slice 3, #215).
+
+        Synchronous: the worker runs in-line within the request and
+        the structured :class:`AutoPromoteResult` is returned directly
+        so operators see the full per-version outcome without grepping
+        logs. A future cron scheduler will call this same route on an
+        interval; for now manual trigger.
+
+        Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the route's
+        admin gate) when the auto-promoter is not wired —
+        ``KW_HITL_DISABLE_SCORER=true`` disables the scorer, the router
+        and (transitively) the worker. The empty result is also a
+        valid response: an admin clicking the button when no rows are
+        pending sees ``scanned=0, promoted=[], skipped=[], failed=[]``
+        and a 200.
+        """
+        if services.hitl_auto_promoter is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.HITL_DISABLED,
+                message=(
+                    "HITL auto-promotion worker is not wired. "
+                    "Likely cause: KW_HITL_DISABLE_SCORER=true."
+                ),
+                retryable=False,
+                remediation=(
+                    "Unset KW_HITL_DISABLE_SCORER (or set it to false) "
+                    "and restart the API. The router + worker share the "
+                    "same kill switch as the scorer."
+                ),
+            )
+        log.info(
+            "admin.hitl.run_auto_promote_pass.invoked",
+            extra={
+                "actor": user.id,
+                "actor_role": user.role,
+                "max_versions": max_versions,
+            },
+        )
+        return services.hitl_auto_promoter.run_pass(max_versions=max_versions)
 
     return router

@@ -78,6 +78,44 @@
         "title": "AuditConfig",
         "type": "object"
       },
+      "AutoPromoteResult": {
+        "description": "One pass over the pending auto-routed versions (slice 3, #215).\n\nReturned by :meth:`HITLAutoPromoter.run_pass` and surfaced by the\nadmin trigger route so operators see the exact set of versions the\npass touched, with the reason for every skip and the message for\nevery failure. ``scanned`` counts every row pulled from the store\nin the pass — it equals ``len(promoted) + len(skipped) + len(failed)``\nby construction.",
+        "properties": {
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/FailedVersion"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/PromotedVersion"
+            },
+            "title": "Promoted",
+            "type": "array"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedVersion"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scanned",
+          "promoted",
+          "skipped",
+          "failed"
+        ],
+        "title": "AutoPromoteResult",
+        "type": "object"
+      },
       "BatchUploadOutcome": {
         "description": "Per-file result inside a :class:`BatchUploadResult`.\n\nEvery file the client sent in a batch produces exactly one of\nthese — partial-success batches keep the records for the failed\nfiles alongside the successful ones, and the route always returns\nHTTP 200 (the report itself describes failures). Clients route\non the ``status`` discriminant.",
         "properties": {
@@ -826,6 +864,30 @@
         "title": "EmbeddingsConfig",
         "type": "object"
       },
+      "FailedVersion": {
+        "description": "One version whose promotion raised an exception.\n\nThe error string carries the exception's message; the worker logs\nthe full traceback at ``error`` level so operators can correlate\nvia the structured event ``hitl.auto_promote.version_failed``.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "version_id",
+          "error"
+        ],
+        "title": "FailedVersion",
+        "type": "object"
+      },
       "GraphEdge": {
         "description": "One directed edge in the knowledge graph projection.\n\n``source_id`` and ``target_id`` reference :class:`GraphNode.id`\nvalues. Provenance requirements depend on ``kind``:\n\n- **structural** (``part_of``, ``has_version``, ``has_chunk``,\n  ``belongs_to``) — no citation required; the edge itself is the\n  provenance.\n- **deterministic semantic** (``related_to``, ``shares_keyword``,\n  ``same_topic_as``) — must carry ``source_chunk_ids`` (the two\n  chunks that produced the relation), ``reason`` (human-readable\n  explanation), and ``shared_keywords`` in ``properties``. See\n  :class:`ChunkRelationEdgeProperties`.\n- **LLM** (``has_entity``) — must carry ``source_reference_id``\n  pointing at a row in the catalog's ``source_references`` table\n  (ADR-012 §4). Triples missing citations are dropped by the\n  extractor before edges are constructed.",
         "properties": {
@@ -1415,6 +1477,30 @@
           "data_dir"
         ],
         "title": "PersistenceConfig",
+        "type": "object"
+      },
+      "PromotedVersion": {
+        "description": "One version the worker successfully promoted to VALIDATED.\n\n``score_overall`` is the ``ConfidenceScore.overall`` the router\nused to pick ``auto`` — surfaced so the admin response carries the\naudit-relevant context without a follow-up read.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "score_overall": {
+            "title": "Score Overall",
+            "type": "number"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "version_id",
+          "score_overall"
+        ],
+        "title": "PromotedVersion",
         "type": "object"
       },
       "PurgeArtifactsRequest": {
@@ -2081,6 +2167,36 @@
           "results"
         ],
         "title": "SimilarDocumentsResponse",
+        "type": "object"
+      },
+      "SkippedVersion": {
+        "description": "One version the worker skipped (race-safe no-op).\n\n``reason`` is one of :data:`SkippedReason`; see the docstring for\nthe vocabulary.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "already_validated",
+              "version_no_longer_needs_review",
+              "document_not_found",
+              "version_not_found"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "version_id",
+          "reason"
+        ],
+        "title": "SkippedVersion",
         "type": "object"
       },
       "SourceReference": {
@@ -2816,6 +2932,57 @@
           }
         },
         "summary": "Admin Config"
+      }
+    },
+    "/admin/hitl/run_auto_promote_pass": {
+      "post": {
+        "description": "Run one HITL auto-promotion pass (ADR-023 §6, slice 3, #215).\n\nSynchronous: the worker runs in-line within the request and\nthe structured :class:`AutoPromoteResult` is returned directly\nso operators see the full per-version outcome without grepping\nlogs. A future cron scheduler will call this same route on an\ninterval; for now manual trigger.\n\nReturns 503 with ``KW_HITL_DISABLED`` (mirrored on the route's\nadmin gate) when the auto-promoter is not wired —\n``KW_HITL_DISABLE_SCORER=true`` disables the scorer, the router\nand (transitively) the worker. The empty result is also a\nvalid response: an admin clicking the button when no rows are\npending sees ``scanned=0, promoted=[], skipped=[], failed=[]``\nand a 200.",
+        "operationId": "admin_hitl_run_auto_promote_pass",
+        "parameters": [
+          {
+            "description": "Optional cap on the number of pending versions the pass touches. Pass ``null`` (omit the param) to process every pending row. Bounded ``[1, 1000]`` to keep the synchronous request shape responsive — a real scheduler will pick the right batch size when it lands.",
+            "in": "query",
+            "name": "max_versions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cap on the number of pending versions the pass touches. Pass ``null`` (omit the param) to process every pending row. Bounded ``[1, 1000]`` to keep the synchronous request shape responsive — a real scheduler will pick the right batch size when it lands.",
+              "title": "Max Versions"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoPromoteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Auto Promote Pass"
       }
     },
     "/documents": {
