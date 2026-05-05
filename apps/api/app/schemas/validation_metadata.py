@@ -23,13 +23,61 @@ from typing import Literal
 
 from app.schemas import APISchemaModel as BaseModel
 
-# The set of routing-decision values written by the next-slice
-# ``hitl_router.py``. Kept here so the scorer + the future router
-# share one source of truth and Pydantic validates the persisted
-# value at read time. ``None`` is a valid persisted shape — it means
-# the scorer ran but the router hasn't picked a decision yet.
-RoutingDecision = Literal["auto", "human", "external"]
+# The narrow set of routing-method values written by the slice-2
+# ``hitl_router.py``. Kept here so the scorer + the router share one
+# source of truth and Pydantic validates the persisted value at read
+# time. ``None`` is a valid persisted shape — it means the scorer ran
+# but the router hasn't picked a method yet (e.g. scorer-disabled run).
+RoutingMethod = Literal["auto", "human", "external"]
 ValidationMethod = Literal["auto", "human", "external"]
+
+# Reasons the router can record on a :class:`RoutingDecision`. The
+# vocabulary is closed (no free-form strings) so audit queries can
+# bucket decisions without a string-cleaning pass:
+#
+# - ``force_auto`` — ``KW_HITL_FORCE_AUTO_CORPUS`` admin override.
+# - ``above_threshold`` — score >= threshold and SPC sampling did not
+#   escalate.
+# - ``below_threshold`` — score < threshold; routes to a human.
+# - ``spc_sampled`` — score >= threshold but SPC sampling escalated to
+#   human as a quality probe.
+# - ``external_workflow`` — placeholder for the EPIC-B ITEROP path.
+#   Dead today (no deployment can reach it) but documented so the
+#   audit query has a stable enum.
+# - ``ocr_override`` — OCR flag was active; routes to human regardless
+#   of every other signal.
+RoutingReason = Literal[
+    "force_auto",
+    "above_threshold",
+    "below_threshold",
+    "spc_sampled",
+    "external_workflow",
+    "ocr_override",
+]
+
+
+class RoutingDecision(BaseModel):
+    """One routing decision per ADR-023 + the EPIC-A A.2 router slice.
+
+    Produced by :class:`app.services.hitl_router.HITLRouter.decide` and
+    audit-emitted as ``routing.decided``. ``method`` is the narrow
+    routing-method literal that ``ValidationMetadata.routing_decision``
+    persists; ``reason`` carries the closed enum so audit queries can
+    answer "show me every version routed because of OCR override"
+    without a string-cleaning pass.
+
+    ``bucket`` is a 2-tuple ``(content_type, topic_cluster)`` so the
+    SPC sampler keys per-bucket counters consistently with
+    :class:`app.services.corpus_norms.CorpusNormsProvider` and the
+    next-slice drift detector. ``"_unknown_"`` stands in for a missing
+    ``topic_cluster`` so the bucket key is always populated.
+    """
+
+    method: RoutingMethod
+    reason: RoutingReason
+    score_overall: float
+    threshold: float
+    bucket: tuple[str, str]
 
 
 class ConfidenceScore(BaseModel):
@@ -66,7 +114,7 @@ class ValidationMetadata(BaseModel):
 
     version_id: str
     confidence_score: ConfidenceScore | None = None
-    routing_decision: RoutingDecision | None = None
+    routing_decision: RoutingMethod | None = None
     validation_method: ValidationMethod | None = None
     validation_actor: str | None = None
 
@@ -74,6 +122,8 @@ class ValidationMetadata(BaseModel):
 __all__ = [
     "ConfidenceScore",
     "RoutingDecision",
+    "RoutingMethod",
+    "RoutingReason",
     "ValidationMetadata",
     "ValidationMethod",
 ]

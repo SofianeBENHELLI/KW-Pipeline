@@ -553,3 +553,36 @@ def test_corpus_norms_compound_primary_key(tmp_path):
     ]
     conn.close()
     assert sorted(pk_cols) == sorted(["content_type", "topic_cluster", "metric_name"])
+
+
+def test_migration_0009_creates_sampling_state_table(tmp_path):
+    """SPC sampling state per ``(content_type, topic_cluster)`` bucket
+    (ADR-023 §6, EPIC-A A.3, #215). Backs the HITL router's SPC
+    sampling layer."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sampling_state)")}
+    conn.close()
+    expected = {
+        "content_type",
+        "topic_cluster",
+        "samples_taken",
+        "samples_auto",
+        "samples_human",
+        "samples_human_after_auto",
+        "last_decision_at",
+    }
+    assert expected.issubset(cols)
+
+
+def test_sampling_state_compound_primary_key(tmp_path):
+    """The PK is ``(content_type, topic_cluster)`` so the same bucket
+    cannot be recorded twice — the SQLite store relies on the PK to
+    keep the INSERT-OR-IGNORE + UPDATE write pattern idempotent."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    pk_cols = [row[1] for row in conn.execute("PRAGMA table_info(sampling_state)") if row[5] != 0]
+    conn.close()
+    assert sorted(pk_cols) == sorted(["content_type", "topic_cluster"])

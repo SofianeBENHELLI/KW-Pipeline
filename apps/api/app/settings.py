@@ -481,10 +481,39 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("KW_HITL_AUTO_VALIDATE_THRESHOLD"),
         description=(
             "Auto-validate threshold — versions with confidence "
-            "≥ this value are routed to the auto path by the next-slice "
-            "``hitl_router.py``. The scorer reads this only for the "
-            "audit trail; enforcement lives in the router. "
+            "≥ this value are routed to the auto path by "
+            "``hitl_router.py`` (slice 2). The scorer reads this only "
+            "for the audit trail; enforcement lives in the router. "
             "Range [0.0, 1.0]."
+        ),
+        ge=0.0,
+        le=1.0,
+    )
+    hitl_force_auto_corpus_raw: str = Field(
+        default="",
+        alias="hitl_force_auto_corpus",
+        validation_alias=AliasChoices("KW_HITL_FORCE_AUTO_CORPUS"),
+        description=(
+            "ADR-023 §6 admin-mode override. Truthy "
+            "(``1``/``true``/``yes``/``on``) makes the HITL router "
+            "auto-route every version regardless of score, OCR flag, "
+            "or SPC sampling. Used for backfill / corpus-replay runs "
+            "where every version is already trusted. The router emits "
+            "a loud ``hitl.force_auto_corpus_active`` warning at "
+            "construction so accidental production usage is visible."
+        ),
+    )
+    hitl_spc_sample_rate: float = Field(
+        default=0.05,
+        validation_alias=AliasChoices("KW_HITL_SPC_SAMPLE_RATE"),
+        description=(
+            "Baseline SPC (statistical process control) sampling rate "
+            "for the HITL router (ADR-023 §6). Fraction of versions "
+            "that *would* auto-validate but are escalated to a human "
+            "as a quality probe. Default ``0.05`` keeps the auto-rate "
+            "honest without flooding the review queue. The drift "
+            "detector that ramps this rate per-bucket is the next "
+            "slice — v1 ships a constant baseline. Range [0.0, 1.0]."
         ),
         ge=0.0,
         le=1.0,
@@ -561,6 +590,11 @@ class Settings(BaseSettings):
     def hitl_scorer_disabled(self) -> bool:
         """Truthy parse of the HITL scorer opt-out (ADR-023 §5)."""
         return _truthy(self.hitl_disable_scorer_raw)
+
+    @property
+    def hitl_force_auto_corpus(self) -> bool:
+        """Truthy parse of the corpus-wide force-auto override (ADR-023 §6)."""
+        return _truthy(self.hitl_force_auto_corpus_raw)
 
     @property
     def hitl_weights(self) -> dict[str, float]:

@@ -52,6 +52,11 @@ def test_scorer_fires_on_needs_review_transition():
     assert 0.0 <= metadata.confidence_score.overall <= 1.0
     # All five canonical signals must be present in the persisted row.
     assert set(metadata.confidence_score.signals.keys()) == set(ALL_SIGNALS)
+    # Slice 2 (#215 A.2): the router fills routing_decision with one
+    # of the typed methods. The exact method depends on the score —
+    # the test fixture is small enough that both auto and human are
+    # plausible, so we only assert it's populated and typed.
+    assert metadata.routing_decision in {"auto", "human", "external"}
 
 
 def test_scorer_emits_confidence_scored_audit_event():
@@ -73,20 +78,53 @@ def test_scorer_emits_confidence_scored_audit_event():
     assert payload["computed_by_version"] == "v1"
 
 
+def test_router_emits_routing_decided_audit_event():
+    """Slice 2: every router decision lands a structured
+    ``routing.decided`` event carrying the decision payload (method,
+    reason, score, threshold, bucket). The actor is ``"system"``
+    because the FSM-driven scoring path doesn't have a user context.
+    """
+    services = build_services()
+    create_app(services=services)
+    _, version_id = _land_in_needs_review(services)
+
+    rows = services.audit_events.query(event_name="routing.decided")
+    matching = [r for r in rows if r.payload.get("version_id") == version_id]
+    assert matching, "expected a routing.decided event for the version"
+    payload = matching[0].payload
+    assert payload["method"] in {"auto", "human", "external"}
+    assert payload["reason"] in {
+        "force_auto",
+        "above_threshold",
+        "below_threshold",
+        "spc_sampled",
+        "external_workflow",
+        "ocr_override",
+    }
+    assert "score_overall" in payload
+    assert "threshold" in payload
+    assert payload["bucket_content_type"] == "text/plain"
+    assert payload["actor"] == "system"
+
+
 def test_scorer_disabled_via_env_skips_side_effects(monkeypatch):
     """ADR-023 §5: ``KW_HITL_DISABLE_SCORER=true`` is the demo escape hatch.
     The transition keeps working, no metadata row is written, no
-    audit event is emitted.
+    audit event is emitted. The router is also disabled when the
+    scorer is — slice 2 ties the two together.
     """
     monkeypatch.setenv("KW_HITL_DISABLE_SCORER", "true")
     services = build_services()
     assert services.confidence_scorer is None
+    assert services.hitl_router is None
     create_app(services=services)
     _, version_id = _land_in_needs_review(services)
 
     assert services.validation_metadata.get(version_id) is None
     rows = services.audit_events.query(event_name="confidence.scored")
     assert not any(row.payload.get("version_id") == version_id for row in rows)
+    routing_rows = services.audit_events.query(event_name="routing.decided")
+    assert not any(row.payload.get("version_id") == version_id for row in routing_rows)
 
 
 def test_scorer_failure_does_not_roll_back_transition():
@@ -123,6 +161,67 @@ def test_scorer_failure_does_not_roll_back_transition():
     assert refreshed.status == DocumentVersionStatus.NEEDS_REVIEW
     # No metadata persisted because the scorer raised before upsert.
     assert services.validation_metadata.get(version.id) is None
+
+
+def test_router_failure_does_not_roll_back_transition_or_score():
+    """Slice 2: a router-internal failure must NOT roll back the FSM
+    transition or the score persistence. The score is the more
+    important record; the router can be re-run by the next-slice
+    worker against the persisted score.
+    """
+    services = build_services()
+
+    class _FlakyRouter:
+        ROUTER_VERSION = "v1"
+
+        def decide(self, **_kwargs):
+            raise RuntimeError("simulated router outage")
+
+    services.semantic_outputs.hitl_router = _FlakyRouter()  # type: ignore[assignment]
+
+    version = services.documents.upload(
+        filename="policy.txt",
+        content_type="text/plain",
+        content=b"Tiny.",
+    )
+    services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
+    services.semantic_outputs.generate(document_id=version.document_id, version_id=version.id)
+
+    refreshed = services.documents.get_version(
+        document_id=version.document_id, version_id=version.id
+    )
+    assert refreshed.status == DocumentVersionStatus.NEEDS_REVIEW
+    # The score MUST have been persisted — the router exception fires
+    # in a separate try-block from the score persistence so the
+    # score survives the router hiccup.
+    metadata = services.validation_metadata.get(version.id)
+    assert metadata is not None
+    assert metadata.confidence_score is not None
+    # The router never wrote a routing_decision because it raised.
+    assert metadata.routing_decision is None
+
+
+def test_router_skipped_when_router_unwired_but_scorer_present():
+    """Defensive branch: if a caller constructs ``SemanticOutputService``
+    with a scorer but no router (e.g. a test that injects a fake
+    scorer), the score still persists and no routing decision lands.
+    """
+    services = build_services()
+    # Strip the router back out, mimicking a hand-built service.
+    services.semantic_outputs.hitl_router = None
+
+    version = services.documents.upload(
+        filename="policy.txt",
+        content_type="text/plain",
+        content=b"Tiny.",
+    )
+    services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
+    services.semantic_outputs.generate(document_id=version.document_id, version_id=version.id)
+
+    metadata = services.validation_metadata.get(version.id)
+    assert metadata is not None
+    assert metadata.confidence_score is not None
+    assert metadata.routing_decision is None
 
 
 def test_settings_hitl_weights_default_equal():

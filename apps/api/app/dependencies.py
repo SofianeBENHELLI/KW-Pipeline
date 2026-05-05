@@ -22,6 +22,7 @@ from app.services.document_similarity_service import DocumentSimilarityService
 from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
 from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
+from app.services.hitl_router import HITLRouter
 from app.services.idempotency_store import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
@@ -43,6 +44,11 @@ from app.services.knowledge import (
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
 from app.services.review_service import ReviewService
+from app.services.sampling_state_store import (
+    InMemorySamplingStateStore,
+    SamplingStateStore,
+    SQLiteSamplingStateStore,
+)
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
@@ -267,6 +273,14 @@ class PipelineServices:
     # truthy, in which case the transition keeps working without the
     # scoring side-effect (demo-safety escape hatch per ADR-023 §5).
     confidence_scorer: ConfidenceScorer | None = None
+    # HITL router (slice 2, ADR-023 §6, #215). ``None`` when the
+    # scorer is disabled — the router has nothing to read in that
+    # case, so the wiring keeps both fields tied. The router writes
+    # ``ValidationMetadata.routing_decision`` and emits the
+    # ``routing.decided`` audit event; the auto-promotion FSM
+    # transition is the next slice.
+    hitl_router: HITLRouter | None = None
+    sampling_state: SamplingStateStore = field(default_factory=InMemorySamplingStateStore)
     validation_metadata: ValidationMetadataStore = field(
         default_factory=InMemoryValidationMetadataStore
     )
@@ -555,6 +569,35 @@ def _maybe_build_confidence_scorer(
     )
 
 
+def _maybe_build_hitl_router(
+    settings: Settings,
+    *,
+    confidence_scorer: ConfidenceScorer | None,
+    sampling_state: SamplingStateStore,
+) -> HITLRouter | None:
+    """Construct the HITL router iff the scorer is also wired.
+
+    The router has nothing to read when the scorer is disabled, so we
+    tie the two together: a single ``KW_HITL_DISABLE_SCORER`` flips
+    both off. EPIC-B is currently dead — ``external_workflow_enabled``
+    is hard-wired to ``False`` here. Once EPIC-B lands, this flips to
+    ``settings.iterop_enabled and bool(settings.iterop_base_url)`` and
+    the router's ``external`` branch lights up without further code
+    changes in the hook.
+    """
+    if confidence_scorer is None:
+        return None
+    return HITLRouter(
+        sampling_state=sampling_state,
+        threshold=settings.hitl_auto_validate_threshold,
+        force_auto_corpus=settings.hitl_force_auto_corpus,
+        # EPIC-B placeholder — see module docstring on
+        # ``hitl_router.HITLRouter`` for the wire-up plan.
+        external_workflow_enabled=False,
+        sampling_rate=settings.hitl_spc_sample_rate,
+    )
+
+
 def build_services(settings: Settings | None = None) -> PipelineServices:
     """Create fresh in-memory services for tests and ephemeral demos.
 
@@ -605,6 +648,12 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         documents=documents,
         corpus_norms=corpus_norms_store,
     )
+    sampling_state_store: SamplingStateStore = InMemorySamplingStateStore()
+    hitl_router = _maybe_build_hitl_router(
+        settings,
+        confidence_scorer=confidence_scorer,
+        sampling_state=sampling_state_store,
+    )
     semantic_outputs = SemanticOutputService(
         documents=documents,
         extraction_jobs=extraction_jobs,
@@ -612,6 +661,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         markdown_generator=markdown_generator,
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
+        hitl_router=hitl_router,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
@@ -640,6 +690,8 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
         confidence_scorer=confidence_scorer,
+        hitl_router=hitl_router,
+        sampling_state=sampling_state_store,
         validation_metadata=validation_metadata_store,
         corpus_norms=corpus_norms_store,
     )
@@ -698,6 +750,12 @@ def build_persistent_services(
         documents=documents,
         corpus_norms=corpus_norms_store,
     )
+    sampling_state_store: SamplingStateStore = SQLiteSamplingStateStore(catalog_db_path)
+    hitl_router = _maybe_build_hitl_router(
+        settings,
+        confidence_scorer=confidence_scorer,
+        sampling_state=sampling_state_store,
+    )
     semantic_outputs = SemanticOutputService(
         documents=documents,
         extraction_jobs=extraction_jobs,
@@ -705,6 +763,7 @@ def build_persistent_services(
         markdown_generator=markdown_generator,
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
+        hitl_router=hitl_router,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
@@ -733,6 +792,8 @@ def build_persistent_services(
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
         confidence_scorer=confidence_scorer,
+        hitl_router=hitl_router,
+        sampling_state=sampling_state_store,
         validation_metadata=validation_metadata_store,
         corpus_norms=corpus_norms_store,
     )

@@ -31,7 +31,7 @@ from typing import Protocol, runtime_checkable
 
 from app.schemas.validation_metadata import (
     ConfidenceScore,
-    RoutingDecision,
+    RoutingMethod,
     ValidationMetadata,
     ValidationMethod,
 )
@@ -198,11 +198,11 @@ def _row_to_metadata(row: tuple) -> ValidationMetadata:
     )
 
 
-def _coerce_routing(value: str | None) -> RoutingDecision | None:
-    """Narrow a freeform DB string into the typed ``RoutingDecision``
+def _coerce_routing(value: str | None) -> RoutingMethod | None:
+    """Narrow a freeform DB string into the typed ``RoutingMethod``
     literal. Unknown values are dropped to ``None`` rather than
-    raising — the next-slice router is the authoritative writer, and
-    a forward-compat row written by a newer service shouldn't crash
+    raising — the router is the authoritative writer, and a
+    forward-compat row written by a newer service shouldn't crash
     this read path.
     """
     if value in {"auto", "human", "external"}:
