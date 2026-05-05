@@ -1264,6 +1264,11 @@ export interface components {
              * @enum {string}
              */
             default_validation_method: "human" | "external" | "auto";
+            /**
+             * Force Auto Corpus
+             * @default false
+             */
+            force_auto_corpus: boolean;
             iterop: components["schemas"]["IteropConfig"];
         };
         /** IteropConfig */

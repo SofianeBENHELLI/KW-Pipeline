@@ -144,6 +144,7 @@ def _build_admin_config(settings: Settings) -> AdminConfigResponse:
                 base_url_configured=bool(settings.iterop_base_url),
                 auth_configured=bool(settings.iterop_auth_token),
             ),
+            force_auto_corpus=settings.hitl_force_auto_corpus,
         ),
         logging=LoggingConfig(
             format=settings.log_format,

@@ -512,11 +512,40 @@ class Settings(BaseSettings):
             "that *would* auto-validate but are escalated to a human "
             "as a quality probe. Default ``0.05`` keeps the auto-rate "
             "honest without flooding the review queue. The drift "
-            "detector that ramps this rate per-bucket is the next "
-            "slice — v1 ships a constant baseline. Range [0.0, 1.0]."
+            "detector ramps this rate per-bucket; see "
+            "``hitl_drift_threshold`` / ``hitl_drift_ramp_factor``. "
+            "Range [0.0, 1.0]."
         ),
         ge=0.0,
         le=1.0,
+    )
+    hitl_drift_threshold: float = Field(
+        default=0.10,
+        validation_alias=AliasChoices("KW_HITL_DRIFT_THRESHOLD"),
+        description=(
+            "Drift ratio above which a bucket's SPC sampling rate "
+            "ramps (ADR-023 §6, EPIC-A A.3 part 2). The ratio is "
+            "``samples_human_after_auto / samples_auto`` per "
+            "``(content_type, topic_cluster)`` bucket — when human "
+            "reviewers reject auto-eligible versions at a rate above "
+            "this floor, the bucket's sampling rate ramps up to "
+            "catch more regressions. Range [0.0, 1.0+); typical "
+            "value ``0.10`` (10% rejection rate triggers ramp)."
+        ),
+        ge=0.0,
+    )
+    hitl_drift_ramp_factor: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("KW_HITL_DRIFT_RAMP_FACTOR"),
+        description=(
+            "Multiplier applied to ``hitl_spc_sample_rate`` for "
+            "drifting buckets (ADR-023 §6, EPIC-A A.3 part 2). With "
+            "the default ``0.05`` baseline + ``10.0`` ramp factor, a "
+            "drifting bucket samples at ``0.5`` (capped at ``1.0``). "
+            "Tune up to escalate harder; tune down for less reactive "
+            "behaviour. Range [0.0, ∞)."
+        ),
+        ge=0.0,
     )
 
     # ------------------------------------------------------------------

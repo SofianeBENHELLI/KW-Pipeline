@@ -23,6 +23,7 @@ from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
 from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
 from app.services.hitl_auto_promoter import HITLAutoPromoter
+from app.services.hitl_drift_detector import HITLDriftDetector
 from app.services.hitl_router import HITLRouter
 from app.services.idempotency_store import (
     IdempotencyStore,
@@ -315,6 +316,11 @@ class PipelineServices:
                 semantic_outputs=self.semantic_outputs,
                 knowledge_projector=self.knowledge_projector,
                 entity_extractor=self.entity_extractor,
+                # EPIC-A A.3 part 2 drift signal: handle_rejection
+                # bumps ``samples_human_after_auto`` when the rejected
+                # version was originally routed to ``auto``.
+                validation_metadata=self.validation_metadata,
+                sampling_state=self.sampling_state,
             ),
         )
         object.__setattr__(
@@ -609,9 +615,23 @@ def _maybe_build_hitl_router(
     ``settings.iterop_enabled and bool(settings.iterop_base_url)`` and
     the router's ``external`` branch lights up without further code
     changes in the hook.
+
+    The drift detector (EPIC-A A.3 part 2) is wired alongside the
+    router so the SPC sampling rate ramps per-bucket when the
+    ``samples_human_after_auto / samples_auto`` ratio crosses
+    :attr:`Settings.hitl_drift_threshold`. Backward-compat: the
+    router's ``sampling_rate`` constant is still threaded through so
+    a future ``drift_detector=None`` posture (or a misconfiguration)
+    falls back to the constant rate.
     """
     if confidence_scorer is None:
         return None
+    drift_detector = HITLDriftDetector(
+        sampling_state=sampling_state,
+        baseline_rate=settings.hitl_spc_sample_rate,
+        drift_threshold=settings.hitl_drift_threshold,
+        ramp_factor=settings.hitl_drift_ramp_factor,
+    )
     return HITLRouter(
         sampling_state=sampling_state,
         threshold=settings.hitl_auto_validate_threshold,
@@ -620,6 +640,7 @@ def _maybe_build_hitl_router(
         # ``hitl_router.HITLRouter`` for the wire-up plan.
         external_workflow_enabled=False,
         sampling_rate=settings.hitl_spc_sample_rate,
+        drift_detector=drift_detector.sampling_rate,
     )
 
 

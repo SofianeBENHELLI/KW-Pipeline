@@ -166,6 +166,94 @@ def test_handle_validation_omits_actor_when_not_provided():
     assert any("actor" in row.payload for row in rows)
 
 
+def test_handle_rejection_bumps_drift_counter_when_router_decided_auto():
+    """EPIC-A A.3 part 2 (#215, ADR-023 §6): a rejection of a version
+    the router originally decided to auto is the canonical drift
+    signal — bump ``samples_human_after_auto`` for the bucket so the
+    drift detector ramps the bucket's sampling rate."""
+    from app.schemas.validation_metadata import ValidationMetadata
+    from app.services.sampling_state_store import SamplingBucket
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    # Force the validation_metadata into an "auto-decided, not yet
+    # promoted" shape so ``handle_rejection`` recognises this as a
+    # drift signal.
+    services.validation_metadata.upsert(
+        ValidationMetadata(
+            version_id=version_id,
+            confidence_score=None,
+            routing_decision="auto",
+            validation_method=None,
+        ),
+    )
+
+    services.review.handle_rejection(
+        document_id=document_id,
+        version_id=version_id,
+        reviewer_note="Looked good to the router; humans disagreed.",
+        actor="alice",
+    )
+
+    counters = services.sampling_state.read_counters(
+        bucket=SamplingBucket(content_type="text/plain", topic_cluster="_unknown_"),
+    )
+    assert counters.samples_human_after_auto == 1
+
+
+def test_handle_rejection_does_not_bump_drift_counter_for_human_routed_version():
+    """The rejection of a version the router decided to ``human``
+    (e.g. below threshold) is NOT a drift event — the router never
+    thought this version was auto-eligible."""
+    from app.schemas.validation_metadata import ValidationMetadata
+    from app.services.sampling_state_store import SamplingBucket
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    services.validation_metadata.upsert(
+        ValidationMetadata(
+            version_id=version_id,
+            routing_decision="human",
+        ),
+    )
+
+    services.review.handle_rejection(
+        document_id=document_id,
+        version_id=version_id,
+        actor="alice",
+    )
+
+    counters = services.sampling_state.read_counters(
+        bucket=SamplingBucket(content_type="text/plain", topic_cluster="_unknown_"),
+    )
+    assert counters.samples_human_after_auto == 0
+
+
+def test_handle_rejection_does_not_bump_drift_counter_when_no_metadata():
+    """Defensive: a rejection on a version with no validation_metadata
+    row (scorer disabled, legacy data) is a no-op for the drift counter."""
+    from app.services.sampling_state_store import SamplingBucket
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    # Wipe any auto-written metadata so the lookup returns None.
+    services.validation_metadata._rows.clear()  # type: ignore[attr-defined]
+
+    services.review.handle_rejection(
+        document_id=document_id,
+        version_id=version_id,
+        actor="alice",
+    )
+
+    counters = services.sampling_state.read_counters(
+        bucket=SamplingBucket(content_type="text/plain", topic_cluster="_unknown_"),
+    )
+    assert counters.samples_human_after_auto == 0
+
+
 def test_handle_validation_does_not_roll_back_on_projector_failure():
     """ADR-012 fire-and-log: a knowledge-projector failure must NOT
     roll back the FSM transition. The catalog stays the source of

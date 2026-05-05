@@ -59,6 +59,14 @@ log = logging.getLogger(__name__)
 # :func:`random.random` so production wiring needs no extra config.
 RandomFn = Callable[[], float]
 
+# Type alias for the per-bucket sampling-rate function. The router
+# calls this once per :meth:`decide` to pick the SPC sampling rate
+# for the version's bucket. Same Protocol shape as
+# :meth:`HITLDriftDetector.sampling_rate` so the wiring layer can
+# pass the bound method directly; tests pass a lambda. Returns a
+# rate in ``[0.0, 1.0]``.
+SamplingRateFn = Callable[[tuple[str, str]], float]
+
 
 @dataclass(frozen=True)
 class _RouterConfig:
@@ -101,6 +109,7 @@ class HITLRouter:
         force_auto_corpus: bool,
         external_workflow_enabled: bool,
         sampling_rate: float = 0.05,
+        drift_detector: SamplingRateFn | None = None,
         random_fn: RandomFn = random.random,
     ) -> None:
         if not 0.0 <= threshold <= 1.0:
@@ -118,6 +127,12 @@ class HITLRouter:
             external_workflow_enabled=external_workflow_enabled,
             sampling_rate=sampling_rate,
         )
+        # Per-bucket rate driver (A.3 part 2). When wired, the router
+        # asks the detector for an effective rate per
+        # ``(content_type, topic_cluster)``; when ``None`` we fall back
+        # to the configured constant ``sampling_rate`` so existing
+        # tests + the in-memory wiring keep working without churn.
+        self._drift_detector = drift_detector
         self._random_fn = random_fn
         if force_auto_corpus:
             # ADR-023 §6 admin mode is a load-bearing override that
@@ -228,7 +243,7 @@ class HITLRouter:
 
         # 4. Threshold path. >= threshold → auto unless SPC sampled.
         if score.overall >= self._config.threshold:
-            if self._spc_escalate():
+            if self._spc_escalate(bucket=bucket):
                 return self._decision(
                     method="human",
                     reason="spc_sampled",
@@ -250,18 +265,60 @@ class HITLRouter:
             bucket=bucket,
         )
 
-    def _spc_escalate(self) -> bool:
+    def _spc_escalate(self, *, bucket: SamplingBucket) -> bool:
         """Roll the SPC sampler. Returns True iff the version escalates.
+
+        Per ADR-023 §6 A.3 part 2: the effective rate is per-bucket
+        when a :class:`HITLDriftDetector` is wired. The drifting-bucket
+        ramp lifts the rate above the constant baseline so versions
+        from a regression-prone slice get sampled more often. When no
+        detector is wired the router falls back to the constant
+        ``sampling_rate`` from settings — preserves backward-compat
+        with existing tests + the cold in-memory wiring.
 
         ``sampling_rate == 0.0`` short-circuits to never escalate,
         which keeps the production "I've turned SPC off entirely"
         posture cheap (no rng call). Otherwise we draw a uniform
         ``[0, 1)`` and escalate iff the draw lies inside ``[0, rate)``.
         """
-        rate = self._config.sampling_rate
+        rate = self._effective_sampling_rate(bucket=bucket)
         if rate <= 0.0:
             return False
         return self._random_fn() < rate
+
+    def _effective_sampling_rate(self, *, bucket: SamplingBucket) -> float:
+        """Resolve the per-bucket SPC sampling rate.
+
+        Reads from the wired :class:`HITLDriftDetector` when present;
+        otherwise returns the constant baseline from settings. A
+        drift-detector exception is treated as "stay at baseline" —
+        same fire-and-log discipline the rest of the HITL pipeline
+        uses (ADR-012 §3): a hiccup in the drift signal must not
+        change the routing decision.
+        """
+        if self._drift_detector is None:
+            return self._config.sampling_rate
+        try:
+            rate = self._drift_detector(
+                (bucket.content_type, bucket.topic_cluster),
+            )
+        except Exception:  # noqa: BLE001 - fire-and-log boundary
+            log.exception(
+                "hitl.drift_detector.read_failed",
+                extra={
+                    "bucket_content_type": bucket.content_type,
+                    "bucket_topic_cluster": bucket.topic_cluster,
+                },
+            )
+            return self._config.sampling_rate
+        # Defensive clamp: a misbehaving detector returning <0 or >1
+        # would either always-suppress or always-escalate; clamp to
+        # the contracted range so the rng draw stays well-formed.
+        if rate < 0.0:
+            return 0.0
+        if rate > 1.0:
+            return 1.0
+        return rate
 
     def _decision(
         self,
