@@ -7,13 +7,36 @@ Holds:
   the Knowledge Forge Settings widget (``apps/_shared/settings-hub``).
   Strips every secret (API keys, auth tokens, DB passwords) before
   returning. Gated on the ``admin`` role (#83 slice 2 / ADR-019 §3).
+* ``POST /admin/archive/unarchive`` — clears ``documents.archived_at``
+  on a flag-archived row. ADR-027 §1.1, slice 1 of D.9.
+* ``POST /admin/archive/relink_scope`` — reactivates a soft-removed
+  ``document_scopes`` row via the existing ``add_scope`` reactivation
+  path. ADR-027 §1.2, slice 2 of D.9.
+
+Both archive routes require the ``admin`` role (ADR-019 §3 / #264) AND
+``?confirm=true`` for non-dry-run mutating actions (defence in depth,
+per ADR-027 §5). ``?dry_run=true`` returns the impact summary with no
+state change and no audit row. The deeper slices (``purge_artifacts``,
+``purge_batch``, the 410 Gone read response, the ``PURGED`` status
+migration) are deferred to a follow-up PR — they need the ``PURGED``
+status migration plus the tombstone URI shape.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import logging
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import PipelineServices
+from app.errors import ApiError, ErrorCode
+from app.schemas.admin_archive import (
+    RelinkScopeRequest,
+    RelinkScopeResponse,
+    UnarchiveRequest,
+    UnarchiveResponse,
+)
 from app.schemas.admin_config import (
     AdminConfigResponse,
     AuditConfig,
@@ -30,8 +53,11 @@ from app.schemas.admin_config import (
     UploadConfig,
 )
 from app.schemas.document import HealthResponse
+from app.schemas.scope import Scope
 from app.services.auth import User, require_admin
 from app.settings import Settings
+
+log = logging.getLogger(__name__)
 
 
 def _build_admin_config(settings: Settings) -> AdminConfigResponse:
@@ -99,12 +125,47 @@ def _build_admin_config(settings: Settings) -> AdminConfigResponse:
     )
 
 
-def build_admin_router(services: PipelineServices) -> APIRouter:  # noqa: ARG001 — services unused today, but every sub-router takes it for symmetry
+def _require_confirm_or_dry_run(*, confirm: bool, dry_run: bool) -> None:
+    """Enforce ADR-027 §5: every non-dry-run mutating route needs ``?confirm=true``.
+
+    Mirrors the ADR-027 §2 "exclusive" rule too — passing both
+    ``?confirm=true`` and ``?dry_run=true`` rejects with 400 because a
+    dry-run does not need confirmation (it does not mutate state). The
+    "missing confirm" case maps to 422 with ``KW_UNPROCESSABLE_ENTITY``
+    so a curl typo or a misconfigured admin UI surfaces a deterministic
+    error instead of silently mutating state.
+    """
+    if dry_run and confirm:
+        raise ApiError(
+            status_code=400,
+            code=ErrorCode.BAD_REQUEST,
+            message="dry_run and confirm are mutually exclusive.",
+            retryable=False,
+            remediation=(
+                "Pass either ?dry_run=true (impact summary, no "
+                "mutation) or ?confirm=true (real mutation), not both."
+            ),
+        )
+    if not dry_run and not confirm:
+        raise ApiError(
+            status_code=422,
+            code=ErrorCode.UNPROCESSABLE_ENTITY,
+            message="Missing required confirmation for mutating admin action.",
+            retryable=False,
+            remediation=(
+                "Re-send with ?confirm=true to mutate state, or "
+                "?dry_run=true to preview the impact without mutating."
+            ),
+        )
+
+
+def build_admin_router(services: PipelineServices) -> APIRouter:
     """Register admin / health routes.
 
-    ``services`` is accepted but unused at present so the call shape
-    matches the other ``build_*_router`` factories — that uniformity
-    is what lets ``app.routes.__init__`` compose them in a loop.
+    ``services`` is captured by closure so the archive routes can
+    reach the catalog store and reactivate / unarchive rows. Per
+    other ``build_*_router`` factories the legacy ``/health`` and
+    ``/admin/config`` routes are unchanged.
     """
     router = APIRouter()
 
@@ -124,5 +185,193 @@ def build_admin_router(services: PipelineServices) -> APIRouter:  # noqa: ARG001
         # in tests is observed without restarting the app — same
         # posture every other call site uses.
         return _build_admin_config(Settings())
+
+    @router.post(
+        "/admin/archive/unarchive",
+        operation_id="admin_archive_unarchive",
+        response_model=UnarchiveResponse,
+    )
+    def unarchive_document(
+        body: UnarchiveRequest,
+        confirm: bool = Query(False),
+        dry_run: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> UnarchiveResponse:
+        """Clear ``documents.archived_at`` on a flag-archived row (ADR-027 §1.1).
+
+        The catalog method is idempotent on already-active documents,
+        so this route's idempotency story is also "200 OK + no audit
+        row" rather than a 409 — the ADR-027 §1.1 example shows 409
+        for the bytes-purge precondition, not for unarchive. Real
+        operator workflows re-run the route safely as a status check.
+        """
+        _require_confirm_or_dry_run(confirm=confirm, dry_run=dry_run)
+
+        # Use the archived-inclusive accessor so a flag-archived row
+        # still resolves — the standard ``get_document`` would 404 it,
+        # which is exactly the behaviour we're trying to reverse.
+        catalog = services.documents.catalog
+        document = catalog._get_document_including_archived(  # type: ignore[attr-defined]
+            body.document_id,
+        )
+        if document is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Document not found: {body.document_id!r}.",
+                retryable=False,
+                remediation=(
+                    "Verify the document id; archived rows are "
+                    "visible to this admin tool but a never-existed "
+                    "id still 404s."
+                ),
+            )
+
+        archived_at_before = document.archived_at
+
+        if dry_run:
+            # No state change, no audit row — just the impact summary.
+            return UnarchiveResponse(
+                document_id=body.document_id,
+                archived_at_before=archived_at_before,
+                unarchived_at=None,
+                dry_run=True,
+            )
+
+        # Real mutation. ``unarchive_document`` is idempotent: when
+        # the row was already active the UPDATE matches zero rows and
+        # the returned :class:`Document` carries ``archived_at = None``.
+        catalog.unarchive_document(body.document_id, actor=user.id)
+        unarchived_at = datetime.now(UTC) if archived_at_before is not None else None
+
+        # Audit emit only fires on a real transition — an idempotent
+        # no-op (already-active doc) leaves the log clean. The dotted
+        # event name routes through the audit handler installed at
+        # startup; payload mirrors the ADR-027 §1.1 contract
+        # (``document_id``, ``archived_at_before``, ``actor``).
+        if unarchived_at is not None:
+            log.info(
+                "admin.document.unarchived",
+                extra={
+                    "document_id": body.document_id,
+                    "archived_at_before": archived_at_before.isoformat()
+                    if archived_at_before
+                    else None,
+                    "unarchived_at": unarchived_at.isoformat(),
+                    "actor": user.id,
+                    "actor_role": user.role,
+                },
+            )
+
+        return UnarchiveResponse(
+            document_id=body.document_id,
+            archived_at_before=archived_at_before,
+            unarchived_at=unarchived_at,
+            dry_run=False,
+        )
+
+    @router.post(
+        "/admin/archive/relink_scope",
+        operation_id="admin_archive_relink_scope",
+        response_model=RelinkScopeResponse,
+    )
+    def relink_scope(
+        body: RelinkScopeRequest,
+        confirm: bool = Query(False),
+        dry_run: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> RelinkScopeResponse:
+        """Reactivate a soft-removed ``document_scopes`` row (ADR-027 §1.2).
+
+        Wraps the existing :meth:`CatalogStore.add_scope` reactivation
+        path from #262: that method already clears ``removed_at`` and
+        overwrites ``added_at`` / ``added_by`` with the new caller's
+        identity when the row was previously soft-removed. The admin
+        wrapper just gates the action behind ``require_admin`` plus
+        ``?confirm=true`` and surfaces the pre-action ``removed_at``
+        timestamp for the audit log.
+        """
+        _require_confirm_or_dry_run(confirm=confirm, dry_run=dry_run)
+
+        catalog = services.documents.catalog
+        link_before = catalog.get_scope_link(
+            body.document_id,
+            body.scope_kind,
+            body.scope_ref,
+        )
+        if link_before is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=(
+                    f"Scope link not found: ({body.document_id!r}, "
+                    f"{body.scope_kind!r}, {body.scope_ref!r})."
+                ),
+                retryable=False,
+                remediation=(
+                    "Verify the document id and (kind, ref) tuple; "
+                    "the admin tool can reach soft-removed links but "
+                    "a triple that never existed still 404s."
+                ),
+            )
+
+        removed_at_before = link_before.removed_at
+
+        if dry_run:
+            return RelinkScopeResponse(
+                document_id=body.document_id,
+                scope_kind=body.scope_kind,
+                scope_ref=body.scope_ref,
+                removed_at_before=removed_at_before,
+                relinked_at=None,
+                dry_run=True,
+            )
+
+        # Drive the existing add_scope reactivation path — it clears
+        # removed_at and overwrites added_at / added_by with the new
+        # admin actor's identity, which is the documented "re-link is
+        # a fresh audit event" behaviour from #262.
+        relinked_at = datetime.now(UTC)
+        catalog.add_scope(
+            body.document_id,
+            Scope(
+                kind=body.scope_kind,
+                ref=body.scope_ref,
+                added_at=relinked_at,
+                added_by=user.id,
+            ),
+        )
+
+        # Audit emit only fires on a real transition — re-linking an
+        # already-active row is a no-op for the catalog (first-write
+        # wins for active rows per #262) and we mirror that on the
+        # audit log so the table doesn't fill with no-op rows.
+        if removed_at_before is not None:
+            log.info(
+                "admin.scope_link.relinked",
+                extra={
+                    "document_id": body.document_id,
+                    "scope_kind": body.scope_kind,
+                    "scope_ref": body.scope_ref,
+                    "removed_at_before": removed_at_before.isoformat(),
+                    "relinked_at": relinked_at.isoformat(),
+                    "actor": user.id,
+                    "actor_role": user.role,
+                },
+            )
+
+        # ``relinked_at`` is the moment we reactivated; for an
+        # already-active row we still return the moment the route
+        # ran so clients can correlate without a separate "was it a
+        # no-op?" probe — the empty audit log is the canonical
+        # idempotency signal.
+        return RelinkScopeResponse(
+            document_id=body.document_id,
+            scope_kind=body.scope_kind,
+            scope_ref=body.scope_ref,
+            removed_at_before=removed_at_before,
+            relinked_at=relinked_at if removed_at_before is not None else None,
+            dry_run=False,
+        )
 
     return router
