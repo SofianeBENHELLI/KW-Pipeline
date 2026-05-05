@@ -20,11 +20,24 @@ const widgetStub = fileURLToPath(
   new URL("../widget-preview/widget-stub.ts", import.meta.url),
 );
 
+// Absolute paths to this app's own ``node_modules`` packages —
+// shared-package tests live in ``apps/_shared/`` (which has no
+// node_modules of its own), so we redirect bare specifiers like
+// ``@testing-library/react`` to the widget's installed copy.
+// Without this, Vite's import-analysis fails to resolve the import
+// when it runs a test file from outside the project root.
+const widgetNodeModule = (pkg: string): string =>
+  fileURLToPath(new URL(`./node_modules/${pkg}`, import.meta.url));
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
       "@widget-lab/3ddashboard-utils": widgetStub,
+      "@testing-library/react": widgetNodeModule("@testing-library/react"),
+      "@testing-library/jest-dom": widgetNodeModule(
+        "@testing-library/jest-dom",
+      ),
     },
   },
   // Allow Vite to read files outside ``apps/widget/`` so the bundler

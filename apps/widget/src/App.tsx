@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-import { getApiBaseUrl, getHealth, setApiBaseUrl as persistApiBaseUrl } from "./api/client";
+import {
+  SessionExpiredBanner,
+  useSessionGuard,
+} from "../../_shared/auth";
+import {
+  clearSessionTrigger,
+  getApiBaseUrl,
+  getHealth,
+  setApiBaseUrl as persistApiBaseUrl,
+  setSessionTrigger,
+} from "./api/client";
 import { Header } from "./components/Header";
 import { SideRail, type ActiveMode } from "./components/SideRail";
 import { ChatPanel } from "./sections/ChatPanel";
@@ -29,6 +39,38 @@ const App: React.FC = () => {
   // search result is clicked. ``DocumentsList`` consumes this and
   // flashes the matching row.
   const [highlightDocId, setHighlightDocId] = useState<string | null>(null);
+
+  // Session-expired wiring (#83 slice 3 / ADR-019 §5). The provider
+  // sits at the widget root in index.tsx; here we just register the
+  // trigger so the shared ApiError class can flip the banner on for
+  // any 401, regardless of which section fired the request.
+  const session = useSessionGuard();
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => {
+      clearSessionTrigger();
+    };
+  }, [session.trigger]);
+
+  // Dev stub: ``KW_AUTH_MODE=dev`` (default per #245) never returns
+  // 401, so the banner is unreachable through normal interaction in a
+  // demo build. Loading the widget with ``#force-session-expired`` in
+  // the URL hash flips it once for visual review. Removed once
+  // bearer mode is the default and real 401s show up organically.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash === "#force-session-expired") {
+      session.trigger();
+    }
+  }, [session]);
+
+  // 3DX context: the widget runs as a tile inside 3DDashboard, so
+  // ``window.location.reload()`` reloads the tile and re-fires the
+  // host's auth handshake. Same call as web/explorer until a refresh-
+  // token flow lands (ADR-019 follow-up slice).
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
 
   // Lightweight, header-level health probe so the live pill in the
   // header and the rail status dot reflect reachability regardless of
@@ -88,6 +130,11 @@ const App: React.FC = () => {
 
   return (
     <div className="kw-widget">
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+        className="kw-widget__session-expired"
+      />
       <Header
         health={health}
         settingsOpen={activeMode === "settings"}

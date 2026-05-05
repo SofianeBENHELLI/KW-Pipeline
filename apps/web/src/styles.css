@@ -1185,3 +1185,40 @@ pre {
   overflow: hidden;
   white-space: nowrap;
 }
+
+/* Session-expired banner (#83 slice 3 / ADR-019 §5).
+   Lives at the top of the app shell, spans both columns of the
+   grid so it doesn't squeeze either panel. Themed with the same
+   warning palette as the rest of the app's notice surfaces. */
+.kw-session-expired {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--warning);
+  background: #fff8e6;
+  color: #553300;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.kw-session-expired__copy {
+  flex: 1 1 auto;
+  line-height: 1.4;
+}
+
+.kw-session-expired__action {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border: 1px solid var(--action);
+  background: var(--action);
+  color: white;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.kw-session-expired__action:hover {
+  background: var(--action-strong);
+}

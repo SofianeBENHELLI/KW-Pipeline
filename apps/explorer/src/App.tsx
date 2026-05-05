@@ -25,6 +25,10 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  SessionExpiredBanner,
+  useSessionGuard,
+} from "../../_shared/auth";
 import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/GraphCanvas";
 import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
 import { DocViewer } from "./components/DocViewer";
@@ -32,7 +36,11 @@ import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
 import { SettingsModal } from "./components/SettingsModal";
 import { LineageModal } from "./components/LineageModal";
-import { getApiBaseUrl } from "./api/client";
+import {
+  clearSessionTrigger,
+  getApiBaseUrl,
+  setSessionTrigger,
+} from "./api/client";
 import type { Document as ApiDocument } from "./api/types";
 import {
   CLUSTERS,
@@ -85,6 +93,33 @@ export default function App(): React.ReactElement {
   const [refreshTick, setRefreshTick] = useState(0);
   const data = useExplorerData(apiBaseUrl, refreshTick);
   const snapshot = data.snapshot;
+
+  // Session-expired wiring (#83 slice 3 / ADR-019 §5). Provider lives
+  // at the explorer's root in index.tsx; we register the 401 trigger
+  // here so any read endpoint hitting /knowledge/** or /documents/**
+  // flips the shared banner.
+  const session = useSessionGuard();
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => {
+      clearSessionTrigger();
+    };
+  }, [session.trigger]);
+
+  // Dev stub: ``KW_AUTH_MODE=dev`` (default per #245) never returns
+  // 401, so a real banner is unreachable in normal demo flows. Loading
+  // the explorer with ``#force-session-expired`` flips it once for
+  // visual review. Removed when bearer mode becomes the default.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash === "#force-session-expired") {
+      session.trigger();
+    }
+  }, [session]);
+
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
 
   const [view, setView] = useState<ViewId>("corpus");
   const [selected, setSelected] = useState<NodeSelection | null>(null);
@@ -533,6 +568,11 @@ export default function App(): React.ReactElement {
         (tweaks.layoutMode === "graph" ? " kx-layout-graph" : "")
       }
     >
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+        className="kx-session-expired"
+      />
       <header className="kx-header">
         <div className="kx-brand">
           <div className="kx-brand-mark">

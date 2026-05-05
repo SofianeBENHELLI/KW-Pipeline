@@ -34,7 +34,16 @@ import type {
 // Re-export from the shared module so existing import sites
 // (``import { ApiError } from "./api/client"``) keep working without
 // every consumer needing to know about the shared package layout.
-export { ApiError } from "../../../_shared/api-core";
+//
+// ``setSessionTrigger`` / ``clearSessionTrigger`` are surfaced here
+// for the same reason: ``<SessionGuardProvider>`` registers its
+// ``trigger`` callback through this re-export so the widget root
+// keeps importing everything from ``./api/client`` (#83 slice 3).
+export {
+  ApiError,
+  setSessionTrigger,
+  clearSessionTrigger,
+} from "../../../_shared/api-core";
 
 const SETTINGS_KEY = "apiBaseUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";

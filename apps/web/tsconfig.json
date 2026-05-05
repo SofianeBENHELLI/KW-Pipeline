@@ -22,7 +22,21 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
 
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "types": ["vitest/globals", "@testing-library/jest-dom"],
+
+    // Make ``react`` / ``react-dom`` resolvable from files in
+    // ``apps/_shared/`` (#83 slice 3 introduced React-using shared
+    // modules under ``_shared/auth``). With moduleResolution=bundler
+    // TypeScript walks parent directories looking for ``node_modules``
+    // — _shared/ has none, so we map the bare specifiers to this
+    // app's installed copy explicitly.
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
   },
   "include": ["src", "../_shared"],
   "exclude": ["../_shared/**/*.test.ts", "../_shared/**/*.test.tsx"]
