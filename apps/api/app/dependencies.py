@@ -22,6 +22,7 @@ from app.services.document_similarity_service import DocumentSimilarityService
 from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
 from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
+from app.services.hitl_auto_promoter import HITLAutoPromoter
 from app.services.hitl_router import HITLRouter
 from app.services.idempotency_store import (
     IdempotencyStore,
@@ -280,6 +281,14 @@ class PipelineServices:
     # ``routing.decided`` audit event; the auto-promotion FSM
     # transition is the next slice.
     hitl_router: HITLRouter | None = None
+    # HITL auto-promotion worker (slice 3, ADR-023 §6, #215). ``None``
+    # when the router is None — same kill-switch tied to
+    # ``KW_HITL_DISABLE_SCORER`` since the worker has no rows to act
+    # on without the router writing them in the first place. The
+    # worker is invoked synchronously from
+    # ``POST /admin/hitl/run_auto_promote_pass``; a real scheduler
+    # (cron / asyncio) is deferred until the drift-detector slice.
+    hitl_auto_promoter: HITLAutoPromoter | None = field(init=False, default=None)
     sampling_state: SamplingStateStore = field(default_factory=InMemorySamplingStateStore)
     validation_metadata: ValidationMetadataStore = field(
         default_factory=InMemoryValidationMetadataStore
@@ -318,6 +327,22 @@ class PipelineServices:
                 ),
             ),
         )
+        # HITL auto-promotion worker (slice 3, #215). Same kill switch
+        # as the router: when ``hitl_router`` is None the worker has
+        # no rows to act on. Built here (rather than in
+        # ``build_services``) so it can reuse the ``self.review``
+        # instance the post-init just created.
+        if self.hitl_router is not None:
+            object.__setattr__(
+                self,
+                "hitl_auto_promoter",
+                HITLAutoPromoter(
+                    validation_metadata=self.validation_metadata,
+                    review_service=self.review,
+                    sampling_state=self.sampling_state,
+                    catalog=self.documents.catalog,
+                ),
+            )
 
 
 def _build_enrichers(settings: Settings) -> list[SemanticEnricher]:

@@ -61,6 +61,9 @@ class ErrorCode:
     # ─── Phase 3 grounded chat (POST /knowledge/chat) ──────────────
     CHAT_DISABLED = "KW_CHAT_DISABLED"
 
+    # ─── HITL auto-promotion (POST /admin/hitl/run_auto_promote_pass) ─
+    HITL_DISABLED = "KW_HITL_DISABLED"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"

@@ -230,3 +230,122 @@ def test_upsert_does_not_share_state_with_caller(store_factory):
     assert fetched is not None
     assert fetched.confidence_score is not None
     assert fetched.confidence_score.overall == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# list_pending_auto_promotions + mark_auto_promoted (slice 3, #215).
+# ---------------------------------------------------------------------------
+
+
+def test_list_pending_auto_promotions_filters_to_auto_and_unflipped(store_factory):
+    """The worker's read filter:
+    ``routing_decision == "auto" AND validation_method IS NULL``."""
+    store = store_factory()
+    # Three rows in three states; only the first should surface.
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-1",
+            confidence_score=_make_score(0.95),
+            routing_decision="auto",
+        )
+    )
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-2",
+            confidence_score=_make_score(0.9),
+            routing_decision="auto",
+            validation_method="auto",  # already promoted
+            validation_actor="system:hitl_auto_promote",
+        )
+    )
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-h",
+            confidence_score=_make_score(0.4),
+            routing_decision="human",
+        )
+    )
+
+    pending = store.list_pending_auto_promotions()
+    assert [row.version_id for row in pending] == ["ver-1"]
+
+
+def test_list_pending_auto_promotions_empty_set_returns_empty_list(store_factory):
+    store = store_factory()
+    assert store.list_pending_auto_promotions() == []
+
+
+def test_list_pending_auto_promotions_excludes_router_only_rows(store_factory):
+    """A scorer-only row (routing_decision is None) must NOT surface."""
+    store = store_factory()
+    store.upsert(ValidationMetadata(version_id="ver-no-score"))  # nothing set
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-1",
+            confidence_score=_make_score(0.6),
+            # routing_decision still None — scorer ran, router didn't
+        )
+    )
+    assert store.list_pending_auto_promotions() == []
+
+
+def test_mark_auto_promoted_sets_method_and_actor(store_factory):
+    store = store_factory()
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-1",
+            confidence_score=_make_score(0.95),
+            routing_decision="auto",
+        )
+    )
+
+    store.mark_auto_promoted("ver-1", actor="system:hitl_auto_promote")
+
+    fetched = store.get("ver-1")
+    assert fetched is not None
+    assert fetched.validation_method == "auto"
+    assert fetched.validation_actor == "system:hitl_auto_promote"
+
+
+def test_mark_auto_promoted_is_idempotent(store_factory):
+    """A second call against an already-promoted row is a no-op —
+    first-write wins on validation_actor so the audit trail is stable."""
+    store = store_factory()
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-1",
+            confidence_score=_make_score(0.95),
+            routing_decision="auto",
+        )
+    )
+    store.mark_auto_promoted("ver-1", actor="system:hitl_auto_promote")
+    store.mark_auto_promoted("ver-1", actor="system:another-actor")
+
+    fetched = store.get("ver-1")
+    assert fetched is not None
+    assert fetched.validation_actor == "system:hitl_auto_promote"
+
+
+def test_mark_auto_promoted_excludes_promoted_row_from_pending(store_factory):
+    """The two methods compose: a row promoted via mark_auto_promoted
+    no longer shows up in ``list_pending_auto_promotions``."""
+    store = store_factory()
+    store.upsert(
+        ValidationMetadata(
+            version_id="ver-1",
+            confidence_score=_make_score(0.95),
+            routing_decision="auto",
+        )
+    )
+    assert [row.version_id for row in store.list_pending_auto_promotions()] == ["ver-1"]
+
+    store.mark_auto_promoted("ver-1", actor="system:hitl_auto_promote")
+
+    assert store.list_pending_auto_promotions() == []
+
+
+def test_mark_auto_promoted_on_missing_row_is_noop(store_factory):
+    """Defensive: stale calls must not raise."""
+    store = store_factory()
+    store.mark_auto_promoted("never-existed", actor="system:hitl_auto_promote")
+    assert store.get("never-existed") is None
