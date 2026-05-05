@@ -19,6 +19,21 @@ class DocumentVersionStatus(StrEnum):
     # remains visible to the audit/Orbital surfaces so the version
     # history is preserved.
     SUPERSEDED = "SUPERSEDED"
+    # ADR-027 §3: terminal status assigned to every version in a
+    # document family by the ``purge_artifacts`` admin route. The
+    # version's ``storage_uri`` is overwritten with a tombstone marker
+    # (``tombstone:purged:<doc>:<version>:<iso>``) and the bytes /
+    # extractions / semantic JSON / Markdown asset are physically
+    # deleted via ``StorageService.delete``. The catalog row stays put
+    # — read paths surface ``PURGED`` as HTTP 410 Gone instead of
+    # 404 so consumers can distinguish "never existed" from "purged".
+    # Reachable only from a previously **terminal** status
+    # (``VALIDATED`` / ``REJECTED`` / ``FAILED`` / ``SUPERSEDED`` /
+    # ``DUPLICATE_DETECTED`` / ``PURGED``) because ``purge_artifacts``
+    # requires the document to be archived first, and the orphan
+    # cascade only flag-archives families whose versions have all
+    # reached a terminal state.
+    PURGED = "PURGED"
 
 
 # Lifecycle FSM for a DocumentVersion. Maps each state to the set of states
@@ -66,12 +81,33 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
     DocumentVersionStatus.NEEDS_REVIEW: frozenset(
         {DocumentVersionStatus.VALIDATED, DocumentVersionStatus.REJECTED}
     ),
-    DocumentVersionStatus.DUPLICATE_DETECTED: frozenset(),
-    # ADR-025: VALIDATED → SUPERSEDED is the only legal exit edge.
-    DocumentVersionStatus.VALIDATED: frozenset({DocumentVersionStatus.SUPERSEDED}),
-    DocumentVersionStatus.REJECTED: frozenset(),
-    DocumentVersionStatus.SUPERSEDED: frozenset(),
-    DocumentVersionStatus.FAILED: frozenset({DocumentVersionStatus.EXTRACTING}),
+    # ADR-027 §3: every previously-terminal status can transition to
+    # PURGED, fired exclusively by the ``purge_artifacts`` admin route.
+    # Intermediate states (UPLOADED/HASHED/STORED/EXTRACTING/EXTRACTED/
+    # SEMANTIC_READY/NEEDS_REVIEW) cannot reach PURGED because the
+    # archive precondition (``documents.archived_at IS NOT NULL``)
+    # implies every version in the family has already settled into a
+    # terminal state — the orphan cascade flag-archives families whose
+    # versions are no longer in motion.
+    DocumentVersionStatus.DUPLICATE_DETECTED: frozenset({DocumentVersionStatus.PURGED}),
+    # ADR-025: VALIDATED → SUPERSEDED is the only legal exit edge,
+    # plus ADR-027 § 3's terminal → PURGED transition.
+    DocumentVersionStatus.VALIDATED: frozenset(
+        {DocumentVersionStatus.SUPERSEDED, DocumentVersionStatus.PURGED}
+    ),
+    DocumentVersionStatus.REJECTED: frozenset({DocumentVersionStatus.PURGED}),
+    DocumentVersionStatus.SUPERSEDED: frozenset({DocumentVersionStatus.PURGED}),
+    DocumentVersionStatus.FAILED: frozenset(
+        {DocumentVersionStatus.EXTRACTING, DocumentVersionStatus.PURGED}
+    ),
+    # PURGED → PURGED is admitted as a no-op so the catalog method can
+    # treat re-purge as idempotent (returns the existing tombstone
+    # without re-emitting an audit row). The route layer never actually
+    # fires the FSM check on an already-PURGED row — it short-circuits
+    # to the existing tombstone — but keeping the self-loop in the FSM
+    # avoids surprising IllegalTransition raises if a future caller
+    # naively retries via ``update_version_status``.
+    DocumentVersionStatus.PURGED: frozenset({DocumentVersionStatus.PURGED}),
 }
 
 

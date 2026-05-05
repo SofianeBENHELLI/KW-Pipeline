@@ -12,14 +12,22 @@ Holds:
 * ``POST /admin/archive/relink_scope`` — reactivates a soft-removed
   ``document_scopes`` row via the existing ``add_scope`` reactivation
   path. ADR-027 §1.2, slice 2 of D.9.
+* ``POST /admin/archive/purge_artifacts`` — physically deletes a
+  document's source artifacts (bytes / extractions / semantic JSON /
+  Markdown asset) via :meth:`StorageService.delete`, flips every
+  version to ``PURGED``, overwrites ``storage_uri`` with a tombstone
+  marker. ADR-027 §1.3, slice 4 of D.9. Catalog row preserved per the
+  no-delete policy.
+* ``POST /admin/archive/purge_batch`` — bulk wrapper around
+  ``purge_artifacts``, capped at 100 ids per call, best-effort with
+  per-doc error reporting. ADR-027 §4, slice 5 of D.9.
 
-Both archive routes require the ``admin`` role (ADR-019 §3 / #264) AND
+Every archive route requires the ``admin`` role (ADR-019 §3 / #264) AND
 ``?confirm=true`` for non-dry-run mutating actions (defence in depth,
 per ADR-027 §5). ``?dry_run=true`` returns the impact summary with no
-state change and no audit row. The deeper slices (``purge_artifacts``,
-``purge_batch``, the 410 Gone read response, the ``PURGED`` status
-migration) are deferred to a follow-up PR — they need the ``PURGED``
-status migration plus the tombstone URI shape.
+state change and no audit row. The 410 Gone read response for purged
+versions / fully-purged documents is wired in
+:mod:`app.routes.lifecycle` (slice 6 of D.9).
 """
 
 from __future__ import annotations
@@ -31,11 +39,18 @@ from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
+from app.models.document import DocumentVersionStatus
 from app.schemas.admin_archive import (
+    PurgeArtifactsRequest,
+    PurgeArtifactsResponse,
+    PurgeBatchRequest,
+    PurgeBatchResponse,
+    PurgeBatchResult,
     RelinkScopeRequest,
     RelinkScopeResponse,
     UnarchiveRequest,
     UnarchiveResponse,
+    VersionPurgeResult,
 )
 from app.schemas.admin_config import (
     AdminConfigResponse,
@@ -123,6 +138,29 @@ def _build_admin_config(settings: Settings) -> AdminConfigResponse:
             level=settings.log_level.upper(),
         ),
     )
+
+
+_PURGE_BATCH_MAX = 100
+"""Per-request cap on :func:`purge_batch` document ids (ADR-027 §4).
+
+A list longer than this returns 422; chaining multiple calls is the
+documented escape hatch. Kept as a module constant so tests can
+import the same value rather than hard-coding 100 in the assertion.
+"""
+
+
+def _build_tombstone_uri(document_id: str, version_id: str, purged_at: datetime) -> str:
+    """Return the ADR-027 §3 tombstone URI for a purged version.
+
+    Shape: ``tombstone:purged:<document_id>:<version_id>:<purged_at_iso>``.
+    The tombstone is parseable so audit tooling can recover context
+    without joining against the audit log; it is also obviously not a
+    real URI, so any storage backend that accidentally receives it
+    fails the standard "not found" path rather than fetching unrelated
+    bytes. Future read paths can ``startswith("tombstone:")`` to
+    detect purged content.
+    """
+    return f"tombstone:purged:{document_id}:{version_id}:{purged_at.isoformat()}"
 
 
 def _require_confirm_or_dry_run(*, confirm: bool, dry_run: bool) -> None:
@@ -373,5 +411,290 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             relinked_at=relinked_at if removed_at_before is not None else None,
             dry_run=False,
         )
+
+    def _purge_one_document(
+        document_id: str,
+        *,
+        dry_run: bool,
+        actor: str,
+        actor_role: str,
+    ) -> PurgeArtifactsResponse:
+        """Apply ADR-027 §1.3 ``purge_artifacts`` to a single document.
+
+        Shared between the per-doc route and the bulk wrapper. Raises
+        :class:`ApiError` for the documented HTTP-mappable failures
+        (404 missing, 409 not-archived); the bulk wrapper catches
+        those and converts to a per-row error envelope so a single
+        failure doesn't abort the batch.
+        """
+        catalog = services.documents.catalog
+        document = catalog._get_document_including_archived(  # type: ignore[attr-defined]
+            document_id,
+        )
+        if document is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Document not found: {document_id!r}.",
+                retryable=False,
+                remediation=(
+                    "Verify the document id; archived rows are "
+                    "visible to this admin tool but a never-existed "
+                    "id still 404s."
+                ),
+            )
+        if document.archived_at is None:
+            # ADR-027 §1.3 precondition: archive-then-purge is the
+            # ordered ritual. Fail closed so an admin must run the
+            # archive step (or wait for the orphan cascade) first;
+            # the unarchive escape hatch in §1.1 is the only way
+            # back from an over-eager archive.
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=(
+                    f"Document {document_id!r} is not archived; "
+                    "purge_artifacts requires the document to be "
+                    "archived first."
+                ),
+                retryable=False,
+                remediation=(
+                    "Archive the document via the orphan cascade or a "
+                    "future archive admin route, then re-run "
+                    "purge_artifacts. The /admin/archive/unarchive "
+                    "route reverses the archive flag if you change "
+                    "your mind before purging."
+                ),
+            )
+
+        purged_at = datetime.now(UTC)
+        results: list[VersionPurgeResult] = []
+        for version in list(document.versions):
+            tombstone_uri = _build_tombstone_uri(document_id, version.id, purged_at)
+            status_before = version.status
+            storage_uri_before = version.storage_uri
+
+            if status_before is DocumentVersionStatus.PURGED:
+                # Idempotent re-purge: the existing tombstone URI is
+                # already on the row. Echo it back without touching
+                # storage / catalog / audit so a retry converges
+                # cleanly (ADR-027 §1.3 + §6).
+                results.append(
+                    VersionPurgeResult(
+                        version_id=version.id,
+                        status_before=status_before,
+                        storage_uri_before=storage_uri_before,
+                        tombstone_uri=storage_uri_before,
+                        purged_at=None,
+                        bytes_estimate=version.file_size,
+                    )
+                )
+                continue
+
+            if dry_run:
+                # Impact summary only — no storage delete, no catalog
+                # mutation, no audit row.
+                results.append(
+                    VersionPurgeResult(
+                        version_id=version.id,
+                        status_before=status_before,
+                        storage_uri_before=storage_uri_before,
+                        tombstone_uri=tombstone_uri,
+                        purged_at=None,
+                        bytes_estimate=version.file_size,
+                    )
+                )
+                continue
+
+            # Real mutation. Storage delete first (best-effort,
+            # idempotent per the slice 3 contract) so a partial
+            # failure leaves bytes deleted before the catalog is
+            # touched — that matches the §6 "bytes are the point of
+            # no return" envelope. A storage error is logged and we
+            # carry on; the catalog flip + audit row capture the
+            # before/after state.
+            try:
+                services.storage.delete(storage_uri_before)
+            except Exception as exc:  # noqa: BLE001 — best-effort delete; logged + continue.
+                log.warning(
+                    "admin.purge_artifacts.storage_delete_failed",
+                    extra={
+                        "document_id": document_id,
+                        "version_id": version.id,
+                        "storage_uri": storage_uri_before,
+                        "error": str(exc),
+                    },
+                )
+            services.documents.catalog.purge_version_artifacts(
+                document_id,
+                version.id,
+                tombstone_uri=tombstone_uri,
+                purged_at=purged_at,
+                actor=actor,
+            )
+            log.info(
+                "document.artifacts_purged",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version.id,
+                    "storage_uri_before": storage_uri_before,
+                    "tombstone_uri": tombstone_uri,
+                    "actor": actor,
+                    "actor_role": actor_role,
+                    "dry_run": False,
+                },
+            )
+            results.append(
+                VersionPurgeResult(
+                    version_id=version.id,
+                    status_before=status_before,
+                    storage_uri_before=storage_uri_before,
+                    tombstone_uri=tombstone_uri,
+                    purged_at=purged_at,
+                    bytes_estimate=version.file_size,
+                )
+            )
+
+        return PurgeArtifactsResponse(
+            document_id=document_id,
+            versions_purged=results,
+            dry_run=dry_run,
+        )
+
+    @router.post(
+        "/admin/archive/purge_artifacts",
+        operation_id="admin_archive_purge_artifacts",
+        response_model=PurgeArtifactsResponse,
+    )
+    def purge_artifacts(
+        body: PurgeArtifactsRequest,
+        confirm: bool = Query(False),
+        dry_run: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> PurgeArtifactsResponse:
+        """Hard-delete a document's source artifacts (ADR-027 §1.3).
+
+        Pre-conditions:
+
+        - The document must exist (404 otherwise).
+        - The document must already be archived (409 otherwise) —
+          archive-then-purge is the ordered ritual that gives an
+          operator a chance to reverse via ``unarchive`` before bytes
+          go.
+        - ``?confirm=true`` is required for non-dry-run mutating
+          actions (422 otherwise — ``KW_UNPROCESSABLE_ENTITY``).
+
+        Per version the route:
+
+        1. Computes a tombstone URI per ADR-027 §3
+           (``tombstone:purged:<doc>:<version>:<iso>``).
+        2. Calls :meth:`StorageService.delete` on the version's
+           current ``storage_uri`` (best-effort + idempotent per
+           ADR-027 §7).
+        3. Flips the version's status to :data:`DocumentVersionStatus.PURGED`
+           and overwrites ``storage_uri`` with the tombstone via
+           :meth:`CatalogStore.purge_version_artifacts`.
+        4. Emits a ``document.artifacts_purged`` audit event with
+           the storage URI before / after, the actor, and the
+           ``dry_run`` flag.
+
+        Idempotent: re-purging an already-PURGED version is a no-op
+        — the existing tombstone URI is echoed back and no audit
+        row is emitted (the empty audit row is the idempotency
+        signal). KG cleanup is out of scope: the cascade in #265
+        already removed KG nodes when the document was archived.
+        """
+        _require_confirm_or_dry_run(confirm=confirm, dry_run=dry_run)
+        return _purge_one_document(
+            body.document_id,
+            dry_run=dry_run,
+            actor=user.id,
+            actor_role=user.role,
+        )
+
+    @router.post(
+        "/admin/archive/purge_batch",
+        operation_id="admin_archive_purge_batch",
+        response_model=PurgeBatchResponse,
+    )
+    def purge_batch(
+        body: PurgeBatchRequest,
+        confirm: bool = Query(False),
+        dry_run: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> PurgeBatchResponse:
+        """Bulk wrapper around ``purge_artifacts`` (ADR-027 §4).
+
+        Best-effort: a failure on one doc (e.g. ``document_not_archived``,
+        ``document_not_found``) does not abort the batch — the
+        per-doc failure surfaces as ``success=False`` +
+        ``error_code`` / ``error_message`` in the corresponding
+        :class:`PurgeBatchResult`. Successful per-doc purges carry
+        the full :class:`PurgeArtifactsResponse` under
+        ``purge_response`` so callers can recover the per-version
+        tombstone URIs without a follow-up call.
+
+        Capped at 100 ids per call (``KW_UNPROCESSABLE_ENTITY``);
+        chaining is the documented escape hatch for larger sweeps.
+        Each successful per-doc purge emits its own
+        ``document.artifacts_purged`` audit row — never a single
+        batch-level row, so the audit log stays queryable per
+        document.
+        """
+        _require_confirm_or_dry_run(confirm=confirm, dry_run=dry_run)
+        if len(body.document_ids) > _PURGE_BATCH_MAX:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.UNPROCESSABLE_ENTITY,
+                message=(
+                    "purge_batch accepts at most "
+                    f"{_PURGE_BATCH_MAX} document_ids per call; "
+                    f"got {len(body.document_ids)}."
+                ),
+                retryable=False,
+                remediation=(
+                    "Split the request into batches of "
+                    f"{_PURGE_BATCH_MAX} or fewer ids and chain the "
+                    "calls. Each batch is independent — a failure in "
+                    "one batch does not affect the others."
+                ),
+            )
+
+        results: list[PurgeBatchResult] = []
+        for document_id in body.document_ids:
+            try:
+                response = _purge_one_document(
+                    document_id,
+                    dry_run=dry_run,
+                    actor=user.id,
+                    actor_role=user.role,
+                )
+            except ApiError as exc:
+                # Per-doc failure: surface the public error code so
+                # the caller can route on it (e.g. retry the
+                # ``document_not_archived`` rows after archiving them
+                # via the cascade). The batch itself still returns
+                # 200 — partial success is the contract.
+                results.append(
+                    PurgeBatchResult(
+                        document_id=document_id,
+                        success=False,
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        purge_response=None,
+                    )
+                )
+                continue
+            results.append(
+                PurgeBatchResult(
+                    document_id=document_id,
+                    success=True,
+                    error_code=None,
+                    error_message=None,
+                    purge_response=response,
+                )
+            )
+
+        return PurgeBatchResponse(results=results, dry_run=dry_run)
 
     return router
