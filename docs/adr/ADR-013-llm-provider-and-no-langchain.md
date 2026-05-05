@@ -3,6 +3,7 @@
 ## Status
 
 Accepted, 2026-05-01.
+Amended (§6 — multi-provider), 2026-05-05.
 
 ## Context
 
@@ -155,3 +156,99 @@ Source attribution for borrowed patterns lives in module docstrings:
   `cache_control: {"type": "ephemeral"}`). Phase 2 ADR.
 - **Budget guardrails and circuit breakers.** Phase 2 ADR.
 - **Embedding provider** for Phase 3's vector RAG mode. Phase 3 ADR.
+
+## 6. Amendment (2026-05-05) — Multi-provider, Gemini primary, Anthropic fallback
+
+§1 above committed to "one provider in v1" with the explicit caveat
+that "adding a second provider later means writing a second concrete
+implementation of the same Protocol — and at that point we lift the
+multi-provider factory pattern". This amendment is that point.
+
+### Decision
+
+Two providers are supported behind the `LLMClient` Protocol:
+
+- **Gemini** (`google-genai` SDK, `GeminiLLMClient`) — primary in
+  deployments that opt in.
+- **Anthropic** (`anthropic` SDK, `AnthropicLLMClient`) — fallback
+  and the original v1 implementation; unchanged.
+
+Selection is driven by `KW_LLM_PROVIDER` (`auto` / `gemini` /
+`anthropic`) and the configured API keys:
+
+- `auto` (default): Gemini wins when `GEMINI_API_KEY` is set,
+  otherwise Anthropic if `ANTHROPIC_API_KEY` is set, otherwise no LLM
+  (Phase 1 only).
+- `gemini` / `anthropic`: pin the choice; resolution returns no
+  client when the pinned provider's key is missing rather than
+  silently falling back to the other provider. Operators who pin
+  typically want a misconfiguration to surface as a 503 on
+  `POST /knowledge/chat`, not a quiet provider switch.
+
+`KW_LLM_MODEL` continues to alias `KW_ANTHROPIC_MODEL`; `KW_GEMINI_MODEL`
+overrides the Gemini model id (default `gemini-2.5-flash` — the cheap
++ fast tier matching Sonnet's cost/quality slot).
+
+### What does NOT change
+
+- **No LangChain anywhere.** The §2 commitment stands. The Gemini
+  implementation talks to `google-genai` directly; no
+  `langchain-google-genai`, no `langchain-core` in the install graph.
+- **Protocol surface.** `complete_with_tool` and `complete_text` are
+  unchanged. Call sites (entity extractor, chat service, route
+  layer) compile against the Protocol and are unaware of which
+  provider answers.
+- **Token-usage shape.** The dict returned by both methods carries
+  the same four keys (`input_tokens`, `output_tokens`,
+  `cache_read_input_tokens`, `cache_creation_input_tokens`) so the
+  audit logs and ADR-014 §3 circuit breaker stay provider-agnostic.
+  Gemini's `cached_content_token_count` maps onto
+  `cache_read_input_tokens`; Gemini does not surface a distinct
+  `cache_creation` counter and the field stays at 0.
+- **No runtime failover.** A process picks one provider at startup.
+  Quota exhaustion on Gemini does not transparently retry against
+  Anthropic — the operator sees the upstream error and decides. A
+  future `FailoverLLMClient` is contemplated but deliberately not
+  built today; doubling the latency on every call to chase rare
+  upstream failures isn't worth it at this stage.
+- **Prompt caching on Gemini.** Anthropic prompt caching (ADR-014
+  §2) stays as-is. Gemini's context-cache API (`cachedContents`) is
+  a different shape — create-then-reference — and is intentionally
+  out of scope for this amendment. Phase 2 cost on Gemini will be
+  higher than on Anthropic with caching until that follow-up lands.
+
+### Rejected alternatives
+
+- **Provider failover at runtime.** Tried in spirit by passing the
+  primary's failure to the secondary's call inside one Protocol
+  invocation. Rejected: doubles tail latency on real failures,
+  obscures which provider produced an answer in the audit trail,
+  and adds a cross-provider error-classification layer for marginal
+  resilience benefit.
+- **Replace Anthropic outright.** Smaller diff, but loses the
+  fallback safety net and forces every existing test fixture +
+  integration job to be rewritten against Gemini before this lands.
+- **Add a third provider (OpenAI / Vertex / Bedrock) in the same
+  PR.** Out of scope. The Protocol still permits it; adding a third
+  is one more `LLMClient` implementation when the need is real.
+
+### Consequences
+
+- **One additional optional runtime dependency:** `google-genai`.
+  Same posture as `anthropic` — added to `pyproject.toml`, lazy-imported
+  inside `GeminiLLMClient.__init__`, dormant unless
+  `GEMINI_API_KEY` is set.
+- **Settings surface gains three fields:** `gemini_api_key`,
+  `gemini_model`, `llm_provider`. Defaults preserve every existing
+  deployment's behaviour exactly: a deployment with only
+  `ANTHROPIC_API_KEY` set continues to use Anthropic with
+  `llm_provider=auto`.
+- **`GET /admin/config`** now exposes both providers' configured-flag
+  + model id and the resolved `active_provider`, so the Settings
+  widget can render "Gemini in use, Anthropic available as fallback"
+  without re-implementing the resolution rules.
+- **Tests stay deterministic.** `FakeLLMClient` covers both providers
+  in unit tests. `GeminiLLMClient` accepts an injected mock client
+  the same way `AnthropicLLMClient` does. The opt-in
+  `pytest -m llm_integration` job is the place to add a real Gemini
+  smoke test when needed; no default-suite change.

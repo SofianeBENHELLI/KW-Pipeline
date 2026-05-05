@@ -45,6 +45,13 @@ class LLMConfig(BaseModel):
     configured: bool
     model: str
     max_input_tokens_per_document: int
+    # ADR-013 §6 multi-provider amendment.
+    provider_setting: Literal["auto", "gemini", "anthropic"]
+    active_provider: Literal["gemini", "anthropic"] | None
+    gemini_configured: bool
+    gemini_model: str
+    anthropic_configured: bool
+    anthropic_model: str
 
 
 class EmbeddingsConfig(BaseModel):

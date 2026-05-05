@@ -156,10 +156,31 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
-    # LLM (ADR-013). ``ANTHROPIC_API_KEY`` is kept as a legacy alias
-    # because the Anthropic SDK uses that exact name and many deploy
-    # tools surface it under that label.
+    # LLM (ADR-013, amended §6 2026-05-05). Two providers are supported
+    # behind the ``LLMClient`` Protocol; selection is governed by
+    # ``llm_provider`` and the configured keys. Default is ``auto``:
+    # Gemini wins when ``GEMINI_API_KEY`` is set, otherwise Anthropic
+    # is used. Operators can pin a specific provider via
+    # ``KW_LLM_PROVIDER=gemini|anthropic`` for A/B testing.
+    #
+    # ``ANTHROPIC_API_KEY`` and ``GEMINI_API_KEY`` are kept as legacy
+    # aliases without the ``KW_`` prefix because each provider's SDK
+    # ships with that exact name and operators surface them under that
+    # label.
     # ------------------------------------------------------------------
+    llm_provider: Literal["auto", "gemini", "anthropic"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("KW_LLM_PROVIDER"),
+        description=(
+            "Active LLM provider. ``auto`` (default) prefers Gemini when "
+            "``GEMINI_API_KEY`` is set and falls back to Anthropic. "
+            "``gemini`` / ``anthropic`` pin the choice for A/B testing. "
+            "When the pinned provider's key is missing the resolution "
+            "yields no client and Phase 2 / Phase 3 stay disabled — "
+            "matching the Phase 1-only behaviour the platform shipped "
+            "with before this amendment."
+        ),
+    )
     anthropic_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("KW_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
@@ -175,6 +196,22 @@ class Settings(BaseSettings):
         description=(
             "Claude model id override. Empty means use the SDK's default "
             "(currently ``claude-sonnet-4-5``)."
+        ),
+    )
+    gemini_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_GEMINI_API_KEY", "GEMINI_API_KEY"),
+        description=(
+            "Gemini API key. Empty disables the Gemini provider. When "
+            "set with ``llm_provider=auto`` it becomes the active LLM."
+        ),
+    )
+    gemini_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_GEMINI_MODEL"),
+        description=(
+            "Gemini model id override. Empty means use the SDK's default "
+            "(currently ``gemini-2.5-flash``)."
         ),
     )
     entity_extractor_max_input_tokens_per_document: int = Field(

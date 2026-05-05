@@ -11,6 +11,12 @@ dependencies = [
   # a deployment opts in.
   "anthropic>=0.40",
   "fastapi==0.115.6",
+  # Google Generative AI SDK for the optional Gemini LLM provider
+  # (ADR-013 §6 amendment). Imported lazily by `GeminiLLMClient`; unit
+  # tests use `FakeLLMClient` or inject a mock client so the SDK is
+  # never called in the default suite. Refuses to construct without
+  # `GEMINI_API_KEY`, so this dep is dormant unless a deployment opts in.
+  "google-genai>=0.3",
   # Bolt driver for the optional knowledge layer (ADR-012). Tiny package;
   # `Neo4jGraphStore` is lazy-imported, so unit tests against the in-memory
   # fake do not exercise it. The driver is dormant until KW_NEO4J_URI is set.
@@ -134,5 +140,5 @@ disallow_incomplete_defs = true
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["neo4j.*", "anthropic.*", "voyageai.*", "pdfplumber.*", "docx.*", "pptx.*", "fpdf.*", "yaml"]
+module = ["neo4j.*", "anthropic.*", "google.*", "google.genai.*", "voyageai.*", "pdfplumber.*", "docx.*", "pptx.*", "fpdf.*", "yaml"]
 ignore_missing_imports = true

@@ -1163,12 +1163,27 @@ export interface components {
         };
         /** LLMConfig */
         LLMConfig: {
+            /** Active Provider */
+            active_provider: ("gemini" | "anthropic") | null;
+            /** Anthropic Configured */
+            anthropic_configured: boolean;
+            /** Anthropic Model */
+            anthropic_model: string;
             /** Configured */
             configured: boolean;
+            /** Gemini Configured */
+            gemini_configured: boolean;
+            /** Gemini Model */
+            gemini_model: string;
             /** Max Input Tokens Per Document */
             max_input_tokens_per_document: number;
             /** Model */
             model: string;
+            /**
+             * Provider Setting
+             * @enum {string}
+             */
+            provider_setting: "auto" | "gemini" | "anthropic";
         };
         /**
          * LineageResponse

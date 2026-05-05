@@ -1230,9 +1230,40 @@
       },
       "LLMConfig": {
         "properties": {
+          "active_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "gemini",
+                  "anthropic"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Provider"
+          },
+          "anthropic_configured": {
+            "title": "Anthropic Configured",
+            "type": "boolean"
+          },
+          "anthropic_model": {
+            "title": "Anthropic Model",
+            "type": "string"
+          },
           "configured": {
             "title": "Configured",
             "type": "boolean"
+          },
+          "gemini_configured": {
+            "title": "Gemini Configured",
+            "type": "boolean"
+          },
+          "gemini_model": {
+            "title": "Gemini Model",
+            "type": "string"
           },
           "max_input_tokens_per_document": {
             "title": "Max Input Tokens Per Document",
@@ -1241,12 +1272,27 @@
           "model": {
             "title": "Model",
             "type": "string"
+          },
+          "provider_setting": {
+            "enum": [
+              "auto",
+              "gemini",
+              "anthropic"
+            ],
+            "title": "Provider Setting",
+            "type": "string"
           }
         },
         "required": [
           "configured",
           "model",
-          "max_input_tokens_per_document"
+          "max_input_tokens_per_document",
+          "provider_setting",
+          "active_provider",
+          "gemini_configured",
+          "gemini_model",
+          "anthropic_configured",
+          "anthropic_model"
         ],
         "title": "LLMConfig",
         "type": "object"

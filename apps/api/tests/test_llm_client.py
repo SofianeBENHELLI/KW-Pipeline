@@ -243,6 +243,49 @@ def test_fake_llm_client_complete_text_raises_when_queue_empty():
         fake.complete_text(system="s", user="u")
 
 
+def test_fake_llm_client_complete_with_tool_raises_when_queue_empty():
+    fake = FakeLLMClient()
+    with pytest.raises(RuntimeError, match="enqueue"):
+        fake.complete_with_tool(
+            system="s",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+
+
+def test_retry_after_returns_none_when_header_unparseable():
+    """Non-numeric Retry-After (HTTP-date or junk) falls back to backoff."""
+    from app.services.knowledge.llm_client import _retry_after_seconds
+
+    exc = MagicMock()
+    exc.response = MagicMock()
+    exc.response.headers = {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}
+    assert _retry_after_seconds(exc) is None
+
+
+def test_retry_after_returns_none_when_header_absent():
+    from app.services.knowledge.llm_client import _retry_after_seconds
+
+    exc = MagicMock()
+    exc.response = MagicMock()
+    exc.response.headers = {"Other": "value"}
+    assert _retry_after_seconds(exc) is None
+
+
+def test_retry_after_returns_none_when_header_bag_blows_up():
+    """Tolerate a header bag that's not a dict-like (raises on .get)."""
+    from app.services.knowledge.llm_client import _retry_after_seconds
+
+    class _BadHeaders:
+        def get(self, _key: str) -> str:  # noqa: D401 - tiny stub
+            raise RuntimeError("not dict-like")
+
+    exc = MagicMock()
+    exc.response = MagicMock()
+    exc.response.headers = _BadHeaders()
+    assert _retry_after_seconds(exc) is None
+
+
 def test_fake_llm_client_records_system_as_passed():
     """FakeLLMClient stores the system arg verbatim — backwards-compatible str shape."""
     fake = FakeLLMClient()

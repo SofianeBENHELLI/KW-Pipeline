@@ -2,16 +2,23 @@
 
 The :class:`LLMClient` Protocol is the only seam between the entity
 extractor (Phase 2) / chat service (Phase 3) and a concrete LLM
-provider. ADR-013 commits to one provider in v1 — Anthropic Claude —
-behind this Protocol so adding a second provider later is a new
-implementation, not a rewrite of every call site.
+provider. ADR-013 §6 (amendment, 2026-05-05) extends the original
+Anthropic-only commitment to a two-provider posture: Gemini is the
+primary in deployments that opt into it, Anthropic remains the
+fallback. Both providers sit behind this Protocol so call sites do
+not change when the active provider does.
 
-Three implementations live here:
+Implementations:
 
-- :class:`AnthropicLLMClient` is the production wrapper. It lazy-imports
-  the ``anthropic`` SDK so this module loads in environments without
-  the dependency installed (e.g. minimal CI images that only run the
-  unit suite without ``ANTHROPIC_API_KEY``).
+- :class:`AnthropicLLMClient` is a production wrapper around the
+  ``anthropic`` SDK. Lazy-imports the SDK so this module loads in
+  environments without the dependency installed (e.g. minimal CI
+  images that only run the unit suite without ``ANTHROPIC_API_KEY``).
+- :class:`GeminiLLMClient` is the production wrapper around the
+  ``google-genai`` SDK. Same lazy-import posture; refuses to
+  construct without ``GEMINI_API_KEY``. Maps the Anthropic-shaped
+  Protocol contract onto Gemini's function-calling + free-text
+  surface so call sites are unchanged.
 - :class:`FakeLLMClient` is the in-process test double. It returns
   recorded ``(parsed_tool_input, token_usage)`` tuples in order, so
   the default ``pytest`` invocation never reaches the network.
@@ -45,6 +52,11 @@ log = logging.getLogger(__name__)
 # entity extraction, with Opus reserved for the harder Phase 3 chat
 # work. Callers can override via the constructor.
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+
+# Default Gemini model. ``gemini-2.5-flash`` is the cheap + fast tier
+# that mirrors Sonnet's cost/quality slot for entity extraction.
+# Callers can override via the constructor or ``KW_GEMINI_MODEL``.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 # Conservative default. Per-call override exists on the Anthropic
 # implementation; the extractor uses a smaller value for short
@@ -432,6 +444,325 @@ def _retry_after_seconds(exc: Exception) -> float | None:
         return None
 
 
+# ─── Gemini implementation (ADR-013 §6 amendment) ────────────────────────
+
+
+# Gemini exception class names that map onto ADR-014 §4's "transient"
+# bucket. Matched by ``type(exc).__name__`` so we don't need a hard
+# import of ``google.api_core.exceptions`` to recognise them.
+_GEMINI_RETRYABLE_EXCEPTION_NAMES: frozenset[str] = frozenset(
+    {
+        "ResourceExhausted",  # 429-equivalent (gRPC code 8)
+        "ServiceUnavailable",  # 503-equivalent (gRPC code 14)
+        "InternalServerError",  # 500-equivalent (gRPC code 13)
+        "DeadlineExceeded",  # 504-equivalent (gRPC code 4)
+        "Aborted",  # transient conflict (gRPC code 10)
+        "Unknown",  # gRPC code 2 — treat as transient
+        "ServerError",  # generic API server error
+        "TooManyRequests",  # alternate spelling some SDKs use
+    }
+)
+
+
+class GeminiLLMClient:
+    """Production :class:`LLMClient` against the Google Generative AI SDK.
+
+    The SDK is imported in ``__init__`` (not at module load) so that
+    importing this module does not require ``google-genai`` to be
+    installed. Tests that exercise this class set up their own SDK
+    stubs; the default unit suite uses :class:`FakeLLMClient` and
+    never touches this module.
+
+    The ``tool_schema`` passed to :meth:`complete_with_tool` must be a
+    JSON-Schema-shaped dict suitable for Gemini's
+    ``function_declaration.parameters`` field. Gemini accepts a
+    subset of JSON Schema; the schemas the entity extractor emits
+    (object with primitive-typed properties) fall inside that subset.
+
+    Token usage shape is mapped to match the Anthropic surface so the
+    audit logs and ADR-014 §3 circuit breaker remain provider-agnostic:
+
+    - ``input_tokens`` ← ``prompt_token_count``
+    - ``output_tokens`` ← ``candidates_token_count``
+    - ``cache_read_input_tokens`` ← ``cached_content_token_count``
+    - ``cache_creation_input_tokens`` ← ``0`` (Gemini does not surface
+      this distinctly; context-cache *creation* is a separate API call,
+      not reported in the response usage block).
+
+    Gemini context caching (``cachedContents``) is not used in this
+    revision; adding it is a follow-up that mirrors ADR-014 §2 for the
+    Gemini provider.
+    """
+
+    name: str = "gemini"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = DEFAULT_GEMINI_MODEL,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        client: Any = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+        retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
+        sleep: Callable[[float], None] | None = None,
+        rng: Callable[[], float] | None = None,
+    ) -> None:
+        if max_retries < 0:
+            raise ValueError("max_retries must be >= 0")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be >= 0")
+        if client is None:  # pragma: no cover - exercised behind pytest -m llm_integration
+            try:
+                from google import genai  # noqa: PLC0415
+            except ImportError as exc:
+                raise RuntimeError(
+                    "GeminiLLMClient requires the `google-genai` package. "
+                    "Install with `pip install google-genai` or use FakeLLMClient "
+                    "for tests."
+                ) from exc
+            client = genai.Client(api_key=api_key)
+        self._client = client
+        self._model = model
+        self._max_tokens = max_tokens
+        self._max_retries = max_retries
+        self._retry_backoff_seconds = retry_backoff_seconds
+        self._retry_backoff_cap_seconds = retry_backoff_cap_seconds
+        self._sleep = sleep or time.sleep
+        self._rng = rng or random.random
+
+    def complete_with_tool(
+        self,
+        *,
+        system: str,
+        user: str,
+        tool_schema: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, int]]:
+        """Run one structured-output call against Gemini.
+
+        The Gemini equivalent of Anthropic's ``tool_use`` is a function
+        declaration plus ``tool_config.function_calling_config`` set to
+        ``ANY`` mode with the function name allow-listed. This forces
+        the model to invoke ``emit_structured`` and return the args
+        dict, matching the Protocol contract.
+
+        Per ADR-014 §4, transient upstream failures (gRPC ``ResourceExhausted``
+        / ``ServiceUnavailable`` / ``DeadlineExceeded`` and the rest of
+        the transient bucket) are retried up to ``max_retries`` times
+        with jittered exponential backoff.
+        """
+        tool_name = "emit_structured"
+        response = self._call_with_retry(
+            system=system,
+            user=user,
+            tool_schema=tool_schema,
+            tool_name=tool_name,
+        )
+
+        # Find the function_call part. Gemini returns the call inside
+        # ``response.candidates[*].content.parts[*].function_call``.
+        # With function-calling mode ``ANY`` and the name allow-listed,
+        # exactly one such part should be present; if not, the model
+        # misbehaved — surface as an error so the extractor's warning
+        # path catches it.
+        tool_input: dict[str, Any] | None = None
+        for candidate in getattr(response, "candidates", []) or []:
+            content = getattr(candidate, "content", None)
+            for part in getattr(content, "parts", []) or []:
+                fc = getattr(part, "function_call", None)
+                if fc is not None and getattr(fc, "name", None) == tool_name:
+                    raw = getattr(fc, "args", None)
+                    if isinstance(raw, dict):
+                        tool_input = raw
+                        break
+            if tool_input is not None:
+                break
+        if tool_input is None:
+            raise RuntimeError(f"Gemini response did not include an `{tool_name}` function_call.")
+
+        token_usage = self._extract_usage(getattr(response, "usage_metadata", None))
+        return tool_input, token_usage
+
+    def complete_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
+        """Run one free-text call against Gemini.
+
+        Phase 3 chat surface. The system prompt is forwarded via
+        ``system_instruction`` on the request config (Gemini's
+        equivalent of Anthropic's ``system`` block). Caching is not
+        applied in this revision; see the class docstring.
+        """
+        response = self._call_text_with_retry(
+            system=system,
+            user=user,
+            max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
+        )
+
+        # Concatenate every text part. Gemini exposes ``response.text``
+        # as a convenience; we still iterate over ``parts`` to tolerate
+        # the multi-part shape and to remain robust against SDK
+        # versions that omit the convenience accessor.
+        parts: list[str] = []
+        for candidate in getattr(response, "candidates", []) or []:
+            content = getattr(candidate, "content", None)
+            for part in getattr(content, "parts", []) or []:
+                text = getattr(part, "text", None)
+                if isinstance(text, str):
+                    parts.append(text)
+        if not parts:
+            convenience = getattr(response, "text", None)
+            if isinstance(convenience, str):
+                parts.append(convenience)
+        answer = "".join(parts)
+
+        token_usage = self._extract_usage(getattr(response, "usage_metadata", None))
+        return answer, token_usage
+
+    @staticmethod
+    def _extract_usage(usage: Any) -> dict[str, int]:
+        """Map Gemini's ``usage_metadata`` onto the Protocol's usage dict.
+
+        See class docstring for the field-by-field translation.
+        """
+        return {
+            "input_tokens": int(getattr(usage, "prompt_token_count", 0) or 0),
+            "output_tokens": int(getattr(usage, "candidates_token_count", 0) or 0),
+            "cache_read_input_tokens": int(getattr(usage, "cached_content_token_count", 0) or 0),
+            "cache_creation_input_tokens": 0,
+        }
+
+    def _call_with_retry(
+        self,
+        *,
+        system: str,
+        user: str,
+        tool_schema: dict[str, Any],
+        tool_name: str,
+    ) -> Any:
+        """Issue the SDK call, retrying transient upstream failures."""
+        config = {
+            "system_instruction": system,
+            "max_output_tokens": self._max_tokens,
+            "tools": [
+                {
+                    "function_declarations": [
+                        {
+                            "name": tool_name,
+                            "description": (
+                                "Emit the structured payload that conforms to the "
+                                "provided JSON schema. Always invoke this function; "
+                                "never reply in plain text."
+                            ),
+                            "parameters": tool_schema,
+                        }
+                    ]
+                }
+            ],
+            "tool_config": {
+                "function_calling_config": {
+                    "mode": "ANY",
+                    "allowed_function_names": [tool_name],
+                }
+            },
+        }
+        attempt = 0
+        while True:
+            try:
+                return self._client.models.generate_content(
+                    model=self._model,
+                    contents=user,
+                    config=config,
+                )
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if attempt >= self._max_retries or not _is_retryable_gemini(exc):
+                    raise
+                delay = self._retry_delay(attempt)
+                log.warning(
+                    "knowledge.llm.retrying",
+                    extra={
+                        "provider": "gemini",
+                        "attempt": attempt + 1,
+                        "max_retries": self._max_retries,
+                        "delay_seconds": round(delay, 3),
+                        "error_type": type(exc).__name__,
+                        "code": getattr(exc, "code", None),
+                    },
+                )
+                self._sleep(delay)
+                attempt += 1
+
+    def _call_text_with_retry(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int,
+    ) -> Any:
+        """Issue a free-text SDK call, retrying transient upstream failures."""
+        config = {
+            "system_instruction": system,
+            "max_output_tokens": max_tokens,
+        }
+        attempt = 0
+        while True:
+            try:
+                return self._client.models.generate_content(
+                    model=self._model,
+                    contents=user,
+                    config=config,
+                )
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if attempt >= self._max_retries or not _is_retryable_gemini(exc):
+                    raise
+                delay = self._retry_delay(attempt)
+                log.warning(
+                    "knowledge.llm.retrying",
+                    extra={
+                        "provider": "gemini",
+                        "attempt": attempt + 1,
+                        "max_retries": self._max_retries,
+                        "delay_seconds": round(delay, 3),
+                        "error_type": type(exc).__name__,
+                        "code": getattr(exc, "code", None),
+                        "call_kind": "complete_text",
+                    },
+                )
+                self._sleep(delay)
+                attempt += 1
+
+    def _retry_delay(self, attempt: int) -> float:
+        """Jittered exponential backoff capped at the configured ceiling."""
+        base = self._retry_backoff_seconds * (2**attempt)
+        jitter = self._rng() * self._retry_backoff_seconds
+        return min(base + jitter, self._retry_backoff_cap_seconds)
+
+
+def _is_retryable_gemini(exc: Exception) -> bool:
+    """Classify a Gemini SDK exception as transient (retryable) or terminal.
+
+    Detection is duck-typed on the exception class name so this module
+    does not need to import ``google.api_core.exceptions``. The set of
+    names lifted to "retryable" is :data:`_GEMINI_RETRYABLE_EXCEPTION_NAMES`.
+
+    For the (rare) case where the SDK raises a generic exception with
+    an HTTP-style ``status_code``, we apply the same 429/5xx rule used
+    by the Anthropic path so the retry budget stays consistent.
+    """
+    name = type(exc).__name__
+    if name in _GEMINI_RETRYABLE_EXCEPTION_NAMES:
+        return True
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or 500 <= status < 600
+    return False
+
+
 # ─── In-process fake (used by all default unit tests) ────────────────────
 
 
@@ -507,11 +838,13 @@ class FakeLLMClient:
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
+    "DEFAULT_GEMINI_MODEL",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_RETRY_BACKOFF_CAP_SECONDS",
     "DEFAULT_RETRY_BACKOFF_SECONDS",
     "AnthropicLLMClient",
     "FakeLLMClient",
+    "GeminiLLMClient",
     "LLMClient",
 ]

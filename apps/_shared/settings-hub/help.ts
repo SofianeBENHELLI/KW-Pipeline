@@ -37,11 +37,19 @@ export const SETTING_HELP: Record<string, string> = {
   "knowledge_layer.neo4j_database":
     "Neo4j database name. Defaults to 'neo4j'.",
 
-  // LLM
-  "llm.configured":
-    "Anthropic API key. Required for Phase 2 entity extraction; without it the pipeline still validates documents but skips typed entities.",
-  "llm.model":
-    "Claude model id used for entity extraction. Empty falls back to the SDK default (currently claude-sonnet-4-5).",
+  // LLM (multi-provider per ADR-013 §6)
+  "llm.active_provider":
+    "Provider currently wired to the entity extractor and chat. Resolved from KW_LLM_PROVIDER plus which API keys are configured.",
+  "llm.provider_setting":
+    "How the active provider is picked. 'auto' (default) prefers Gemini when GEMINI_API_KEY is set and falls back to Anthropic. 'gemini' or 'anthropic' pin the choice.",
+  "llm.gemini_configured":
+    "Gemini API key. With provider mode 'auto' or 'gemini', this key — when set — makes Gemini the active LLM.",
+  "llm.gemini_model":
+    "Gemini model id used for extraction and chat. Empty falls back to the SDK default (currently gemini-2.5-flash — cheap + fast tier).",
+  "llm.anthropic_configured":
+    "Anthropic API key. Acts as the fallback in 'auto' mode when GEMINI_API_KEY is unset, or as the active LLM when provider mode is pinned to 'anthropic'.",
+  "llm.anthropic_model":
+    "Claude model id used when Anthropic is active. Empty falls back to the SDK default (currently claude-sonnet-4-5).",
   "llm.max_input_tokens_per_document":
     "Per-document budget for cumulative input tokens. Once met, remaining sections are skipped and recorded as warnings. Zero disables the breaker.",
 
