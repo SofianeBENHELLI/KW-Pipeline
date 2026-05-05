@@ -335,6 +335,59 @@ function PurgeModal({ item, onClose, onCompleted }: PurgeModalProps) {
   );
 }
 
+// ─── Filter / sort state ─────────────────────────────────────────────────────
+
+/**
+ * Sort modes the filter bar exposes. Applied client-side against the
+ * already-fetched page (cursor pagination is preserved by the backend
+ * — see TODO below).
+ *
+ * - ``recent``  — ``archived_at DESC`` (default; matches the route's
+ *   server-side default so the no-filter view doesn't re-shuffle).
+ * - ``oldest``  — ``archived_at ASC``.
+ * - ``most-purged`` — ``versions_purged DESC``; surfaces the "biggest
+ *   bytes-freed wins" so an operator hunting storage can scan top-down.
+ *
+ * TODO(#274 follow-up): the route ``GET /admin/archive/archived_documents``
+ * doesn't accept ``?q=`` / ``?sort=`` yet — when it does, drop the
+ * client-side filter for the matching server-side params (the catalog
+ * list endpoint already uses this shape with ``?q=`` / ``?status=``).
+ * Until then the search+sort applies only to the visible page; with
+ * the cursor still pointing at the next page from the unfiltered set.
+ */
+export type ArchiveSortMode = "recent" | "oldest" | "most-purged";
+
+const DEFAULT_SORT_MODE: ArchiveSortMode = "recent";
+
+/** Apply the client-side filter + sort to the visible page. Pure so
+ *  the test suite can pin the ordering without re-mounting the view. */
+export function filterAndSortItems(
+  items: readonly ApiArchivedDocumentItem[],
+  query: string,
+  sort: ArchiveSortMode,
+): ApiArchivedDocumentItem[] {
+  const q = query.trim().toLowerCase();
+  const filtered =
+    q === ""
+      ? items.slice()
+      : items.filter((it) =>
+          it.original_filename.toLowerCase().includes(q),
+        );
+  switch (sort) {
+    case "oldest":
+      filtered.sort((a, b) => a.archived_at.localeCompare(b.archived_at));
+      break;
+    case "most-purged":
+      filtered.sort((a, b) => b.versions_purged - a.versions_purged);
+      break;
+    case "recent":
+    default:
+      filtered.sort((a, b) => b.archived_at.localeCompare(a.archived_at));
+      break;
+  }
+  return filtered;
+}
+
 // ─── Main view ───────────────────────────────────────────────────────────────
 
 type ModalState =
@@ -359,11 +412,21 @@ export function AdminArchiveView() {
   // Cleared whenever the list reloads so a refreshed table starts clean
   // (also defends against a stale id surviving an unarchive/purge).
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Client-side filter bar state. The backend route doesn't accept
+  // ``?q=`` / ``?sort=`` yet (#274 follow-up), so we filter the
+  // already-fetched visible page in-memory.
+  const [filterQuery, setFilterQuery] = useState("");
+  const [sortMode, setSortMode] = useState<ArchiveSortMode>(DEFAULT_SORT_MODE);
 
   const loadList = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
+      // TODO(#274 follow-up): pass ``q`` / ``sort`` to the backend
+      // once ``GET /admin/archive/archived_documents`` supports them
+      // (matches the catalog list's ``?q=`` / ``?status=`` shape).
+      // Until then ``filterQuery`` + ``sortMode`` are applied
+      // client-side via ``filterAndSortItems``.
       const page = await listArchivedDocuments();
       setItems(page.items);
       setSelectedIds(new Set());
@@ -375,6 +438,19 @@ export function AdminArchiveView() {
       setLoading(false);
     }
   }, []);
+
+  const visibleItems = useMemo(
+    () => filterAndSortItems(items, filterQuery, sortMode),
+    [items, filterQuery, sortMode],
+  );
+
+  const handleResetFilters = useCallback(() => {
+    setFilterQuery("");
+    setSortMode(DEFAULT_SORT_MODE);
+  }, []);
+
+  const filtersActive =
+    filterQuery.trim() !== "" || sortMode !== DEFAULT_SORT_MODE;
 
   useEffect(() => {
     void loadList();
@@ -417,12 +493,18 @@ export function AdminArchiveView() {
       // If every visible row is already selected, clear; otherwise
       // select all visible rows. Mirrors the semantic of a tri-state
       // header checkbox without needing an indeterminate visual.
-      if (prev.size === items.length && items.length > 0) return new Set();
-      return new Set(items.map((it) => it.document_id));
+      // "Visible" honours the client-side filter — selecting-all on
+      // a filtered page only checks the filtered rows, which matches
+      // the operator's mental model when they've narrowed the table.
+      if (prev.size === visibleItems.length && visibleItems.length > 0) {
+        return new Set();
+      }
+      return new Set(visibleItems.map((it) => it.document_id));
     });
-  }, [items]);
+  }, [visibleItems]);
 
-  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const allSelected =
+    visibleItems.length > 0 && selectedIds.size === visibleItems.length;
   const selectedCount = selectedIds.size;
 
   // Forbidden state: the backend's 403 on a non-admin caller is the
@@ -490,12 +572,65 @@ export function AdminArchiveView() {
           </div>
         ) : null}
 
+        {/* Filter bar — client-side search + sort + reset. Renders
+            even when the page is empty so the controls don't pop in
+            and out. The filter is applied locally; see TODO on
+            ``loadList`` for the future server-side ``?q=`` / ``?sort=``
+            params. */}
+        {!loading && loadError === null ? (
+          <div
+            className="action-row admin-archive-filter-bar"
+            data-testid="admin-archive-filter-bar"
+          >
+            <label className="admin-archive-filter-search">
+              <span className="muted">Search filename</span>
+              <input
+                type="search"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                placeholder="filename substring"
+                data-testid="admin-archive-filter-search"
+              />
+            </label>
+            <label className="admin-archive-filter-sort">
+              <span className="muted">Sort</span>
+              <select
+                value={sortMode}
+                onChange={(e) =>
+                  setSortMode(e.target.value as ArchiveSortMode)
+                }
+                data-testid="admin-archive-filter-sort"
+              >
+                <option value="recent">Recently archived</option>
+                <option value="oldest">Oldest first</option>
+                <option value="most-purged">Most versions purged</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="text-button"
+              onClick={handleResetFilters}
+              disabled={!filtersActive}
+              data-testid="admin-archive-filter-reset"
+            >
+              Reset filters
+            </button>
+          </div>
+        ) : null}
+
         {loading ? (
           <p className="muted" role="status" aria-live="polite">
             Loading…
           </p>
         ) : items.length === 0 ? (
           <p className="muted">No archived documents.</p>
+        ) : visibleItems.length === 0 ? (
+          // Filter bar narrowed the page to nothing. Distinct copy from
+          // the truly-empty state so the operator knows it's a filter
+          // result, not an empty archive.
+          <p className="muted" data-testid="admin-archive-empty-filtered">
+            No archived documents match the search.
+          </p>
         ) : (
           <>
             {/* Bulk action bar — only renders when ≥ 1 row is selected.
@@ -547,7 +682,7 @@ export function AdminArchiveView() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => {
+                {visibleItems.map((item) => {
                   const totalVersions =
                     item.versions_remaining + item.versions_purged;
                   const isSelected = selectedIds.has(item.document_id);

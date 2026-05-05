@@ -788,6 +788,181 @@ describe("AdminArchiveView", () => {
     ).toBeInTheDocument();
   });
 
+  // ─── Filter bar (search / sort / reset) ─────────────────────────────────────
+
+  it("filename search narrows the table to substring matches (case-insensitive)", async () => {
+    const items = [
+      makeItem({
+        document_id: "doc-1",
+        original_filename: "alpha-policy.txt",
+        archived_at: "2026-05-01T12:00:00Z",
+      }),
+      makeItem({
+        document_id: "doc-2",
+        original_filename: "beta-handbook.pdf",
+        archived_at: "2026-05-02T12:00:00Z",
+      }),
+      makeItem({
+        document_id: "doc-3",
+        original_filename: "gamma-Policy-v2.md",
+        archived_at: "2026-05-03T12:00:00Z",
+      }),
+    ];
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(makeListResponse(items)),
+    );
+
+    render(<AdminArchiveView />);
+    await waitFor(() => {
+      expect(screen.getByText("alpha-policy.txt")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByTestId(
+      "admin-archive-filter-search",
+    ) as HTMLInputElement;
+
+    // Substring "policy" — case-insensitive — matches docs 1 and 3.
+    fireEvent.change(searchInput, { target: { value: "policy" } });
+
+    await waitFor(() => {
+      expect(screen.queryByText("beta-handbook.pdf")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("alpha-policy.txt")).toBeInTheDocument();
+    expect(screen.getByText("gamma-Policy-v2.md")).toBeInTheDocument();
+
+    // Empty filter result → distinct empty-state copy.
+    fireEvent.change(searchInput, { target: { value: "no-such-file" } });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("admin-archive-empty-filtered"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("No archived documents match the search."),
+    ).toBeInTheDocument();
+  });
+
+  it("sort dropdown reorders the table (oldest first / most-purged)", async () => {
+    const items = [
+      makeItem({
+        document_id: "doc-recent",
+        original_filename: "recent.txt",
+        archived_at: "2026-05-04T12:00:00Z",
+        versions_purged: 1,
+      }),
+      makeItem({
+        document_id: "doc-mid",
+        original_filename: "mid.txt",
+        archived_at: "2026-05-02T12:00:00Z",
+        versions_purged: 5,
+      }),
+      makeItem({
+        document_id: "doc-oldest",
+        original_filename: "oldest.txt",
+        archived_at: "2026-05-01T12:00:00Z",
+        versions_purged: 0,
+      }),
+    ];
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(makeListResponse(items)),
+    );
+
+    render(<AdminArchiveView />);
+    await waitFor(() => {
+      expect(screen.getByText("recent.txt")).toBeInTheDocument();
+    });
+
+    const filenamesInOrder = () =>
+      screen
+        .getAllByTestId("admin-archive-row")
+        .map((row) => within(row).getByText(/\.txt$/).textContent);
+
+    // Default = "Recently archived" → DESC by archived_at.
+    expect(filenamesInOrder()).toEqual([
+      "recent.txt",
+      "mid.txt",
+      "oldest.txt",
+    ]);
+
+    const sortSelect = screen.getByTestId(
+      "admin-archive-filter-sort",
+    ) as HTMLSelectElement;
+
+    // Oldest first → ASC by archived_at.
+    fireEvent.change(sortSelect, { target: { value: "oldest" } });
+    await waitFor(() => {
+      expect(filenamesInOrder()).toEqual([
+        "oldest.txt",
+        "mid.txt",
+        "recent.txt",
+      ]);
+    });
+
+    // Most versions purged → DESC by versions_purged (mid=5, recent=1, oldest=0).
+    fireEvent.change(sortSelect, { target: { value: "most-purged" } });
+    await waitFor(() => {
+      expect(filenamesInOrder()).toEqual([
+        "mid.txt",
+        "recent.txt",
+        "oldest.txt",
+      ]);
+    });
+  });
+
+  it("reset filters restores default state (search empty + recent sort)", async () => {
+    const items = [
+      makeItem({
+        document_id: "doc-1",
+        original_filename: "alpha.txt",
+        archived_at: "2026-05-01T12:00:00Z",
+      }),
+      makeItem({
+        document_id: "doc-2",
+        original_filename: "beta.txt",
+        archived_at: "2026-05-02T12:00:00Z",
+      }),
+    ];
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(makeListResponse(items)),
+    );
+
+    render(<AdminArchiveView />);
+    await waitFor(() => {
+      expect(screen.getByText("alpha.txt")).toBeInTheDocument();
+    });
+
+    const resetBtn = screen.getByTestId(
+      "admin-archive-filter-reset",
+    ) as HTMLButtonElement;
+    // Reset is disabled by default (no filters active).
+    expect(resetBtn.disabled).toBe(true);
+
+    const searchInput = screen.getByTestId(
+      "admin-archive-filter-search",
+    ) as HTMLInputElement;
+    const sortSelect = screen.getByTestId(
+      "admin-archive-filter-sort",
+    ) as HTMLSelectElement;
+
+    fireEvent.change(searchInput, { target: { value: "alpha" } });
+    fireEvent.change(sortSelect, { target: { value: "oldest" } });
+
+    await waitFor(() => {
+      expect(resetBtn.disabled).toBe(false);
+    });
+    // Search is filtering down.
+    expect(screen.queryByText("beta.txt")).not.toBeInTheDocument();
+
+    fireEvent.click(resetBtn);
+
+    await waitFor(() => {
+      expect(searchInput.value).toBe("");
+    });
+    expect(sortSelect.value).toBe("recent");
+    expect(screen.getByText("beta.txt")).toBeInTheDocument();
+    expect(resetBtn.disabled).toBe(true);
+  });
+
   it("renders Forbidden state when the listing returns 403 KW_FORBIDDEN", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       makeJsonResponse(
