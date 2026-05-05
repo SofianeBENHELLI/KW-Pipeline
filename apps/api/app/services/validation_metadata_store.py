@@ -60,6 +60,42 @@ class ValidationMetadataStore(Protocol):
     def list_all(self) -> list[ValidationMetadata]:  # pragma: no cover - Protocol
         """Return every persisted row. Tests + future admin tooling."""
 
+    def list_pending_auto_promotions(  # pragma: no cover - Protocol
+        self,
+    ) -> list[ValidationMetadata]:
+        """Return rows where the router picked auto and the worker hasn't acted.
+
+        Filters to ``routing_decision == "auto" AND validation_method
+        IS NULL`` — the exact set the auto-promotion worker (slice 3,
+        #215) loops over. Order is implementation-defined but stable
+        enough for tests; the SQLite store returns rows ordered by
+        ``version_id`` for determinism.
+
+        ``max_versions`` clamping happens in the worker (so the
+        store stays simple); callers that want to bound the pass
+        slice the returned list themselves.
+        """
+
+    def mark_auto_promoted(  # pragma: no cover - Protocol
+        self,
+        version_id: str,
+        *,
+        actor: str,
+    ) -> None:
+        """Flip ``validation_method="auto"`` and record ``validation_actor``.
+
+        Called by :class:`HITLAutoPromoter` after a successful
+        ``handle_validation`` so the next worker pass's
+        :meth:`list_pending_auto_promotions` skips this row. Idempotent:
+        a second call against an already-promoted row is a no-op
+        because the SQL ``WHERE`` filter and the in-memory short-circuit
+        both exclude rows that already carry a ``validation_method``.
+
+        ``actor`` lands on ``validation_actor`` so the audit query
+        "who/what flipped this row" stays a SQL one-liner. The worker
+        passes ``"system:hitl_auto_promote"`` per ADR-019 §4.
+        """
+
 
 class InMemoryValidationMetadataStore:
     """Dict-backed :class:`ValidationMetadataStore`."""
@@ -84,6 +120,38 @@ class InMemoryValidationMetadataStore:
     def list_all(self) -> list[ValidationMetadata]:
         with self._lock:
             return [row.model_copy(deep=True) for row in self._rows.values()]
+
+    def list_pending_auto_promotions(self) -> list[ValidationMetadata]:
+        with self._lock:
+            pending = [
+                row.model_copy(deep=True)
+                for row in self._rows.values()
+                if row.routing_decision == "auto" and row.validation_method is None
+            ]
+        # Stable order by version_id keeps tests + admin output
+        # deterministic across pass invocations.
+        pending.sort(key=lambda row: row.version_id)
+        return pending
+
+    def mark_auto_promoted(self, version_id: str, *, actor: str) -> None:
+        with self._lock:
+            row = self._rows.get(version_id)
+            if row is None:
+                # No-op: nothing to flip. The worker only calls this
+                # after a successful handle_validation, but the store
+                # stays defensive so a stale call doesn't crash.
+                return
+            if row.validation_method is not None:
+                # Idempotent: a second call against an already-promoted
+                # row is a no-op (race: a parallel worker pass beat us).
+                return
+            updated = row.model_copy(
+                update={
+                    "validation_method": "auto",
+                    "validation_actor": actor,
+                }
+            )
+            self._rows[version_id] = updated
 
 
 class SQLiteValidationMetadataStore:
@@ -149,6 +217,32 @@ class SQLiteValidationMetadataStore:
                 "ORDER BY version_id"
             ).fetchall()
         return [_row_to_metadata(row) for row in rows]
+
+    def list_pending_auto_promotions(self) -> list[ValidationMetadata]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT version_id, confidence_overall, confidence_signals, confidence_weights,"
+                "       ocr_override_active, confidence_computed_at,"
+                "       confidence_computed_by_version,"
+                "       routing_decision, validation_method, validation_actor "
+                "FROM validation_metadata "
+                "WHERE routing_decision = 'auto' AND validation_method IS NULL "
+                "ORDER BY version_id"
+            ).fetchall()
+        return [_row_to_metadata(row) for row in rows]
+
+    def mark_auto_promoted(self, version_id: str, *, actor: str) -> None:
+        # The WHERE clause encodes idempotency: a row that already
+        # carries a validation_method (any value, including "auto")
+        # is left untouched. The route this column changes is a
+        # one-way valve into terminal state.
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE validation_metadata "
+                "SET validation_method = 'auto', validation_actor = ? "
+                "WHERE version_id = ? AND validation_method IS NULL",
+                (actor, version_id),
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

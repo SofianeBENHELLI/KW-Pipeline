@@ -119,11 +119,114 @@ class ValidationMetadata(BaseModel):
     validation_actor: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# Auto-promotion worker result shapes (ADR-023 §6, EPIC-A A.4, slice 3, #215).
+# ---------------------------------------------------------------------------
+#
+# The :class:`HITLAutoPromoter` (in
+# :mod:`app.services.hitl_auto_promoter`) returns one
+# :class:`AutoPromoteResult` per pass over the pending auto-routed
+# versions. Each version lands in exactly one of three buckets:
+#
+# - ``promoted`` — successfully driven NEEDS_REVIEW → VALIDATED.
+# - ``skipped`` — race-safe no-op (validation_method already set, version
+#   no longer needs review, etc.). Reason is a closed enum so audit
+#   queries can bucket without string cleanup.
+# - ``failed`` — exception during promotion. The pass continues.
+#
+# These shapes back the :class:`POST /admin/hitl/run_auto_promote_pass`
+# admin trigger response so operators see exactly what happened in the
+# pass without grepping logs.
+
+
+SkippedReason = Literal[
+    "already_validated",
+    "version_no_longer_needs_review",
+    "document_not_found",
+    "version_not_found",
+]
+"""Closed vocabulary of reasons the worker may skip a pending row.
+
+- ``already_validated`` — the row's ``validation_method`` is already
+  set (a previous worker pass or a human reviewer beat us). The
+  ``list_pending_auto_promotions`` filter excludes these by default,
+  but a row that flips between list-and-act stays race-safe by being
+  reported here rather than crashing.
+- ``version_no_longer_needs_review`` — the version's FSM status is no
+  longer ``NEEDS_REVIEW``. A human reviewer raced ahead, or the version
+  was rejected, or it transitioned to FAILED. Either way, the worker
+  must not try to validate it.
+- ``document_not_found`` / ``version_not_found`` — the parent document
+  or the version itself disappeared between the list and the act
+  (defensive; should not happen given the FK in migration 0007).
+"""
+
+
+class PromotedVersion(BaseModel):
+    """One version the worker successfully promoted to VALIDATED.
+
+    ``score_overall`` is the ``ConfidenceScore.overall`` the router
+    used to pick ``auto`` — surfaced so the admin response carries the
+    audit-relevant context without a follow-up read.
+    """
+
+    document_id: str
+    version_id: str
+    score_overall: float
+
+
+class SkippedVersion(BaseModel):
+    """One version the worker skipped (race-safe no-op).
+
+    ``reason`` is one of :data:`SkippedReason`; see the docstring for
+    the vocabulary.
+    """
+
+    document_id: str
+    version_id: str
+    reason: SkippedReason
+
+
+class FailedVersion(BaseModel):
+    """One version whose promotion raised an exception.
+
+    The error string carries the exception's message; the worker logs
+    the full traceback at ``error`` level so operators can correlate
+    via the structured event ``hitl.auto_promote.version_failed``.
+    """
+
+    document_id: str
+    version_id: str
+    error: str
+
+
+class AutoPromoteResult(BaseModel):
+    """One pass over the pending auto-routed versions (slice 3, #215).
+
+    Returned by :meth:`HITLAutoPromoter.run_pass` and surfaced by the
+    admin trigger route so operators see the exact set of versions the
+    pass touched, with the reason for every skip and the message for
+    every failure. ``scanned`` counts every row pulled from the store
+    in the pass — it equals ``len(promoted) + len(skipped) + len(failed)``
+    by construction.
+    """
+
+    scanned: int
+    promoted: list[PromotedVersion]
+    skipped: list[SkippedVersion]
+    failed: list[FailedVersion]
+
+
 __all__ = [
+    "AutoPromoteResult",
     "ConfidenceScore",
+    "FailedVersion",
+    "PromotedVersion",
     "RoutingDecision",
     "RoutingMethod",
     "RoutingReason",
+    "SkippedReason",
+    "SkippedVersion",
     "ValidationMetadata",
     "ValidationMethod",
 ]
