@@ -432,21 +432,33 @@ scope filter and returns only documents whose
 scopes. The predicate is enforced server-side via FastAPI
 dependencies — never trust client input.
 
-### 4.6 Hard-delete on Swym community deletion (Q4.4)
+### 4.6 Flag-only cascade on Swym community deletion (Q4.4)
+
+Per the no-delete policy (no real deletion of document source data
+— flag-only, real purge handled by a future Archive/Purge Admin
+tool), this cascade soft-removes scope links and archives the
+document. The KG subgraph is the one explicit exception: it is a
+derived index and may be physically cleaned up.
 
 ```python
 def on_swym_community_deleted(swym_community_id):
-    rows = remove_scope_link(scope_kind="swym_community",
-                             scope_ref=swym_community_id)
-    for doc_id in unique_doc_ids(rows):
-        if has_no_remaining_scopes(doc_id):
-            purge_document(doc_id)  # bytes + extractions + semantic + markdown + KG
-            audit_log("document.purged_orphan", doc_id=doc_id, reason="all_scopes_removed")
+    soft_remove_scope_links(scope_kind="swym_community",
+                            scope_ref=swym_community_id)
+    for doc_id in unique_doc_ids_for(swym_community_id):
+        if has_no_remaining_active_scopes(doc_id):
+            flag_archive(doc_id)            # documents.archived_at = now
+            kg.delete_subgraph_for_document(doc_id)  # derived index, OK to drop
+            audit_log("document.archived_orphan",
+                      doc_id=doc_id, reason="all_scopes_removed")
 ```
 
-The detection mechanism (3DSwym webhook vs lazy detection on next
-access) is an implementation detail. Audit retention is a separate
-concern handled by EPIC 2 (#84).
+`flag_archive` is a metadata transition only — the bytes,
+extractions, semantic JSON, and Markdown asset stay in the catalog.
+The Archive/Purge Admin tool (separate ADR, deferred) is the only
+path to physical deletion or rehydration. The detection mechanism
+(3DSwym webhook vs lazy detection on next access) is an
+implementation detail. Audit retention is a separate concern handled
+by EPIC 2 (#84).
 
 ### 4.7 Required ADRs
 

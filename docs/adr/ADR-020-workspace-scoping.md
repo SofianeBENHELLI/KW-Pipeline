@@ -63,7 +63,8 @@ class ScopeKind(StrEnum):
   Visibility follows live 3DSwym membership (see ADR-026). The scope
   exists for as long as the underlying 3DSwym community exists; when
   the community is deleted, every document-scope link with that
-  reference is hard-deleted (see §4).
+  reference is **soft-removed** (`removed_at` flag), not physically
+  deleted (see §4).
 - **`project`** — an internal-only, non-Swym scope. The reference is
   a server-issued opaque id. `project` is for content that does not
   belong in any 3DSwym community: internal experiments, drafts the
@@ -103,12 +104,21 @@ CREATE TABLE document_scopes (
     scope_ref   TEXT NOT NULL,
     added_at    TIMESTAMPTZ NOT NULL,
     added_by    TEXT NOT NULL,    -- user id
+    removed_at  TIMESTAMPTZ,      -- soft-remove flag (no-delete policy, §4)
     PRIMARY KEY (document_id, scope_kind, scope_ref)
 );
 
 CREATE INDEX idx_document_scopes_kind_ref
     ON document_scopes (scope_kind, scope_ref);
 ```
+
+The `removed_at` column is the soft-remove flag (see §4). A row with
+`removed_at IS NULL` is an active scope link; a row with a non-null
+timestamp is invisible to read paths but preserved on disk for the
+future Archive/Purge Admin tool. `add_scope` reactivates a flagged
+row by clearing `removed_at` and overwriting `added_at` / `added_by`
+with the re-link caller's identity (a re-link is a fresh audit
+event); active rows are no-op on re-add (first-write wins).
 
 Index considerations:
 
@@ -144,32 +154,56 @@ Reasons:
   data-model change (the override would be a per-scope row that
   shadows the global default), so deferring it costs nothing.
 
-### 4. Hard-delete cascade on scope removal
+### 4. Flag-only cascade on scope removal (no-delete policy)
 
 When a 3DSwym community is deleted, every `document_scopes` row with
 `scope_kind = 'swym_community'` and `scope_ref = <community_id>` is
-removed. If a document loses **all** of its scope links — i.e. it is
-no longer referenced by any scope — it is **purged**:
+**soft-removed**: a `removed_at` timestamp is stamped on the row, but
+the row itself is preserved. Read paths
+(`list_scopes_for_document`, `list_documents_in_scope`) filter out
+rows where `removed_at IS NOT NULL`, so the link is invisible to
+normal reads while remaining recoverable.
 
-- The original bytes (object store).
-- The raw extraction JSON.
-- The semantic JSON.
-- The Markdown asset.
-- The knowledge-graph nodes and edges via the existing reconciliation
-  path (`delete_subgraph_for_version`, ADR-012).
-- A row in the audit event store recording the purge with
+If a document loses **all** of its active scope links — i.e. every
+remaining row carries a non-null `removed_at` — the document is
+**flagged as archived**, not purged:
+
+- A status `ARCHIVED` (or an `archived_at` column on `documents`,
+  TBD by the Archive/Purge Admin tool ADR — see below) replaces the
+  current "purge" cascade.
+- The original bytes, raw extractions, semantic JSON, and Markdown
+  asset **stay in the catalog**.
+- The knowledge-graph subgraph (`delete_subgraph_for_version`,
+  ADR-012) **may** be cleaned up because the KG is a derived view
+  regenerable from the catalog — that is the one explicit exception
+  to the no-delete policy.
+
+The KG cleanup is operational housekeeping on a derived index, not
+deletion of source data; the Archive/Purge Admin tool's job is to
+later finalise (or reverse) the archive flag, deciding whether to
+physically purge the source bytes or rehydrate the document.
+- A row in the audit event store recording the archive with
   `reason = "all_scopes_removed"`, the original document id, the last
-  scope that was removed, and the actor that triggered the removal.
+  scope that was soft-removed, and the actor that triggered the
+  removal.
 
-The purge is **irreversible**. This is by design: the data-deletion
-expectation from owners of 3DSwym communities is that deleting the
-community deletes the content they shared into it, not that the
-content lingers on a server they no longer have access to.
+The archive flag is **reversible**: a future Archive/Purge Admin tool
+(separate ADR, deferred) is the only path to physical deletion or
+rehydration. Until then, archived documents keep their bytes,
+extractions, semantic JSON, and Markdown asset on disk; only their
+visibility on read paths changes.
 
-The cascade also applies to `project` scopes: deleting a project that
-holds the only remaining link to a document purges the document.
-Deleting the user account that owns a `personal` scope follows the
-same path.
+This shape diverges from the original "hard-delete to honour the
+data-deletion expectation of community owners" framing. The trade-off
+is intentional: an irreversible cascade scattered across services
+makes the audit + reversibility story of a dedicated Archive/Purge
+Admin tool harder to build, and risks losing data before a human has
+reviewed the archive decision. The Admin tool will close that gap
+explicitly with audit + reversibility + an explicit purge action.
+
+The flag-only cascade also applies to `project` scopes: soft-removing
+the last `project` link archives the document. Deleting the user
+account that owns a `personal` scope follows the same path.
 
 ### 5. Read filter on every endpoint
 
@@ -200,20 +234,21 @@ predicate is one extra dependency per route.
 - **Positive — personal default works on day one.** Every user has a
   private workspace before they have joined any community, so the
   product is usable from the first sign-in.
-- **Positive — cascade-purge meets data-deletion expectations.**
-  Owners of a 3DSwym community can delete it and have confidence that
-  orphaned content is removed, not stranded.
+- **Positive — flag-only cascade preserves auditability.** Owners of
+  a 3DSwym community can delete it and the orphaned content becomes
+  invisible to reads while remaining recoverable. The Archive/Purge
+  Admin tool (deferred ADR) finalises the decision with an explicit,
+  audited action.
 - **Negative — membership lookups are a hot path.** The scope filter
   fires on every read endpoint. The `swym_community` portion of the
   user's accessible scope set requires a 3DSwym call. ADR-026
   addresses this with per-request memoisation and a circuit breaker;
   see that ADR for the cost analysis.
-- **Negative — cascade-purge is irreversible.** A misconfigured 3DSwym
-  community deletion can wipe content the team did not intend to
-  lose. Mitigation: the audit log records every purge with full
-  attribution, and an admin override (a manual "rehydrate from
-  audit" affordance) is tracked as a follow-up. The override is out
-  of scope for this ADR.
+- **Negative — flag-only cascade keeps storage growing.** Soft-removed
+  scope links and archived documents stay on disk until the
+  Archive/Purge Admin tool acts on them. For the pilot footprint this
+  is a non-issue; at scale the Admin tool's purge action becomes the
+  pressure-release valve.
 - **Neutral — uniform refactor across endpoints.** Every list /
   search / graph / chat / catalog endpoint must add a scope filter
   predicate. This is mechanical and lands as part of EPIC-D's slices.
@@ -239,7 +274,7 @@ Treat scopes as free-form tags on documents and rely on the audit
 trail to guess intent. Rejected because tag matching gives weak
 isolation guarantees: a tag typo silently leaks content across
 communities, and there is no SQL-level enforcement of the
-`(document, scope)` invariant. The hard-delete cascade in §4 also
+`(document, scope)` invariant. The flag-only cascade in §4 also
 requires a real foreign-key-shaped relationship to be sound.
 
 ### Per-scope embedding namespaces
