@@ -44,6 +44,26 @@ def _encode_cursor(position: tuple[datetime, str]) -> str:
     return base64.urlsafe_b64encode(payload).decode("ascii")
 
 
+def _encode_archived_cursor(position: tuple[datetime, str]) -> str:
+    """Encode an ``(archived_at, id)`` pair as an opaque base64 cursor.
+
+    Same wire format as :func:`_encode_cursor`, kept as a thin alias so
+    the Archive/Purge admin listing — which sorts by ``archived_at
+    DESC`` rather than ``created_at ASC`` — has a self-documenting
+    constructor at every call site.
+    """
+    return _encode_cursor(position)
+
+
+def _decode_archived_cursor(token: str) -> tuple[datetime, str]:
+    """Decode the ``(archived_at, id)`` pair from an admin-archive cursor.
+
+    Mirrors :func:`_decode_cursor`; kept as a separate function so the
+    archived-listing call sites read straight without ``# noqa`` casts.
+    """
+    return _decode_cursor(token)
+
+
 def _decode_cursor(token: str) -> tuple[datetime, str]:
     """Decode an opaque cursor back into a ``(created_at, id)`` tuple.
 
@@ -359,6 +379,37 @@ class CatalogStore(Protocol):
         part of the contract so callers and instrumentation agree on
         the shape. Raises :class:`KeyError` when the document is
         missing.
+        """
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        """Return one page of flag-archived documents (ADR-027 §1.4 / D.9).
+
+        Documents are returned sorted by ``archived_at DESC`` (most-
+        recently archived first) with ``id`` as the tie-breaker so two
+        same-second archives don't shift between pages. Only rows with
+        ``archived_at IS NOT NULL`` are returned — the inverse of the
+        standard read path's filter.
+
+        ``cursor`` is opaque (encoded ``(archived_at, id)``) and
+        decoded via :func:`_decode_archived_cursor`. The second tuple
+        element is the next-page cursor; ``None`` when this page is
+        the last one.
+
+        Each :class:`Document` carries its full ``versions`` list so
+        the admin tool can compute ``versions_purged`` / ``versions_remaining``
+        without a per-doc round-trip. Soft-removed scope links are
+        included on ``Document.scopes`` so the admin UI can surface
+        the last scope that was removed before the cascade fired —
+        the standard ``list_scopes_for_document`` filter is bypassed
+        here because that information is the whole point of the
+        admin view.
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
         """
 
     def purge_version_artifacts(
@@ -734,6 +785,58 @@ class InMemoryCatalogStore:
         if document.archived_at is not None:
             document.archived_at = None
         return document
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # In-memory walk: filter to archived rows, sort by
+        # ``(archived_at DESC, id ASC)`` and apply cursor + limit.
+        # ``id`` ASC is the tie-breaker so two same-second archives
+        # don't shift between pages — the cursor inequality flips
+        # accordingly: we want rows STRICTLY OLDER than the cursor
+        # tuple under DESC ordering, i.e. ``(a.archived_at, a.id) <
+        # (cursor.archived_at, cursor.id)`` when sorted DESC by the
+        # primary key. We model that directly by negating the
+        # comparison.
+        archived = [d for d in self.documents.values() if d.archived_at is not None]
+        ordered = sorted(archived, key=lambda d: (-d.archived_at.timestamp(), d.id))  # type: ignore[union-attr]
+        if cursor is not None:
+            after_archived_at, after_id = _decode_archived_cursor(cursor)
+            # Walk the sorted list, taking only entries that come AFTER
+            # the cursor pair under the same ordering. Under DESC by
+            # ``archived_at`` (with ``id`` ASC tie-break), ``after`` means
+            # strictly older ``archived_at``, OR same ``archived_at`` and
+            # ``id`` lexicographically greater.
+            ordered = [
+                d
+                for d in ordered
+                if (
+                    d.archived_at is not None
+                    and (
+                        d.archived_at < after_archived_at
+                        or (d.archived_at == after_archived_at and d.id > after_id)
+                    )
+                )
+            ]
+        # Fetch one extra row so we can decide whether to emit a cursor.
+        page_plus_one = ordered[: limit + 1]
+        page = page_plus_one[:limit]
+        # Populate scopes on the page — include soft-removed rows so the
+        # admin tool can show "last scope removed". The admin path is the
+        # only one that needs this leakage; other call sites still go
+        # through the filtering ``list_scopes_for_document``.
+        for document in page:
+            document.scopes = list(self.scopes_by_document.get(document.id, ()))
+        if len(page_plus_one) > limit and page:
+            last = page[-1]
+            assert last.archived_at is not None  # guard rail; filtered above
+            next_cursor = _encode_archived_cursor((last.archived_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
 
     def purge_version_artifacts(
         self,
@@ -1509,6 +1612,92 @@ class SQLiteCatalogStore:
         refreshed = self._get_document_including_archived(document_id)
         assert refreshed is not None  # we just confirmed existence
         return refreshed
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # SQL walks ``documents`` filtered to ``archived_at IS NOT NULL``,
+        # sorted by ``archived_at DESC, id ASC`` (the secondary sort by
+        # id keeps two same-second archives from shifting between pages
+        # — same trick the standard cursor codec uses). The cursor
+        # inequality flips relative to ``list_documents``: under DESC
+        # we want rows STRICTLY OLDER than the cursor (or same archived_at
+        # with id ASC after the cursor's id).
+        clauses: list[str] = ["archived_at IS NOT NULL"]
+        params: list[object] = []
+        if cursor is not None:
+            after_archived_at, after_id = _decode_archived_cursor(cursor)
+            clauses.append("(archived_at < ? OR (archived_at = ? AND id > ?))")
+            params.extend(
+                [
+                    after_archived_at.isoformat(),
+                    after_archived_at.isoformat(),
+                    after_id,
+                ]
+            )
+        params.append(int(limit) + 1)  # fetch one extra to decide on cursor
+        query = (
+            "SELECT * FROM documents WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY archived_at DESC, id ASC LIMIT ?"
+        )
+        with self._connect() as connection:
+            document_rows = connection.execute(query, tuple(params)).fetchall()
+            if not document_rows:
+                return [], None
+            page_rows = document_rows[:limit]
+            ids = [row["id"] for row in page_rows]
+            placeholders = ", ".join("?" for _ in ids)
+            version_rows = connection.execute(
+                f"""
+                SELECT * FROM document_versions
+                WHERE document_id IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+            # The admin view needs to see soft-removed scope links so it
+            # can surface the "last scope removed" before the cascade
+            # archived this row — bypass the standard ``removed_at IS
+            # NULL`` filter on purpose. Other read paths still go
+            # through ``_batch_list_scopes`` which keeps the soft-remove
+            # invariant; this is the documented escape hatch.
+            scope_rows = connection.execute(
+                f"""
+                SELECT document_id, scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id IN ({placeholders})
+                ORDER BY added_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+        scopes_by_document: dict[str, list[Scope]] = {}
+        for srow in scope_rows:
+            scopes_by_document.setdefault(srow["document_id"], []).append(
+                self._scope_from_row(srow)
+            )
+        versions_by_document: dict[str, list[DocumentVersion]] = {}
+        for vrow in version_rows:
+            version = self._version_from_row(vrow)
+            versions_by_document.setdefault(version.document_id, []).append(version)
+        page = [
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
+            for row in page_rows
+        ]
+        if len(document_rows) > limit and page:
+            last = page[-1]
+            assert last.archived_at is not None  # guard rail; clause filtered
+            next_cursor: str | None = _encode_archived_cursor((last.archived_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
 
     def unarchive_document(
         self,

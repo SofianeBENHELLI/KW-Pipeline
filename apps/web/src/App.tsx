@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Route, Routes } from "react-router-dom";
 import "./styles.css";
 import {
   SessionExpiredBanner,
@@ -12,6 +13,7 @@ import {
   setSessionTrigger,
 } from "./api/client";
 import type { ApiDocument } from "./api/types";
+import { AdminArchiveView } from "./features/admin/AdminArchiveView";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
@@ -214,7 +216,26 @@ export function useDocumentCatalog(): DocumentCatalog {
   };
 }
 
+/**
+ * Top-level app router (D.9).
+ *
+ * Two routes today:
+ *  - ``/admin/archive`` mounts the Admin UI Archive view; the route
+ *    handler 403s on a non-admin token and the page renders a
+ *    "Forbidden" state for that envelope. We never derive admin
+ *    role client-side — the backend is the single source of truth.
+ *  - everything else falls through to the legacy reviewer workbench.
+ */
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/admin/archive" element={<AdminArchiveView />} />
+      <Route path="*" element={<ReviewerWorkbench />} />
+    </Routes>
+  );
+}
+
+function ReviewerWorkbench() {
   const catalog = useDocumentCatalog();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const session = useSessionGuard();

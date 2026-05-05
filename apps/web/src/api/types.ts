@@ -67,6 +67,27 @@ export type ApiBatchUploadOutcome = Schemas["BatchUploadOutcome"];
 export type ApiBatchUploadSummary = Schemas["BatchUploadSummary"];
 export type ApiBatchUploadResult = Schemas["BatchUploadResult"];
 
+// ─── Admin / Archive (D.9 admin UI) ─────────────────────────────────────────
+
+/** One row of the Archive listing (``GET /admin/archive/archived_documents``).
+ *  Carries the version-purged / version-remaining split + the most-recently
+ *  removed scope link so the admin UI can render a row without per-doc
+ *  probes. */
+export type ApiArchivedDocumentItem = Schemas["ArchivedDocumentItem"];
+
+/** Paginated response from ``GET /admin/archive/archived_documents``. */
+export type ApiArchivedDocumentsResponse = Schemas["ArchivedDocumentsResponse"];
+
+/** Response body of ``POST /admin/archive/unarchive``. */
+export type ApiUnarchiveResponse = Schemas["UnarchiveResponse"];
+
+/** Response body of ``POST /admin/archive/purge_artifacts``. Carries
+ *  per-version tombstone URIs and the dry-run flag. */
+export type ApiPurgeArtifactsResponse = Schemas["PurgeArtifactsResponse"];
+
+/** Per-version row inside a purge response. */
+export type ApiVersionPurgeResult = Schemas["VersionPurgeResult"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];

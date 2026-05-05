@@ -1,0 +1,550 @@
+/**
+ * Admin UI — Archive view (D.9, ADR-027 §1.4).
+ *
+ * Paginated table of flag-archived documents with two per-row actions:
+ *
+ * 1. **Unarchive** — confirmation modal → POST `/admin/archive/unarchive`
+ *    with `?confirm=true`. Reactivates the document on the standard
+ *    read path. Idempotent on already-active rows (route returns 200
+ *    with `archived_at_before === null`).
+ *
+ * 2. **Purge artifacts** — preview modal that first calls the route
+ *    with `?dry_run=true` so the operator sees the per-version
+ *    tombstone URI list + the freed-bytes estimate. Confirming flips
+ *    to `?confirm=true` and renders the real result. Irreversible —
+ *    the modal's CTA copy says so verbatim.
+ *
+ * No client-side role check: the UI fires the request and renders a
+ * "Forbidden" state if the backend responds 403 (`KW_FORBIDDEN`).
+ * That keeps the role enforcement single-sourced on the server
+ * (ADR-019 §3 / #264) — the frontend never has a stale view of the
+ * user's role.
+ *
+ * UX decisions worth flagging:
+ *
+ * - The dry-run preview is the **only** path to the real purge. Users
+ *   can't skip the preview by clicking faster — the "Permanently
+ *   delete" CTA only renders after the dry-run resolves.
+ * - The confirmation modal for *unarchive* is just a yes/no — there's
+ *   no reversible-state checkbox because the action *is* the reverse.
+ * - The action buttons are enabled even on rows where every version
+ *   is already PURGED. The dry-run preview will show "0 bytes to free"
+ *   and the operator can decide whether to skip; there's no point
+ *   gating the click since the catalog row is the audit-keeping trace
+ *   (a no-op purge call is idempotent and documented).
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ApiError,
+  listArchivedDocuments,
+  purgeArtifacts,
+  unarchiveDocument,
+} from "../../api/client";
+import type {
+  ApiArchivedDocumentItem,
+  ApiPurgeArtifactsResponse,
+} from "../../api/types";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Render an archived-at timestamp as "N hours/days/months ago".
+ *
+ * Localised wall-clock formatting is overkill for the admin tool: the
+ * relative phrase is what an operator scans for ("two hours ago"
+ * means "the cascade fired during the morning incident"). Falls
+ * back to the raw ISO string for very-old archives where "months
+ * ago" stops being precise enough. */
+export function formatRelativeArchived(
+  isoString: string,
+  now: Date = new Date(),
+): string {
+  const archived = new Date(isoString);
+  const ms = now.getTime() - archived.getTime();
+  if (Number.isNaN(ms) || ms < 0) return isoString;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  // Far enough back that the relative phrase loses precision; fall
+  // back to the date portion so the operator at least sees a year.
+  return archived.toISOString().slice(0, 10);
+}
+
+/** Format the scope-removed cell. ``"—"`` placeholder when no link
+ *  history is recoverable. */
+export function formatScopeRemoved(item: ApiArchivedDocumentItem): string {
+  const kind = item.last_active_scope_kind;
+  const ref = item.last_active_scope_ref;
+  if (kind === null || kind === undefined || ref === null || ref === undefined) {
+    return "—";
+  }
+  return `${kind}:${ref}`;
+}
+
+// ─── Modal primitives (inline; the app has no shared modal component) ───────
+
+interface ModalShellProps {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function ModalShell({ title, onClose, children }: ModalShellProps) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="modal-card">
+        <header className="modal-header">
+          <h3>{title}</h3>
+          <button
+            type="button"
+            className="text-button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Unarchive confirmation modal ────────────────────────────────────────────
+
+interface UnarchiveModalProps {
+  item: ApiArchivedDocumentItem;
+  onClose: () => void;
+  onCompleted: () => void | Promise<void>;
+}
+
+function UnarchiveModal({
+  item,
+  onClose,
+  onCompleted,
+}: UnarchiveModalProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConfirm = useCallback(() => {
+    setBusy(true);
+    setError(null);
+    unarchiveDocument(item.document_id)
+      .then(async () => {
+        await onCompleted();
+        onClose();
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof ApiError
+            ? err.detail
+            : err instanceof Error
+              ? err.message
+              : "Unarchive failed.";
+        setError(message);
+      })
+      .finally(() => setBusy(false));
+  }, [item.document_id, onCompleted, onClose]);
+
+  return (
+    <ModalShell title="Restore document?" onClose={onClose}>
+      <p>
+        Restore <strong>{item.original_filename}</strong> to active reads?
+      </p>
+      <p className="muted">
+        The document will reappear on the standard catalog after this
+        action. Already-purged versions stay purged.
+      </p>
+      {error !== null ? (
+        <div className="notice danger" role="alert">
+          <strong>Unarchive failed</strong>
+          <span>{error}</span>
+        </div>
+      ) : null}
+      <div className="action-row">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={onClose}
+          disabled={busy}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={handleConfirm}
+          disabled={busy}
+          aria-busy={busy}
+        >
+          {busy ? "Restoring…" : "Restore"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─── Purge dry-run preview + confirm modal ───────────────────────────────────
+
+interface PurgeModalProps {
+  item: ApiArchivedDocumentItem;
+  onClose: () => void;
+  onCompleted: () => void | Promise<void>;
+}
+
+function PurgeModal({ item, onClose, onCompleted }: PurgeModalProps) {
+  // Two-phase modal: first the dry-run loads the impact preview;
+  // confirming flips to the real call. The "Permanently delete" CTA
+  // only renders once the dry-run resolves so the operator cannot
+  // skip the preview phase by clicking faster.
+  const [preview, setPreview] = useState<ApiPurgeArtifactsResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [purging, setPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    purgeArtifacts(item.document_id, { dryRun: true })
+      .then((response) => {
+        if (cancelled) return;
+        setPreview(response);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof ApiError
+            ? err.detail
+            : err instanceof Error
+              ? err.message
+              : "Failed to preview purge impact.";
+        setPreviewError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.document_id]);
+
+  const handleConfirm = useCallback(() => {
+    setPurging(true);
+    setPurgeError(null);
+    purgeArtifacts(item.document_id, { dryRun: false })
+      .then(async () => {
+        await onCompleted();
+        onClose();
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof ApiError
+            ? err.detail
+            : err instanceof Error
+              ? err.message
+              : "Purge failed.";
+        setPurgeError(message);
+      })
+      .finally(() => setPurging(false));
+  }, [item.document_id, onCompleted, onClose]);
+
+  // Bytes-estimate rollup. ``bytes_estimate`` is None on a tombstone'd
+  // version (already-PURGED rows) — sum the non-null values.
+  const bytesTotal = useMemo(() => {
+    if (preview === null) return 0;
+    return preview.versions_purged.reduce(
+      (sum, version) => sum + (version.bytes_estimate ?? 0),
+      0,
+    );
+  }, [preview]);
+
+  const versionsToPurge = useMemo(() => {
+    if (preview === null) return [];
+    return preview.versions_purged.filter(
+      (version) => version.status_before !== "PURGED",
+    );
+  }, [preview]);
+
+  return (
+    <ModalShell title="Purge document artifacts?" onClose={onClose}>
+      {previewLoading ? (
+        <p className="muted" role="status" aria-live="polite">
+          Loading impact preview…
+        </p>
+      ) : previewError !== null ? (
+        <div className="notice danger" role="alert">
+          <strong>Preview failed</strong>
+          <span>{previewError}</span>
+        </div>
+      ) : preview !== null ? (
+        <>
+          <div className="notice danger" role="alert">
+            <strong>Irreversible.</strong> This will permanently delete the
+            bytes for {versionsToPurge.length}{" "}
+            {versionsToPurge.length === 1 ? "version" : "versions"}. The
+            catalog rows will be preserved as audit traces.
+          </div>
+          <p>
+            Document: <strong>{item.original_filename}</strong>
+          </p>
+          <dl className="purge-preview">
+            <div>
+              <dt>Versions to purge</dt>
+              <dd data-testid="purge-versions-count">
+                {versionsToPurge.length}
+              </dd>
+            </div>
+            <div>
+              <dt>Estimated bytes freed</dt>
+              <dd data-testid="purge-bytes-total">{bytesTotal}</dd>
+            </div>
+          </dl>
+          {versionsToPurge.length > 0 ? (
+            <details className="purge-tombstone-list">
+              <summary>Tombstone URIs that will be created</summary>
+              <ul>
+                {versionsToPurge.map((version) => (
+                  <li key={version.version_id}>
+                    <code>{version.tombstone_uri}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </>
+      ) : null}
+      {purgeError !== null ? (
+        <div className="notice danger" role="alert">
+          <strong>Purge failed</strong>
+          <span>{purgeError}</span>
+        </div>
+      ) : null}
+      <div className="action-row">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={onClose}
+          disabled={purging}
+        >
+          Cancel
+        </button>
+        {/* The destructive CTA only shows after a successful dry-run.
+            That removes the "double-click to skip preview" foot-gun. */}
+        {preview !== null ? (
+          <button
+            type="button"
+            className="primary-button danger"
+            onClick={handleConfirm}
+            disabled={purging}
+            aria-busy={purging}
+          >
+            {purging ? "Purging…" : "Permanently delete"}
+          </button>
+        ) : null}
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─── Main view ───────────────────────────────────────────────────────────────
+
+type ModalState =
+  | { kind: "none" }
+  | { kind: "unarchive"; item: ApiArchivedDocumentItem }
+  | { kind: "purge"; item: ApiArchivedDocumentItem };
+
+interface ToastState {
+  message: string;
+  kind: "success" | "danger";
+}
+
+export function AdminArchiveView() {
+  const [items, setItems] = useState<ApiArchivedDocumentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ApiError | string | null>(null);
+  const [modal, setModal] = useState<ModalState>({ kind: "none" });
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const page = await listArchivedDocuments();
+      setItems(page.items);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) setLoadError(err);
+      else if (err instanceof Error) setLoadError(err.message);
+      else setLoadError("Failed to load archived documents.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadList();
+  }, [loadList]);
+
+  const handleUnarchiveCompleted = useCallback(async () => {
+    setToast({ message: "Document restored.", kind: "success" });
+    await loadList();
+  }, [loadList]);
+
+  const handlePurgeCompleted = useCallback(async () => {
+    setToast({ message: "Artifacts purged.", kind: "success" });
+    await loadList();
+  }, [loadList]);
+
+  // Forbidden state: the backend's 403 on a non-admin caller is the
+  // sole signal we ever consult about role. We don't try to derive
+  // it from the token client-side (the frontend has no token-decoder
+  // and the server is the source of truth).
+  if (loadError instanceof ApiError && loadError.status === 403) {
+    return (
+      <main className="app-shell admin-shell" aria-label="Admin archive view">
+        <section className="workspace">
+          <header className="workspace-header">
+            <h2>Forbidden</h2>
+          </header>
+          <p>This view requires the <code>admin</code> role.</p>
+          <p className="muted">{loadError.detail}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell admin-shell" aria-label="Admin archive view">
+      <section className="workspace">
+        <header className="workspace-header">
+          <div>
+            <p className="eyebrow">Admin</p>
+            <h2>Archived Documents</h2>
+          </div>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void loadList()}
+            disabled={loading}
+          >
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </header>
+
+        {toast !== null ? (
+          <div
+            className={`notice ${toast.kind === "success" ? "" : "danger"}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span>{toast.message}</span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setToast(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        {loadError !== null && !(loadError instanceof ApiError) ? (
+          <div className="notice danger" role="alert">
+            <strong>Failed to load</strong>
+            <span>{loadError}</span>
+          </div>
+        ) : loadError instanceof ApiError ? (
+          <div className="notice danger" role="alert">
+            <strong>Failed to load</strong>
+            <span>{loadError.detail}</span>
+          </div>
+        ) : null}
+
+        {loading ? (
+          <p className="muted" role="status" aria-live="polite">
+            Loading…
+          </p>
+        ) : items.length === 0 ? (
+          <p className="muted">No archived documents.</p>
+        ) : (
+          <table className="admin-archive-table">
+            <thead>
+              <tr>
+                <th scope="col">Filename</th>
+                <th scope="col">Scope removed</th>
+                <th scope="col">Versions</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const totalVersions =
+                  item.versions_remaining + item.versions_purged;
+                return (
+                  <tr key={item.document_id} data-testid="admin-archive-row">
+                    <td>
+                      <div>
+                        <strong>{item.original_filename}</strong>
+                      </div>
+                      <div className="muted" data-testid="row-archived-relative">
+                        {formatRelativeArchived(item.archived_at)}
+                      </div>
+                    </td>
+                    <td data-testid="row-scope-removed">
+                      {formatScopeRemoved(item)}
+                    </td>
+                    <td data-testid="row-version-counts">
+                      {item.versions_remaining} / {totalVersions}
+                    </td>
+                    <td>
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() =>
+                            setModal({ kind: "unarchive", item })
+                          }
+                        >
+                          Unarchive
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => setModal({ kind: "purge", item })}
+                        >
+                          Purge…
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {modal.kind === "unarchive" ? (
+        <UnarchiveModal
+          item={modal.item}
+          onClose={() => setModal({ kind: "none" })}
+          onCompleted={handleUnarchiveCompleted}
+        />
+      ) : null}
+      {modal.kind === "purge" ? (
+        <PurgeModal
+          item={modal.item}
+          onClose={() => setModal({ kind: "none" })}
+          onCompleted={handlePurgeCompleted}
+        />
+      ) : null}
+    </main>
+  );
+}

@@ -15,6 +15,7 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiArchivedDocumentsResponse,
   ApiBatchUploadResult,
   ApiChatMode,
   ApiChatResponse,
@@ -23,8 +24,10 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiPurgeArtifactsResponse,
   ApiRawExtraction,
   ApiSemanticDocument,
+  ApiUnarchiveResponse,
   ApiUploadResponse,
   ListDocumentsResponse,
 } from "./types";
@@ -582,6 +585,78 @@ export async function askKnowledgeChat(
     await http.POST("/knowledge/chat", {
       body: { question, mode, top_k },
       signal,
+    }),
+  );
+}
+
+// ─── Admin / Archive (D.9 admin UI) ──────────────────────────────────────────
+
+/**
+ * GET /admin/archive/archived_documents
+ *
+ * Paginated walk of flag-archived documents (``archived_at IS NOT NULL``)
+ * sorted ``archived_at DESC``. Returns 403 ``KW_FORBIDDEN`` when the
+ * caller lacks the ``admin`` role — the UI uses that as its sole
+ * "is the user an admin?" probe (we never derive role client-side).
+ */
+export async function listArchivedDocuments(
+  options: { cursor?: string; limit?: number; signal?: AbortSignal } = {},
+): Promise<ApiArchivedDocumentsResponse> {
+  const { cursor, limit = 50, signal } = options;
+  const query: Record<string, string | number> = { limit };
+  if (cursor) query.cursor = cursor;
+  return unwrap(
+    await http.GET("/admin/archive/archived_documents", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/unarchive
+ *
+ * Admin-only. Clears ``archived_at`` so the document reappears on the
+ * standard read path. ``?confirm=true`` is REQUIRED for the real
+ * mutation (defence in depth — ADR-027 §5). 403 if non-admin.
+ */
+export async function unarchiveDocument(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiUnarchiveResponse> {
+  return unwrap(
+    await http.POST("/admin/archive/unarchive", {
+      params: { query: { confirm: true } },
+      body: { document_id: documentId },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/purge_artifacts
+ *
+ * Admin-only. Hard-deletes the document's source artifacts; the
+ * catalog row is preserved as an audit trace per the no-delete
+ * policy. ``?dry_run=true`` returns the impact preview without
+ * mutating state — the UI uses that for the confirmation modal.
+ * ``?confirm=true`` flips the real mutation; the route rejects
+ * passing both.
+ */
+export async function purgeArtifacts(
+  documentId: string,
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiPurgeArtifactsResponse> {
+  const dryRun = options.dryRun ?? false;
+  // ``confirm`` and ``dry_run`` are mutually exclusive — the route
+  // 400s if both are set. Keep the boolean inversion local so call
+  // sites just pick "preview vs real".
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/purge_artifacts", {
+      params: { query },
+      body: { document_id: documentId },
+      signal: options.signal,
     }),
   );
 }
