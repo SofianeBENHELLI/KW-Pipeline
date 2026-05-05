@@ -112,7 +112,11 @@ try {
     Write-Warn2 "Could not read 'docker logs kw-pipeline-cloudflared': $($_.Exception.Message)"
 }
 
-$registered = (@($cloudflaredLogs) | Select-String "Registered tunnel connection").Matches.Count
+# ``Select-String`` returns nothing when there are zero matches, so
+# ``...Matches.Count`` raises under StrictMode (PropertyNotFoundStrict).
+# Wrap the result in ``@(...)`` so an empty pipeline still gives us
+# a 0-length array we can ``.Count`` safely.
+$registered = @(@($cloudflaredLogs) | Select-String "Registered tunnel connection").Count
 if ($registered -ge 4) {
     Write-Done "$registered registered connections (>=4 means healthy across PoPs)"
 } elseif ($registered -gt 0) {
