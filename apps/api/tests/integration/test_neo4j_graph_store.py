@@ -83,12 +83,21 @@ def store(neo4j_config: dict[str, str]) -> Iterator[Neo4jGraphStore]:
 
 @pytest.fixture(autouse=True)
 def clean_graph(neo4j_config: dict[str, str]) -> Iterator[None]:
-    """Wipe :KnowledgeNode before AND after each test.
+    """Wipe :KnowledgeNode + drop per-test vector indexes before AND
+    after each test.
 
     The ``before`` clean keeps a previous failure from poisoning the
     next run; the ``after`` clean keeps the database tidy for the next
     test. Both run via a fresh driver session so they aren't entangled
     with the per-test ``store`` fixture.
+
+    Vector indexes are also dropped: each test that needs one creates
+    a per-test ``ns``-prefixed name with ``ensure_vector_index``; if
+    we leave them lying around the schema picks up cruft across the
+    suite, and on Neo4j 5.x community a fresh ``CREATE VECTOR INDEX``
+    after one already exists has been observed to succeed silently
+    while the new index never registers (see #225 follow-up). A clean
+    drop before each test sidesteps that race entirely.
     """
     from neo4j import GraphDatabase  # noqa: PLC0415
 
@@ -100,6 +109,14 @@ def clean_graph(neo4j_config: dict[str, str]) -> Iterator[None]:
     def _wipe() -> None:
         with driver.session() as session:
             session.run("MATCH (n:KnowledgeNode) DETACH DELETE n")
+            # Drop every VECTOR index. LOOKUP indexes are Neo4j
+            # built-ins and must not be touched.
+            result = session.run(
+                "SHOW INDEXES YIELD name, type WHERE type = 'VECTOR' RETURN name"
+            )
+            names = [str(record["name"]) for record in result]
+            for name in names:
+                session.run(f"DROP INDEX {name} IF EXISTS")
 
     try:
         _wipe()
