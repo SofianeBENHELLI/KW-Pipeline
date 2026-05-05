@@ -221,9 +221,26 @@ def user_can_access(
     scope-less row is either pre-D.1 legacy data or a bug — either way
     the safe default is "hidden"). The ``disabled`` bypass still lets
     operators read these rows for audit / migration purposes.
+
+    Archived documents (``Document.archived_at IS NOT NULL``, ADR-020
+    §4) are also hidden under any non-disabled mode — the catalog read
+    methods already filter these out, but ``user_can_access`` is the
+    last-line check used by per-document routes that don't go through
+    ``list_documents``, so the archive flag is enforced here too. The
+    catalog's ``get_document`` returns ``None`` for archived rows, so a
+    ``get_document(...) is None`` short-circuit here is equivalent to
+    "row is missing OR archived" — both deserve the same hidden-404
+    treatment.
     """
     if _is_disabled_mode(settings):
         return True
+
+    document = catalog.get_document(document_id)
+    if document is None:
+        # Either truly missing or archived — both render as "hidden" to
+        # the caller. The 404 the route layer emits in response is the
+        # documented hidden-existence behaviour.
+        return False
 
     document_scopes = catalog.list_scopes_for_document(document_id)
     if not document_scopes:

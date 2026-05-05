@@ -167,6 +167,28 @@ def _migrate_0005_document_scopes_removed_at(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE document_scopes ADD COLUMN removed_at TEXT")
 
 
+def _migrate_0006_documents_archived_at(conn: sqlite3.Connection) -> None:
+    """Add ``archived_at`` to ``documents`` for the flag-only orphan cascade.
+
+    Per the no-delete policy and ADR-020 §4 (rewritten in #262): when a
+    document loses its last active scope link (e.g. its only Swym
+    community got deleted), the cascade flags the document with an
+    ``archived_at`` timestamp instead of physically deleting bytes,
+    extractions, semantic JSON, or markdown assets. Read paths
+    (``list_documents``, ``list_documents_in_scope``, ``get_document``,
+    ``/knowledge/catalog``) filter ``archived_at IS NULL`` so archived
+    rows are invisible to the standard surface but stay recoverable
+    until the future Archive/Purge Admin tool acts on them.
+
+    SQLite does not support ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``,
+    so we inspect ``PRAGMA table_info`` first — same pattern as
+    migration 0002 / 0005.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+    if "archived_at" not in existing:
+        conn.execute("ALTER TABLE documents ADD COLUMN archived_at TEXT")
+
+
 def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
     """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
 
@@ -214,6 +236,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0003_perf_indexes", _migrate_0003_perf_indexes),
     ("0004_document_scopes", _migrate_0004_document_scopes),
     ("0005_document_scopes_removed_at", _migrate_0005_document_scopes_removed_at),
+    ("0006_documents_archived_at", _migrate_0006_documents_archived_at),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.

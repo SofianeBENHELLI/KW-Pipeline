@@ -285,6 +285,35 @@ class CatalogStore(Protocol):
         deletion.
         """
 
+    # ------- Archive flag (ADR-020 §4, EPIC-D D.6/D.7) ------- #
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,
+    ) -> Document:
+        """Soft-archive: set ``documents.archived_at = archived_at``.
+
+        Idempotent: re-archiving an already-archived document preserves
+        the original ``archived_at`` (audit-faithful). Returns the
+        updated :class:`Document`. Raises :class:`KeyError` when the
+        document is missing.
+
+        Per the no-delete policy: this is a metadata transition only —
+        no bytes, extractions, semantic JSON, or markdown assets are
+        touched. The KG subgraph MAY be cleaned up by the caller as
+        derived data (it's regenerable from the catalog and is the one
+        explicit exception to the no-delete rule, per ADR-012 + the
+        feedback rule).
+
+        ``actor`` is the user id that triggered the cascade — it is
+        not persisted on the document row (the audit row carries it)
+        but is part of the contract so callers and instrumentation
+        agree on the shape.
+        """
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -334,8 +363,14 @@ class InMemoryCatalogStore:
         status_filter: frozenset[DocumentVersionStatus] | None = None,
         filename_query: str | None = None,
     ) -> list[Document]:
+        # Hide archived documents by default (ADR-020 §4 / D.6+D.7).
+        # An admin-only ``include_archived=True`` query param could
+        # surface them in a future Archive/Purge Admin tool; that's
+        # explicitly out of scope for this slice — we route the
+        # admin-tool path through ``_get_document_including_archived``
+        # which is internal-only and never exposed via Protocol.
         ordered = sorted(
-            self.documents.values(),
+            (d for d in self.documents.values() if d.archived_at is None),
             key=lambda d: (d.created_at, d.id),
         )
         if cursor is not None:
@@ -356,13 +391,30 @@ class InMemoryCatalogStore:
         return ordered
 
     def get_document(self, document_id: str) -> Document | None:
+        # Hide archived documents from the standard read path (#265 / D.6);
+        # the route layer maps ``None`` to a 404 — same shape as a missing
+        # row, the correct hidden-existence story per ADR-020 §4. The
+        # internal Archive/Purge Admin tool path uses
+        # ``_get_document_including_archived``.
         document = self.documents.get(document_id)
-        if document is None:
+        if document is None or document.archived_at is not None:
             return None
         # #258 — populate ``Document.scopes`` on detail reads too. Soft-
         # removed rows are filtered by ``list_scopes_for_document``.
         document.scopes = self.list_scopes_for_document(document.id)
         return document
+
+    def _get_document_including_archived(self, document_id: str) -> Document | None:
+        """Internal accessor that ignores ``archived_at``.
+
+        Reserved for the future Archive/Purge Admin tool (D.9 — deferred
+        ADR). Not exposed via the public :class:`CatalogStore` Protocol
+        and never wired into a route in this PR. Kept here so the cascade
+        service can confirm a document still exists (and capture its
+        existing ``archived_at``) when re-archiving an already-archived
+        row, without breaking the "reads hide archived" invariant.
+        """
+        return self.documents.get(document_id)
 
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
         document = self.documents.get(document_id)
@@ -499,9 +551,16 @@ class InMemoryCatalogStore:
     ) -> tuple[list[Document], str | None]:
         # The reverse index is maintained to only contain active links;
         # remove_scope drops the doc id from the set when the link is
-        # flagged. So no extra filter is needed here.
+        # flagged. Archived rows are filtered out so a doc that lost its
+        # last scope and was flag-archived disappears from the listing
+        # even if a stale scope-link race leaves it in this index — the
+        # archive flag is the source of truth for visibility.
         document_ids = self.documents_by_scope.get((scope_kind, scope_ref), set())
-        candidates = [self.documents[d] for d in document_ids if d in self.documents]
+        candidates = [
+            self.documents[d]
+            for d in document_ids
+            if d in self.documents and self.documents[d].archived_at is None
+        ]
         ordered = sorted(candidates, key=lambda d: (d.created_at, d.id))
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
@@ -544,6 +603,27 @@ class InMemoryCatalogStore:
             reverse.discard(document_id)
             if not reverse:
                 del self.documents_by_scope[(scope_kind, scope_ref)]
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Use the internal accessor so an already-archived row still
+        # resolves and we can preserve its original ``archived_at``.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        if document.archived_at is None:
+            # First-archive: stamp the timestamp on the existing row so
+            # references held elsewhere (e.g. the test fixture's local
+            # variable) observe the transition.
+            document.archived_at = archived_at
+        # Second-archive: no-op — the original ``archived_at`` is
+        # preserved (audit-faithful). Return the row either way.
+        return document
 
 
 class SQLiteCatalogStore:
@@ -603,7 +683,12 @@ class SQLiteCatalogStore:
             self._insert_version(connection, version)
 
     def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
-        if self.get_document(document_id) is None:
+        # Use the archived-inclusive lookup so write paths continue to
+        # work on archived rows when the future Archive/Purge Admin
+        # tool wires up rehydration. The standard surface never appends
+        # to an archived document because the route layer 404s before
+        # reaching this service.
+        if self._get_document_including_archived(document_id) is None:
             raise KeyError("Document not found.")
         with self._connect() as connection:
             self._insert_version(connection, version)
@@ -626,7 +711,10 @@ class SQLiteCatalogStore:
         # and matches the in-memory store's ordering. Status filter
         # joins on the latest version row; the LEFT JOIN keeps documents
         # without versions visible when the filter is absent.
-        clauses: list[str] = []
+        # ``d.archived_at IS NULL`` hides flag-archived rows by default
+        # (ADR-020 §4) — a future Archive/Purge Admin tool can build
+        # its own listing by going through ``_get_document_including_archived``.
+        clauses: list[str] = ["d.archived_at IS NULL"]
         params: list[object] = []
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
@@ -687,6 +775,41 @@ class SQLiteCatalogStore:
         ]
 
     def get_document(self, document_id: str) -> Document | None:
+        # Filter ``archived_at IS NULL`` so flag-archived docs return
+        # None — the route layer maps that to a 404 (hidden-existence).
+        # The future Archive/Purge Admin tool reaches archived rows via
+        # ``_get_document_including_archived``.
+        with self._connect() as connection:
+            document_row = connection.execute(
+                "SELECT * FROM documents WHERE id = ? AND archived_at IS NULL",
+                (document_id,),
+            ).fetchone()
+            if document_row is None:
+                return None
+            version_rows = connection.execute(
+                """
+                SELECT * FROM document_versions
+                WHERE document_id = ?
+                ORDER BY created_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
+        versions = [self._version_from_row(row) for row in version_rows]
+        # #258 — populate scopes on detail reads. Soft-removed rows are
+        # filtered by ``list_scopes_for_document``.
+        scopes = self.list_scopes_for_document(document_id)
+        return self._document_from_row(document_row, versions, scopes)
+
+    def _get_document_including_archived(self, document_id: str) -> Document | None:
+        """Internal accessor that ignores ``archived_at``.
+
+        Reserved for the future Archive/Purge Admin tool (D.9, deferred
+        ADR). Not exposed via the public :class:`CatalogStore` Protocol
+        and never wired into a route in this PR. Used by the cascade
+        service to resolve an already-archived document during the
+        idempotent re-archive path so the original timestamp can be
+        preserved without breaking the "reads hide archived" invariant.
+        """
         with self._connect() as connection:
             document_row = connection.execute(
                 "SELECT * FROM documents WHERE id = ?",
@@ -728,7 +851,12 @@ class SQLiteCatalogStore:
                 (document_id, version_id),
             ).fetchone()
         if row is None:
-            document_exists = self.get_document(document_id) is not None
+            # Use the archived-inclusive lookup so the disambiguation
+            # between "document missing" and "version missing" still
+            # holds for archived documents. ``get_version`` is a
+            # write-path helper used by lifecycle transitions; archive
+            # state is not its concern.
+            document_exists = self._get_document_including_archived(document_id) is not None
             if not document_exists:
                 raise KeyError("Document not found.")
             raise KeyError("Document version not found.")
@@ -944,11 +1072,17 @@ class SQLiteCatalogStore:
         versions: list[DocumentVersion],
         scopes: list[Scope] | None = None,
     ) -> Document:
+        # Migration 0006 guarantees ``archived_at`` is on every row; it
+        # may be NULL but the SELECT always includes it. Falling back to
+        # ``None`` via ``row.keys()`` would also work, but the explicit
+        # guard documents the column contract.
+        archived_at = row["archived_at"] if "archived_at" in row.keys() else None  # noqa: SIM118 — sqlite3.Row supports `in` only via .keys()
         return Document(
             id=row["id"],
             original_filename=row["original_filename"],
             latest_version_id=row["latest_version_id"],
             created_at=row["created_at"],
+            archived_at=archived_at,
             versions=versions,
             scopes=scopes if scopes is not None else [],
         )
@@ -1075,7 +1209,14 @@ class SQLiteCatalogStore:
         # ``s.removed_at IS NULL`` filters soft-removed scope links per
         # the no-delete policy — flagged rows stay in the table for the
         # future Archive/Purge Admin tool but are invisible to reads.
-        clauses: list[str] = ["s.scope_kind = ?", "s.scope_ref = ?", "s.removed_at IS NULL"]
+        # ``d.archived_at IS NULL`` additionally hides documents that
+        # were flag-archived by the orphan cascade (ADR-020 §4).
+        clauses: list[str] = [
+            "s.scope_kind = ?",
+            "s.scope_ref = ?",
+            "s.removed_at IS NULL",
+            "d.archived_at IS NULL",
+        ]
         params: list[object] = [scope_kind, scope_ref]
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
@@ -1161,3 +1302,35 @@ class SQLiteCatalogStore:
             added_by=row["added_by"],
             removed_at=row["removed_at"],
         )
+
+    # ------- Archive flag (ADR-020 §4, EPIC-D D.6/D.7) ------- #
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Idempotent flag: only set ``archived_at`` when it's still NULL
+        # so a re-archive preserves the original timestamp (audit-faithful).
+        # Confirm the row exists first so a missing document raises
+        # KeyError instead of silently no-op'ing into a misleading return.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET archived_at = ?
+                WHERE id = ? AND archived_at IS NULL
+                """,
+                (archived_at.isoformat(), document_id),
+            )
+        # Re-read so the returned Document carries the current
+        # ``archived_at`` (either the new timestamp or, for an idempotent
+        # second-archive, the original one).
+        refreshed = self._get_document_including_archived(document_id)
+        assert refreshed is not None  # we just confirmed existence
+        return refreshed
