@@ -60,6 +60,73 @@
         "title": "AdminConfigResponse",
         "type": "object"
       },
+      "AdminHITLStateResponse": {
+        "description": "Snapshot of the HITL routing state for the Admin dashboard.\n\nRead-only — the route never mutates and the counters are monotonic\nby design. The configuration block at the top mirrors the env vars\nthe operator pinned at deploy time so the UI can render a\n\"deployment posture\" header without a second probe to\n``/admin/config``. The bucket list is sorted by ``drift_ratio``\nDESC so the noisiest buckets surface at the top of the table.",
+        "properties": {
+          "baseline_sample_rate": {
+            "description": "Mirrors ``KW_HITL_SPC_SAMPLE_RATE`` — the cold-start fraction of versions that *would* auto-validate but are escalated to a human as a quality probe.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Baseline Sample Rate",
+            "type": "number"
+          },
+          "buckets": {
+            "description": "Per-bucket SPC counters + derived drift signals, sorted by ``drift_ratio`` DESC so the noisiest buckets surface at the top. Empty when no routing decisions have been recorded yet (cold-start deployment).",
+            "items": {
+              "$ref": "#/components/schemas/BucketState"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "drift_ramp_factor": {
+            "description": "Mirrors ``KW_HITL_DRIFT_RAMP_FACTOR`` — the multiplier applied to ``baseline_sample_rate`` for drifting buckets, capped at 1.0.",
+            "minimum": 0.0,
+            "title": "Drift Ramp Factor",
+            "type": "number"
+          },
+          "drift_threshold": {
+            "description": "Mirrors ``KW_HITL_DRIFT_THRESHOLD`` — the ``samples_human_after_auto / samples_auto`` ratio above which a bucket's sampling rate ramps.",
+            "minimum": 0.0,
+            "title": "Drift Threshold",
+            "type": "number"
+          },
+          "enabled": {
+            "description": "Mirrors ``not KW_HITL_DISABLE_SCORER``. When ``False`` the router and auto-promoter are both unwired; this snapshot reports the env state but every bucket count is zero (the router never ran).",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "force_auto_corpus": {
+            "description": "Mirrors ``KW_HITL_FORCE_AUTO_CORPUS`` (ADR-023 §6). When ``True`` the router auto-routes every version regardless of score, OCR flag, or SPC sampling. The UI surfaces a loud warning banner in this state.",
+            "title": "Force Auto Corpus",
+            "type": "boolean"
+          },
+          "pending_auto_promotions": {
+            "description": "Count of ``ValidationMetadata`` rows where ``routing_decision == 'auto'`` AND ``validation_method IS NULL`` — the queue the auto-promotion worker would process on the next pass. The dashboard's ``Run pass`` trigger calls ``POST /admin/hitl/run_auto_promote_pass`` to drain it.",
+            "minimum": 0.0,
+            "title": "Pending Auto Promotions",
+            "type": "integer"
+          },
+          "threshold": {
+            "description": "Mirrors ``KW_HITL_AUTO_VALIDATE_THRESHOLD`` — versions with confidence ≥ this value are routed to the auto path.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "force_auto_corpus",
+          "threshold",
+          "baseline_sample_rate",
+          "drift_threshold",
+          "drift_ramp_factor",
+          "pending_auto_promotions",
+          "buckets"
+        ],
+        "title": "AdminHITLStateResponse",
+        "type": "object"
+      },
       "ArchivedDocumentItem": {
         "description": "One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.\n\nSurface fields the admin UI needs to render an Archive view row\nwithout a per-doc detail fetch:\n\n- ``document_id`` / ``original_filename`` identify the row.\n- ``archived_at`` is the wall clock the orphan cascade (or a\n  future explicit-archive route) stamped on the document; the UI\n  renders it as a relative date.\n- ``last_active_scope_kind`` / ``last_active_scope_ref`` describe\n  the scope that was last removed before the cascade flagged the\n  document — so the admin can see *why* it ended up archived. Both\n  fall back to ``None`` when no scope-link history is recoverable\n  (e.g. a never-scoped document was archived directly).\n- ``versions_purged`` / ``versions_remaining`` split the version\n  family by :data:`DocumentVersionStatus.PURGED` so the operator\n  sees how much bytes-recovery surface is still on disk vs already\n  tombstone'd. The standard ``X / Y`` UI string is\n  ``versions_remaining / (versions_remaining + versions_purged)``.",
         "properties": {
@@ -397,6 +464,84 @@
           "files"
         ],
         "title": "Body_upload_documents_batch",
+        "type": "object"
+      },
+      "BucketState": {
+        "description": "One ``(content_type, topic_cluster)`` row in the dashboard table.\n\nMirrors the SPC ``sampling_state`` table the HITL router writes\non every routing decision, plus two derived fields the dashboard\nneeds to render hot-spots without recomputing client-side:\n\n- ``drift_ratio`` is ``samples_human_after_auto / max(samples_auto, 1)``,\n  the same ratio the :class:`HITLDriftDetector` reads to decide\n  whether to ramp. The route encodes the ``max(_, 1)`` so a\n  cold-start bucket (no auto decisions yet) reports ``0.0``\n  instead of a ``ZeroDivisionError`` and the UI can sort the\n  table without special-casing.\n\n- ``effective_sample_rate`` is what the drift detector returns\n  for this bucket *today* — the configured baseline for non-drifting\n  buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above\n  the threshold. Letting the route compute this means the UI\n  doesn't have to mirror the detector's logic and the snapshot\n  stays consistent with what the router will see on the next\n  decision.\n\n``topic_cluster`` is the canonical SPC bucket key — the\n``\"_unknown_\"`` sentinel from\n:data:`app.services.sampling_state_store.UNKNOWN_TOPIC_CLUSTER`\nsurfaces verbatim so operators can see \"no cluster\" rows next to\nreal clusters.",
+        "properties": {
+          "content_type": {
+            "description": "MIME-style content type the SPC bucket is keyed on (e.g. ``text/plain``, ``application/pdf``). Mirrors the catalog's ``DocumentVersion.content_type``.",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "drift_ratio": {
+            "description": "``samples_human_after_auto / max(samples_auto, 1)``. When above ``drift_threshold`` the drift detector ramps this bucket's sampling rate. Cold-start buckets (``samples_auto == 0``) report ``0.0`` so the table sort stays well-defined.",
+            "minimum": 0.0,
+            "title": "Drift Ratio",
+            "type": "number"
+          },
+          "effective_sample_rate": {
+            "description": "What :meth:`HITLDriftDetector.sampling_rate` returns for this bucket today: the configured baseline for non-drifting buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above the drift threshold.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Effective Sample Rate",
+            "type": "number"
+          },
+          "last_decision_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wall clock the last routing decision for this bucket was stamped onto the SPC counters. ``None`` for buckets that exist but never recorded a decision (a defensive case the in-memory store guards against by only inserting on decision).",
+            "title": "Last Decision At"
+          },
+          "samples_auto": {
+            "description": "Decisions where the router picked ``auto``.",
+            "minimum": 0.0,
+            "title": "Samples Auto",
+            "type": "integer"
+          },
+          "samples_human": {
+            "description": "Decisions where the router picked ``human`` (covers below-threshold, OCR-override, and SPC-escalated paths).",
+            "minimum": 0.0,
+            "title": "Samples Human",
+            "type": "integer"
+          },
+          "samples_human_after_auto": {
+            "description": "Drift signal — bumped when a human reviewer flips a previously-auto-routed version (the ``hitl.review_service`` rejection handler writes this column).",
+            "minimum": 0.0,
+            "title": "Samples Human After Auto",
+            "type": "integer"
+          },
+          "samples_taken": {
+            "description": "Total routing decisions recorded for this bucket.",
+            "minimum": 0.0,
+            "title": "Samples Taken",
+            "type": "integer"
+          },
+          "topic_cluster": {
+            "description": "Topic-cluster id the bucket is keyed on, or ``\"_unknown_\"`` when no cluster was assigned. Same sentinel :class:`HITLRouter` stamps on routing decisions.",
+            "title": "Topic Cluster",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_type",
+          "topic_cluster",
+          "samples_taken",
+          "samples_auto",
+          "samples_human",
+          "samples_human_after_auto",
+          "drift_ratio",
+          "effective_sample_rate",
+          "last_decision_at"
+        ],
+        "title": "BucketState",
         "type": "object"
       },
       "ChatCitation": {
@@ -3138,6 +3283,25 @@
           }
         },
         "summary": "Run Auto Promote Pass"
+      }
+    },
+    "/admin/hitl/state": {
+      "get": {
+        "description": "Read-only snapshot of HITL routing state (EPIC-A close-out, #215).\n\nSurfaces three things the operator needs to see at a glance:\n\n1. **Config posture** — the env-driven knobs the router and\n   drift detector were constructed with (threshold, baseline\n   sample rate, drift threshold + ramp factor, plus the\n   force-auto and scorer kill switches).\n2. **Per-bucket SPC counters** — every bucket the router has\n   recorded a decision against, decorated with its drift\n   ratio and the drift detector's *current* effective sample\n   rate. Sorted by ``drift_ratio`` DESC so the noisiest\n   buckets surface at the top of the dashboard table.\n3. **Pending auto-promotion queue depth** — the count of\n   rows the next ``run_auto_promote_pass`` invocation would\n   touch, so the dashboard can render the queue size next to\n   its trigger button without a second probe.\n\nReturns 503 with ``KW_HITL_DISABLED`` (mirrored on the\nauto-promote-pass route) when ``KW_HITL_DISABLE_SCORER`` is\ntruthy — a disabled scorer means the router is also unwired\nand the snapshot would be misleading. Read-only: no\n``?confirm=true`` ceremony.\n\nPer ADR-023 §6 and EPIC-A's \"auto-validated == human-validated\nto consumers\" rule, the dashboard never exposes individual\n:class:`ValidationMetadata` rows — the metadata stays internal.",
+        "operationId": "admin_hitl_get_state",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminHITLStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Hitl State"
       }
     },
     "/documents": {

@@ -88,6 +88,22 @@ export type ApiPurgeArtifactsResponse = Schemas["PurgeArtifactsResponse"];
 /** Per-version row inside a purge response. */
 export type ApiVersionPurgeResult = Schemas["VersionPurgeResult"];
 
+// ─── Admin / HITL dashboard (#215, EPIC-A close-out) ───────────────────────
+
+/** Read-only HITL routing state snapshot powering the Admin HITL
+ *  dashboard. Surfaces config posture + per-bucket SPC counters +
+ *  drift ratios + the pending auto-promotion queue depth. */
+export type ApiAdminHITLStateResponse = Schemas["AdminHITLStateResponse"];
+
+/** One ``(content_type, topic_cluster)`` row of the dashboard table —
+ *  the SPC sampling counters plus the route-derived drift_ratio /
+ *  effective_sample_rate. */
+export type ApiBucketState = Schemas["BucketState"];
+
+/** Result envelope of ``POST /admin/hitl/run_auto_promote_pass``,
+ *  surfaced inline on the dashboard's "Run pass" trigger. */
+export type ApiAutoPromoteResult = Schemas["AutoPromoteResult"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];

@@ -233,6 +233,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/hitl/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Hitl State
+         * @description Read-only snapshot of HITL routing state (EPIC-A close-out, #215).
+         *
+         *     Surfaces three things the operator needs to see at a glance:
+         *
+         *     1. **Config posture** — the env-driven knobs the router and
+         *        drift detector were constructed with (threshold, baseline
+         *        sample rate, drift threshold + ramp factor, plus the
+         *        force-auto and scorer kill switches).
+         *     2. **Per-bucket SPC counters** — every bucket the router has
+         *        recorded a decision against, decorated with its drift
+         *        ratio and the drift detector's *current* effective sample
+         *        rate. Sorted by ``drift_ratio`` DESC so the noisiest
+         *        buckets surface at the top of the dashboard table.
+         *     3. **Pending auto-promotion queue depth** — the count of
+         *        rows the next ``run_auto_promote_pass`` invocation would
+         *        touch, so the dashboard can render the queue size next to
+         *        its trigger button without a second probe.
+         *
+         *     Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the
+         *     auto-promote-pass route) when ``KW_HITL_DISABLE_SCORER`` is
+         *     truthy — a disabled scorer means the router is also unwired
+         *     and the snapshot would be misleading. Read-only: no
+         *     ``?confirm=true`` ceremony.
+         *
+         *     Per ADR-023 §6 and EPIC-A's "auto-validated == human-validated
+         *     to consumers" rule, the dashboard never exposes individual
+         *     :class:`ValidationMetadata` rows — the metadata stays internal.
+         */
+        get: operations["admin_hitl_get_state"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -824,6 +870,59 @@ export interface components {
             upload: components["schemas"]["UploadConfig"];
         };
         /**
+         * AdminHITLStateResponse
+         * @description Snapshot of the HITL routing state for the Admin dashboard.
+         *
+         *     Read-only — the route never mutates and the counters are monotonic
+         *     by design. The configuration block at the top mirrors the env vars
+         *     the operator pinned at deploy time so the UI can render a
+         *     "deployment posture" header without a second probe to
+         *     ``/admin/config``. The bucket list is sorted by ``drift_ratio``
+         *     DESC so the noisiest buckets surface at the top of the table.
+         */
+        AdminHITLStateResponse: {
+            /**
+             * Baseline Sample Rate
+             * @description Mirrors ``KW_HITL_SPC_SAMPLE_RATE`` — the cold-start fraction of versions that *would* auto-validate but are escalated to a human as a quality probe.
+             */
+            baseline_sample_rate: number;
+            /**
+             * Buckets
+             * @description Per-bucket SPC counters + derived drift signals, sorted by ``drift_ratio`` DESC so the noisiest buckets surface at the top. Empty when no routing decisions have been recorded yet (cold-start deployment).
+             */
+            buckets: components["schemas"]["BucketState"][];
+            /**
+             * Drift Ramp Factor
+             * @description Mirrors ``KW_HITL_DRIFT_RAMP_FACTOR`` — the multiplier applied to ``baseline_sample_rate`` for drifting buckets, capped at 1.0.
+             */
+            drift_ramp_factor: number;
+            /**
+             * Drift Threshold
+             * @description Mirrors ``KW_HITL_DRIFT_THRESHOLD`` — the ``samples_human_after_auto / samples_auto`` ratio above which a bucket's sampling rate ramps.
+             */
+            drift_threshold: number;
+            /**
+             * Enabled
+             * @description Mirrors ``not KW_HITL_DISABLE_SCORER``. When ``False`` the router and auto-promoter are both unwired; this snapshot reports the env state but every bucket count is zero (the router never ran).
+             */
+            enabled: boolean;
+            /**
+             * Force Auto Corpus
+             * @description Mirrors ``KW_HITL_FORCE_AUTO_CORPUS`` (ADR-023 §6). When ``True`` the router auto-routes every version regardless of score, OCR flag, or SPC sampling. The UI surfaces a loud warning banner in this state.
+             */
+            force_auto_corpus: boolean;
+            /**
+             * Pending Auto Promotions
+             * @description Count of ``ValidationMetadata`` rows where ``routing_decision == 'auto'`` AND ``validation_method IS NULL`` — the queue the auto-promotion worker would process on the next pass. The dashboard's ``Run pass`` trigger calls ``POST /admin/hitl/run_auto_promote_pass`` to drain it.
+             */
+            pending_auto_promotions: number;
+            /**
+             * Threshold
+             * @description Mirrors ``KW_HITL_AUTO_VALIDATE_THRESHOLD`` — versions with confidence ≥ this value are routed to the auto path.
+             */
+            threshold: number;
+        };
+        /**
          * ArchivedDocumentItem
          * @description One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.
          *
@@ -999,6 +1098,82 @@ export interface components {
         Body_upload_documents_batch: {
             /** Files */
             files: string[];
+        };
+        /**
+         * BucketState
+         * @description One ``(content_type, topic_cluster)`` row in the dashboard table.
+         *
+         *     Mirrors the SPC ``sampling_state`` table the HITL router writes
+         *     on every routing decision, plus two derived fields the dashboard
+         *     needs to render hot-spots without recomputing client-side:
+         *
+         *     - ``drift_ratio`` is ``samples_human_after_auto / max(samples_auto, 1)``,
+         *       the same ratio the :class:`HITLDriftDetector` reads to decide
+         *       whether to ramp. The route encodes the ``max(_, 1)`` so a
+         *       cold-start bucket (no auto decisions yet) reports ``0.0``
+         *       instead of a ``ZeroDivisionError`` and the UI can sort the
+         *       table without special-casing.
+         *
+         *     - ``effective_sample_rate`` is what the drift detector returns
+         *       for this bucket *today* — the configured baseline for non-drifting
+         *       buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above
+         *       the threshold. Letting the route compute this means the UI
+         *       doesn't have to mirror the detector's logic and the snapshot
+         *       stays consistent with what the router will see on the next
+         *       decision.
+         *
+         *     ``topic_cluster`` is the canonical SPC bucket key — the
+         *     ``"_unknown_"`` sentinel from
+         *     :data:`app.services.sampling_state_store.UNKNOWN_TOPIC_CLUSTER`
+         *     surfaces verbatim so operators can see "no cluster" rows next to
+         *     real clusters.
+         */
+        BucketState: {
+            /**
+             * Content Type
+             * @description MIME-style content type the SPC bucket is keyed on (e.g. ``text/plain``, ``application/pdf``). Mirrors the catalog's ``DocumentVersion.content_type``.
+             */
+            content_type: string;
+            /**
+             * Drift Ratio
+             * @description ``samples_human_after_auto / max(samples_auto, 1)``. When above ``drift_threshold`` the drift detector ramps this bucket's sampling rate. Cold-start buckets (``samples_auto == 0``) report ``0.0`` so the table sort stays well-defined.
+             */
+            drift_ratio: number;
+            /**
+             * Effective Sample Rate
+             * @description What :meth:`HITLDriftDetector.sampling_rate` returns for this bucket today: the configured baseline for non-drifting buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above the drift threshold.
+             */
+            effective_sample_rate: number;
+            /**
+             * Last Decision At
+             * @description Wall clock the last routing decision for this bucket was stamped onto the SPC counters. ``None`` for buckets that exist but never recorded a decision (a defensive case the in-memory store guards against by only inserting on decision).
+             */
+            last_decision_at: string | null;
+            /**
+             * Samples Auto
+             * @description Decisions where the router picked ``auto``.
+             */
+            samples_auto: number;
+            /**
+             * Samples Human
+             * @description Decisions where the router picked ``human`` (covers below-threshold, OCR-override, and SPC-escalated paths).
+             */
+            samples_human: number;
+            /**
+             * Samples Human After Auto
+             * @description Drift signal — bumped when a human reviewer flips a previously-auto-routed version (the ``hitl.review_service`` rejection handler writes this column).
+             */
+            samples_human_after_auto: number;
+            /**
+             * Samples Taken
+             * @description Total routing decisions recorded for this bucket.
+             */
+            samples_taken: number;
+            /**
+             * Topic Cluster
+             * @description Topic-cluster id the bucket is keyed on, or ``"_unknown_"`` when no cluster was assigned. Same sentinel :class:`HITLRouter` stamps on routing decisions.
+             */
+            topic_cluster: string;
         };
         /**
          * ChatCitation
@@ -2439,6 +2614,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_hitl_get_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHITLStateResponse"];
                 };
             };
         };
