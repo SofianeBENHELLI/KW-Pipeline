@@ -24,6 +24,32 @@ Assert-Docker
 Write-Step "Containers"
 docker compose @(Get-ComposeArgs) ps
 
+# When neo4j is unhealthy or restarting, the API depends_on it and
+# never starts. Surface the tail of neo4j logs proactively so the
+# operator sees the real cause (stale volume password, memory
+# pressure, port conflict, license prompt) without having to know to
+# run ``docker logs`` themselves.
+$neo4jStatus = (& docker inspect --format '{{.State.Health.Status}}' kw-pipeline-neo4j 2>$null)
+if ($LASTEXITCODE -eq 0 -and $neo4jStatus -and $neo4jStatus -ne 'healthy') {
+    Write-Host ""
+    Write-Warn2 "kw-pipeline-neo4j is '$neo4jStatus' — API depends on it and won't start until it's healthy."
+    Write-Host "  Common causes:"
+    Write-Host "    1. Stale ``neo4j_data`` volume from a previous run with a different password."
+    Write-Host "       Fix (wipes Neo4j data): ``cd docker && docker compose --profile deploy down -v && docker compose --profile deploy up -d``"
+    Write-Host "    2. Docker Desktop RAM < 4 GB. Settings -> Resources -> bump and restart Docker."
+    Write-Host "    3. Ports 7687 or 7474 already bound. Run: ``netstat -ano | findstr ""7687 7474""``"
+    $neo4jLogs = @()
+    try {
+        $neo4jLogs = & docker logs --tail 8 kw-pipeline-neo4j 2>&1 | ForEach-Object { "$_" }
+    } catch {}
+    if ($neo4jLogs.Count -gt 0) {
+        Write-Host "  Last log lines from kw-pipeline-neo4j:"
+        foreach ($line in $neo4jLogs) {
+            if ($line) { Write-Host "    $line" }
+        }
+    }
+}
+
 Write-Host ""
 Write-Step "Local API /health"
 try {
