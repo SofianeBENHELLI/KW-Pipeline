@@ -33,13 +33,26 @@ class DocumentVersion(BaseModel):
 
 
 class Document(BaseModel):
-    """Logical document family containing one or more versions."""
+    """Logical document family containing one or more versions.
+
+    ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
+    document currently lives in — populated by every
+    :class:`CatalogStore` read path so the frontend can render its
+    scope chip on any list/detail response without a follow-up call.
+    Soft-removed links (per the no-delete policy) are filtered out at
+    the store layer via ``list_scopes_for_document``. The default
+    ``[]`` keeps construction sites that don't care about scopes (e.g.
+    inline test fixtures, ``with_first_version``) terse — those callers
+    still serialize a present-but-empty list, which the OpenAPI
+    contract marks as required (defaults required = wire-honest).
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     original_filename: str
     latest_version_id: str
     created_at: datetime = Field(default_factory=utc_now)
     versions: list[DocumentVersion] = Field(default_factory=list)
+    scopes: list[Scope] = Field(default_factory=list)
 
     @classmethod
     def with_first_version(cls, version: DocumentVersion) -> Self:

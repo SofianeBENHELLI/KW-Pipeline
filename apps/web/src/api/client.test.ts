@@ -60,6 +60,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   latest_version_id: "ver-001",
   created_at: "2026-05-01T00:00:00Z",
   versions: [FIXTURE_VERSION],
+  scopes: [],
 };
 
 const FIXTURE_LIST: ListDocumentsResponse = {

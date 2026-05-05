@@ -848,6 +848,17 @@ export interface components {
         /**
          * Document
          * @description Logical document family containing one or more versions.
+         *
+         *     ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
+         *     document currently lives in — populated by every
+         *     :class:`CatalogStore` read path so the frontend can render its
+         *     scope chip on any list/detail response without a follow-up call.
+         *     Soft-removed links (per the no-delete policy) are filtered out at
+         *     the store layer via ``list_scopes_for_document``. The default
+         *     ``[]`` keeps construction sites that don't care about scopes (e.g.
+         *     inline test fixtures, ``with_first_version``) terse — those callers
+         *     still serialize a present-but-empty list, which the OpenAPI
+         *     contract marks as required (defaults required = wire-honest).
          */
         Document: {
             /**
@@ -861,6 +872,8 @@ export interface components {
             latest_version_id: string;
             /** Original Filename */
             original_filename: string;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
             /** Versions */
             versions: components["schemas"]["DocumentVersion"][];
         };
