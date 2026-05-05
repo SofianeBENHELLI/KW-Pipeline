@@ -83,12 +83,21 @@ def store(neo4j_config: dict[str, str]) -> Iterator[Neo4jGraphStore]:
 
 @pytest.fixture(autouse=True)
 def clean_graph(neo4j_config: dict[str, str]) -> Iterator[None]:
-    """Wipe :KnowledgeNode before AND after each test.
+    """Wipe :KnowledgeNode + drop per-test vector indexes before AND
+    after each test.
 
     The ``before`` clean keeps a previous failure from poisoning the
     next run; the ``after`` clean keeps the database tidy for the next
     test. Both run via a fresh driver session so they aren't entangled
     with the per-test ``store`` fixture.
+
+    Vector indexes are also dropped: each test that needs one creates
+    a per-test ``ns``-prefixed name with ``ensure_vector_index``; if
+    we leave them lying around the schema picks up cruft across the
+    suite, and on Neo4j 5.x community a fresh ``CREATE VECTOR INDEX``
+    after one already exists has been observed to succeed silently
+    while the new index never registers (see #225 follow-up). A clean
+    drop before each test sidesteps that race entirely.
     """
     from neo4j import GraphDatabase  # noqa: PLC0415
 
@@ -100,6 +109,12 @@ def clean_graph(neo4j_config: dict[str, str]) -> Iterator[None]:
     def _wipe() -> None:
         with driver.session() as session:
             session.run("MATCH (n:KnowledgeNode) DETACH DELETE n")
+            # Drop every VECTOR index. LOOKUP indexes are Neo4j
+            # built-ins and must not be touched.
+            result = session.run("SHOW INDEXES YIELD name, type WHERE type = 'VECTOR' RETURN name")
+            names = [str(record["name"]) for record in result]
+            for name in names:
+                session.run(f"DROP INDEX {name} IF EXISTS")
 
     try:
         _wipe()
@@ -340,3 +355,58 @@ def test_find_chunks_by_similarity_rejects_oversize_limit(
 ) -> None:
     with pytest.raises(ValueError):
         store.find_chunks_by_similarity([0.0, 0.0, 0.0, 0.0], limit=10_000)
+
+
+def test_bulk_set_chunk_embeddings_writes_all_in_one_unwind(
+    store: Neo4jGraphStore,
+    ns: str,
+) -> None:
+    """One UNWIND-driven Cypher must populate every chunk's embedding;
+    the search index must subsequently rank every chunk (audit #225).
+
+    The test does not directly assert the transaction count — Bolt
+    doesn't expose that easily — but it does assert that a single
+    ``bulk_set_chunk_embeddings`` call lands the same vectors that
+    three ``set_chunk_embedding`` calls did in the prior test. The
+    projection hot path's perf win comes from issuing one transaction
+    instead of N; the contract verified here is the equivalence.
+    """
+    index_name = f"chunk_embedding_{ns.replace('-', '_')}_bulk"
+    store.ensure_vector_index(name=index_name, dim=4)
+
+    store.upsert_nodes(
+        [
+            _chunk(ns, "b1", snippet="alpha"),
+            _chunk(ns, "b2", snippet="beta"),
+            _chunk(ns, "b3", snippet="gamma"),
+        ]
+    )
+
+    # One bulk call covers all three vectors.
+    store.bulk_set_chunk_embeddings(
+        {
+            f"{ns}-b1": [1.0, 0.0, 0.0, 0.0],
+            f"{ns}-b2": [0.0, 1.0, 0.0, 0.0],
+            f"{ns}-b3": [0.5, 0.5, 0.0, 0.0],
+        }
+    )
+
+    hits = store.find_chunks_by_similarity(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=3,
+        index_name=index_name,
+    )
+    chunk_ids = [h.chunk_id for h in hits]
+    assert chunk_ids[0] == f"{ns}-b1"
+    assert {h.chunk_id for h in hits} == {f"{ns}-b1", f"{ns}-b2", f"{ns}-b3"}
+
+
+def test_bulk_set_chunk_embeddings_empty_mapping_is_noop(
+    store: Neo4jGraphStore,
+) -> None:
+    """Empty mapping must not fire a Cypher; the projector relies on
+    this so the call site can stay unconditional."""
+    # Should not raise (nothing to assert on the graph; no nodes
+    # involved). The ``if not mapping: return`` guard inside the impl
+    # is what we are pinning here.
+    store.bulk_set_chunk_embeddings({})

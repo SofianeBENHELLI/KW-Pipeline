@@ -35,6 +35,7 @@ import json
 import logging
 import math
 import threading
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -153,6 +154,21 @@ class GraphStore(Protocol):
         ``KnowledgeGraphProjection`` payload doesn't grow by 1024
         floats per chunk. ``find_chunks_by_similarity`` is the only
         public read path for these vectors.
+
+        Prefer :meth:`bulk_set_chunk_embeddings` when writing more than
+        one chunk at a time — it amortises the round-trip cost (one
+        Cypher transaction on Neo4j instead of N).
+        """
+
+    def bulk_set_chunk_embeddings(self, mapping: Mapping[str, Sequence[float]]) -> None:
+        """Write embedding vectors for many chunks in one round-trip.
+
+        ``mapping`` is keyed by chunk id and the value is the embedding
+        vector. Empty mapping is a no-op. The Neo4j path executes one
+        UNWIND-driven Cypher; the in-memory path is a dict update under
+        the store lock. The projection hot path is the primary caller
+        (audit #225); ``set_chunk_embedding`` stays for the
+        reconciliation single-chunk path.
         """
 
     def find_chunks_by_similarity(
@@ -348,6 +364,13 @@ class InMemoryGraphStore:
     def set_chunk_embedding(self, *, chunk_id: str, embedding: Sequence[float]) -> None:
         with self._lock:
             self._chunk_embeddings[chunk_id] = list(embedding)
+
+    def bulk_set_chunk_embeddings(self, mapping: Mapping[str, Sequence[float]]) -> None:
+        if not mapping:
+            return
+        with self._lock:
+            for chunk_id, embedding in mapping.items():
+                self._chunk_embeddings[chunk_id] = list(embedding)
 
     def find_chunks_by_similarity(
         self,
@@ -671,6 +694,16 @@ class Neo4jGraphStore:
         Neo4j 5.13+ ``CREATE VECTOR INDEX`` syntax with ``IF NOT
         EXISTS`` keeps the call safe across restarts. Cosine
         similarity matches Voyage's embedding space.
+
+        Index creation is asynchronous in Neo4j: ``CREATE VECTOR
+        INDEX`` returns immediately while the index transitions
+        through ``POPULATING`` to ``ONLINE``. Querying the index
+        before it is online fails with ``IllegalArgumentException:
+        There is no such vector schema index``. We poll
+        ``SHOW INDEXES`` for the named index until its ``state`` reads
+        ``ONLINE`` so the post-condition of this method matches the
+        name it is given: when it returns, the index is ready to
+        serve ``db.index.vector.queryNodes`` calls.
         """
         if dim <= 0:
             raise ValueError(f"vector index dim must be positive; got {dim}.")
@@ -687,6 +720,35 @@ class Neo4jGraphStore:
             """,
             {"dim": dim},
         )
+        # Poll SHOW INDEXES for the named index until it transitions to
+        # ONLINE. 30s ceiling is generous; an empty vector index
+        # typically lights up in well under a second, but loaded CI
+        # runners have been observed to take a beat between
+        # CREATE INDEX returning and the index becoming queryable.
+        deadline = time.monotonic() + 30.0
+        while True:
+            rows = self._read(
+                "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
+                {"name": name},
+            )
+            state = str(rows[0]["state"]) if rows else ""
+            if state == "ONLINE":
+                return
+            if time.monotonic() >= deadline:
+                # Surface every index Neo4j knows about so a missed
+                # name shows up clearly when this RuntimeError is
+                # the cause of a CI failure.
+                all_rows = self._read(
+                    "SHOW INDEXES YIELD name, state, type RETURN name, state, type",
+                    {},
+                )
+                snapshot = ", ".join(f"{r['name']}:{r['state']}:{r['type']}" for r in all_rows)
+                raise RuntimeError(
+                    f"vector index {name!r} did not reach ONLINE within 30s "
+                    f"(last observed state: {state or '<missing>'}; all "
+                    f"indexes: {snapshot or '<none>'})."
+                )
+            time.sleep(0.1)
 
     def set_chunk_embedding(  # pragma: no cover - exercised behind pytest -m integration
         self,
@@ -700,6 +762,35 @@ class Neo4jGraphStore:
             SET n.embedding = $embedding
             """,
             {"chunk_id": chunk_id, "embedding": list(embedding)},
+        )
+
+    def bulk_set_chunk_embeddings(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        mapping: Mapping[str, Sequence[float]],
+    ) -> None:
+        # One UNWIND-driven Cypher writes every chunk's embedding inside
+        # a single transaction, replacing the per-chunk round-trip the
+        # projector used to do (audit #225). Empty mapping is a no-op
+        # so the projection path can call this unconditionally without
+        # an ``if mapping`` guard at the call site.
+        #
+        # The MATCH-then-WHERE shape mirrors ``upsert_edges`` (the only
+        # other UNWIND+MATCH pattern in this module): match by id alone
+        # and filter the ``kind`` in a WHERE clause. The inline-map form
+        # ``{id: row.chunk_id, kind: 'chunk'}`` is also valid Cypher, but
+        # the explicit form keeps every UNWIND+MATCH in this module
+        # using one shape.
+        if not mapping:
+            return
+        rows = [{"chunk_id": cid, "embedding": list(emb)} for cid, emb in mapping.items()]
+        self._write(
+            """
+            UNWIND $rows AS row
+            MATCH (n:KnowledgeNode {id: row.chunk_id})
+            WHERE n.kind = 'chunk'
+            SET n.embedding = row.embedding
+            """,
+            {"rows": rows},
         )
 
     def find_chunks_by_similarity(  # pragma: no cover - exercised behind pytest -m integration
