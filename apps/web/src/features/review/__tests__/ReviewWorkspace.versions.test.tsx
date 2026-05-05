@@ -62,6 +62,7 @@ function makeDocument(
     created_at: "2026-05-01T00:00:00Z",
     archived_at: null,
     versions,
+    scopes: [],
   };
 }
 

@@ -30,6 +30,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   created_at: "2026-04-30T08:42:00Z",
   archived_at: null,
   versions: [FIXTURE_VERSION],
+  scopes: [],
 };
 
 const FIXTURE_LIST: ListDocumentsResponse = {

@@ -185,6 +185,100 @@ class TestListDocumentsInScope:
         assert page == []
         assert next_cursor is None
 
+    def test_returned_documents_carry_their_scope_links(self, store: CatalogStore):
+        """#258 — every document returned by ``list_documents_in_scope``
+        must carry its active scope links on ``Document.scopes`` so
+        the route layer can surface them without a follow-up
+        ``list_scopes_for_document`` call.
+        """
+        _seed_document(store, document_id="d1")
+        _seed_document(store, document_id="d2")
+        store.add_scope("d1", _scope(kind="swym_community", ref="abc"))
+        store.add_scope("d1", _scope(kind="project", ref="p1"))
+        store.add_scope("d2", _scope(kind="swym_community", ref="abc"))
+
+        page, _ = store.list_documents_in_scope("swym_community", "abc", cursor=None, limit=10)
+        scopes_by_id = {d.id: d.scopes for d in page}
+        assert {(s.kind, s.ref) for s in scopes_by_id["d1"]} == {
+            ("swym_community", "abc"),
+            ("project", "p1"),
+        }
+        assert {(s.kind, s.ref) for s in scopes_by_id["d2"]} == {
+            ("swym_community", "abc"),
+        }
+
+    def test_returned_documents_filter_soft_removed_scopes(self, store: CatalogStore):
+        """Soft-removed (``removed_at IS NOT NULL``, per #262) links
+        must not surface on the populated ``Document.scopes`` field —
+        the no-delete policy keeps the row but every read path hides
+        it."""
+        _seed_document(store, document_id="d1")
+        store.add_scope("d1", _scope(kind="swym_community", ref="abc"))
+        store.add_scope("d1", _scope(kind="project", ref="p1"))
+        store.remove_scope("d1", "project", "p1")
+
+        page, _ = store.list_documents_in_scope("swym_community", "abc", cursor=None, limit=10)
+        assert len(page) == 1
+        assert {(s.kind, s.ref) for s in page[0].scopes} == {
+            ("swym_community", "abc"),
+        }
+
+
+class TestDocumentScopesPopulation:
+    """#258 — every read path that returns a Document populates
+    ``Document.scopes`` with the active links so the frontend can
+    render its scope chip without a follow-up call.
+    """
+
+    def test_get_document_populates_scopes(self, store: CatalogStore):
+        _seed_document(store, document_id="d1")
+        store.add_scope("d1", _scope(kind="personal", ref="dev"))
+        store.add_scope("d1", _scope(kind="project", ref="p1"))
+
+        document = store.get_document("d1")
+        assert document is not None
+        assert {(s.kind, s.ref) for s in document.scopes} == {
+            ("personal", "dev"),
+            ("project", "p1"),
+        }
+
+    def test_get_document_filters_soft_removed_scopes(self, store: CatalogStore):
+        _seed_document(store, document_id="d1")
+        store.add_scope("d1", _scope(kind="personal", ref="dev"))
+        store.add_scope("d1", _scope(kind="project", ref="p1"))
+        store.remove_scope("d1", "project", "p1")
+
+        document = store.get_document("d1")
+        assert document is not None
+        assert [(s.kind, s.ref) for s in document.scopes] == [("personal", "dev")]
+
+    def test_list_documents_populates_scopes(self, store: CatalogStore):
+        _seed_document(store, document_id="d1")
+        _seed_document(store, document_id="d2")
+        store.add_scope("d1", _scope(kind="personal", ref="dev"))
+        store.add_scope("d2", _scope(kind="swym_community", ref="abc"))
+
+        documents = store.list_documents()
+        scopes_by_id = {d.id: d.scopes for d in documents}
+        assert {(s.kind, s.ref) for s in scopes_by_id["d1"]} == {("personal", "dev")}
+        assert {(s.kind, s.ref) for s in scopes_by_id["d2"]} == {
+            ("swym_community", "abc"),
+        }
+
+    def test_list_documents_empty_scopes_for_unlinked_doc(self, store: CatalogStore):
+        _seed_document(store, document_id="d1")
+        documents = store.list_documents()
+        assert documents[0].scopes == []
+
+    def test_list_documents_filters_soft_removed_scopes(self, store: CatalogStore):
+        _seed_document(store, document_id="d1")
+        store.add_scope("d1", _scope(kind="personal", ref="dev"))
+        store.add_scope("d1", _scope(kind="project", ref="p1"))
+        store.remove_scope("d1", "project", "p1")
+
+        documents = store.list_documents()
+        assert [(s.kind, s.ref) for s in documents[0].scopes] == [("personal", "dev")]
+
 
 class TestRemoveScope:
     def test_remove_scope_drops_link(self, store: CatalogStore):

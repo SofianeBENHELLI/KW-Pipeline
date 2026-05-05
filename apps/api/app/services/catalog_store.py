@@ -383,17 +383,25 @@ class InMemoryCatalogStore:
             ordered = [d for d in ordered if needle in d.original_filename.lower()]
         if limit is not None:
             ordered = ordered[:limit]
+        # #258 — populate ``Document.scopes`` per row. The forward
+        # index is in-process so this is O(1) per doc; soft-removed
+        # rows are filtered by ``list_scopes_for_document``.
+        for document in ordered:
+            document.scopes = self.list_scopes_for_document(document.id)
         return ordered
 
     def get_document(self, document_id: str) -> Document | None:
-        # Hide archived documents from the standard read path; the route
-        # layer maps ``None`` to a 404 — same shape as a missing row,
-        # which is the correct hidden-existence story for archived data
-        # (ADR-020 §4). The internal admin-tool path uses
+        # Hide archived documents from the standard read path (#265 / D.6);
+        # the route layer maps ``None`` to a 404 — same shape as a missing
+        # row, the correct hidden-existence story per ADR-020 §4. The
+        # internal Archive/Purge Admin tool path uses
         # ``_get_document_including_archived``.
         document = self.documents.get(document_id)
         if document is None or document.archived_at is not None:
             return None
+        # #258 — populate ``Document.scopes`` on detail reads too. Soft-
+        # removed rows are filtered by ``list_scopes_for_document``.
+        document.scopes = self.list_scopes_for_document(document.id)
         return document
 
     def _get_document_including_archived(self, document_id: str) -> Document | None:
@@ -566,6 +574,12 @@ class InMemoryCatalogStore:
             next_cursor = _encode_cursor((last.created_at, last.id))
         else:
             next_cursor = None
+        # #258 — populate ``Document.scopes`` for the returned page so
+        # the catalog projection sees the same shape as ``GET
+        # /documents``. Soft-removed rows are already filtered by
+        # ``list_scopes_for_document``.
+        for document in page:
+            document.scopes = self.list_scopes_for_document(document.id)
         return page, next_cursor
 
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
@@ -742,12 +756,21 @@ class SQLiteCatalogStore:
                 """,
                 tuple(ids),
             ).fetchall()
+            # #258 — batch-load active scope links for the page in a
+            # single query so the read path stays N+1-free. The
+            # ``removed_at IS NULL`` predicate matches the no-delete
+            # policy (#262); flagged links are invisible.
+            scopes_by_document = self._batch_list_scopes(connection, ids)
         versions_by_document: dict[str, list[DocumentVersion]] = {}
         for row in version_rows:
             version = self._version_from_row(row)
             versions_by_document.setdefault(version.document_id, []).append(version)
         return [
-            self._document_from_row(row, versions_by_document.get(row["id"], []))
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
             for row in document_rows
         ]
 
@@ -772,7 +795,10 @@ class SQLiteCatalogStore:
                 (document_id,),
             ).fetchall()
         versions = [self._version_from_row(row) for row in version_rows]
-        return self._document_from_row(document_row, versions)
+        # #258 — populate scopes on detail reads. Soft-removed rows are
+        # filtered by ``list_scopes_for_document``.
+        scopes = self.list_scopes_for_document(document_id)
+        return self._document_from_row(document_row, versions, scopes)
 
     def _get_document_including_archived(self, document_id: str) -> Document | None:
         """Internal accessor that ignores ``archived_at``.
@@ -799,8 +825,21 @@ class SQLiteCatalogStore:
                 """,
                 (document_id,),
             ).fetchall()
+            # #258 — populate ``Document.scopes`` on detail reads too.
+            # Goes through the same ``list_scopes_for_document`` path so
+            # soft-removed links are filtered.
+            scope_rows = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id = ? AND removed_at IS NULL
+                ORDER BY added_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
         versions = [self._version_from_row(row) for row in version_rows]
-        return self._document_from_row(document_row, versions)
+        scopes = [self._scope_from_row(row) for row in scope_rows]
+        return self._document_from_row(document_row, versions, scopes)
 
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
         with self._connect() as connection:
@@ -1027,11 +1066,16 @@ class SQLiteCatalogStore:
             ),
         )
 
-    def _document_from_row(self, row: sqlite3.Row, versions: list[DocumentVersion]) -> Document:
-        # Migration 0006 guarantees ``archived_at`` is on every row;
-        # it may be NULL but the SELECT always includes it. Falling back
-        # to ``None`` via ``row.keys()`` would also work, but the
-        # explicit guard documents the column contract.
+    def _document_from_row(
+        self,
+        row: sqlite3.Row,
+        versions: list[DocumentVersion],
+        scopes: list[Scope] | None = None,
+    ) -> Document:
+        # Migration 0006 guarantees ``archived_at`` is on every row; it
+        # may be NULL but the SELECT always includes it. Falling back to
+        # ``None`` via ``row.keys()`` would also work, but the explicit
+        # guard documents the column contract.
         archived_at = row["archived_at"] if "archived_at" in row.keys() else None  # noqa: SIM118 — sqlite3.Row supports `in` only via .keys()
         return Document(
             id=row["id"],
@@ -1040,7 +1084,44 @@ class SQLiteCatalogStore:
             created_at=row["created_at"],
             archived_at=archived_at,
             versions=versions,
+            scopes=scopes if scopes is not None else [],
         )
+
+    def _batch_list_scopes(
+        self,
+        connection: sqlite3.Connection,
+        document_ids: list[str],
+    ) -> dict[str, list[Scope]]:
+        """Group active scope links by ``document_id`` in a single query.
+
+        Issued once per page (``list_documents`` /
+        ``list_documents_in_scope``) so the read path stays N+1-free
+        when ``Document.scopes`` is populated (#258). Soft-removed
+        links (``removed_at IS NOT NULL``) are filtered per the
+        no-delete policy (#262); flagged rows stay in the table for a
+        future Archive/Purge tool but are invisible to reads.
+
+        Returns a dict keyed by ``document_id``; documents with no
+        active scope link are absent from the dict (callers fall back
+        to an empty list). Order within each list is ``added_at ASC``,
+        matching :meth:`list_scopes_for_document`.
+        """
+        if not document_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in document_ids)
+        rows = connection.execute(
+            f"""
+            SELECT document_id, scope_kind, scope_ref, added_at, added_by, removed_at
+            FROM document_scopes
+            WHERE document_id IN ({placeholders}) AND removed_at IS NULL
+            ORDER BY added_at ASC
+            """,
+            tuple(document_ids),
+        ).fetchall()
+        grouped: dict[str, list[Scope]] = {}
+        for row in rows:
+            grouped.setdefault(row["document_id"], []).append(self._scope_from_row(row))
+        return grouped
 
     def _version_from_row(self, row: sqlite3.Row) -> DocumentVersion:
         return DocumentVersion(
@@ -1163,13 +1244,21 @@ class SQLiteCatalogStore:
                 """,
                 tuple(ids),
             ).fetchall()
+            # #258 — batch-load active scope links for the page so
+            # the catalog projection sees the same shape as ``GET
+            # /documents``. Stays N+1-free.
+            scopes_by_document = self._batch_list_scopes(connection, ids)
         versions_by_document: dict[str, list[DocumentVersion]] = {}
         for row in version_rows:
             version = self._version_from_row(row)
             versions_by_document.setdefault(version.document_id, []).append(version)
         page_rows = document_rows[:limit]
         page = [
-            self._document_from_row(row, versions_by_document.get(row["id"], []))
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
             for row in page_rows
         ]
         if len(document_rows) > limit and page:

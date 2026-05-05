@@ -34,7 +34,8 @@ from app.services.auth import (
     User,
     assert_can_access_document,
     get_caller_scopes,
-    get_current_user,
+    require_contributor,
+    require_viewer,
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
@@ -79,7 +80,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     def get_document_graph(
         request: Request,
         document_id: str,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         """Knowledge graph projection for one document family (ADR-012).
 
@@ -104,6 +105,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     def get_knowledge_graph(
         limit: int = Query(default=DEFAULT_GRAPH_PAGE_LIMIT, ge=MIN_GRAPH_PAGE_LIMIT),
         cursor: str | None = None,
+        _user: User = Depends(require_viewer),
     ) -> Any:
         """Cursor-paginated walk of the catalog-wide projection (ADR-012).
 
@@ -141,7 +143,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     def search_knowledge_chunks(
         q: str = Query(min_length=1, max_length=2000),
         limit: int = Query(default=DEFAULT_VECTOR_SEARCH_LIMIT, ge=1),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         """Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).
 
@@ -216,7 +218,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     )
     def chat_with_knowledge(
         payload: ChatRequest,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         """Grounded chat surface (Phase 3 follow-up).
 
@@ -277,7 +279,9 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         operation_id="get_knowledge_taxonomy",
         response_model=TaxonomyResponse,
     )
-    def get_knowledge_taxonomy() -> Any:
+    def get_knowledge_taxonomy(
+        _user: User = Depends(require_viewer),
+    ) -> Any:
         """Read the hybrid taxonomy (ADR-017, #249).
 
         The response merges two halves under one ``categories`` list:
@@ -352,6 +356,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         # membership client (D.3) ships. See ADR-020 §2 for the
         # read-side filter shape.
         caller_scopes: tuple[ScopeRef, ...] = Depends(get_caller_scopes),
+        _user: User = Depends(require_viewer),
     ) -> Any:
         """Paginated catalog view filtered for the EPIC-C surface (ADR-025).
 
@@ -565,7 +570,9 @@ def _build_catalog_item(
         latest = max(non_superseded, key=lambda v: v.version_number)
     if latest.status not in visibility:
         return None
-    scopes = services.documents.catalog.list_scopes_for_document(document.id)
+    # #258 — every catalog read path now populates ``Document.scopes``
+    # (filtered to active links), so we surface that directly instead
+    # of a follow-up ``list_scopes_for_document`` round-trip.
     return KnowledgeCatalogItem(
         document_id=document.id,
         family_filename=latest.filename,
@@ -573,7 +580,7 @@ def _build_catalog_item(
         latest_status=latest.status,
         version_count=len(sorted_versions),
         sha256=latest.sha256,
-        scopes=scopes,
+        scopes=list(document.scopes),
     )
 
 

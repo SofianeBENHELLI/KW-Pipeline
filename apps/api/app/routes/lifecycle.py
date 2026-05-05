@@ -38,7 +38,9 @@ from app.services.auth import (
     User,
     assert_can_access_document,
     get_caller_scopes,
-    get_current_user,
+    require_contributor,
+    require_reviewer,
+    require_viewer,
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
@@ -76,6 +78,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         status: list[str] | None = Query(default=None),
         q: str | None = Query(default=None, max_length=200),
         caller_scopes: tuple[ScopeRef, ...] = Depends(get_caller_scopes),
+        _user: User = Depends(require_viewer),
     ) -> Any:
         """List document families with optional status / filename filters (#86).
 
@@ -146,7 +149,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
     def get_document(
         request: Request,
         document_id: str,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         document = services.documents.get_document(document_id)
         if document is None:
@@ -167,7 +170,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         # D.5: hidden-existence semantics — a 404 here is indistinguishable
         # from "no such document" so we don't leak that another user
@@ -214,6 +217,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        _user: User = Depends(require_contributor),
     ) -> Any:
         """Retry extraction for a previously-FAILED version (#87).
 
@@ -278,7 +282,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         # D.5: hidden-existence — refuse before any catalog work happens.
         assert_can_access_document(request=request, document_id=document_id, user=current_user)
@@ -395,7 +399,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
     def get_document_lineage(
         request: Request,
         document_id: str,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         """Version history for one document family (EPIC-C C.3, ADR-025).
 
@@ -432,7 +436,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         request: Request,
         document_id: str,
         k: int = Query(default=5, ge=1, le=50),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         """Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).
 
@@ -493,7 +497,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_reviewer),
     ) -> Any:
         # D.5: refuse before any review work happens. A scope-blocked
         # caller must not be able to flip another user's doc status.
@@ -516,7 +520,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         request: ReviewRequest = Body(default_factory=ReviewRequest),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_reviewer),
     ) -> Any:
         # D.5: refuse before any review work happens.
         assert_can_access_document(request=http_request, document_id=document_id, user=current_user)
