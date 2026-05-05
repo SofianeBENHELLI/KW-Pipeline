@@ -24,10 +24,11 @@ module form.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 
-def _load_main() -> object:
+def _load_main() -> Callable[[Iterable[str] | None], int]:
     """Resolve the loader's ``main`` callable from the scripts directory.
 
     The scripts directory is intentionally excluded from the wheel's
@@ -48,9 +49,12 @@ def _load_main() -> object:
         )
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
-    from load_demo_dataset import main  # noqa: PLC0415  (lazy by design)
+    # ``load_demo_dataset`` lives outside the ``app`` import package so
+    # mypy cannot resolve the import at type-check time. The runtime
+    # sys.path tweak above takes care of resolution at execution time.
+    from load_demo_dataset import main as runner  # type: ignore[import-not-found]
 
-    return main
+    return runner
 
 
 def main() -> int:

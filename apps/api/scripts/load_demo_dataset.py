@@ -551,8 +551,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         "--reset",
         action="store_true",
         help=(
-            "Print the manual reset recipe and exit. The script never "
-            "deletes data on disk itself."
+            "Print the manual reset recipe and exit. The script never deletes data on disk itself."
         ),
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
