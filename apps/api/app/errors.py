@@ -71,6 +71,14 @@ class ErrorCode:
     # ─── HITL auto-promotion (POST /admin/hitl/run_auto_promote_pass) ─
     HITL_DISABLED = "KW_HITL_DISABLED"
 
+    # ─── Admin audit log viewer (GET /admin/audit/events, #206 follow-up) ─
+    # Surfaced as a 503 when ``KW_AUDIT_ENABLED=false`` (the in-memory
+    # default). The store still works in-process — but a deployment
+    # that opts out of the persistent audit DB has no historical
+    # rows to browse, so the route fails closed with a remediation
+    # hint pointing at the env var.
+    AUDIT_DISABLED = "KW_AUDIT_DISABLED"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"

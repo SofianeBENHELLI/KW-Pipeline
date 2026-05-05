@@ -182,6 +182,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/audit/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description Paginated read of the structured audit event log (#206 follow-up).
+         *
+         *     The viewer is read-only — the audit table is append-only by
+         *     design. Events sort by ``created_at DESC`` so the freshest
+         *     rows surface at the top of the operator's table; ``cursor``
+         *     encodes the page boundary opaquely so the same-timestamp tie
+         *     case paginates cleanly across both store impls.
+         *
+         *     Returns 503 with ``KW_AUDIT_DISABLED`` when
+         *     ``KW_AUDIT_ENABLED=false`` (the in-memory default). The store
+         *     still works in-process for live event capture but a
+         *     deployment that opts out of the persistent DB has no
+         *     historical rows to browse, so the route fails closed with a
+         *     remediation hint pointing at the env var.
+         *
+         *     ``available_event_names`` is included on every response so
+         *     the UI's filter dropdown can be self-populating without a
+         *     second probe — cheap by construction since the audit table
+         *     indexes ``event_name`` directly.
+         */
+        get: operations["admin_audit_list_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/config": {
         parameters: {
             query?: never;
@@ -845,6 +883,35 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdminAuditEventsResponse
+         * @description Response body of ``GET /admin/audit/events`` (#206 follow-up).
+         *
+         *     Cursor-paginated, sorted ``created_at DESC`` so the freshest
+         *     events surface at the top of the table. ``next_cursor`` is opaque
+         *     (the audit store's base64-JSON codec) and ``None`` when this page
+         *     is the last one.
+         *
+         *     ``available_event_names`` is a one-shot ``SELECT DISTINCT
+         *     event_name`` against the store — included on every response so
+         *     the UI's filter dropdown doesn't need a second probe to populate.
+         *     Cheap by construction (the audit table is small and the store
+         *     indexes on ``event_name``).
+         */
+        AdminAuditEventsResponse: {
+            /**
+             * Available Event Names
+             * @description Distinct ``event_name`` values currently in the store, sorted lexicographically. The UI's filter dropdown is populated from this list so a deployment that has never fired a particular event doesn't surface it as a filter option.
+             */
+            available_event_names: string[];
+            /** Items */
+            items: components["schemas"]["AuditEventItem"][];
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page. ``None`` means this page is the last one. Pass it back as ``?cursor=...`` on the next request.
+             */
+            next_cursor: string | null;
+        };
+        /**
          * AdminConfigResponse
          * @description Sanitized snapshot of the running deployment's configuration.
          *
@@ -994,6 +1061,49 @@ export interface components {
             db_path: string;
             /** Enabled */
             enabled: boolean;
+        };
+        /**
+         * AuditEventItem
+         * @description One row of the audit log viewer table.
+         *
+         *     ``payload`` is the full ``extra`` dict the structured-logging
+         *     emitter passed to ``log.info(...)`` when the event fired —
+         *     surfaced verbatim so the operator can inspect the per-event
+         *     context (document_id, before/after fields, scope kind/ref, etc.)
+         *     without joining against any other surface.
+         *
+         *     ``actor`` is projected out of the payload (audit emitters stash
+         *     it under ``payload['actor']``); ``None`` when the event was
+         *     emitted by a system-initiated cascade with no human principal
+         *     (e.g. the orphan archive cascade).
+         */
+        AuditEventItem: {
+            /**
+             * Actor
+             * @description Acting principal — the user id the route stamped onto ``payload['actor']`` (or ``None`` for system-initiated events with no human caller).
+             */
+            actor: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description Wall clock the event was emitted (UTC, seconds resolution).
+             */
+            created_at: string;
+            /**
+             * Event Name
+             * @description Dotted event name, e.g. ``routing.decided``, ``review.validated``, ``document.archived_orphan``. The full vocabulary is documented in ``docs/architecture/observability.md``.
+             */
+            event_name: string;
+            /**
+             * Id
+             * @description Stable display id synthesised from the row's wall-clock + event name + actor. Opaque — the UI uses it as a React key only; do not parse it.
+             */
+            id: string;
+            /**
+             * Payload
+             * @description Full structured-logging payload. Arbitrary JSON-shaped — the UI renders it as pretty JSON in the row's expanded panel.
+             */
+            payload: Record<string, never>;
         };
         /**
          * AutoPromoteResult
@@ -2553,6 +2663,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UnarchiveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_audit_list_events: {
+        parameters: {
+            query?: {
+                /** @description Restrict results to a single dotted event name (e.g. ``review.validated``). The full vocabulary is surfaced on the response's ``available_event_names`` so the UI dropdown is self-populating. */
+                event_name?: string | null;
+                /** @description Restrict results to events emitted by a specific principal — matches the ``actor`` field projected out of the structured-logging payload (the admin routes stash ``actor=user.id``). Rows with no actor are excluded only when this filter is set. */
+                actor?: string | null;
+                /** @description Lower-bound timestamp (inclusive). Events with ``created_at < since`` are skipped. */
+                since?: string | null;
+                /** @description Upper-bound timestamp (inclusive). Events with ``created_at > until`` are skipped. */
+                until?: string | null;
+                /** @description Opaque cursor returned in a prior response's ``next_cursor``. Pass it to advance pages within the current filter set; drop it to start over. */
+                cursor?: string | null;
+                /** @description Page size. Defaults to 50 to keep the dashboard responsive; the upper bound mirrors the audit store's ``MAX_QUERY_LIMIT`` so an over-eager filter can't drag back the entire table. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditEventsResponse"];
                 };
             };
             /** @description Validation Error */

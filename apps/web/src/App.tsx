@@ -219,14 +219,18 @@ export function useDocumentCatalog(): DocumentCatalog {
 }
 
 /**
- * Top-level app router (D.9).
+ * Top-level app router (D.9 + #215 + #206 follow-up).
  *
- * Two routes today:
- *  - ``/admin/archive`` mounts the Admin UI Archive view; the route
- *    handler 403s on a non-admin token and the page renders a
- *    "Forbidden" state for that envelope. We never derive admin
- *    role client-side — the backend is the single source of truth.
- *  - everything else falls through to the legacy reviewer workbench.
+ * Admin routes (each lazy-loaded into its own chunk):
+ *  - ``/admin/archive`` — Archive listing + per-doc actions (D.9).
+ *  - ``/admin/hitl`` — HITL routing dashboard (#215, EPIC-A close-out).
+ *  - ``/admin/audit`` — Audit log viewer (#206 follow-up).
+ *
+ * Each handler 403s on a non-admin token and the page renders a
+ * "Forbidden" state for that envelope. We never derive admin role
+ * client-side — the backend is the single source of truth.
+ *
+ * Everything else falls through to the legacy reviewer workbench.
  */
 // Lazy-load the admin views so they don't ship in the initial app
 // chunk — admin routes are admin-only and most users never land here.
@@ -241,6 +245,11 @@ const AdminArchiveView = lazy(() =>
 const AdminHITLView = lazy(() =>
   import("./features/admin/AdminHITLView").then((mod) => ({
     default: mod.AdminHITLView,
+  })),
+);
+const AdminAuditView = lazy(() =>
+  import("./features/admin/AdminAuditView").then((mod) => ({
+    default: mod.AdminAuditView,
   })),
 );
 
@@ -260,6 +269,14 @@ export default function App() {
         element={
           <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
             <AdminHITLView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/audit"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+            <AdminAuditView />
           </Suspense>
         }
       />

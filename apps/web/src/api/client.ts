@@ -15,6 +15,7 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiAdminAuditEventsResponse,
   ApiAdminHITLStateResponse,
   ApiArchivedDocumentsResponse,
   ApiAutoPromoteResult,
@@ -730,6 +731,49 @@ export async function runAutoPromotePass(
     await http.POST("/admin/hitl/run_auto_promote_pass", {
       params: { query: query as never },
       signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /admin/audit/events (#206 follow-up)
+ *
+ * Admin-only. Cursor-paginated walk over the structured audit event
+ * log, sorted ``created_at DESC``. Filter by ``event_name`` / ``actor``
+ * / ``since`` / ``until``; pass back ``next_cursor`` from a prior
+ * response to load the next page. The response always carries
+ * ``available_event_names`` so the UI's filter dropdown is
+ * self-populating.
+ *
+ * Returns 403 ``KW_FORBIDDEN`` when the caller lacks the ``admin``
+ * role; 503 ``KW_AUDIT_DISABLED`` when ``KW_AUDIT_ENABLED=false``
+ * (the in-memory default — the audit DB is opt-in for persistent
+ * deployments).
+ */
+export interface ListAuditEventsOptions {
+  eventName?: string;
+  actor?: string;
+  since?: string;
+  until?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+export async function listAuditEvents(
+  opts: ListAuditEventsOptions = {},
+): Promise<ApiAdminAuditEventsResponse> {
+  const { eventName, actor, since, until, cursor, limit = 50, signal } = opts;
+  const query: Record<string, string | number> = { limit };
+  if (eventName) query.event_name = eventName;
+  if (actor) query.actor = actor;
+  if (since) query.since = since;
+  if (until) query.until = until;
+  if (cursor) query.cursor = cursor;
+  return unwrap(
+    await http.GET("/admin/audit/events", {
+      params: { query: query as never },
+      signal,
     }),
   );
 }
