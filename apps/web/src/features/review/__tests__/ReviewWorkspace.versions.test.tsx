@@ -61,6 +61,7 @@ function makeDocument(
     latest_version_id: versions[versions.length - 1].id,
     created_at: "2026-05-01T00:00:00Z",
     versions,
+    scopes: [],
   };
 }
 

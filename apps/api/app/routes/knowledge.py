@@ -570,7 +570,9 @@ def _build_catalog_item(
         latest = max(non_superseded, key=lambda v: v.version_number)
     if latest.status not in visibility:
         return None
-    scopes = services.documents.catalog.list_scopes_for_document(document.id)
+    # #258 — every catalog read path now populates ``Document.scopes``
+    # (filtered to active links), so we surface that directly instead
+    # of a follow-up ``list_scopes_for_document`` round-trip.
     return KnowledgeCatalogItem(
         document_id=document.id,
         family_filename=latest.filename,
@@ -578,7 +580,7 @@ def _build_catalog_item(
         latest_status=latest.status,
         version_count=len(sorted_versions),
         sha256=latest.sha256,
-        scopes=scopes,
+        scopes=list(document.scopes),
     )
 
 
