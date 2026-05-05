@@ -20,7 +20,10 @@
 
 .PARAMETER Hostname
     Public hostname the tunnel will serve, e.g. kw-api.example.com.
-    Must live in a Cloudflare zone you control.
+    Must live in a Cloudflare zone you control. When omitted, the
+    script reads the hostname from a previously rendered
+    docker\cloudflared\config.yml; if that's missing too it falls
+    back to the runbook default (kw-api.benhelli.org).
 
 .PARAMETER TunnelName
     Cloudflare-side tunnel name. Defaults to ``kw-api``. Pick a
@@ -28,11 +31,11 @@
     another deployment in the same account.
 
 .EXAMPLE
+    .\10-Setup-Tunnel.ps1
     .\10-Setup-Tunnel.ps1 -Hostname kw-api.example.com
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
     [ValidatePattern('^[a-z0-9.-]+\.[a-z]{2,}$')]
     [string]$Hostname,
 
@@ -41,6 +44,11 @@ param(
 
 . "$PSScriptRoot\_lib.ps1"
 Assert-Cloudflared
+
+if (-not $Hostname) {
+    $Hostname = Get-DefaultHostname
+    Write-Warn2 "No -Hostname supplied; defaulting to '$Hostname'. Pass -Hostname <fqdn> to override."
+}
 
 $repoRoot = Get-RepoRoot
 $cloudflaredDir = Join-Path $repoRoot 'docker\cloudflared'

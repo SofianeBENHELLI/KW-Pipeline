@@ -8,6 +8,40 @@ This is the Windows companion to `docs/runbook/workstation-deploy.md`.
 The Linux runbook still applies — these scripts just automate the
 manual steps for Windows operators.
 
+## What's stored where
+
+| File | What it carries | First written by | Survives reboot? |
+|---|---|---|---|
+| `~/.cloudflared/cert.pem` | Cloudflare account auth (per machine, browser flow) | `cloudflared tunnel login` | Yes |
+| `~/.cloudflared/<UUID>.json` | Tunnel credentials | `cloudflared tunnel create` | Yes |
+| `docker\cloudflared\<UUID>.json` | Same creds, mounted into the container (gitignored) | `10-Setup-Tunnel.ps1` (copies from above) | Yes |
+| `docker\cloudflared\config.yml` | **Tunnel UUID + public hostname + ingress rules** (gitignored) | `10-Setup-Tunnel.ps1` (renders from `.example`) | Yes |
+| `docker\cloudflared\config.yml.example` | Template (committed) | the repo | n/a |
+| `docker\.env` | LLM provider mode + API keys (gitignored) | `20-Setup-Env.ps1` | Yes |
+| `docker\docker-compose.yml` | Neo4j password (after patching) + every passthrough | `20-Setup-Env.ps1` (patches the placeholder) | Yes |
+| Docker volume `kw-pipeline_neo4j_data` | Knowledge graph | `Start.ps1` | Yes |
+| Docker volume `kw-pipeline_api_data` | SQLite catalog + raw uploads | `Start.ps1` | Yes |
+
+## Defaults the repo already carries
+
+- **Hostname**: `kw-api.benhelli.org` (from `docker/cloudflared/config.yml.example` — also the default you'll see in `docs/runbook/workstation-deploy.md`). The scripts read your *prior* `config.yml` first when re-bootstrapping; they fall back to this default only on a fresh clone.
+- **Tunnel name**: `kw-api`.
+- **CORS regex**: `^https://.*\.3dexperience\.3ds\.com$` (3DEXPERIENCE on-cloud tenants). Override via `KW_CORS_ALLOWED_ORIGIN_REGEX` in the `api` service env if your widget host differs.
+- **LLM provider mode**: `auto` (Gemini primary, Anthropic fallback per ADR-013 §6).
+- **Default Gemini model**: `gemini-2.5-flash` (cheap + fast tier).
+- **Default Anthropic model**: `claude-sonnet-4-5`.
+
+## What only you can supply
+
+| Parameter | When you supply it | Why no default is possible |
+|---|---|---|
+| Cloudflare auth | First setup, browser flow | OAuth-style consent tied to your account |
+| `GEMINI_API_KEY` | First setup or rotation | Account-bound credential |
+| `ANTHROPIC_API_KEY` | First setup or rotation | Account-bound credential |
+| `VOYAGE_API_KEY` | First setup or rotation | Account-bound credential |
+| Neo4j password | First setup | Operator-chosen secret (anything strong) |
+| `-Hostname` | First setup if `benhelli.org` isn't your zone | Tied to a domain you control |
+
 ## Prerequisites
 
 - **Docker Desktop**, running, with **"Start Docker Desktop when you
@@ -27,6 +61,8 @@ From a fresh PowerShell window in the repo root:
 ```powershell
 cd scripts\windows
 .\Bootstrap.ps1 -Hostname kw-api.<your-zone>
+# or, if benhelli.org is your zone, just:
+.\Bootstrap.ps1
 ```
 
 That walks through every step interactively:

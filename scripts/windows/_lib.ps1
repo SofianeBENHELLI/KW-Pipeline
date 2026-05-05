@@ -68,3 +68,38 @@ function Assert-Cloudflared {
 function Get-DockerEnvFile {
     Join-Path (Get-RepoRoot) 'docker\.env'
 }
+
+# Default operator hostname used when the prior config doesn't pin
+# one (e.g. fresh clone). Mirrors the example in
+# ``docker/cloudflared/config.yml.example`` and the
+# workstation-deploy.md runbook. Override per-deployment by passing
+# ``-Hostname`` or by re-rendering ``docker/cloudflared/config.yml``.
+$script:KW_DEFAULT_HOSTNAME = 'kw-api.benhelli.org'
+
+function Get-DefaultHostname {
+    <#
+    .SYNOPSIS
+        Best-effort guess at the public hostname for this deployment.
+
+    .DESCRIPTION
+        Looks at the rendered ``docker\cloudflared\config.yml`` first
+        (post-setup state). Falls back to the example file if the
+        rendered file doesn't exist yet (fresh clone). Falls back to
+        :data:`KW_DEFAULT_HOSTNAME` if neither file is parseable.
+    #>
+    $candidates = @(
+        Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml',
+        Join-Path (Get-RepoRoot) 'docker\cloudflared\config.yml.example'
+    )
+    foreach ($path in $candidates) {
+        if (-not (Test-Path $path)) { continue }
+        $match = Get-Content $path |
+            Select-String -Pattern '^\s*-\s*hostname:\s*(.+?)\s*$' |
+            Select-Object -First 1
+        if ($match) {
+            $value = $match.Matches[0].Groups[1].Value.Trim()
+            if ($value -and $value -notmatch 'REPLACE') { return $value }
+        }
+    }
+    return $script:KW_DEFAULT_HOSTNAME
+}

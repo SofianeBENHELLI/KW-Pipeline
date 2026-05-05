@@ -19,7 +19,10 @@
 
 .PARAMETER Hostname
     Public hostname (must be in a Cloudflare zone you control), e.g.
-    ``kw-api.example.com``. Required.
+    ``kw-api.example.com``. When omitted, the script reuses the
+    hostname from a prior deploy (read from
+    docker\cloudflared\config.yml) or falls back to the repo default
+    (``kw-api.benhelli.org``).
 
 .PARAMETER Provider
     KW_LLM_PROVIDER. Defaults to ``auto`` (Gemini primary, Anthropic
@@ -33,10 +36,17 @@
     Skip the auto-start scheduled task registration.
 
 .EXAMPLE
+    .\Bootstrap.ps1
+
+    Re-bootstrap on a machine that already has a deploy: re-uses the
+    existing hostname + tunnel, re-prompts for any new keys.
+
+.EXAMPLE
     .\Bootstrap.ps1 -Hostname kw-api.example.com
 
-    Walks through every prompt interactively, ends with a running
-    deploy and a scheduled task that brings it back up at logon.
+    First-time setup with an explicit hostname. Walks through every
+    prompt interactively, ends with a running deploy and a scheduled
+    task that brings it back up at logon.
 
 .EXAMPLE
     .\Bootstrap.ps1 -Hostname kw-api.example.com -NoAutoStart -NoStart
@@ -46,7 +56,6 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
     [ValidatePattern('^[a-z0-9.-]+\.[a-z]{2,}$')]
     [string]$Hostname,
 
@@ -58,6 +67,12 @@ param(
 )
 
 . "$PSScriptRoot\_lib.ps1"
+
+if (-not $Hostname) {
+    $Hostname = Get-DefaultHostname
+    Write-Warn2 "No -Hostname supplied; defaulting to '$Hostname'."
+    Write-Warn2 "Pass -Hostname <fqdn> if your deployment uses a different subdomain."
+}
 
 Write-Step "Bootstrap — $Hostname (provider=$Provider)"
 & "$PSScriptRoot\00-Install-Prereqs.ps1"
