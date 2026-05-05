@@ -1,6 +1,45 @@
 {
   "components": {
     "schemas": {
+      "AdminAuditEventsResponse": {
+        "description": "Response body of ``GET /admin/audit/events`` (#206 follow-up).\n\nCursor-paginated, sorted ``created_at DESC`` so the freshest\nevents surface at the top of the table. ``next_cursor`` is opaque\n(the audit store's base64-JSON codec) and ``None`` when this page\nis the last one.\n\n``available_event_names`` is a one-shot ``SELECT DISTINCT\nevent_name`` against the store — included on every response so\nthe UI's filter dropdown doesn't need a second probe to populate.\nCheap by construction (the audit table is small and the store\nindexes on ``event_name``).",
+        "properties": {
+          "available_event_names": {
+            "description": "Distinct ``event_name`` values currently in the store, sorted lexicographically. The UI's filter dropdown is populated from this list so a deployment that has never fired a particular event doesn't surface it as a filter option.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Event Names",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page. ``None`` means this page is the last one. Pass it back as ``?cursor=...`` on the next request.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "available_event_names"
+        ],
+        "title": "AdminAuditEventsResponse",
+        "type": "object"
+      },
       "AdminConfigResponse": {
         "description": "Sanitized snapshot of the running deployment's configuration.\n\nThe frontend ``apps/_shared/settings-hub`` package consumes this\nshape verbatim — keep the camelCase / snake_case posture stable.",
         "properties": {
@@ -233,6 +272,53 @@
           "db_path"
         ],
         "title": "AuditConfig",
+        "type": "object"
+      },
+      "AuditEventItem": {
+        "description": "One row of the audit log viewer table.\n\n``payload`` is the full ``extra`` dict the structured-logging\nemitter passed to ``log.info(...)`` when the event fired —\nsurfaced verbatim so the operator can inspect the per-event\ncontext (document_id, before/after fields, scope kind/ref, etc.)\nwithout joining against any other surface.\n\n``actor`` is projected out of the payload (audit emitters stash\nit under ``payload['actor']``); ``None`` when the event was\nemitted by a system-initiated cascade with no human principal\n(e.g. the orphan archive cascade).",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Acting principal — the user id the route stamped onto ``payload['actor']`` (or ``None`` for system-initiated events with no human caller).",
+            "title": "Actor"
+          },
+          "created_at": {
+            "description": "Wall clock the event was emitted (UTC, seconds resolution).",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_name": {
+            "description": "Dotted event name, e.g. ``routing.decided``, ``review.validated``, ``document.archived_orphan``. The full vocabulary is documented in ``docs/architecture/observability.md``.",
+            "title": "Event Name",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable display id synthesised from the row's wall-clock + event name + actor. Opaque — the UI uses it as a React key only; do not parse it.",
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "description": "Full structured-logging payload. Arbitrary JSON-shaped — the UI renders it as pretty JSON in the row's expanded panel.",
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "event_name",
+          "actor",
+          "created_at",
+          "payload"
+        ],
+        "title": "AuditEventItem",
         "type": "object"
       },
       "AutoPromoteResult": {
@@ -3214,6 +3300,143 @@
           }
         },
         "summary": "Unarchive Document"
+      }
+    },
+    "/admin/audit/events": {
+      "get": {
+        "description": "Paginated read of the structured audit event log (#206 follow-up).\n\nThe viewer is read-only — the audit table is append-only by\ndesign. Events sort by ``created_at DESC`` so the freshest\nrows surface at the top of the operator's table; ``cursor``\nencodes the page boundary opaquely so the same-timestamp tie\ncase paginates cleanly across both store impls.\n\nReturns 503 with ``KW_AUDIT_DISABLED`` when\n``KW_AUDIT_ENABLED=false`` (the in-memory default). The store\nstill works in-process for live event capture but a\ndeployment that opts out of the persistent DB has no\nhistorical rows to browse, so the route fails closed with a\nremediation hint pointing at the env var.\n\n``available_event_names`` is included on every response so\nthe UI's filter dropdown can be self-populating without a\nsecond probe — cheap by construction since the audit table\nindexes ``event_name`` directly.",
+        "operationId": "admin_audit_list_events",
+        "parameters": [
+          {
+            "description": "Restrict results to a single dotted event name (e.g. ``review.validated``). The full vocabulary is surfaced on the response's ``available_event_names`` so the UI dropdown is self-populating.",
+            "in": "query",
+            "name": "event_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict results to a single dotted event name (e.g. ``review.validated``). The full vocabulary is surfaced on the response's ``available_event_names`` so the UI dropdown is self-populating.",
+              "title": "Event Name"
+            }
+          },
+          {
+            "description": "Restrict results to events emitted by a specific principal — matches the ``actor`` field projected out of the structured-logging payload (the admin routes stash ``actor=user.id``). Rows with no actor are excluded only when this filter is set.",
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict results to events emitted by a specific principal — matches the ``actor`` field projected out of the structured-logging payload (the admin routes stash ``actor=user.id``). Rows with no actor are excluded only when this filter is set.",
+              "title": "Actor"
+            }
+          },
+          {
+            "description": "Lower-bound timestamp (inclusive). Events with ``created_at < since`` are skipped.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Lower-bound timestamp (inclusive). Events with ``created_at < since`` are skipped.",
+              "title": "Since"
+            }
+          },
+          {
+            "description": "Upper-bound timestamp (inclusive). Events with ``created_at > until`` are skipped.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Upper-bound timestamp (inclusive). Events with ``created_at > until`` are skipped.",
+              "title": "Until"
+            }
+          },
+          {
+            "description": "Opaque cursor returned in a prior response's ``next_cursor``. Pass it to advance pages within the current filter set; drop it to start over.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned in a prior response's ``next_cursor``. Pass it to advance pages within the current filter set; drop it to start over.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size. Defaults to 50 to keep the dashboard responsive; the upper bound mirrors the audit store's ``MAX_QUERY_LIMIT`` so an over-eager filter can't drag back the entire table.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size. Defaults to 50 to keep the dashboard responsive; the upper bound mirrors the audit store's ``MAX_QUERY_LIMIT`` so an over-eager filter can't drag back the entire table.",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Audit Events"
       }
     },
     "/admin/config": {

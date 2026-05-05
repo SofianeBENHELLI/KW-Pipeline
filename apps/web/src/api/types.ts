@@ -104,6 +104,18 @@ export type ApiBucketState = Schemas["BucketState"];
  *  surfaced inline on the dashboard's "Run pass" trigger. */
 export type ApiAutoPromoteResult = Schemas["AutoPromoteResult"];
 
+// ─── Admin / Audit log viewer (#206 follow-up) ────────────────────────────
+
+/** One row in the Admin Audit Log Viewer table. ``actor`` is projected
+ *  out of ``payload['actor']`` server-side so the UI can filter on it
+ *  without re-parsing the JSON blob. */
+export type ApiAuditEventItem = Schemas["AuditEventItem"];
+
+/** Paginated response from ``GET /admin/audit/events``. Carries the
+ *  cursor for "Load more" plus ``available_event_names`` so the UI's
+ *  filter dropdown is self-populating without a second probe. */
+export type ApiAdminAuditEventsResponse = Schemas["AdminAuditEventsResponse"];
+
 // ─── Admin / Archive relink + bulk purge (#218 D.9, slices 2 + 5) ──────────
 
 /** Body for ``POST /admin/archive/relink_scope``. */

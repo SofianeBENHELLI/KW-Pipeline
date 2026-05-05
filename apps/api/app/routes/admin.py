@@ -74,6 +74,10 @@ from app.schemas.admin_archive import (
     UnarchiveResponse,
     VersionPurgeResult,
 )
+from app.schemas.admin_audit import (
+    AdminAuditEventsResponse,
+    AuditEventItem,
+)
 from app.schemas.admin_config import (
     AdminConfigResponse,
     AuditConfig,
@@ -96,6 +100,7 @@ from app.schemas.admin_hitl import (
 from app.schemas.document import HealthResponse
 from app.schemas.scope import Scope
 from app.schemas.validation_metadata import AutoPromoteResult
+from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
 from app.services.catalog_store import InvalidCursor
 from app.settings import Settings
@@ -997,6 +1002,148 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             drift_ramp_factor=ramp_factor,
             pending_auto_promotions=pending,
             buckets=bucket_states,
+        )
+
+    @router.get(
+        "/admin/audit/events",
+        operation_id="admin_audit_list_events",
+        response_model=AdminAuditEventsResponse,
+    )
+    def list_audit_events(
+        event_name: str | None = Query(
+            None,
+            description=(
+                "Restrict results to a single dotted event name "
+                "(e.g. ``review.validated``). The full vocabulary is "
+                "surfaced on the response's ``available_event_names`` "
+                "so the UI dropdown is self-populating."
+            ),
+        ),
+        actor: str | None = Query(
+            None,
+            description=(
+                "Restrict results to events emitted by a specific "
+                "principal — matches the ``actor`` field projected "
+                "out of the structured-logging payload (the admin "
+                "routes stash ``actor=user.id``). Rows with no actor "
+                "are excluded only when this filter is set."
+            ),
+        ),
+        since: datetime | None = Query(
+            None,
+            description=(
+                "Lower-bound timestamp (inclusive). Events with ``created_at < since`` are skipped."
+            ),
+        ),
+        until: datetime | None = Query(
+            None,
+            description=(
+                "Upper-bound timestamp (inclusive). Events with ``created_at > until`` are skipped."
+            ),
+        ),
+        cursor: str | None = Query(
+            None,
+            description=(
+                "Opaque cursor returned in a prior response's "
+                "``next_cursor``. Pass it to advance pages within the "
+                "current filter set; drop it to start over."
+            ),
+        ),
+        limit: int = Query(
+            50,
+            ge=1,
+            le=200,
+            description=(
+                "Page size. Defaults to 50 to keep the dashboard "
+                "responsive; the upper bound mirrors the audit "
+                "store's ``MAX_QUERY_LIMIT`` so an over-eager filter "
+                "can't drag back the entire table."
+            ),
+        ),
+        _user: User = Depends(require_admin),
+    ) -> AdminAuditEventsResponse:
+        """Paginated read of the structured audit event log (#206 follow-up).
+
+        The viewer is read-only — the audit table is append-only by
+        design. Events sort by ``created_at DESC`` so the freshest
+        rows surface at the top of the operator's table; ``cursor``
+        encodes the page boundary opaquely so the same-timestamp tie
+        case paginates cleanly across both store impls.
+
+        Returns 503 with ``KW_AUDIT_DISABLED`` when
+        ``KW_AUDIT_ENABLED=false`` (the in-memory default). The store
+        still works in-process for live event capture but a
+        deployment that opts out of the persistent DB has no
+        historical rows to browse, so the route fails closed with a
+        remediation hint pointing at the env var.
+
+        ``available_event_names`` is included on every response so
+        the UI's filter dropdown can be self-populating without a
+        second probe — cheap by construction since the audit table
+        indexes ``event_name`` directly.
+        """
+        # Re-read settings on every request so ``monkeypatch.setenv``
+        # in tests is observed without restarting the app — same
+        # posture every other admin route uses.
+        settings = Settings()
+        if not settings.audit_enabled:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.AUDIT_DISABLED,
+                message=(
+                    "Audit log is disabled. Likely cause: "
+                    "KW_AUDIT_ENABLED=false (the in-memory default)."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set KW_AUDIT_ENABLED=true (and optionally "
+                    "KW_AUDIT_DB_PATH=/path/to/audit.sqlite3 for a "
+                    "persistent deployment) and restart the API."
+                ),
+            )
+
+        try:
+            rows, next_cursor = services.audit_events.query_page(
+                event_name=event_name,
+                actor=actor,
+                since=since,
+                until=until,
+                cursor=cursor,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise ApiError(
+                status_code=400,
+                code=ErrorCode.BAD_REQUEST,
+                message=f"Invalid cursor: {exc}",
+                retryable=False,
+                remediation=(
+                    "Drop the ``cursor`` query param to start at the "
+                    "first page. The cursor format is opaque; do not "
+                    "construct it client-side."
+                ),
+            ) from exc
+
+        items: list[AuditEventItem] = []
+        for event in rows:
+            row_actor = _audit_event_actor(event)
+            ts_iso = event.ts_utc.astimezone(UTC).isoformat(timespec="seconds")
+            items.append(
+                AuditEventItem(
+                    # Synthesised stable id for the React key + a11y
+                    # row anchor. Opaque to clients.
+                    id=f"{ts_iso}:{event.event_name}:{row_actor or '-'}",
+                    event_name=event.event_name,
+                    actor=row_actor,
+                    created_at=event.ts_utc,
+                    payload=dict(event.payload),
+                )
+            )
+
+        return AdminAuditEventsResponse(
+            items=items,
+            next_cursor=next_cursor,
+            available_event_names=services.audit_events.list_event_names(),
         )
 
     return router
