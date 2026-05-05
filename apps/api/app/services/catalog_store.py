@@ -269,6 +269,27 @@ class CatalogStore(Protocol):
         Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
         """
 
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        """Return one ``(document_id, scope_kind, scope_ref)`` row, active or soft-removed.
+
+        Companion to :meth:`list_scopes_for_document` for the
+        Archive/Purge Admin tool (ADR-027 §1.2): the list method
+        filters out soft-removed rows, so the admin tool would have no
+        way to surface the ``removed_at_before`` field on its
+        ``relink_scope`` response. This accessor returns the row
+        regardless of ``removed_at`` state — the route layer uses it to
+        peek at the pre-action state for both real mutations and
+        dry-runs.
+
+        Returns ``None`` when no row exists for the triple (active or
+        otherwise) — the route layer maps that to a 404.
+        """
+
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
         """Soft-remove a single ``(document_id, scope_kind, scope_ref)`` link.
 
@@ -312,6 +333,32 @@ class CatalogStore(Protocol):
         not persisted on the document row (the audit row carries it)
         but is part of the contract so callers and instrumentation
         agree on the shape.
+        """
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,
+    ) -> Document:
+        """Clear ``documents.archived_at`` (Archive/Purge Admin tool — ADR-027 §1.1).
+
+        Reverses the D.6 flag-archive cascade. Per ADR-027 the document
+        bytes / extractions / semantic JSON / Markdown asset / KG nodes
+        were preserved by the flag-only cascade, so unarchiving is a
+        metadata-only transition: clear ``archived_at`` and the document
+        reappears on the standard read path.
+
+        Idempotent: calling on an already-active document is a no-op
+        and returns the current row unchanged (so the route layer can
+        honour ADR-027 §1.1's "calling on an unarchived document"
+        contract without duplicating state checks).
+
+        ``actor`` is the user id that triggered the unarchive — not
+        persisted on the document row (the audit row carries it) but
+        part of the contract so callers and instrumentation agree on
+        the shape. Raises :class:`KeyError` when the document is
+        missing.
         """
 
 
@@ -582,6 +629,20 @@ class InMemoryCatalogStore:
             document.scopes = self.list_scopes_for_document(document.id)
         return page, next_cursor
 
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        # Walk the forward-index list — it keeps soft-removed rows so
+        # ``add_scope`` can reactivate them, which is precisely the
+        # state the admin tool needs to surface in dry-run output.
+        for scope in self.scopes_by_document.get(document_id, ()):
+            if scope.kind == scope_kind and scope.ref == scope_ref:
+                return scope
+        return None
+
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
         # Soft-remove: flag the row with removed_at, drop from the
         # reverse index. The forward-index list keeps the row so
@@ -623,6 +684,22 @@ class InMemoryCatalogStore:
             document.archived_at = archived_at
         # Second-archive: no-op — the original ``archived_at`` is
         # preserved (audit-faithful). Return the row either way.
+        return document
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Mirror ``flag_document_archived``: the internal accessor
+        # resolves both archived and active rows so an already-active
+        # document still returns successfully (idempotent no-op).
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        if document.archived_at is not None:
+            document.archived_at = None
         return document
 
 
@@ -1268,6 +1345,25 @@ class SQLiteCatalogStore:
             next_cursor = None
         return page, next_cursor
 
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id = ?
+                  AND scope_kind = ?
+                  AND scope_ref = ?
+                """,
+                (document_id, scope_kind, scope_ref),
+            ).fetchone()
+        return self._scope_from_row(row) if row else None
+
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
         # Soft-remove: stamp removed_at on the active row only. Already-
         # removed rows preserve their original removed_at timestamp;
@@ -1332,5 +1428,41 @@ class SQLiteCatalogStore:
         # ``archived_at`` (either the new timestamp or, for an idempotent
         # second-archive, the original one).
         refreshed = self._get_document_including_archived(document_id)
+        assert refreshed is not None  # we just confirmed existence
+        return refreshed
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Confirm existence first so a missing document raises KeyError
+        # rather than silently no-op'ing — same shape as
+        # ``flag_document_archived``.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET archived_at = NULL
+                WHERE id = ? AND archived_at IS NOT NULL
+                """,
+                (document_id,),
+            )
+        # Re-read so the returned Document reflects the current state.
+        # When the row was already active the UPDATE matched zero rows
+        # (idempotent no-op) and the read returns the same row unchanged.
+        # ``get_document`` filters archived rows; once the UPDATE has
+        # cleared the flag we use the standard accessor to get the
+        # populated ``scopes`` field.
+        refreshed = self.get_document(document_id)
+        if refreshed is None:
+            # The row was already archived AND the UPDATE didn't clear
+            # it (race / impossible by construction). Fall back to the
+            # archived-inclusive accessor so the contract still holds.
+            refreshed = self._get_document_including_archived(document_id)
         assert refreshed is not None  # we just confirmed existence
         return refreshed
