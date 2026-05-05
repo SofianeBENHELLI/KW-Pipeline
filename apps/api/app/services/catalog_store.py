@@ -1063,16 +1063,12 @@ class SQLiteCatalogStore:
             )
 
     def _scope_from_row(self, row: sqlite3.Row) -> Scope:
-        # ``removed_at`` is optional in the column set (legacy callers
-        # may have selected without it). Default to None when absent.
-        try:
-            removed_raw = row["removed_at"]
-        except (IndexError, KeyError):
-            removed_raw = None
+        # Migration 0005 guarantees ``removed_at`` is on every row; the
+        # column may be NULL but the SELECT always includes it.
         return Scope(
             kind=row["scope_kind"],
             ref=row["scope_ref"],
             added_at=row["added_at"],
             added_by=row["added_by"],
-            removed_at=removed_raw,
+            removed_at=row["removed_at"],
         )
