@@ -243,14 +243,36 @@ const AdminHITLView = lazy(() =>
     default: mod.AdminHITLView,
   })),
 );
+const AdminHubView = lazy(() =>
+  import("./features/admin/AdminHubView").then((mod) => ({
+    default: mod.AdminHubView,
+  })),
+);
+
+// Shared Suspense fallback for every lazy admin route. Hoisted out
+// of the JSX so the literal isn't inlined three times in the initial
+// chunk (the budget enforcer is tight).
+const ADMIN_FALLBACK = <div className="kw-loading">Loading admin view…</div>;
 
 export default function App() {
   return (
     <Routes>
+      {/* Bare ``/admin`` is the navigation hub — explicit, no implicit
+          redirect to ``/admin/archive``. The hub lists every admin
+          sub-tool so an operator landing on /admin sees the full
+          surface, not whichever sub-page we picked first. */}
+      <Route
+        path="/admin"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminHubView />
+          </Suspense>
+        }
+      />
       <Route
         path="/admin/archive"
         element={
-          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+          <Suspense fallback={ADMIN_FALLBACK}>
             <AdminArchiveView />
           </Suspense>
         }
@@ -258,7 +280,7 @@ export default function App() {
       <Route
         path="/admin/hitl"
         element={
-          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+          <Suspense fallback={ADMIN_FALLBACK}>
             <AdminHITLView />
           </Suspense>
         }

@@ -1409,3 +1409,92 @@ pre {
   font-family: var(--font-mono, monospace);
   font-size: 13px;
 }
+
+/* Admin nav hub at /admin — card grid linking to each admin tool.
+   Cards are clickable in their entirety (the whole element is a
+   button) with a chevron used purely as a visual affordance. */
+.admin-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-hub-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.admin-hub-card:hover,
+.admin-hub-card:focus-visible {
+  border-color: var(--action);
+  background: var(--panel-muted);
+  outline: none;
+}
+
+.admin-hub-card-body h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.admin-hub-card-body p {
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.admin-hub-card-chevron {
+  font-size: 1.5rem;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.admin-hub-footer {
+  margin-top: 18px;
+  font-size: 0.8rem;
+}
+
+/* Filter bar above the archive table — search + sort + reset.
+   Client-side filter for v1 (#274 follow-up TODO). */
+.admin-archive-filter-bar {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-start;
+}
+
+.admin-archive-filter-search,
+.admin-archive-filter-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-archive-filter-search input,
+.admin-archive-filter-sort select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--panel);
+}
+
+.admin-archive-filter-search input:focus,
+.admin-archive-filter-sort select:focus {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
