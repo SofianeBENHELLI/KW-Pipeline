@@ -21,6 +21,7 @@ import {
   getDocument,
   getExtraction,
   getKnowledgeGraph,
+  getKnowledgeTaxonomy,
   getSemantic,
   listDocuments,
 } from "../api/client";
@@ -29,15 +30,19 @@ import type {
   KnowledgeGraphPage,
   RawExtraction,
   SemanticDocument,
+  TaxonomyResponse,
 } from "../api/types";
 import {
   CLUSTERS,
+  type ClusterMeta,
   type ExplorerDocument,
   type ExplorerSnapshot,
   SAMPLE_SNAPSHOT,
   adaptDocContent,
   adaptDocument,
   adaptGraph,
+  adaptTaxonomy,
+  hashHueDeterministic,
 } from "./explorer-data";
 
 const CONTENT_FETCH_CONCURRENCY = 3;
@@ -104,6 +109,32 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           }
         }
 
+        // Pull the operator-imposed taxonomy (ADR-017). Missing /
+        // unconfigured / 404 / 503 / parse error → null, in which
+        // case every cluster falls back to ``source: "computed"``.
+        // We log at warn so deployments missing the route surface in
+        // the console but the UI keeps rendering.
+        let taxonomy: TaxonomyResponse | null = null;
+        try {
+          taxonomy = await getKnowledgeTaxonomy({
+            baseUrl: apiBaseUrl,
+            signal: controller.signal,
+          });
+        } catch (err: unknown) {
+          if (isAbortError(err)) return;
+          if (err instanceof ApiError && (err.status === 404 || err.status === 503)) {
+            console.warn(
+              "[explorer] /knowledge/taxonomy unavailable; falling back to computed clusters.",
+              err.status,
+            );
+          } else {
+            console.warn(
+              "[explorer] /knowledge/taxonomy fetch failed; falling back to computed clusters.",
+              err,
+            );
+          }
+        }
+
         // Fetch per-document semantic + extraction with a small ceiling.
         const semanticByDoc = new Map<string, SemanticDocument | null>();
         const extractionByDoc = new Map<string, RawExtraction | null>();
@@ -142,10 +173,46 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           adaptDocument(doc, semanticByDoc.get(doc.id) ?? null, extractionByDoc.get(doc.id) ?? null, i, page.items.length),
         );
 
-        // Group docs without a known cluster under a synthetic "uncategorised" key.
+        // Build the per-snapshot cluster catalogue.
+        //
+        //   1. If the API returned a configured taxonomy, every
+        //      category becomes a cluster. The category's
+        //      ``source`` (imposed | computed) flows straight through
+        //      from the backend (#249) — the Explorer no longer
+        //      derives source client-side, the API owns the merge.
+        //      The seed CLUSTERS dict is ignored in this branch
+        //      because the taxonomy is the source of truth.
+        //   2. Otherwise, start from the seed CLUSTERS dict (for the
+        //      stable sample-corpus colours) marked as "computed".
+        //   3. Either way, walk the live documents and add a
+        //      "computed" entry for any cluster id we haven't seen yet
+        //      (e.g. a doc tagged to a category the topic-clustering
+        //      didn't surface). We never overwrite an entry from the
+        //      taxonomy — that came from the authoritative merge.
+        //
+        // Important: we no longer mutate the module-level CLUSTERS
+        // dict. That used to leak across refreshes and across tests;
+        // the snapshot now owns its own ``clusters`` field.
+        const taxonomyAdapter = adaptTaxonomy(taxonomy);
+        const clusters: Record<string, ClusterMeta> = {};
+        if (Object.keys(taxonomyAdapter.clusters).length > 0) {
+          for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
+            clusters[id] = meta;
+          }
+        } else {
+          // Seed from the sample-corpus dict so familiar names + hues
+          // survive the live transition. All seeds are "computed".
+          for (const [id, meta] of Object.entries(CLUSTERS)) {
+            clusters[id] = { ...meta, source: "computed" };
+          }
+        }
         for (const doc of documents) {
-          if (!CLUSTERS[doc.cluster]) {
-            CLUSTERS[doc.cluster] = { label: doc.cluster, hue: hashHue(doc.cluster) };
+          if (!clusters[doc.cluster]) {
+            clusters[doc.cluster] = {
+              label: doc.cluster,
+              hue: hashHueDeterministic(doc.cluster),
+              source: "computed",
+            };
           }
         }
 
@@ -182,6 +249,7 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           chunkConcept: graphAdapter.chunkConcept,
           conceptEdges: graphAdapter.conceptEdges,
           docContent,
+          clusters,
           isSample: false,
           corpusLabel: `${page.items.length} documents`,
         };
@@ -248,14 +316,6 @@ async function fetchFullGraph(
 
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
-}
-
-function hashHue(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (h * 31 + s.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h) % 360;
 }
 
 // Re-export the API helper that callers (App) still need.

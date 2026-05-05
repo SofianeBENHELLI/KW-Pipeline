@@ -5,6 +5,10 @@
  * (#97) so the widget surfaces the same `code` / `retryable` / `remediation`
  * fields the backend already emits. No external HTTP library — just `fetch`.
  *
+ * The error class and envelope parser themselves live in
+ * ``apps/_shared/api-core`` (audit #227) so a bug fix to envelope
+ * handling lands in one place rather than every frontend's copy.
+ *
  * Base-URL resolution order:
  *   1. The widget's persisted setting `apiBaseUrl` (set via SettingsPanel).
  *   2. The `KW_API_BASE_URL` env var captured at build time (so a deployed
@@ -15,6 +19,7 @@
 
 import { widget } from "@widget-lab/3ddashboard-utils";
 
+import { ApiError, asApiError } from "../../../_shared/api-core";
 import type {
   ChatMode,
   ChatResponse,
@@ -25,6 +30,20 @@ import type {
   Health,
   KnowledgeGraphPage,
 } from "./types";
+
+// Re-export from the shared module so existing import sites
+// (``import { ApiError } from "./api/client"``) keep working without
+// every consumer needing to know about the shared package layout.
+//
+// ``setSessionTrigger`` / ``clearSessionTrigger`` are surfaced here
+// for the same reason: ``<SessionGuardProvider>`` registers its
+// ``trigger`` callback through this re-export so the widget root
+// keeps importing everything from ``./api/client`` (#83 slice 3).
+export {
+  ApiError,
+  setSessionTrigger,
+  clearSessionTrigger,
+} from "../../../_shared/api-core";
 
 const SETTINGS_KEY = "apiBaseUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";
@@ -64,58 +83,6 @@ export function getApiBaseUrl(): string {
 
 export function setApiBaseUrl(value: string): void {
   safeSetWidgetValue(SETTINGS_KEY, value);
-}
-
-// ─── Errors ──────────────────────────────────────────────────────────────────
-
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly detail: string,
-    public readonly code: string = "KW_HTTP_ERROR",
-    public readonly retryable: boolean = false,
-    public readonly remediation: string | null = null,
-  ) {
-    super(`API ${status}: ${detail}`);
-    this.name = "ApiError";
-  }
-}
-
-interface ErrorEnvelope {
-  code?: unknown;
-  message?: unknown;
-  retryable?: unknown;
-  remediation?: unknown;
-}
-
-interface ResponseBodyShape {
-  error?: ErrorEnvelope;
-  detail?: unknown;
-}
-
-async function asApiError(response: Response): Promise<ApiError> {
-  let body: ResponseBodyShape | null = null;
-  try {
-    body = (await response.clone().json()) as ResponseBodyShape;
-  } catch {
-    // Non-JSON or empty body.
-  }
-  let detail =
-    typeof body?.detail === "string" ? body.detail : response.statusText;
-  const env = body?.error;
-  const code =
-    typeof env?.code === "string" && env.code.length > 0
-      ? env.code
-      : "KW_HTTP_ERROR";
-  const retryable = env?.retryable === true;
-  const remediation =
-    typeof env?.remediation === "string" && env.remediation.length > 0
-      ? env.remediation
-      : null;
-  if (typeof env?.message === "string" && env.message.length > 0) {
-    detail = env.message;
-  }
-  return new ApiError(response.status, detail, code, retryable, remediation);
 }
 
 // ─── Core request helper ─────────────────────────────────────────────────────
@@ -273,6 +240,28 @@ export async function uploadDocument(
  * envelope handling stays consistent with `uploadDocument` — same
  * shape, same `ApiError` instances on failure.
  */
+// Local mirror of the shared ``ResponseBodyShape`` type.
+//
+// ``uploadDocumentWithProgress`` uses XMLHttpRequest (for the upload
+// progress events that fetch doesn't expose) and so cannot call
+// ``asApiError(response)`` from the shared module — that helper is
+// tied to the fetch ``Response`` object. Reconstructing the envelope
+// shape here keeps the XHR path's error semantics aligned with the
+// fetch path's. A follow-up of audit #227 could expose a
+// ``parseEnvelopeJson(text)`` helper in ``apps/_shared/api-core`` so
+// even this last branch shares the parser.
+interface XhrErrorEnvelope {
+  code?: unknown;
+  message?: unknown;
+  retryable?: unknown;
+  remediation?: unknown;
+}
+
+interface XhrResponseBodyShape {
+  error?: XhrErrorEnvelope;
+  detail?: unknown;
+}
+
 export function uploadDocumentWithProgress(
   file: File,
   opts: {
@@ -280,6 +269,17 @@ export function uploadDocumentWithProgress(
     signal?: AbortSignal;
     /** Receives a fraction in `[0, 1]`. Called only when total is known. */
     onProgress?: (fraction: number) => void;
+    /**
+     * Optional workspace-scope query params (EPIC-D #218 / #250).
+     *
+     * When omitted, the backend auto-fills ``personal:<current_user.id>``
+     * via the ``get_current_user`` dependency. Pass both to land the
+     * upload into a different scope (e.g. a 3DSwym community). The
+     * route reads them as ``?scope_kind=…&scope_ref=…`` query params,
+     * not form fields, so they're appended to the URL below.
+     */
+    scope_kind?: string;
+    scope_ref?: string;
   } = {},
 ): Promise<DocumentVersion> {
   return new Promise<DocumentVersion>((resolve, reject) => {
@@ -287,8 +287,15 @@ export function uploadDocumentWithProgress(
     const form = new FormData();
     form.append("file", file);
 
+    // Scope params ride on the query string per #250. Only append when
+    // the caller actually picked something — letting both stay absent
+    // means the backend falls back to ``personal:<current_user.id>``.
+    const url = new URL(baseUrl.replace(/\/$/, "") + "/documents/upload");
+    if (opts.scope_kind) url.searchParams.set("scope_kind", opts.scope_kind);
+    if (opts.scope_ref) url.searchParams.set("scope_ref", opts.scope_ref);
+
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", baseUrl.replace(/\/$/, "") + "/documents/upload");
+    xhr.open("POST", url.toString());
 
     if (opts.onProgress) {
       xhr.upload.addEventListener("progress", (evt) => {
@@ -314,7 +321,7 @@ export function uploadDocumentWithProgress(
       let retryable = false;
       let remediation: string | null = null;
       try {
-        const body = JSON.parse(xhr.responseText) as ResponseBodyShape;
+        const body = JSON.parse(xhr.responseText) as XhrResponseBodyShape;
         if (typeof body?.detail === "string") detail = body.detail;
         const env = body?.error;
         if (env) {

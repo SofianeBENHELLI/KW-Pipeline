@@ -56,6 +56,21 @@ interface Props {
   node: DetailNode | null;
   onAction: (action: DetailAction) => void;
   onSelectId: (id: string, kind: "doc" | "chunk" | "concept") => void;
+  /**
+   * Bug B — id of the chunk currently cross-highlighted with the
+   * document viewer. The doc-detail chunks list and the
+   * concept-evidence list use this to render a ``kx-on`` row + scroll
+   * the row into view, so the user always knows which chunk the
+   * orange bracket in the viewer corresponds to.
+   */
+  highlightChunkId?: string | null;
+  /**
+   * Open the lineage modal for the supplied document. When omitted,
+   * the "View history" link in the Versions section is hidden — the
+   * link is purely a discoverability affordance for the modal that
+   * the v{N} badge already opens.
+   */
+  onOpenLineage?: (doc: ExplorerDocument) => void;
 }
 
 const DetailRow: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
@@ -76,7 +91,22 @@ const ConfBar: React.FC<{ value: number }> = ({ value }) => (
   </div>
 );
 
-export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelectId }) => {
+export const DetailPanel: React.FC<Props> = ({
+  snapshot,
+  node,
+  onAction,
+  onSelectId,
+  highlightChunkId,
+  onOpenLineage,
+}) => {
+  // Bug B — when the highlighted chunk changes, scroll its row into
+  // view in whichever section is rendering the chunk list (doc detail
+  // chunks list, or concept evidence list). ``block: "nearest"`` keeps
+  // the panel from jumping if the row is already visible.
+  const activeRowRef = React.useRef<HTMLLIElement | null>(null);
+  React.useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [highlightChunkId]);
   if (!node) {
     return (
       <div className="kx-detail kx-detail-empty">
@@ -93,8 +123,9 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
     const d = node.doc ?? docById(snapshot, node.id);
     if (!d) return null;
     const dt = DOC_TYPES[d.type];
+    const docChunks = chunksForDoc(snapshot, d.id);
     const concepts = [
-      ...new Set(chunksForDoc(snapshot, d.id).flatMap((c) => conceptsForChunk(snapshot, c.id).map((k) => k.id))),
+      ...new Set(docChunks.flatMap((c) => conceptsForChunk(snapshot, c.id).map((k) => k.id))),
     ]
       .map((id) => conceptById(snapshot, id))
       .filter((x): x is ExplorerConcept => Boolean(x));
@@ -103,6 +134,8 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
       .map((e) => docById(snapshot, e.a === d.id ? e.b : e.a))
       .filter((x): x is ExplorerDocument => Boolean(x))
       .slice(0, 5);
+    const versionCount = d.versionCount ?? d.versions?.length ?? 1;
+    const latestVersion = d.latestVersion ?? d.versions?.[d.versions.length - 1]?.versionNumber ?? 1;
     return (
       <div className="kx-detail">
         <div className="kx-detail-head">
@@ -111,7 +144,15 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
           </span>
           <div>
             <div className="kx-kind">DOCUMENT</div>
-            <div className="kx-detail-title">{d.title}</div>
+            <div className="kx-detail-title">
+              {d.title}
+              <span className="kx-ver-badge kx-mono" title={`Latest version v${latestVersion}`}>
+                v{latestVersion}
+              </span>
+              {versionCount > 1 && (
+                <span className="kx-ver-count kx-mute">({versionCount} versions)</span>
+              )}
+            </div>
           </div>
         </div>
         <div className="kx-section">
@@ -147,6 +188,78 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
               </li>
             ))}
             {related.length === 0 && <li className="kx-mute">No related documents</li>}
+          </ul>
+        </div>
+        <div className="kx-section">
+          {/*
+            Bug B — chunks list with cross-highlight to the document
+            viewer. ``kx-on`` mirrors the orange bracket in the viewer
+            so the user always knows which chunk's text is highlighted.
+            Clicking a row fires ``onAction({ kind: "highlight" })``
+            instead of ``onSelectId(..., "chunk")`` because the latter
+            would replace the doc detail panel with a chunk panel —
+            keeping the doc panel mounted lets the user scrub multiple
+            chunks without losing context.
+          */}
+          <div className="kx-sec-h">CHUNKS · {docChunks.length}</div>
+          <ul className="kx-list kx-chunk-list" data-testid="kx-doc-chunks">
+            {docChunks.map((c) => {
+              const active = highlightChunkId === c.id;
+              return (
+                <li
+                  key={c.id}
+                  ref={active ? activeRowRef : undefined}
+                  className={active ? "kx-on" : undefined}
+                  aria-selected={active}
+                  data-chunk-id={c.id}
+                  onClick={() => onAction({ kind: "highlight", chunk: c })}
+                >
+                  <span className="kx-mono kx-mute kx-sm">{c.id}</span>
+                  <span className="kx-list-t">{c.label}</span>
+                  <Icon name="chevron-right" size={12} stroke={NAVY2} />
+                </li>
+              );
+            })}
+            {docChunks.length === 0 && <li className="kx-mute">No chunks indexed</li>}
+          </ul>
+        </div>
+        {/*
+          Versions section — surfaces every version_number in the
+          family with its status + ingested_at. Earlier versions are
+          read-only (no actions) per the sprint scope; the lineage
+          modal (EPIC-C C.5) lands later when the
+          ``/documents/{id}/lineage`` endpoint exists.
+        */}
+        <div className="kx-section" data-testid="kx-versions-section">
+          <div className="kx-sec-h kx-versions-h">
+            <span>VERSIONS · {versionCount}</span>
+            {versionCount > 1 && onOpenLineage && (
+              <button
+                type="button"
+                className="kx-link kx-versions-history"
+                onClick={() => onOpenLineage(d)}
+                data-testid="kx-versions-history-link"
+              >
+                View history
+              </button>
+            )}
+          </div>
+          <ul className="kx-list kx-version-list">
+            {(d.versions ?? [{ id: d.id, versionNumber: 1, status: "UPLOADED", createdAt: d.date, filename: d.title }])
+              .slice()
+              .sort((a, b) => b.versionNumber - a.versionNumber)
+              .map((v) => {
+                const isLatest = v.versionNumber === latestVersion;
+                return (
+                  <li key={v.id} data-version-number={v.versionNumber}>
+                    <span className={"kx-ver-badge kx-mono" + (isLatest ? " kx-ver-latest" : "")}>
+                      v{v.versionNumber}
+                    </span>
+                    <span className="kx-list-t">{v.status}</span>
+                    <span className="kx-mono kx-mute">{v.createdAt.slice(0, 10)}</span>
+                  </li>
+                );
+              })}
           </ul>
         </div>
         <div className="kx-actions">
@@ -269,14 +382,24 @@ export const DetailPanel: React.FC<Props> = ({ snapshot, node, onAction, onSelec
         </div>
         <div className="kx-section">
           <div className="kx-sec-h">EVIDENCE CHUNKS · {evidence.length}</div>
-          <ul className="kx-list">
-            {evidence.map((ec) => (
-              <li key={ec.id} onClick={() => onSelectId(ec.id, "chunk")}>
-                <span className="kx-mono kx-mute kx-sm">{ec.id}</span>
-                <span className="kx-list-t">{ec.label}</span>
-                <Icon name="chevron-right" size={12} stroke={NAVY2} />
-              </li>
-            ))}
+          <ul className="kx-list kx-chunk-list">
+            {evidence.map((ec) => {
+              const active = highlightChunkId === ec.id;
+              return (
+                <li
+                  key={ec.id}
+                  ref={active ? activeRowRef : undefined}
+                  className={active ? "kx-on" : undefined}
+                  aria-selected={active}
+                  data-chunk-id={ec.id}
+                  onClick={() => onSelectId(ec.id, "chunk")}
+                >
+                  <span className="kx-mono kx-mute kx-sm">{ec.id}</span>
+                  <span className="kx-list-t">{ec.label}</span>
+                  <Icon name="chevron-right" size={12} stroke={NAVY2} />
+                </li>
+              );
+            })}
             {evidence.length === 0 && <li className="kx-mute">No evidence chunks</li>}
           </ul>
         </div>

@@ -7,7 +7,8 @@ import {
   rejectVersion,
   validateVersion,
 } from "../../api/client";
-import { latestVersion } from "../../domain/document";
+import { documentScopes, latestVersion } from "../../domain/document";
+import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
 import { ReviewActions } from "./ReviewActions";
@@ -30,6 +31,12 @@ export function ReviewWorkspace({
   const version = latestVersion(document);
   const documentId = document.id;
   const versionId = version.id;
+  // Total version count for the lineage hint (#59 + EPIC-C #217 UX
+  // surface). Lineage modal is deferred until /documents/{id}/lineage
+  // exists — for now we just render the count alongside the active
+  // version number.
+  const totalVersions = document.versions.length;
+  const latestVersionNumber = latestVersion(document).version_number;
 
   const [extraction, setExtraction] = useState<ApiRawExtraction | null>(null);
   const [semantic, setSemantic] = useState<ApiSemanticDocument | null>(null);
@@ -146,9 +153,38 @@ export function ReviewWorkspace({
       <header className="workspace-header">
         <div>
           <p className="eyebrow">Document detail</p>
-          <h2 id="workspace-title">{document.original_filename}</h2>
+          <h2 id="workspace-title">
+            {document.original_filename}
+            <span
+              className="version-badge"
+              data-testid="latest-version-badge"
+              aria-label={`Latest version v${latestVersionNumber}`}
+              title={`Latest version v${latestVersionNumber}`}
+            >
+              v{latestVersionNumber}
+            </span>
+            {/* Scope chip — same component as the catalog row so the
+                review header reflects the workspace the doc was
+                uploaded into (EPIC-D #218 / #250). Falls back to a
+                "No scope info" placeholder until ``GET /documents``
+                is extended to carry ``scopes`` (D.5). */}
+            <ScopeChip scopes={documentScopes(document)} />
+            {totalVersions > 1 ? (
+              <span
+                className="version-count muted"
+                data-testid="version-count"
+              >
+                {" "}
+                ({totalVersions} versions)
+              </span>
+            ) : null}
+          </h2>
           <p className="muted">
-            Version {version.version_number} &mdash; SHA-256 {version.sha256.slice(0, 12)}
+            Version {version.version_number}
+            {totalVersions > 1 ? (
+              <span data-testid="version-of-total"> of {totalVersions} total</span>
+            ) : null}
+            {" "}&mdash; SHA-256 {version.sha256.slice(0, 12)}
           </p>
         </div>
         <div className="workspace-header-meta">

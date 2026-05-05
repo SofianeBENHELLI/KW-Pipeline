@@ -44,6 +44,7 @@ from app.services.knowledge.graph_store import (
 from app.services.knowledge.llm_client import (
     AnthropicLLMClient,
     FakeLLMClient,
+    GeminiLLMClient,
     LLMClient,
 )
 from app.services.knowledge.projector import KnowledgeProjector
@@ -74,6 +75,7 @@ __all__ = [
     "EntityExtractor",
     "FakeEmbeddingClient",
     "FakeLLMClient",
+    "GeminiLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
     "KnowledgeChatService",

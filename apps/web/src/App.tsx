@@ -1,11 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Route, Routes } from "react-router-dom";
 import "./styles.css";
-import { ApiError, getDocument, listDocuments } from "./api/client";
+import {
+  SessionExpiredBanner,
+  useSessionGuard,
+} from "../../_shared/auth";
+import {
+  ApiError,
+  clearSessionTrigger,
+  getApiBaseUrl,
+  getDocument,
+  listDocuments,
+  setSessionTrigger,
+} from "./api/client";
 import type { ApiDocument } from "./api/types";
+import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
+import { SettingsLauncher, SettingsModal } from "./features/settings/SettingsModal";
+import { ForceAutoCorpusBanner } from "./ui/ForceAutoCorpusBanner";
 
 /**
  * Centralised document-catalog hook.
@@ -203,8 +218,145 @@ export function useDocumentCatalog(): DocumentCatalog {
   };
 }
 
+/**
+ * Top-level app router (D.9 + #215 + #206 follow-up).
+ *
+ * Admin routes (each lazy-loaded into its own chunk):
+ *  - ``/admin/archive`` — Archive listing + per-doc actions (D.9).
+ *  - ``/admin/hitl`` — HITL routing dashboard (#215, EPIC-A close-out).
+ *  - ``/admin/audit`` — Audit log viewer (#206 follow-up).
+ *
+ * Each handler 403s on a non-admin token and the page renders a
+ * "Forbidden" state for that envelope. We never derive admin role
+ * client-side — the backend is the single source of truth.
+ *
+ * Everything else falls through to the legacy reviewer workbench.
+ */
+// Lazy-load the admin views so they don't ship in the initial app
+// chunk — admin routes are admin-only and most users never land here.
+// Keeps the index bundle under the 80 KB budget enforced by
+// `scripts/check-bundle-size.mjs`. Each admin page lives in its own
+// chunk so a power user only pays for what they navigate to.
+const AdminArchiveView = lazy(() =>
+  import("./features/admin/AdminArchiveView").then((mod) => ({
+    default: mod.AdminArchiveView,
+  })),
+);
+const AdminHITLView = lazy(() =>
+  import("./features/admin/AdminHITLView").then((mod) => ({
+    default: mod.AdminHITLView,
+  })),
+);
+const AdminAuditView = lazy(() =>
+  import("./features/admin/AdminAuditView").then((mod) => ({
+    default: mod.AdminAuditView,
+  })),
+);
+const AdminHubView = lazy(() =>
+  import("./features/admin/AdminHubView").then((mod) => ({
+    default: mod.AdminHubView,
+  })),
+);
+
+// Shared Suspense fallback for every lazy admin route. Hoisted out
+// of the JSX so the literal isn't inlined three times in the initial
+// chunk (the budget enforcer is tight).
+const ADMIN_FALLBACK = <div className="kw-loading">Loading admin view…</div>;
+
 export default function App() {
+  return (
+    <Routes>
+      {/* Bare ``/admin`` is the navigation hub — explicit, no implicit
+          redirect to ``/admin/archive``. The hub lists every admin
+          sub-tool so an operator landing on /admin sees the full
+          surface, not whichever sub-page we picked first. */}
+      <Route
+        path="/admin"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminHubView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/archive"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminArchiveView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/hitl"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminHITLView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/audit"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+            <AdminAuditView />
+          </Suspense>
+        }
+      />
+      <Route path="*" element={<ReviewerWorkbench />} />
+    </Routes>
+  );
+}
+
+function ReviewerWorkbench() {
   const catalog = useDocumentCatalog();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const session = useSessionGuard();
+  // EPIC-A A.8 (#215, ADR-023 §6): the corpus-wide force-auto override
+  // is surfaced via /admin/config so operators see a non-dismissible
+  // banner whenever the deployment is auto-validating every version.
+  // Hidden for non-admin users (403) and on fetch errors — the banner
+  // is informational and a transient hiccup shouldn't block the app.
+  const adminConfig = useAdminConfig(getApiBaseUrl());
+  const forceAutoActive =
+    adminConfig.status === "ok" && adminConfig.config?.hitl.force_auto_corpus === true;
+
+  // Register the 401-triggered session-expired hook on mount and tear
+  // it down on unmount. The trigger is module-level state on the API
+  // client (#83 slice 3 / ADR-019 §5) so any code path that throws an
+  // ApiError(401) — openapi-fetch's unwrap, the multipart upload's
+  // asApiError branch, anything else — flips this banner without
+  // per-call-site branching.
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => {
+      clearSessionTrigger();
+    };
+  }, [session.trigger]);
+
+  // Dev stub: ``KW_AUTH_MODE=dev`` (default per #245) never returns
+  // 401 in normal operation, so reviewers can't see the banner via
+  // the live backend. Loading the app with ``#force-session-expired``
+  // in the URL hash flips the banner once on mount so the affordance
+  // stays reviewable on a demo build. Removed once bearer mode is
+  // the default and real 401s show up organically.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash === "#force-session-expired") {
+      session.trigger();
+    }
+  }, [session]);
+
+  // Sign-in action behaviour:
+  //   * dev mode (default): reload picks up a fresh dev user on the
+  //     very next request — see ADR-019 §3.
+  //   * bearer mode: reload bounces the user through whatever IdP
+  //     redirect their token issuer wires up. Until the future
+  //     refresh-token slice (ADR-019 follow-up), reload is the only
+  //     thing the frontend can do — it has no sign-in form of its
+  //     own (out of scope for #83 slice 3).
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
   const {
     documents,
     selected,
@@ -236,9 +388,25 @@ export default function App() {
     bumpMutation();
   }, [refreshAll, refreshSelected, bumpMutation]);
 
+  // Banners sit at the top of every shell return — loading, error,
+  // and ready states all need to surface a 401 the same way.
+  // The force-auto banner sits above the session-expired banner so
+  // an operator's "every version is auto" alert is visible even
+  // when their session has just timed out.
+  const banner = (
+    <>
+      <ForceAutoCorpusBanner visible={forceAutoActive} />
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+      />
+    </>
+  );
+
   if (loadingDocuments && documents.length === 0) {
     return (
       <main className="app-shell" aria-label="Orbital document review workbench">
+        {banner}
         <p className="muted" role="status" aria-live="polite">
           Loading documents…
         </p>
@@ -250,6 +418,7 @@ export default function App() {
     const message = error instanceof ApiError ? error.detail : error;
     return (
       <main className="app-shell" aria-label="Orbital document review workbench">
+        {banner}
         <div className="notice danger" role="alert">
           <strong>Failed to load documents</strong>
           <span>{message}</span>
@@ -267,6 +436,7 @@ export default function App() {
 
   return (
     <main className="app-shell" aria-label="Orbital document review workbench">
+      {banner}
       <PipelineWidget
         documents={documents}
         selectedDocumentId={selectedId ?? ""}
@@ -293,6 +463,11 @@ export default function App() {
       />
       <ChatPanel
         onSelectCitation={(citation) => selectDocument(citation.document_id)}
+      />
+      <SettingsLauncher onClick={() => setSettingsOpen(true)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </main>
   );

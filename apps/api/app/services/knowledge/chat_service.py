@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 
 from app.schemas.knowledge import (
     ChatCitation,
@@ -110,12 +111,21 @@ class KnowledgeChatService:
         *,
         mode: ChatMode = "rag",
         top_k: int = 5,
+        accessible_document_id: Callable[[str], bool] | None = None,
     ) -> ChatResponse:
         """Build the prompt, call the LLM, return a typed response.
 
         Empty / whitespace-only questions are rejected with
         :class:`ValueError`; the route layer maps that to a 422 with
         the public error envelope.
+
+        ``accessible_document_id`` (EPIC-D D.5) is an optional predicate
+        the route layer wires to drop chunk hits whose owning document
+        the caller cannot see. When ``None`` (the default), no filter
+        runs — back-compat for in-process callers and tests that don't
+        care about scope. The predicate is called once per unique
+        document_id seen in the hit set; results are cached for the
+        duration of one ``answer`` call.
         """
         if not question or not question.strip():
             raise ValueError("question must not be empty.")
@@ -123,6 +133,18 @@ class KnowledgeChatService:
 
         started = time.perf_counter()
         hits = self._search.search(cleaned, limit=top_k).results
+
+        if accessible_document_id is not None:
+            access_cache: dict[str, bool] = {}
+
+            def _cached_check(document_id: str) -> bool:
+                cached = access_cache.get(document_id)
+                if cached is None:
+                    cached = accessible_document_id(document_id)
+                    access_cache[document_id] = cached
+                return cached
+
+            hits = [hit for hit in hits if _cached_check(hit.document_id)]
 
         # Empty-retrieval short-circuit. ADR-016 calls this out as a
         # service-layer follow-up to the route-shape decision: when

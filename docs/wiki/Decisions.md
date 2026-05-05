@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "parent": "./Home.md" }$ -->
+
 # Decisions Index
 
 Architecture Decision Records live at [`docs/adr/`](https://github.com/SofianeBENHELLI/KW-Pipeline/tree/main/docs/adr) — those are the canonical, version-locked documents. This page is a one-line index for fast navigation.

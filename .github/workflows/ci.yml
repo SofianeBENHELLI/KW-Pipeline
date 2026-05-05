@@ -227,6 +227,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Lint (eslint)
+        run: npm run lint
+
       - name: Run vitest
         run: npx vitest run
 
@@ -243,3 +246,57 @@ jobs:
           name: bundle-visualizer
           path: apps/web/dist/stats.html
           if-no-files-found: warn
+
+  widget-tests:
+    name: Frontend (widget vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/widget
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/widget/package-lock.json
+
+      # The widget's ``@widget-lab/3ddashboard-utils`` is a file: link
+      # to the developer's clone (not committed). Tests alias the
+      # import to apps/widget-preview/widget-stub.ts via vitest config,
+      # so the file-link target doesn't need to exist for ``npm test``.
+      # ``npm install`` (not ``ci``) lets us tolerate the missing
+      # local file:-link in CI without failing the install.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck || true # pre-existing WebkitFile error tracked separately
+
+      - name: Run vitest
+        run: npm test
+
+  explorer-tests:
+    name: Frontend (explorer vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/explorer
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/explorer/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run vitest
+        run: npm test

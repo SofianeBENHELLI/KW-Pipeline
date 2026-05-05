@@ -1,8 +1,8 @@
-# Planning — Smart HITL, Iterop, Catalog-in-Explorer, Multi-Scope Ingestion
+# Planning — Smart HITL, ITEROP, Catalog-in-Explorer, Multi-Scope Ingestion
 
 **Status:** *decisions taken*. Open questions answered in a Q&A round
-on 2026-05-04. One follow-up still pending (Iterop auth, awaits the
-Iterop documentation).
+on 2026-05-04. One follow-up still pending (ITEROP auth, awaits the
+ITEROP documentation).
 
 **Scope.** Four user-requested features and the architecture they
 imply:
@@ -10,8 +10,8 @@ imply:
 1. **Smart HITL routing** — manufacturing-style SPC over the human
    review gate. Full inspection during ramp-up, statistical sampling
    afterwards, with drift-driven escalation.
-2. **External / Iterop review workflow** — the architecture leaves a
-   pull-based hook so an external workflow tool (Iterop / ServiceNow
+2. **External / ITEROP review workflow** — the architecture leaves a
+   pull-based hook so an external workflow tool (ITEROP / ServiceNow
    / 3DX workflow / JIRA…) can act as the reviewer.
 3. **Catalog of ingested documents in Knowledge Explorer** — a new
    read view in `apps/explorer` listing every ingested document with
@@ -52,7 +52,7 @@ for how these epics fit the existing backlog.
 | Q1.4 | Five signals compose `DocumentConfidenceScore`. Performance-first selection: **OCR flag** (hard override) · **orphan chunk ratio** · **section length z-score vs corpus norm** · **topic incoherence ratio** · **citation coverage** (when Phase 2 ON) **or asset-count z-score** (fallback). Each is O(chunks) at most. |
 | Q1.5 | **Drift counter on a sliding window**. On threshold crossed, **escalate the sampling rate** (e.g. 1/100 → 1/10) before falling back to ramp-up. Sample-rate **ladder** with admin-tunable thresholds. |
 
-### Iterop / external workflow (EPIC-B)
+### ITEROP / external workflow (EPIC-B)
 
 | ID | Decision |
 |---|---|
@@ -61,7 +61,7 @@ for how these epics fit the existing backlog.
 | Q2.3 | Default behavior with no adapter configured: **ramp-up → Orbital, steady-state → auto-validate**. |
 | Q12.1 | Orbital is always reachable for: (1) ramp-up phase, (2) confidence-based doubts, (3) SPC sampling when no external adapter is configured. The external adapter, when present, takes over (2) and (3). |
 | Q2.4 | **Auto-reject on timeout**. A worker periodically scans `EXTERNAL_REVIEW_PENDING` and rejects expired entries with reason `external_workflow_timeout`. Timeout is admin-configurable. The uploader can re-submit. |
-| Q2.5 | **Deferred**. Authentication scheme (HMAC / OAuth / mTLS / opaque token) is TBD until the Iterop documentation lands. The adapter is named `IteropAdapter` for the first integration; `ReviewApprovalAdapter` is the generic Protocol. |
+| Q2.5 | **Deferred**. Authentication scheme (HMAC / OAuth / mTLS / opaque token) is TBD until the ITEROP documentation lands. The adapter is named `ITEROPAdapter` for the first integration; `ReviewApprovalAdapter` is the generic Protocol. |
 
 ### Catalog + similarity (EPIC-C)
 
@@ -123,7 +123,7 @@ hitl_router.decide(
 )
    │
    ├─► validation_method = human    → Orbital queue (NEEDS_REVIEW)
-   ├─► validation_method = external → Iterop queue (NEEDS_REVIEW + EXTERNAL_REVIEW_PENDING)
+   ├─► validation_method = external → ITEROP queue (NEEDS_REVIEW + EXTERNAL_REVIEW_PENDING)
    └─► validation_method = auto     → mark_validated() immediately
 ```
 
@@ -176,7 +176,7 @@ the existing `VALIDATED` and `NEEDS_REVIEW` states:
 @dataclass
 class ValidationMetadata:
     validation_method: Literal["human", "external", "auto"]
-    validation_actor: str  # user id, "system", "iterop:<external_id>"
+    validation_actor: str  # user id, "system", "ITEROP:<external_id>"
     confidence_score: float
     confidence_signals: dict[str, float]
     spc_bucket: tuple[str, str]  # (content_type, topic_cluster_id)
@@ -208,11 +208,11 @@ signals' definitions and default weights.
 
 ---
 
-## 2. Feature B — External / Iterop review workflow
+## 2. Feature B — External / ITEROP review workflow
 
 ### 2.1 Goal
 
-Let an external workflow (Iterop / ServiceNow / 3DX workflow / JIRA)
+Let an external workflow (ITEROP / ServiceNow / 3DX workflow / JIRA)
 act as the reviewer authority through a **pull-based, signed**
 contract.
 
@@ -220,7 +220,7 @@ contract.
 
 ```
                   ┌────────────────────────────────────┐
-                  │  external workflow (e.g. Iterop)   │
+                  │  external workflow (e.g. ITEROP)   │
                   └──────────────┬─────────────────────┘
                                  │ poll
                                  ▼
@@ -269,7 +269,7 @@ external adapter name.
 
 - `ReviewApprovalAdapter` Protocol with two impls:
   - `OrbitalReviewAdapter` (today's path)
-  - `IteropAdapter` (first external impl)
+  - `ITEROPAdapter` (first external impl)
 - New routes:
   - `GET  /reviews/pending` (paginated, scoped, auth TBD per Q2.5)
   - `POST /reviews/{review_id}/decision` (idempotent)
@@ -281,7 +281,7 @@ external adapter name.
 ### 2.6 Required ADR
 
 **ADR-024** — External review approval contract: pull endpoints,
-idempotency on decision callback, auth scheme (TBD pending Iterop
+idempotency on decision callback, auth scheme (TBD pending ITEROP
 documentation), timeout/auto-reject policy.
 
 ---
@@ -432,21 +432,33 @@ scope filter and returns only documents whose
 scopes. The predicate is enforced server-side via FastAPI
 dependencies — never trust client input.
 
-### 4.6 Hard-delete on Swym community deletion (Q4.4)
+### 4.6 Flag-only cascade on Swym community deletion (Q4.4)
+
+Per the no-delete policy (no real deletion of document source data
+— flag-only, real purge handled by a future Archive/Purge Admin
+tool), this cascade soft-removes scope links and archives the
+document. The KG subgraph is the one explicit exception: it is a
+derived index and may be physically cleaned up.
 
 ```python
 def on_swym_community_deleted(swym_community_id):
-    rows = remove_scope_link(scope_kind="swym_community",
-                             scope_ref=swym_community_id)
-    for doc_id in unique_doc_ids(rows):
-        if has_no_remaining_scopes(doc_id):
-            purge_document(doc_id)  # bytes + extractions + semantic + markdown + KG
-            audit_log("document.purged_orphan", doc_id=doc_id, reason="all_scopes_removed")
+    soft_remove_scope_links(scope_kind="swym_community",
+                            scope_ref=swym_community_id)
+    for doc_id in unique_doc_ids_for(swym_community_id):
+        if has_no_remaining_active_scopes(doc_id):
+            flag_archive(doc_id)            # documents.archived_at = now
+            kg.delete_subgraph_for_document(doc_id)  # derived index, OK to drop
+            audit_log("document.archived_orphan",
+                      doc_id=doc_id, reason="all_scopes_removed")
 ```
 
-The detection mechanism (3DSwym webhook vs lazy detection on next
-access) is an implementation detail. Audit retention is a separate
-concern handled by EPIC 2 (#84).
+`flag_archive` is a metadata transition only — the bytes,
+extractions, semantic JSON, and Markdown asset stay in the catalog.
+The Archive/Purge Admin tool (separate ADR, deferred) is the only
+path to physical deletion or rehydration. The detection mechanism
+(3DSwym webhook vs lazy detection on next access) is an
+implementation detail. Audit retention is a separate concern handled
+by EPIC 2 (#84).
 
 ### 4.7 Required ADRs
 
@@ -474,10 +486,10 @@ concern handled by EPIC 2 (#84).
    │       │       (uses scope only as a filter; SPC bucket is
    │       │        (content_type, topic_cluster), not scope)
    │       ▼
-   │    [EPIC-B Iterop — ADR-024]
+   │    [EPIC-B ITEROP — ADR-024]
    │       │       (depends on EPIC-A's NEEDS_REVIEW + metadata)
    │       │
-   │       └──► requires Iterop documentation for Q2.5 (auth scheme)
+   │       └──► requires ITEROP documentation for Q2.5 (auth scheme)
    │
    └──► [#59 family-lineage bug fix]
            │
@@ -495,7 +507,7 @@ concern handled by EPIC 2 (#84).
 | ADR-020 | Workspace scoping — three-flavor scope model |
 | ADR-021 | Audit retention + tamper-evidence (existing backlog) |
 | **ADR-023** | **HITL routing policy + SPC math + 5-signal definition** |
-| **ADR-024** | **External review pull contract — Iterop adapter** |
+| **ADR-024** | **External review pull contract — ITEROP adapter** |
 | **ADR-025** | **Document similarity + version supersede flow** |
 | **ADR-026** | **Swym membership live REST integration** |
 
@@ -532,10 +544,10 @@ being correct. Fix order: #59 → EPIC-D → EPIC-A → EPIC-B → EPIC-C.
 
 Only one question remains open after this round:
 
-- **Q2.5 — Iterop adapter authentication scheme.** Pending the
-  Iterop documentation. ADR-024 carries the placeholder; the
+- **Q2.5 — ITEROP adapter authentication scheme.** Pending the
+  ITEROP documentation. ADR-024 carries the placeholder; the
   decision will be HMAC, OAuth bearer, mTLS, or opaque token
-  depending on what Iterop expects.
+  depending on what ITEROP expects.
 
 Everything else has been decided.
 
@@ -548,7 +560,7 @@ The four parent epic issues were filed alongside this doc:
 | Epic | GitHub | Status |
 |---|---|---|
 | EPIC-A — Smart HITL routing & SPC sampling | #215 | decisions taken; ready to slice |
-| EPIC-B — External / Iterop review workflow | #216 | decisions taken; auth pending Q2.5 |
+| EPIC-B — External / ITEROP review workflow | #216 | decisions taken; auth pending Q2.5 |
 | EPIC-C — Knowledge Explorer catalog + similarity | #217 | decisions taken; blocked by #59 |
 | EPIC-D — Multi-scope ingestion | #218 | decisions taken; blocked by #83 |
 

@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "parent": "./Home.md" }$ -->
+
 # Architecture
 
 The repo is a monorepo of two apps and a shared knowledge layer that activates on demand.

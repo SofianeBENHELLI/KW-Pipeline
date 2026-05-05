@@ -23,6 +23,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   original_filename: "test.txt",
   latest_version_id: "ver-001",
   created_at: "2026-05-01T00:00:00Z",
+  archived_at: null,
   versions: [
     {
       id: "ver-001",
@@ -41,6 +42,7 @@ const FIXTURE_DOCUMENT: ApiDocument = {
       created_at: "2026-05-01T00:00:00Z",
     },
   ],
+  scopes: [],
 };
 
 const UPLOAD_RESPONSE: ApiUploadResponse = {
@@ -58,6 +60,17 @@ const UPLOAD_RESPONSE: ApiUploadResponse = {
   reviewer_note: null,
   reviewed_at: null,
   created_at: "2026-05-01T00:00:00Z",
+  // Single-scope default: the backend auto-fills personal:<user> when
+  // the upload route receives no scope_kind/scope_ref query params.
+  scopes: [
+    {
+      kind: "personal",
+      ref: "user-1",
+      added_at: "2026-05-01T00:00:00Z",
+      added_by: "user-1",
+      removed_at: null,
+    },
+  ],
 };
 
 const DUPLICATE_RESPONSE: ApiUploadResponse = {

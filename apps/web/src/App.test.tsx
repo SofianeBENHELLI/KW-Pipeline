@@ -1,8 +1,20 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import axe from "axe-core";
+import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 import type { ApiDocument, ListDocumentsResponse } from "./api/types";
+
+// Wrap the App in a MemoryRouter so the top-level <Routes> tree
+// added in D.9 has a routing context. ``initialEntries=["/"]`` keeps
+// every legacy test on the reviewer workbench (catch-all route).
+function renderApp() {
+  return render(
+    <MemoryRouter initialEntries={["/"]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
 
 // ─── Fixture data ────────────────────────────────────────────────────────────
 
@@ -28,7 +40,9 @@ const FIXTURE_DOCUMENT: ApiDocument = {
   original_filename: "supplier-quality-policy.txt",
   latest_version_id: "ver-policy-002",
   created_at: "2026-04-30T08:42:00Z",
+  archived_at: null,
   versions: [FIXTURE_VERSION],
+  scopes: [],
 };
 
 const FIXTURE_LIST: ListDocumentsResponse = {
@@ -77,7 +91,7 @@ describe("App", () => {
   });
 
   it("renders the compact pipeline widget and review workspace after loading", async () => {
-    render(<App />);
+    renderApp();
 
     // After the async calls resolve, the full UI appears
     await waitFor(() => {
@@ -99,7 +113,7 @@ describe("App", () => {
   });
 
   it("surfaces review and failure states in the widget", async () => {
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getAllByText("Needs review").length).toBeGreaterThan(0);
@@ -111,7 +125,7 @@ describe("App", () => {
   it("shows an error message when the API call fails", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network error"));
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -127,7 +141,7 @@ describe("App", () => {
       makeJsonResponse({ items: [], next_cursor: null }),
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText(/No documents found/i)).toBeInTheDocument();
@@ -151,7 +165,7 @@ describe("App", () => {
       },
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByText(/Failed to load documents/i)).toBeInTheDocument();
@@ -167,7 +181,7 @@ describe("App", () => {
   });
 
   it("has no axe-core a11y violations on the loaded review surface", async () => {
-    const { container } = render(<App />);
+    const { container } = renderApp();
 
     // Wait for initial load + detail load to settle so axe sees the
     // full reviewer surface, not the loading state.
@@ -254,7 +268,7 @@ describe("App", () => {
       },
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /KW Pipeline/i })).toBeInTheDocument();

@@ -7,6 +7,36 @@ import { StatusBadge } from "../components/StatusBadge";
 
 const CONCURRENCY = 2;
 
+/**
+ * Upload scope (EPIC-D #218 / #250).
+ *
+ * Wires the picker to the now-live backend: ``POST /documents/upload``
+ * accepts optional ``scope_kind`` / ``scope_ref`` query params (#250).
+ * When a non-default scope is selected, both params are appended to
+ * the request URL. When the user leaves the default ``personal``,
+ * we omit them and let the backend auto-fill ``personal:<current_user.id>``
+ * from the ``get_current_user`` dependency — the widget has no auth
+ * surface today, so the literal ``"self"`` ref below is just a
+ * placeholder marker for "default personal" and never reaches the wire.
+ */
+export type Scope =
+  | { kind: "personal"; ref: string }
+  | { kind: "swym_community"; ref: string };
+
+const DEFAULT_SCOPE: Scope = { kind: "personal", ref: "self" };
+
+/**
+ * Returns ``true`` when the selected scope is the default personal
+ * placeholder — i.e. the one the user hasn't actively changed away
+ * from. The wire layer omits scope params in that case so the backend
+ * can fall back to ``personal:<current_user.id>``. Anything else
+ * (a real personal ref the user picked, or a different kind) flips
+ * this to ``false`` and the params get sent verbatim.
+ */
+function isDefaultPersonal(scope: Scope): boolean {
+  return scope.kind === DEFAULT_SCOPE.kind && scope.ref === DEFAULT_SCOPE.ref;
+}
+
 interface Props {
   apiBaseUrl: string;
   /** Bumped after each successful upload so sibling sections refresh. */
@@ -32,14 +62,9 @@ interface QueueItem {
 let _id = 0;
 const nextId = () => `q-${++_id}`;
 
-interface WebkitFile extends File {
-  webkitRelativePath?: string;
-}
-
 function relPath(file: File): string {
-  const wf = file as WebkitFile;
-  return wf.webkitRelativePath && wf.webkitRelativePath.length > 0
-    ? wf.webkitRelativePath
+  return file.webkitRelativePath && file.webkitRelativePath.length > 0
+    ? file.webkitRelativePath
     : file.name;
 }
 
@@ -52,6 +77,17 @@ function folderRootOf(relativePath: string): string | null {
 export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFlightChange }) => {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  // Scope selection (EPIC-D #218 / #250). Component-only state — no
+  // localStorage, no URL. The default personal scope is omitted from
+  // the wire so the backend's ``get_current_user`` fills it in;
+  // anything else is forwarded as ``scope_kind`` / ``scope_ref``.
+  const [selectedScope, setSelectedScope] = useState<Scope>(DEFAULT_SCOPE);
+  // Capture the latest scope in a ref so the upload closure inside
+  // ``drain`` reads the current value at submit time without forcing
+  // ``drain``'s identity to depend on it (which would re-create the
+  // scheduler on every keystroke in the dropdown).
+  const selectedScopeRef = useRef<Scope>(DEFAULT_SCOPE);
+  selectedScopeRef.current = selectedScope;
   const inflightRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -81,9 +117,22 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
         // block the React commit. Uses item id to address the row later.
         void (async () => {
           try {
+            // Scope wire-up (EPIC-D #218 / #250). Default personal →
+            // omit the params so the backend auto-fills with
+            // ``personal:<current_user.id>``. Any explicit pick →
+            // forward both fields verbatim so the route binds the
+            // upload to that workspace scope. Today the dropdown
+            // only allows the default (Swym is "Coming soon" until
+            // D.3 lands the membership client), so the second branch
+            // exists for the moment that becomes selectable.
+            const scope = selectedScopeRef.current;
+            const scopeArgs = isDefaultPersonal(scope)
+              ? {}
+              : { scope_kind: scope.kind, scope_ref: scope.ref };
             await uploadDocumentWithProgress(it.file, {
               baseUrl: apiBaseUrl,
               onProgress: (fraction) => updateItem(it.id, { progress: fraction }),
+              ...scopeArgs,
             });
             updateItem(it.id, { status: "done", progress: 1 });
             onUploaded();
@@ -202,6 +251,20 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
     [enqueueDataTransfer],
   );
 
+  // Scope picker change handler — only the personal option is real.
+  // The Swym option is disabled at the <option> level so this guard
+  // is belt-and-braces: even if a synthetic event slips through (or a
+  // future browser ignores `disabled`), we never accept it.
+  const handleScopeChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      if (event.target.value === "personal") {
+        setSelectedScope(DEFAULT_SCOPE);
+      }
+      // Swym option is disabled — ignore any other value silently.
+    },
+    [],
+  );
+
   return (
     <section className="kw-section" aria-label="Upload">
       <SectionHeader
@@ -213,6 +276,49 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
             : undefined
         }
       />
+
+      {/* Scope picker (EPIC-D #218 mockup). UX-only — does NOT change
+          the upload wire contract. The Swym option is disabled until
+          the backend can accept scope_kind / scope_ref. */}
+      <div className="kw-scope" aria-label="Upload destination">
+        <label className="kw-scope__label" htmlFor="kw-upload-scope">
+          Destination
+        </label>
+        <select
+          id="kw-upload-scope"
+          className="kw-scope__select"
+          value={selectedScope.kind}
+          onChange={handleScopeChange}
+          data-testid="kw-upload-scope-select"
+        >
+          <option value="personal">Personal workspace — Visible only to you</option>
+          <option
+            value="swym_community"
+            disabled
+            title="Will activate when 3DSwym communities are connected (ADR-020)"
+          >
+            Swym community… (Coming soon)
+          </option>
+        </select>
+        {selectedScope.kind === "personal" && (
+          <div className="kw-scope__sub">Visible only to you</div>
+        )}
+        <div
+          className="kw-scope__pill"
+          aria-hidden="true"
+          title="Will activate when 3DSwym communities are connected (ADR-020)"
+        >
+          Coming soon
+        </div>
+        <div
+          className="kw-scope__banner"
+          role="note"
+          data-testid="kw-upload-scope-banner"
+        >
+          <Icon name="info" size={12} /> New: pick where your document goes.
+          Scope-aware filtering arrives with the next ingestion update.
+        </div>
+      </div>
 
       <div
         className={isDragging ? "kw-drop kw-drop--active" : "kw-drop"}

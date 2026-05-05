@@ -34,8 +34,13 @@ def test_customer_demo_smoke_runs_full_review_path(tmp_path, monkeypatch):
     assert duplicate["extract_status_code"] == 409
 
     catalog = json.loads((artifact_dir / "catalog.json").read_text(encoding="utf-8"))
-    assert len(catalog["items"]) == 5
-    assert any(len(document["versions"]) == 2 for document in catalog["items"])
+    # Four distinct-bytes families (supplier policy, quality handbook,
+    # success brief, contract memo). The supplier policy family carries
+    # three versions: v1, the explicit-document_id v2, and the
+    # archived-name duplicate (issue #59 — anonymous duplicate uploads
+    # now stitch into the original family).
+    assert len(catalog["items"]) == 4
+    assert any(len(document["versions"]) == 3 for document in catalog["items"])
 
     markdown_paths = sorted((artifact_dir / "markdown").glob("*.md"))
     assert len(markdown_paths) == 5

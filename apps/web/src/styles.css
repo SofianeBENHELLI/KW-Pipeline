@@ -200,6 +200,27 @@ h3 {
   color: var(--muted);
 }
 
+/* Latest-version badge (#59 surface, EPIC-C #217). Brand-coloured,
+   compact pill rendered inline with the document title or below it.
+   Same visual rhythm as the existing status-badge but deliberately
+   smaller so it doesn't compete with the row's primary affordance. */
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--action);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.version-count {
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
 .status-badge {
   display: inline-flex;
   flex: 0 0 auto;
@@ -232,6 +253,56 @@ h3 {
 .status-rejected {
   background: #fde9e7;
   color: var(--danger);
+}
+
+/* Scope chip (EPIC-D #218 / #250). Compact pill rendered next to the
+   filename in catalog rows and the review header. The ``-group`` is
+   the inline wrapper that holds the primary chip plus the optional
+   "+N more" badge on multi-scope documents. */
+.scope-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.scope-chip--personal {
+  background: #eef2f7;
+  color: #304052;
+}
+.scope-chip--swym_community {
+  background: #e6f0fb;
+  color: var(--action-strong);
+}
+.scope-chip--project {
+  background: #efeafa;
+  color: #4d3a8c;
+}
+.scope-chip--more {
+  background: var(--panel-muted);
+  color: var(--muted);
+  cursor: help;
+}
+.scope-chip--empty {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-style: italic;
+}
+.scope-chip__icon {
+  font-size: 0.85em;
+  line-height: 1;
 }
 
 .workspace {
@@ -1113,4 +1184,317 @@ pre {
   border: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+
+/* Session-expired banner (#83 slice 3 / ADR-019 §5).
+   Lives at the top of the app shell, spans both columns of the
+   grid so it doesn't squeeze either panel. Themed with the same
+   warning palette as the rest of the app's notice surfaces. */
+.kw-session-expired {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--warning);
+  background: #fff8e6;
+  color: #553300;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.kw-session-expired__copy {
+  flex: 1 1 auto;
+  line-height: 1.4;
+}
+
+.kw-session-expired__action {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border: 1px solid var(--action);
+  background: var(--action);
+  color: white;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.kw-session-expired__action:hover {
+  background: var(--action-strong);
+}
+
+/* Admin archive view (D.9) — table + minimal modal primitives.
+   Reuses existing tokens (--panel, --border, --radius). The modal
+   is intentionally simple (z-index + fixed overlay) since the app
+   has no shared modal component yet; promoting to a primitive is
+   a follow-up if a second admin view needs it. */
+.admin-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-archive-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.admin-archive-table th,
+.admin-archive-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 14px;
+}
+
+.admin-archive-table th {
+  background: var(--panel-muted);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(23, 32, 44, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal-card {
+  background: var(--panel);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 20px 24px;
+  max-width: 560px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.purge-preview {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.purge-preview > div {
+  display: contents;
+}
+
+.purge-preview dt {
+  color: var(--muted);
+}
+
+.purge-preview dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.purge-tombstone-list code {
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.primary-button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Bulk-purge action bar above the archive table — only renders when
+   ≥ 1 row is selected. */
+.admin-archive-bulk-bar {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  align-items: center;
+}
+
+/* Narrow leading checkbox column for the multi-select archive table. */
+.admin-archive-table th.select-col,
+.admin-archive-table td.select-col {
+  width: 32px;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 4px;
+}
+
+/* Two-column form grid used by the relink-scope modal — same layout
+   primitive as ``.purge-preview`` so the modals look related. */
+.form-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.form-grid label {
+  display: contents;
+}
+
+.form-grid label > span {
+  text-align: right;
+}
+
+.form-grid input,
+.form-grid select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 14px;
+}
+
+/* Compact id list inside the bulk-purge modal — wraps so a 100-id
+   selection doesn't blow out the modal width. */
+.compact-id-list code {
+  word-break: break-all;
+}
+
+/* Inline danger-coloured text for in-flow error labels (per-doc
+   failures inside the bulk-purge preview). */
+.danger-text {
+  color: var(--danger);
+}
+
+/* Force-auto corpus banner (EPIC-A A.8, ADR-023 §6, #215).
+   Sits at the top of the app shell when the operator has set
+   KW_HITL_FORCE_AUTO_CORPUS=true. Non-dismissible — it's a config
+   alert, not a user notification. Same warning palette as the
+   session-expired banner so the visual rhythm stays consistent. */
+.kw-corpus-alert {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--warning);
+  background: #fff8e6;
+  color: #553300;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.kw-corpus-alert strong {
+  margin-right: 4px;
+}
+
+.kw-corpus-alert code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+
+/* Admin nav hub at /admin — card grid linking to each admin tool.
+   Cards are clickable in their entirety (the whole element is a
+   button) with a chevron used purely as a visual affordance. */
+.admin-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-hub-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.admin-hub-card:hover,
+.admin-hub-card:focus-visible {
+  border-color: var(--action);
+  background: var(--panel-muted);
+  outline: none;
+}
+
+.admin-hub-card-body h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.admin-hub-card-body p {
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.admin-hub-card-chevron {
+  font-size: 1.5rem;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.admin-hub-footer {
+  margin-top: 18px;
+  font-size: 0.8rem;
+}
+
+/* Filter bar above the archive table — search + sort + reset.
+   Client-side filter for v1 (#274 follow-up TODO). */
+.admin-archive-filter-bar {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-start;
+}
+
+.admin-archive-filter-search,
+.admin-archive-filter-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-archive-filter-search input,
+.admin-archive-filter-sort select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--panel);
+}
+
+.admin-archive-filter-search input:focus,
+.admin-archive-filter-sort select:focus {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
 }

@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "parent": "./Home.md" }$ -->
+
 # Operating Modes
 
 The pipeline runs in one of three escalating modes. Tests cover all three; default `pytest` does not require Docker or a network LLM call.

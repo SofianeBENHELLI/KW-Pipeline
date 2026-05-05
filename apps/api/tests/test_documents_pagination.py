@@ -188,6 +188,27 @@ class TestListDocumentsRoute:
         follow_up = client.get(f"/documents?cursor={page['next_cursor']}").json()
         assert follow_up == {"items": [], "next_cursor": None}
 
+    def test_response_documents_carry_scopes_field(self):
+        """#258 — every Document on the response carries its active
+        scope links so the frontend can render its scope chip without
+        a follow-up ``list_scopes_for_document`` call. The default
+        upload path lands a single ``personal:<user.id>`` link."""
+        client = TestClient(create_app())
+        upload = _upload(client, b"scoped-payload")
+
+        page = client.get("/documents").json()
+
+        assert len(page["items"]) == 1
+        item = page["items"][0]
+        assert item["id"] == upload["document_id"]
+        # Always present (Pydantic default + serialisation-required
+        # config), and the upload path seeds at least one link so the
+        # list is never empty here.
+        assert "scopes" in item
+        assert isinstance(item["scopes"], list)
+        kinds = {scope["kind"] for scope in item["scopes"]}
+        assert kinds == {"personal"}
+
 
 # --------------- Stable ordering: same-second uploads --------------- #
 

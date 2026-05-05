@@ -124,6 +124,18 @@ class GraphStore(Protocol):
         node_id)`` so pages are stable across calls.
         """
 
+    def find_nodes_by_kind(self, kind: str) -> list[GraphNode]:
+        """Return every node currently stored with the given ``kind``.
+
+        Used by the hybrid taxonomy route (#249) to enumerate the
+        ``topic`` nodes the projector emitted from topic clustering
+        — those become the ``"computed"`` half of
+        ``GET /knowledge/taxonomy``. The result is sorted by node id
+        for byte-stability across calls. Empty graph (or no nodes of
+        that kind) is a valid response: an empty list, not an
+        exception.
+        """
+
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
 
     def ensure_vector_index(self, *, name: str, dim: int) -> None:
@@ -198,6 +210,15 @@ class InMemoryGraphStore:
         self._version_to_node_ids: dict[str, set[str]] = {}
         # Same for edges.
         self._version_to_edge_ids: dict[str, set[str]] = {}
+        # Inverse reverse index — node_id → set of versions that own it
+        # (audit #226). Phase 2 entity nodes can be shared across
+        # versions; without this map ``delete_subgraph_for_version`` was
+        # O(versions × node_ids) — it had to scan every version's node
+        # set to decide whether a freshly-orphaned node was still
+        # claimed by another version. With this map the same check is
+        # O(1) per node so re-projection scales linearly in the version
+        # being deleted, not in the corpus size.
+        self._node_to_versions: dict[str, set[str]] = {}
         # Phase 3: chunk_id → embedding vector. Lives outside
         # ``self._nodes`` so the wire-shape projection stays unchanged
         # when the embedding write path runs.
@@ -211,6 +232,9 @@ class InMemoryGraphStore:
                 version_id = _version_id_from_properties(node.properties)
                 if version_id is not None:
                     self._version_to_node_ids.setdefault(version_id, set()).add(node.id)
+                    # Mirror the version → nodes mapping into the inverse
+                    # so reference-count cleanup at delete time is O(1).
+                    self._node_to_versions.setdefault(node.id, set()).add(version_id)
 
     def upsert_edges(self, edges: Iterable[GraphEdge]) -> None:
         with self._lock:
@@ -228,17 +252,22 @@ class InMemoryGraphStore:
             # shared across versions (Phase 2 hashes entity ids by
             # ``(subject, subject_type)`` so the same canonical entity
             # is one node). Only remove the node when no remaining
-            # version still claims it.
+            # version still claims it. The ``_node_to_versions`` reverse
+            # index makes this an O(1) per-node check (audit #226).
             for node_id in node_ids:
-                still_referenced = any(
-                    node_id in members for members in self._version_to_node_ids.values()
-                )
-                if not still_referenced:
-                    self._nodes.pop(node_id, None)
-                    # Drop the chunk's embedding alongside the node so
-                    # a re-projection re-embeds rather than serving a
-                    # stale vector.
-                    self._chunk_embeddings.pop(node_id, None)
+                owners = self._node_to_versions.get(node_id)
+                if owners is None:
+                    continue
+                owners.discard(version_id)
+                if owners:
+                    continue
+                # No version still claims this node — actually remove it.
+                self._node_to_versions.pop(node_id, None)
+                self._nodes.pop(node_id, None)
+                # Drop the chunk's embedding alongside the node so a
+                # re-projection re-embeds rather than serving a stale
+                # vector.
+                self._chunk_embeddings.pop(node_id, None)
             for edge_id in edge_ids:
                 self._edges.pop(edge_id, None)
 
@@ -310,6 +339,13 @@ class InMemoryGraphStore:
                 nodes=page,
                 edges=sorted(page_edges, key=lambda e: (e.kind, e.id)),
                 next_cursor=next_cursor,
+            )
+
+    def find_nodes_by_kind(self, kind: str) -> list[GraphNode]:
+        with self._lock:
+            return sorted(
+                (n for n in self._nodes.values() if n.kind == kind),
+                key=lambda n: n.id,
             )
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
@@ -626,6 +662,18 @@ class Neo4jGraphStore:
             last = nodes[-1]
             next_cursor = _encode_cursor((last.kind, last.id))
         return KnowledgeGraphPage(nodes=nodes, edges=edges, next_cursor=next_cursor)
+
+    def find_nodes_by_kind(  # pragma: no cover - exercised behind pytest -m integration
+        self, kind: str
+    ) -> list[GraphNode]:
+        rows = self._read(
+            """
+            MATCH (n:KnowledgeNode {kind: $kind})
+            RETURN n ORDER BY n.id
+            """,
+            {"kind": kind},
+        )
+        return [_row_to_node(row["n"]) for row in rows]
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
     # Each method below is exercised end-to-end by

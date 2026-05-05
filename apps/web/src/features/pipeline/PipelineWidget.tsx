@@ -5,7 +5,8 @@ import type {
   ApiUploadResponse,
 } from "../../api/types";
 import { ApiError, uploadDocument, uploadDocumentsBatch } from "../../api/client";
-import { latestVersion } from "../../domain/document";
+import { documentScopes, latestVersion } from "../../domain/document";
+import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 
 const ACCEPTED_MIME_TYPES =
@@ -271,6 +272,7 @@ export function PipelineWidget({
               version.status === "DUPLICATE_DETECTED" ||
               version.duplicate_of_version_id !== null;
 
+            const totalVersions = document.versions.length;
             return (
               <button
                 className={selected ? "document-row selected" : "document-row"}
@@ -280,8 +282,39 @@ export function PipelineWidget({
                 onClick={() => onSelectDocument(document.id)}
               >
                 <span>
-                  <strong>{document.original_filename}</strong>
-                  <small>v{version.version_number}</small>
+                  <strong>
+                    {document.original_filename}
+                    {totalVersions > 1 ? (
+                      <span
+                        className="version-count muted"
+                        data-testid="version-count"
+                      >
+                        {" "}
+                        ({totalVersions} versions)
+                      </span>
+                    ) : null}
+                  </strong>
+                  <small>
+                    {/* Latest-version badge — brand-coloured, compact.
+                        Replaces the legacy bare `v{N}` text so the
+                        latest version is visually distinct from any
+                        per-version row that may render later. */}
+                    <span
+                      className="version-badge"
+                      data-testid="latest-version-badge"
+                      aria-label={`Latest version v${version.version_number}`}
+                      title={`Latest version v${version.version_number}`}
+                    >
+                      v{version.version_number}
+                    </span>
+                    {/* Scope chip — surfaces the workspace this doc
+                        was uploaded into (EPIC-D #218 / #250). Pulls
+                        ``Document.scopes`` defensively because the
+                        catalog schema doesn't yet carry the field;
+                        renders a "No scope info" placeholder when
+                        absent. */}
+                    <ScopeChip scopes={documentScopes(document)} />
+                  </small>
                 </span>
                 <span className="document-row-meta">
                   {isDuplicate ? (

@@ -16,6 +16,8 @@ const statusLabels: Record<DocumentVersionStatus, string> = {
   VALIDATED: "Validated",
   REJECTED: "Rejected",
   FAILED: "Failed",
+  SUPERSEDED: "Superseded",
+  PURGED: "Purged",
 };
 
 const statusDescriptions: Record<DocumentVersionStatus, string> = {
@@ -30,6 +32,8 @@ const statusDescriptions: Record<DocumentVersionStatus, string> = {
   VALIDATED: "Approved by a reviewer.",
   REJECTED: "Rejected by a reviewer.",
   FAILED: "Pipeline error; see the failure reason on the document.",
+  SUPERSEDED: "Replaced by a newer validated version of the same document.",
+  PURGED: "Source artifacts were physically deleted by an admin; only the catalog row remains.",
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {

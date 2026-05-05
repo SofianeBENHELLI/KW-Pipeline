@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -16,6 +16,7 @@ from app.models.document import (
 )
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.extraction import RawExtraction
+from app.schemas.scope import Scope
 from app.schemas.semantic_document import SemanticDocument
 from app.services.migrations import _run_migrations
 from app.services.semantic_schema_loader import load_semantic_document
@@ -41,6 +42,26 @@ def _encode_cursor(position: tuple[datetime, str]) -> str:
     created_at, document_id = position
     payload = json.dumps([created_at.isoformat(), document_id]).encode("utf-8")
     return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _encode_archived_cursor(position: tuple[datetime, str]) -> str:
+    """Encode an ``(archived_at, id)`` pair as an opaque base64 cursor.
+
+    Same wire format as :func:`_encode_cursor`, kept as a thin alias so
+    the Archive/Purge admin listing — which sorts by ``archived_at
+    DESC`` rather than ``created_at ASC`` — has a self-documenting
+    constructor at every call site.
+    """
+    return _encode_cursor(position)
+
+
+def _decode_archived_cursor(token: str) -> tuple[datetime, str]:
+    """Decode the ``(archived_at, id)`` pair from an admin-archive cursor.
+
+    Mirrors :func:`_decode_cursor`; kept as a separate function so the
+    archived-listing call sites read straight without ``# noqa`` casts.
+    """
+    return _decode_cursor(token)
 
 
 def _decode_cursor(token: str) -> tuple[datetime, str]:
@@ -204,6 +225,226 @@ class CatalogStore(Protocol):
         KeyError if none exists.
         """
 
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        """Persist a ``(document_id, scope_kind, scope_ref)`` link.
+
+        Two cases:
+
+        - The triple does not exist → insert with the caller's
+          ``added_at`` / ``added_by``. ``removed_at`` is NULL.
+        - The triple exists but was soft-removed (``removed_at IS NOT
+          NULL``) → reactivate by clearing ``removed_at`` and
+          overwriting ``added_at`` / ``added_by`` with the caller's
+          identity (a re-link is a fresh audit event).
+        - The triple exists and is active (``removed_at IS NULL``) →
+          no-op. The original first-write ``added_at`` / ``added_by``
+          are preserved.
+
+        ``scope.removed_at`` on input is ignored — this method is the
+        public API for **adding/reactivating** a link. Use
+        :meth:`remove_scope` to flag a link as removed.
+        """
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        """Return every active :class:`Scope` row for ``document_id``.
+
+        Filters out soft-removed rows (``removed_at IS NOT NULL``) per
+        the no-delete policy: removed scopes stay in the catalog for a
+        future Archive/Purge Admin tool but they are invisible to
+        normal reads. Order is insertion order. Returns an empty list
+        when the document has no active scope links — including when
+        ``document_id`` does not exist (the scope table is decoupled
+        from the document family for forward-compat with bulk-link
+        routes).
+        """
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        """Return one page of documents that live in the given scope.
+
+        Documents are returned sorted by ``(created_at ASC, id ASC)``,
+        the same ordering ``list_documents`` uses, so the cursor
+        codec is shared via :func:`_encode_cursor` /
+        :func:`_decode_cursor`. The second tuple element is the
+        cursor token to feed back as ``cursor`` for the next page,
+        or ``None`` when this page is the last one.
+
+        Soft-removed scope links (``removed_at IS NOT NULL``) are
+        filtered out; only documents whose scope link is currently
+        active are visible.
+
+        Implementations look the (kind, ref) up via the
+        ``idx_document_scopes_lookup`` index (SQLite) or the in-memory
+        reverse index (in-memory store) and then materialise the
+        ``Document`` objects so callers don't need a second round-trip.
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
+        """
+
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        """Return one ``(document_id, scope_kind, scope_ref)`` row, active or soft-removed.
+
+        Companion to :meth:`list_scopes_for_document` for the
+        Archive/Purge Admin tool (ADR-027 §1.2): the list method
+        filters out soft-removed rows, so the admin tool would have no
+        way to surface the ``removed_at_before`` field on its
+        ``relink_scope`` response. This accessor returns the row
+        regardless of ``removed_at`` state — the route layer uses it to
+        peek at the pre-action state for both real mutations and
+        dry-runs.
+
+        Returns ``None`` when no row exists for the triple (active or
+        otherwise) — the route layer maps that to a 404.
+        """
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        """Soft-remove a single ``(document_id, scope_kind, scope_ref)`` link.
+
+        Per the no-delete policy: the row stays in the catalog with
+        ``removed_at`` set to the current UTC timestamp. Subsequent
+        ``list_scopes_for_document`` / ``list_documents_in_scope``
+        calls hide the link; :meth:`add_scope` for the same triple
+        will reactivate it.
+
+        Idempotent: flagging an already-removed or non-existent link
+        is a no-op (``removed_at`` is not bumped on the second call —
+        the original removal timestamp is preserved for audit). A
+        future Archive/Purge Admin tool is the only path to physical
+        deletion.
+        """
+
+    # ------- Archive flag (ADR-020 §4, EPIC-D D.6/D.7) ------- #
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,
+    ) -> Document:
+        """Soft-archive: set ``documents.archived_at = archived_at``.
+
+        Idempotent: re-archiving an already-archived document preserves
+        the original ``archived_at`` (audit-faithful). Returns the
+        updated :class:`Document`. Raises :class:`KeyError` when the
+        document is missing.
+
+        Per the no-delete policy: this is a metadata transition only —
+        no bytes, extractions, semantic JSON, or markdown assets are
+        touched. The KG subgraph MAY be cleaned up by the caller as
+        derived data (it's regenerable from the catalog and is the one
+        explicit exception to the no-delete rule, per ADR-012 + the
+        feedback rule).
+
+        ``actor`` is the user id that triggered the cascade — it is
+        not persisted on the document row (the audit row carries it)
+        but is part of the contract so callers and instrumentation
+        agree on the shape.
+        """
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,
+    ) -> Document:
+        """Clear ``documents.archived_at`` (Archive/Purge Admin tool — ADR-027 §1.1).
+
+        Reverses the D.6 flag-archive cascade. Per ADR-027 the document
+        bytes / extractions / semantic JSON / Markdown asset / KG nodes
+        were preserved by the flag-only cascade, so unarchiving is a
+        metadata-only transition: clear ``archived_at`` and the document
+        reappears on the standard read path.
+
+        Idempotent: calling on an already-active document is a no-op
+        and returns the current row unchanged (so the route layer can
+        honour ADR-027 §1.1's "calling on an unarchived document"
+        contract without duplicating state checks).
+
+        ``actor`` is the user id that triggered the unarchive — not
+        persisted on the document row (the audit row carries it) but
+        part of the contract so callers and instrumentation agree on
+        the shape. Raises :class:`KeyError` when the document is
+        missing.
+        """
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        """Return one page of flag-archived documents (ADR-027 §1.4 / D.9).
+
+        Documents are returned sorted by ``archived_at DESC`` (most-
+        recently archived first) with ``id`` as the tie-breaker so two
+        same-second archives don't shift between pages. Only rows with
+        ``archived_at IS NOT NULL`` are returned — the inverse of the
+        standard read path's filter.
+
+        ``cursor`` is opaque (encoded ``(archived_at, id)``) and
+        decoded via :func:`_decode_archived_cursor`. The second tuple
+        element is the next-page cursor; ``None`` when this page is
+        the last one.
+
+        Each :class:`Document` carries its full ``versions`` list so
+        the admin tool can compute ``versions_purged`` / ``versions_remaining``
+        without a per-doc round-trip. Soft-removed scope links are
+        included on ``Document.scopes`` so the admin UI can surface
+        the last scope that was removed before the cascade fired —
+        the standard ``list_scopes_for_document`` filter is bypassed
+        here because that information is the whole point of the
+        admin view.
+
+        Raises :class:`InvalidCursor` if ``cursor`` cannot be decoded.
+        """
+
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,
+        actor: str,
+    ) -> DocumentVersion:
+        """Flip a version to ``PURGED`` + overwrite ``storage_uri`` with a tombstone.
+
+        ADR-027 §1.3 / §3 catalog-side primitive. Idempotent: re-purging
+        an already-``PURGED`` version is a no-op and returns the
+        version unchanged (so the route layer can return 200 with the
+        existing ``purged_at`` baked into the tombstone URI without a
+        second audit row). Drops the version from the in-memory
+        ``versions_by_hash`` index so future hash matches don't return
+        tombstones (the SQLite store has no such index — the
+        ``find_version_by_hash`` query already filters duplicates and
+        the tombstone URI is enough to short-circuit downstream reads).
+
+        Raises :class:`KeyError` when the document or version is
+        missing — same shape as :meth:`get_version`. The route layer
+        never reaches this method without first confirming the document
+        is archived (the §1.3 precondition), so this primitive does
+        not re-check that condition.
+
+        ``actor`` is the user id that triggered the purge — not
+        persisted on the version row (the audit row carries it) but
+        part of the contract so callers and instrumentation agree on
+        the shape.
+        """
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -217,6 +458,14 @@ class InMemoryCatalogStore:
         # in-memory store mirrors the SQLite payload column and the loader
         # is the single boundary that yields a typed model. Per ADR-008.
         self.semantic_documents: dict[str, dict] = {}
+        # ADR-020 §1, EPIC-D D.1. Forward index keyed by document_id so
+        # ``list_scopes_for_document`` is O(1). The list ordering is
+        # preserved-on-insert so callers can show "first linked" first.
+        self.scopes_by_document: dict[str, list[Scope]] = {}
+        # Reverse index keyed by (scope_kind, scope_ref) so
+        # ``list_documents_in_scope`` is O(1) on the lookup and only
+        # the page slice does any work. The set holds document_ids.
+        self.documents_by_scope: dict[tuple[str, str], set[str]] = {}
 
     def find_version_by_hash(self, sha256: str) -> DocumentVersion | None:
         return self.versions_by_hash.get(sha256)
@@ -245,8 +494,14 @@ class InMemoryCatalogStore:
         status_filter: frozenset[DocumentVersionStatus] | None = None,
         filename_query: str | None = None,
     ) -> list[Document]:
+        # Hide archived documents by default (ADR-020 §4 / D.6+D.7).
+        # An admin-only ``include_archived=True`` query param could
+        # surface them in a future Archive/Purge Admin tool; that's
+        # explicitly out of scope for this slice — we route the
+        # admin-tool path through ``_get_document_including_archived``
+        # which is internal-only and never exposed via Protocol.
         ordered = sorted(
-            self.documents.values(),
+            (d for d in self.documents.values() if d.archived_at is None),
             key=lambda d: (d.created_at, d.id),
         )
         if cursor is not None:
@@ -259,9 +514,37 @@ class InMemoryCatalogStore:
             ordered = [d for d in ordered if needle in d.original_filename.lower()]
         if limit is not None:
             ordered = ordered[:limit]
+        # #258 — populate ``Document.scopes`` per row. The forward
+        # index is in-process so this is O(1) per doc; soft-removed
+        # rows are filtered by ``list_scopes_for_document``.
+        for document in ordered:
+            document.scopes = self.list_scopes_for_document(document.id)
         return ordered
 
     def get_document(self, document_id: str) -> Document | None:
+        # Hide archived documents from the standard read path (#265 / D.6);
+        # the route layer maps ``None`` to a 404 — same shape as a missing
+        # row, the correct hidden-existence story per ADR-020 §4. The
+        # internal Archive/Purge Admin tool path uses
+        # ``_get_document_including_archived``.
+        document = self.documents.get(document_id)
+        if document is None or document.archived_at is not None:
+            return None
+        # #258 — populate ``Document.scopes`` on detail reads too. Soft-
+        # removed rows are filtered by ``list_scopes_for_document``.
+        document.scopes = self.list_scopes_for_document(document.id)
+        return document
+
+    def _get_document_including_archived(self, document_id: str) -> Document | None:
+        """Internal accessor that ignores ``archived_at``.
+
+        Reserved for the future Archive/Purge Admin tool (D.9 — deferred
+        ADR). Not exposed via the public :class:`CatalogStore` Protocol
+        and never wired into a route in this PR. Kept here so the cascade
+        service can confirm a document still exists (and capture its
+        existing ``archived_at``) when re-archiving an already-archived
+        row, without breaking the "reads hide archived" invariant.
+        """
         return self.documents.get(document_id)
 
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
@@ -344,6 +627,256 @@ class InMemoryCatalogStore:
         # Deep copy so callers can't mutate persisted state.
         return copy.deepcopy(payload)
 
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        existing = self.scopes_by_document.setdefault(document_id, [])
+        for index, already in enumerate(existing):
+            if already.kind == scope.kind and already.ref == scope.ref:
+                if already.removed_at is not None:
+                    # Reactivate: clear removed_at, overwrite added_at /
+                    # added_by with the new caller's identity (re-link is
+                    # a fresh audit event).
+                    existing[index] = Scope(
+                        kind=scope.kind,
+                        ref=scope.ref,
+                        added_at=scope.added_at,
+                        added_by=scope.added_by,
+                        removed_at=None,
+                    )
+                    self.documents_by_scope.setdefault((scope.kind, scope.ref), set()).add(
+                        document_id
+                    )
+                # Active row exists → no-op (first-write wins for active
+                # links; the original added_at / added_by are preserved).
+                return
+        # Fresh insert — store with removed_at coerced to None even if the
+        # caller passed a non-None value (add_scope is the add path).
+        existing.append(
+            Scope(
+                kind=scope.kind,
+                ref=scope.ref,
+                added_at=scope.added_at,
+                added_by=scope.added_by,
+                removed_at=None,
+            )
+        )
+        self.documents_by_scope.setdefault((scope.kind, scope.ref), set()).add(document_id)
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        # Filter soft-removed rows. Return a shallow copy so callers
+        # can't mutate the persisted list.
+        return [
+            scope
+            for scope in self.scopes_by_document.get(document_id, ())
+            if scope.removed_at is None
+        ]
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # The reverse index is maintained to only contain active links;
+        # remove_scope drops the doc id from the set when the link is
+        # flagged. Archived rows are filtered out so a doc that lost its
+        # last scope and was flag-archived disappears from the listing
+        # even if a stale scope-link race leaves it in this index — the
+        # archive flag is the source of truth for visibility.
+        document_ids = self.documents_by_scope.get((scope_kind, scope_ref), set())
+        candidates = [
+            self.documents[d]
+            for d in document_ids
+            if d in self.documents and self.documents[d].archived_at is None
+        ]
+        ordered = sorted(candidates, key=lambda d: (d.created_at, d.id))
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            ordered = [d for d in ordered if (d.created_at, d.id) > (after_created_at, after_id)]
+        page = ordered[:limit]
+        # Emit a next cursor only when there's strictly more data behind
+        # this page; mirrors the "page short of limit signals end" rule
+        # used by ``list_documents``.
+        if len(ordered) > limit and page:
+            last = page[-1]
+            next_cursor = _encode_cursor((last.created_at, last.id))
+        else:
+            next_cursor = None
+        # #258 — populate ``Document.scopes`` for the returned page so
+        # the catalog projection sees the same shape as ``GET
+        # /documents``. Soft-removed rows are already filtered by
+        # ``list_scopes_for_document``.
+        for document in page:
+            document.scopes = self.list_scopes_for_document(document.id)
+        return page, next_cursor
+
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        # Walk the forward-index list — it keeps soft-removed rows so
+        # ``add_scope`` can reactivate them, which is precisely the
+        # state the admin tool needs to surface in dry-run output.
+        for scope in self.scopes_by_document.get(document_id, ()):
+            if scope.kind == scope_kind and scope.ref == scope_ref:
+                return scope
+        return None
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        # Soft-remove: flag the row with removed_at, drop from the
+        # reverse index. The forward-index list keeps the row so
+        # add_scope can reactivate it.
+        existing = self.scopes_by_document.get(document_id)
+        if existing is not None:
+            for index, scope in enumerate(existing):
+                if scope.kind == scope_kind and scope.ref == scope_ref and scope.removed_at is None:
+                    existing[index] = Scope(
+                        kind=scope.kind,
+                        ref=scope.ref,
+                        added_at=scope.added_at,
+                        added_by=scope.added_by,
+                        removed_at=datetime.now(UTC),
+                    )
+                    break
+        reverse = self.documents_by_scope.get((scope_kind, scope_ref))
+        if reverse is not None:
+            reverse.discard(document_id)
+            if not reverse:
+                del self.documents_by_scope[(scope_kind, scope_ref)]
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Use the internal accessor so an already-archived row still
+        # resolves and we can preserve its original ``archived_at``.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        if document.archived_at is None:
+            # First-archive: stamp the timestamp on the existing row so
+            # references held elsewhere (e.g. the test fixture's local
+            # variable) observe the transition.
+            document.archived_at = archived_at
+        # Second-archive: no-op — the original ``archived_at`` is
+        # preserved (audit-faithful). Return the row either way.
+        return document
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Mirror ``flag_document_archived``: the internal accessor
+        # resolves both archived and active rows so an already-active
+        # document still returns successfully (idempotent no-op).
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        if document.archived_at is not None:
+            document.archived_at = None
+        return document
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # In-memory walk: filter to archived rows, sort by
+        # ``(archived_at DESC, id ASC)`` and apply cursor + limit.
+        # ``id`` ASC is the tie-breaker so two same-second archives
+        # don't shift between pages — the cursor inequality flips
+        # accordingly: we want rows STRICTLY OLDER than the cursor
+        # tuple under DESC ordering, i.e. ``(a.archived_at, a.id) <
+        # (cursor.archived_at, cursor.id)`` when sorted DESC by the
+        # primary key. We model that directly by negating the
+        # comparison.
+        archived = [d for d in self.documents.values() if d.archived_at is not None]
+        ordered = sorted(archived, key=lambda d: (-d.archived_at.timestamp(), d.id))  # type: ignore[union-attr]
+        if cursor is not None:
+            after_archived_at, after_id = _decode_archived_cursor(cursor)
+            # Walk the sorted list, taking only entries that come AFTER
+            # the cursor pair under the same ordering. Under DESC by
+            # ``archived_at`` (with ``id`` ASC tie-break), ``after`` means
+            # strictly older ``archived_at``, OR same ``archived_at`` and
+            # ``id`` lexicographically greater.
+            ordered = [
+                d
+                for d in ordered
+                if (
+                    d.archived_at is not None
+                    and (
+                        d.archived_at < after_archived_at
+                        or (d.archived_at == after_archived_at and d.id > after_id)
+                    )
+                )
+            ]
+        # Fetch one extra row so we can decide whether to emit a cursor.
+        page_plus_one = ordered[: limit + 1]
+        page = page_plus_one[:limit]
+        # Populate scopes on the page — include soft-removed rows so the
+        # admin tool can show "last scope removed". The admin path is the
+        # only one that needs this leakage; other call sites still go
+        # through the filtering ``list_scopes_for_document``.
+        for document in page:
+            document.scopes = list(self.scopes_by_document.get(document.id, ()))
+        if len(page_plus_one) > limit and page:
+            last = page[-1]
+            assert last.archived_at is not None  # guard rail; filtered above
+            next_cursor = _encode_archived_cursor((last.archived_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
+
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,  # noqa: ARG002 — recorded on the audit row, not the version model.
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> DocumentVersion:
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        version: DocumentVersion | None = None
+        for candidate in document.versions:
+            if candidate.id == version_id:
+                version = candidate
+                break
+        if version is None:
+            raise KeyError("Document version not found.")
+        # Idempotent re-purge: already-PURGED rows are returned untouched
+        # so the route layer can honour ADR-027's "no extra audit row"
+        # contract by comparing the returned ``storage_uri`` against the
+        # incoming ``tombstone_uri`` it just computed.
+        if version.status is DocumentVersionStatus.PURGED:
+            return version
+        version.status = DocumentVersionStatus.PURGED
+        version.storage_uri = tombstone_uri
+        # Drop the version from the hash index so a subsequent upload of
+        # the same bytes doesn't resolve to a tombstone'd version (which
+        # would surface a 410 on a fresh ingestion path). The in-memory
+        # store keys by the version's pre-purge sha256; we delete the
+        # entry only when it still points at this version (a sibling
+        # version with the same hash, e.g. the original of a duplicate,
+        # must keep its index entry).
+        indexed = self.versions_by_hash.get(version.sha256)
+        if indexed is not None and indexed.id == version_id:
+            self.versions_by_hash.pop(version.sha256, None)
+        return version
+
 
 class SQLiteCatalogStore:
     """SQLite-backed catalog store for the local persistent MVP."""
@@ -373,15 +906,22 @@ class SQLiteCatalogStore:
         # the in-memory store's behaviour (it never indexes duplicates by
         # hash) and prevents a third upload of the same bytes from chaining
         # off a duplicate row instead of pointing at the original version.
+        # Also exclude ``PURGED`` rows (ADR-027 §3) so a fresh upload of
+        # bytes that match a tombstone'd version's hash starts a brand
+        # new version instead of resolving to a tombstone — the in-
+        # memory store achieves the same by dropping ``versions_by_hash``
+        # entries during ``purge_version_artifacts``.
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM document_versions
-                WHERE sha256 = ? AND duplicate_of_version_id IS NULL
+                WHERE sha256 = ?
+                  AND duplicate_of_version_id IS NULL
+                  AND status != ?
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
-                (sha256,),
+                (sha256, DocumentVersionStatus.PURGED.value),
             ).fetchone()
         return self._version_from_row(row) if row else None
 
@@ -402,7 +942,12 @@ class SQLiteCatalogStore:
             self._insert_version(connection, version)
 
     def append_version_to_document(self, document_id: str, version: DocumentVersion) -> None:
-        if self.get_document(document_id) is None:
+        # Use the archived-inclusive lookup so write paths continue to
+        # work on archived rows when the future Archive/Purge Admin
+        # tool wires up rehydration. The standard surface never appends
+        # to an archived document because the route layer 404s before
+        # reaching this service.
+        if self._get_document_including_archived(document_id) is None:
             raise KeyError("Document not found.")
         with self._connect() as connection:
             self._insert_version(connection, version)
@@ -425,7 +970,10 @@ class SQLiteCatalogStore:
         # and matches the in-memory store's ordering. Status filter
         # joins on the latest version row; the LEFT JOIN keeps documents
         # without versions visible when the filter is absent.
-        clauses: list[str] = []
+        # ``d.archived_at IS NULL`` hides flag-archived rows by default
+        # (ADR-020 §4) — a future Archive/Purge Admin tool can build
+        # its own listing by going through ``_get_document_including_archived``.
+        clauses: list[str] = ["d.archived_at IS NULL"]
         params: list[object] = []
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
@@ -467,16 +1015,60 @@ class SQLiteCatalogStore:
                 """,
                 tuple(ids),
             ).fetchall()
+            # #258 — batch-load active scope links for the page in a
+            # single query so the read path stays N+1-free. The
+            # ``removed_at IS NULL`` predicate matches the no-delete
+            # policy (#262); flagged links are invisible.
+            scopes_by_document = self._batch_list_scopes(connection, ids)
         versions_by_document: dict[str, list[DocumentVersion]] = {}
         for row in version_rows:
             version = self._version_from_row(row)
             versions_by_document.setdefault(version.document_id, []).append(version)
         return [
-            self._document_from_row(row, versions_by_document.get(row["id"], []))
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
             for row in document_rows
         ]
 
     def get_document(self, document_id: str) -> Document | None:
+        # Filter ``archived_at IS NULL`` so flag-archived docs return
+        # None — the route layer maps that to a 404 (hidden-existence).
+        # The future Archive/Purge Admin tool reaches archived rows via
+        # ``_get_document_including_archived``.
+        with self._connect() as connection:
+            document_row = connection.execute(
+                "SELECT * FROM documents WHERE id = ? AND archived_at IS NULL",
+                (document_id,),
+            ).fetchone()
+            if document_row is None:
+                return None
+            version_rows = connection.execute(
+                """
+                SELECT * FROM document_versions
+                WHERE document_id = ?
+                ORDER BY created_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
+        versions = [self._version_from_row(row) for row in version_rows]
+        # #258 — populate scopes on detail reads. Soft-removed rows are
+        # filtered by ``list_scopes_for_document``.
+        scopes = self.list_scopes_for_document(document_id)
+        return self._document_from_row(document_row, versions, scopes)
+
+    def _get_document_including_archived(self, document_id: str) -> Document | None:
+        """Internal accessor that ignores ``archived_at``.
+
+        Reserved for the future Archive/Purge Admin tool (D.9, deferred
+        ADR). Not exposed via the public :class:`CatalogStore` Protocol
+        and never wired into a route in this PR. Used by the cascade
+        service to resolve an already-archived document during the
+        idempotent re-archive path so the original timestamp can be
+        preserved without breaking the "reads hide archived" invariant.
+        """
         with self._connect() as connection:
             document_row = connection.execute(
                 "SELECT * FROM documents WHERE id = ?",
@@ -492,8 +1084,21 @@ class SQLiteCatalogStore:
                 """,
                 (document_id,),
             ).fetchall()
+            # #258 — populate ``Document.scopes`` on detail reads too.
+            # Goes through the same ``list_scopes_for_document`` path so
+            # soft-removed links are filtered.
+            scope_rows = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id = ? AND removed_at IS NULL
+                ORDER BY added_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
         versions = [self._version_from_row(row) for row in version_rows]
-        return self._document_from_row(document_row, versions)
+        scopes = [self._scope_from_row(row) for row in scope_rows]
+        return self._document_from_row(document_row, versions, scopes)
 
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
         with self._connect() as connection:
@@ -505,7 +1110,12 @@ class SQLiteCatalogStore:
                 (document_id, version_id),
             ).fetchone()
         if row is None:
-            document_exists = self.get_document(document_id) is not None
+            # Use the archived-inclusive lookup so the disambiguation
+            # between "document missing" and "version missing" still
+            # holds for archived documents. ``get_version`` is a
+            # write-path helper used by lifecycle transitions; archive
+            # state is not its concern.
+            document_exists = self._get_document_including_archived(document_id) is not None
             if not document_exists:
                 raise KeyError("Document not found.")
             raise KeyError("Document version not found.")
@@ -715,14 +1325,62 @@ class SQLiteCatalogStore:
             ),
         )
 
-    def _document_from_row(self, row: sqlite3.Row, versions: list[DocumentVersion]) -> Document:
+    def _document_from_row(
+        self,
+        row: sqlite3.Row,
+        versions: list[DocumentVersion],
+        scopes: list[Scope] | None = None,
+    ) -> Document:
+        # Migration 0006 guarantees ``archived_at`` is on every row; it
+        # may be NULL but the SELECT always includes it. Falling back to
+        # ``None`` via ``row.keys()`` would also work, but the explicit
+        # guard documents the column contract.
+        archived_at = row["archived_at"] if "archived_at" in row.keys() else None  # noqa: SIM118 — sqlite3.Row supports `in` only via .keys()
         return Document(
             id=row["id"],
             original_filename=row["original_filename"],
             latest_version_id=row["latest_version_id"],
             created_at=row["created_at"],
+            archived_at=archived_at,
             versions=versions,
+            scopes=scopes if scopes is not None else [],
         )
+
+    def _batch_list_scopes(
+        self,
+        connection: sqlite3.Connection,
+        document_ids: list[str],
+    ) -> dict[str, list[Scope]]:
+        """Group active scope links by ``document_id`` in a single query.
+
+        Issued once per page (``list_documents`` /
+        ``list_documents_in_scope``) so the read path stays N+1-free
+        when ``Document.scopes`` is populated (#258). Soft-removed
+        links (``removed_at IS NOT NULL``) are filtered per the
+        no-delete policy (#262); flagged rows stay in the table for a
+        future Archive/Purge tool but are invisible to reads.
+
+        Returns a dict keyed by ``document_id``; documents with no
+        active scope link are absent from the dict (callers fall back
+        to an empty list). Order within each list is ``added_at ASC``,
+        matching :meth:`list_scopes_for_document`.
+        """
+        if not document_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in document_ids)
+        rows = connection.execute(
+            f"""
+            SELECT document_id, scope_kind, scope_ref, added_at, added_by, removed_at
+            FROM document_scopes
+            WHERE document_id IN ({placeholders}) AND removed_at IS NULL
+            ORDER BY added_at ASC
+            """,
+            tuple(document_ids),
+        ).fetchall()
+        grouped: dict[str, list[Scope]] = {}
+        for row in rows:
+            grouped.setdefault(row["document_id"], []).append(self._scope_from_row(row))
+        return grouped
 
     def _version_from_row(self, row: sqlite3.Row) -> DocumentVersion:
         return DocumentVersion(
@@ -751,3 +1409,368 @@ class SQLiteCatalogStore:
         if row is None:
             raise KeyError("Semantic output not found.")
         return json.loads(row["payload"])
+
+    # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
+
+    def add_scope(self, document_id: str, scope: Scope) -> None:
+        # UPSERT pattern: inserting a fresh row stores added_at/added_by;
+        # hitting the (document_id, scope_kind, scope_ref) PK on a
+        # previously soft-removed row reactivates it (clear removed_at,
+        # overwrite added_at/added_by with the re-link caller's identity).
+        # Hitting the PK on an active row is a no-op via the WHERE clause
+        # on the DO UPDATE — first-write wins for active links.
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO document_scopes (
+                    document_id, scope_kind, scope_ref, added_at, added_by, removed_at
+                )
+                VALUES (?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(document_id, scope_kind, scope_ref) DO UPDATE SET
+                    removed_at = NULL,
+                    added_at = excluded.added_at,
+                    added_by = excluded.added_by
+                WHERE document_scopes.removed_at IS NOT NULL
+                """,
+                (
+                    document_id,
+                    scope.kind,
+                    scope.ref,
+                    scope.added_at.isoformat(),
+                    scope.added_by,
+                ),
+            )
+
+    def list_scopes_for_document(self, document_id: str) -> list[Scope]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id = ? AND removed_at IS NULL
+                ORDER BY added_at ASC
+                """,
+                (document_id,),
+            ).fetchall()
+        return [self._scope_from_row(row) for row in rows]
+
+    def list_documents_in_scope(
+        self,
+        scope_kind: str,
+        scope_ref: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # Fetch ``limit + 1`` rows so we can emit a next-cursor only when
+        # there's strictly more data behind the page. Matches the
+        # in-memory impl's "page short of limit signals end" rule.
+        # ``s.removed_at IS NULL`` filters soft-removed scope links per
+        # the no-delete policy — flagged rows stay in the table for the
+        # future Archive/Purge Admin tool but are invisible to reads.
+        # ``d.archived_at IS NULL`` additionally hides documents that
+        # were flag-archived by the orphan cascade (ADR-020 §4).
+        clauses: list[str] = [
+            "s.scope_kind = ?",
+            "s.scope_ref = ?",
+            "s.removed_at IS NULL",
+            "d.archived_at IS NULL",
+        ]
+        params: list[object] = [scope_kind, scope_ref]
+        if cursor is not None:
+            after_created_at, after_id = _decode_cursor(cursor)
+            clauses.append("(d.created_at, d.id) > (?, ?)")
+            params.extend([after_created_at.isoformat(), after_id])
+        params.append(int(limit) + 1)
+        query = (
+            "SELECT d.* FROM document_scopes s "
+            "INNER JOIN documents d ON d.id = s.document_id "
+            "WHERE " + " AND ".join(clauses) + " "
+            "ORDER BY d.created_at ASC, d.id ASC "
+            "LIMIT ?"
+        )
+        with self._connect() as connection:
+            document_rows = connection.execute(query, tuple(params)).fetchall()
+            if not document_rows:
+                return [], None
+            ids = [row["id"] for row in document_rows[:limit]]
+            placeholders = ", ".join("?" for _ in ids)
+            version_rows = connection.execute(
+                f"""
+                SELECT * FROM document_versions
+                WHERE document_id IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+            # #258 — batch-load active scope links for the page so
+            # the catalog projection sees the same shape as ``GET
+            # /documents``. Stays N+1-free.
+            scopes_by_document = self._batch_list_scopes(connection, ids)
+        versions_by_document: dict[str, list[DocumentVersion]] = {}
+        for row in version_rows:
+            version = self._version_from_row(row)
+            versions_by_document.setdefault(version.document_id, []).append(version)
+        page_rows = document_rows[:limit]
+        page = [
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
+            for row in page_rows
+        ]
+        if len(document_rows) > limit and page:
+            last = page[-1]
+            next_cursor: str | None = _encode_cursor((last.created_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
+
+    def get_scope_link(
+        self,
+        document_id: str,
+        scope_kind: str,
+        scope_ref: str,
+    ) -> Scope | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id = ?
+                  AND scope_kind = ?
+                  AND scope_ref = ?
+                """,
+                (document_id, scope_kind, scope_ref),
+            ).fetchone()
+        return self._scope_from_row(row) if row else None
+
+    def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        # Soft-remove: stamp removed_at on the active row only. Already-
+        # removed rows preserve their original removed_at timestamp;
+        # non-existent rows produce zero rowcount (idempotent). The row
+        # is never physically deleted — the future Archive/Purge Admin
+        # tool is the only path to that.
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE document_scopes
+                SET removed_at = ?
+                WHERE document_id = ?
+                  AND scope_kind = ?
+                  AND scope_ref = ?
+                  AND removed_at IS NULL
+                """,
+                (
+                    datetime.now(UTC).isoformat(),
+                    document_id,
+                    scope_kind,
+                    scope_ref,
+                ),
+            )
+
+    def _scope_from_row(self, row: sqlite3.Row) -> Scope:
+        # Migration 0005 guarantees ``removed_at`` is on every row; the
+        # column may be NULL but the SELECT always includes it.
+        return Scope(
+            kind=row["scope_kind"],
+            ref=row["scope_ref"],
+            added_at=row["added_at"],
+            added_by=row["added_by"],
+            removed_at=row["removed_at"],
+        )
+
+    # ------- Archive flag (ADR-020 §4, EPIC-D D.6/D.7) ------- #
+
+    def flag_document_archived(
+        self,
+        document_id: str,
+        *,
+        archived_at: datetime,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Idempotent flag: only set ``archived_at`` when it's still NULL
+        # so a re-archive preserves the original timestamp (audit-faithful).
+        # Confirm the row exists first so a missing document raises
+        # KeyError instead of silently no-op'ing into a misleading return.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET archived_at = ?
+                WHERE id = ? AND archived_at IS NULL
+                """,
+                (archived_at.isoformat(), document_id),
+            )
+        # Re-read so the returned Document carries the current
+        # ``archived_at`` (either the new timestamp or, for an idempotent
+        # second-archive, the original one).
+        refreshed = self._get_document_including_archived(document_id)
+        assert refreshed is not None  # we just confirmed existence
+        return refreshed
+
+    def list_archived_documents(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Document], str | None]:
+        # SQL walks ``documents`` filtered to ``archived_at IS NOT NULL``,
+        # sorted by ``archived_at DESC, id ASC`` (the secondary sort by
+        # id keeps two same-second archives from shifting between pages
+        # — same trick the standard cursor codec uses). The cursor
+        # inequality flips relative to ``list_documents``: under DESC
+        # we want rows STRICTLY OLDER than the cursor (or same archived_at
+        # with id ASC after the cursor's id).
+        clauses: list[str] = ["archived_at IS NOT NULL"]
+        params: list[object] = []
+        if cursor is not None:
+            after_archived_at, after_id = _decode_archived_cursor(cursor)
+            clauses.append("(archived_at < ? OR (archived_at = ? AND id > ?))")
+            params.extend(
+                [
+                    after_archived_at.isoformat(),
+                    after_archived_at.isoformat(),
+                    after_id,
+                ]
+            )
+        params.append(int(limit) + 1)  # fetch one extra to decide on cursor
+        query = (
+            "SELECT * FROM documents WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY archived_at DESC, id ASC LIMIT ?"
+        )
+        with self._connect() as connection:
+            document_rows = connection.execute(query, tuple(params)).fetchall()
+            if not document_rows:
+                return [], None
+            page_rows = document_rows[:limit]
+            ids = [row["id"] for row in page_rows]
+            placeholders = ", ".join("?" for _ in ids)
+            version_rows = connection.execute(
+                f"""
+                SELECT * FROM document_versions
+                WHERE document_id IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+            # The admin view needs to see soft-removed scope links so it
+            # can surface the "last scope removed" before the cascade
+            # archived this row — bypass the standard ``removed_at IS
+            # NULL`` filter on purpose. Other read paths still go
+            # through ``_batch_list_scopes`` which keeps the soft-remove
+            # invariant; this is the documented escape hatch.
+            scope_rows = connection.execute(
+                f"""
+                SELECT document_id, scope_kind, scope_ref, added_at, added_by, removed_at
+                FROM document_scopes
+                WHERE document_id IN ({placeholders})
+                ORDER BY added_at ASC
+                """,
+                tuple(ids),
+            ).fetchall()
+        scopes_by_document: dict[str, list[Scope]] = {}
+        for srow in scope_rows:
+            scopes_by_document.setdefault(srow["document_id"], []).append(
+                self._scope_from_row(srow)
+            )
+        versions_by_document: dict[str, list[DocumentVersion]] = {}
+        for vrow in version_rows:
+            version = self._version_from_row(vrow)
+            versions_by_document.setdefault(version.document_id, []).append(version)
+        page = [
+            self._document_from_row(
+                row,
+                versions_by_document.get(row["id"], []),
+                scopes_by_document.get(row["id"], []),
+            )
+            for row in page_rows
+        ]
+        if len(document_rows) > limit and page:
+            last = page[-1]
+            assert last.archived_at is not None  # guard rail; clause filtered
+            next_cursor: str | None = _encode_archived_cursor((last.archived_at, last.id))
+        else:
+            next_cursor = None
+        return page, next_cursor
+
+    def unarchive_document(
+        self,
+        document_id: str,
+        *,
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> Document:
+        # Confirm existence first so a missing document raises KeyError
+        # rather than silently no-op'ing — same shape as
+        # ``flag_document_archived``.
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET archived_at = NULL
+                WHERE id = ? AND archived_at IS NOT NULL
+                """,
+                (document_id,),
+            )
+        # Re-read so the returned Document reflects the current state.
+        # When the row was already active the UPDATE matched zero rows
+        # (idempotent no-op) and the read returns the same row unchanged.
+        # ``get_document`` filters archived rows; once the UPDATE has
+        # cleared the flag we use the standard accessor to get the
+        # populated ``scopes`` field.
+        refreshed = self.get_document(document_id)
+        if refreshed is None:
+            # The row was already archived AND the UPDATE didn't clear
+            # it (race / impossible by construction). Fall back to the
+            # archived-inclusive accessor so the contract still holds.
+            refreshed = self._get_document_including_archived(document_id)
+        assert refreshed is not None  # we just confirmed existence
+        return refreshed
+
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,  # noqa: ARG002 — recorded on the audit row, not the version row.
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> DocumentVersion:
+        # Use ``get_version`` to surface "Document not found." vs
+        # "Document version not found." discriminated KeyErrors —
+        # mirrors the existing ``update_version_status`` shape so the
+        # route layer's 404 envelope stays consistent.
+        version = self.get_version(document_id=document_id, version_id=version_id)
+        # Idempotent re-purge: short-circuit before touching the row so
+        # the tombstone URI captured at the original purge moment is
+        # preserved (re-running the route with a fresh ``purged_at``
+        # would otherwise overwrite the timestamp embedded in the
+        # tombstone).
+        if version.status is DocumentVersionStatus.PURGED:
+            return version
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE document_versions
+                SET status = ?, storage_uri = ?
+                WHERE document_id = ? AND id = ?
+                """,
+                (
+                    DocumentVersionStatus.PURGED.value,
+                    tombstone_uri,
+                    document_id,
+                    version_id,
+                ),
+            )
+        # Re-read so the returned DocumentVersion reflects the
+        # tombstone URI / new status — the route layer hands the
+        # response back to clients verbatim.
+        return self.get_version(document_id=document_id, version_id=version_id)

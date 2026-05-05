@@ -125,6 +125,212 @@ def _migrate_0002_add_review_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE document_versions ADD COLUMN reviewed_at TEXT")
 
 
+def _migrate_0003_perf_indexes(conn: sqlite3.Connection) -> None:
+    """Add indexes on hot read paths uncovered by the 2026-05-04 audit (#224).
+
+    1. ``idx_document_versions_document_id`` — the ``list_documents`` page
+       fetches versions for the returned slice via
+       ``WHERE document_id IN (...)``. Without this index that secondary
+       query scans the full ``document_versions`` table on every page.
+    2. ``idx_documents_created_at_id`` — cursor pagination orders by
+       ``(d.created_at, d.id)`` and predicates the cursor as
+       ``(d.created_at, d.id) > (?, ?)``. The composite covers both the
+       sort and the cursor predicate so the planner can serve pages
+       directly from the index.
+
+    Both indexes use ``IF NOT EXISTS`` so re-running this migration on a
+    database where the indexes were created out-of-band is safe.
+    """
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_versions_document_id "
+        "ON document_versions (document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_created_at_id ON documents (created_at, id)"
+    )
+
+
+def _migrate_0005_document_scopes_removed_at(conn: sqlite3.Connection) -> None:
+    """Add ``removed_at`` to ``document_scopes`` for soft-remove semantics.
+
+    Per the no-delete policy (no real deletion of document source data —
+    flag-only, real purge handled by a future Archive/Purge Admin tool),
+    ``CatalogStore.remove_scope`` no longer deletes the row but flags
+    it with a ``removed_at`` timestamp. ``add_scope`` reactivates a
+    flagged row instead of failing the PK constraint.
+
+    SQLite does not support ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``,
+    so we inspect ``PRAGMA table_info`` first.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(document_scopes)").fetchall()}
+    if "removed_at" not in existing:
+        conn.execute("ALTER TABLE document_scopes ADD COLUMN removed_at TEXT")
+
+
+def _migrate_0006_documents_archived_at(conn: sqlite3.Connection) -> None:
+    """Add ``archived_at`` to ``documents`` for the flag-only orphan cascade.
+
+    Per the no-delete policy and ADR-020 §4 (rewritten in #262): when a
+    document loses its last active scope link (e.g. its only Swym
+    community got deleted), the cascade flags the document with an
+    ``archived_at`` timestamp instead of physically deleting bytes,
+    extractions, semantic JSON, or markdown assets. Read paths
+    (``list_documents``, ``list_documents_in_scope``, ``get_document``,
+    ``/knowledge/catalog``) filter ``archived_at IS NULL`` so archived
+    rows are invisible to the standard surface but stay recoverable
+    until the future Archive/Purge Admin tool acts on them.
+
+    SQLite does not support ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``,
+    so we inspect ``PRAGMA table_info`` first — same pattern as
+    migration 0002 / 0005.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+    if "archived_at" not in existing:
+        conn.execute("ALTER TABLE documents ADD COLUMN archived_at TEXT")
+
+
+def _migrate_0007_validation_metadata(conn: sqlite3.Connection) -> None:
+    """HITL validation metadata sidecar (ADR-023, EPIC-A A.5, #215).
+
+    Sidecar table keyed by ``version_id`` that holds the 5-signal
+    confidence breakdown plus the routing decision the
+    ``hitl_router.py`` next slice will write. Kept off the public
+    ``Document`` / ``DocumentVersion`` API surface per EPIC-A's
+    "auto-validated == human-validated to consumers" rule, so the
+    visibility is by-construction (no route reads from this table on
+    the public read path).
+
+    The JSON-text columns (``confidence_signals`` / ``confidence_weights``)
+    serialise the per-signal dicts; SQLite's JSON support is sufficient
+    for the v1 ad-hoc audit queries we need ("show me every
+    auto-validated version with orphan_ratio > 0.3"). A future
+    migration can promote them to typed columns without breaking the
+    contract — the sidecar isolation is the load-bearing property.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS validation_metadata (
+            version_id        TEXT PRIMARY KEY,
+            confidence_overall REAL,
+            confidence_signals TEXT,
+            confidence_weights TEXT,
+            ocr_override_active INTEGER,
+            confidence_computed_at TEXT,
+            confidence_computed_by_version TEXT,
+            routing_decision TEXT,
+            validation_method TEXT,
+            validation_actor TEXT,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id)
+        )
+        """
+    )
+
+
+def _migrate_0008_corpus_norms(conn: sqlite3.Connection) -> None:
+    """Corpus norms backing the length / asset z-score signals (ADR-023 §1, §4).
+
+    Stores ``(mean, stddev, sample_count)`` per
+    ``(content_type, topic_cluster, metric_name)`` bucket. The scorer
+    consults this table to compute z-scores for the
+    ``section_length`` and ``asset_count`` signals; missing buckets
+    score ``1.0`` (cold-start tolerance, see ADR-023 §1).
+
+    Materialised on-demand: the first request for an unknown bucket
+    triggers a one-time scan of the catalog's existing semantic
+    documents to compute the norms and persist the row. The compound
+    primary key keeps a bucket from being recorded twice; an ``INSERT
+    OR REPLACE`` on the recompute path is idempotent.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS corpus_norms (
+            content_type    TEXT NOT NULL,
+            topic_cluster   TEXT NOT NULL,
+            metric_name     TEXT NOT NULL,
+            sample_count    INTEGER NOT NULL,
+            mean            REAL NOT NULL,
+            stddev          REAL NOT NULL,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (content_type, topic_cluster, metric_name)
+        )
+        """
+    )
+
+
+def _migrate_0009_sampling_state(conn: sqlite3.Connection) -> None:
+    """SPC sampling state per ``(content_type, topic_cluster)`` bucket
+    (ADR-023 §6, EPIC-A A.3, #215).
+
+    Backs :class:`SQLiteSamplingStateStore`. The HITL router bumps
+    these counters every time it makes a routing decision so the
+    future drift detector can detect "this bucket's auto-rate is
+    diverging from its observed human-flip rate" without a SQL
+    materialisation pass over the audit table.
+
+    Counters are non-negative and monotonic — the router only ever
+    increments — and ``samples_human_after_auto`` is reserved for the
+    drift signal the auto-promotion / drift-detector worker (next
+    slice) writes when a human reviewer overturns a previously-auto
+    decision.
+
+    The compound primary key keeps a bucket from being recorded twice
+    and lets the in-memory + SQLite implementations share an
+    ``INSERT OR IGNORE`` + ``UPDATE`` write pattern that's portable
+    across SQLite versions older than the UPSERT cutoff (3.24).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sampling_state (
+            content_type            TEXT NOT NULL,
+            topic_cluster           TEXT NOT NULL,
+            samples_taken           INTEGER NOT NULL DEFAULT 0,
+            samples_auto            INTEGER NOT NULL DEFAULT 0,
+            samples_human           INTEGER NOT NULL DEFAULT 0,
+            samples_human_after_auto INTEGER NOT NULL DEFAULT 0,
+            last_decision_at        TEXT,
+            PRIMARY KEY (content_type, topic_cluster)
+        )
+        """
+    )
+
+
+def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
+    """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
+
+    Creates the ``document_scopes`` join table that links a document
+    family to one or more scopes (``personal`` / ``swym_community`` /
+    ``project``). A document can live in N scopes simultaneously; the
+    primary key ``(document_id, scope_kind, scope_ref)`` keeps the
+    same scope from being recorded twice for the same document.
+
+    The single supporting index covers the read pattern "list documents
+    in scope X" used by the future EPIC-D D.5 filter on every list /
+    search / graph endpoint. The reverse pattern ("list scopes for
+    document Y") is already covered by the primary key prefix.
+
+    Both DDL statements use ``IF NOT EXISTS`` so the migration is
+    idempotent — re-running on a database where the structures were
+    created out-of-band is safe.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_scopes (
+            document_id TEXT NOT NULL,
+            scope_kind  TEXT NOT NULL,
+            scope_ref   TEXT NOT NULL,
+            added_at    TEXT NOT NULL,
+            added_by    TEXT NOT NULL,
+            PRIMARY KEY (document_id, scope_kind, scope_ref),
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_scopes_lookup "
+        "ON document_scopes (scope_kind, scope_ref)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ordered registry — append only, never renumber
 # ---------------------------------------------------------------------------
@@ -132,12 +338,32 @@ def _migrate_0002_add_review_columns(conn: sqlite3.Connection) -> None:
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
+    ("0003_perf_indexes", _migrate_0003_perf_indexes),
+    ("0004_document_scopes", _migrate_0004_document_scopes),
+    ("0005_document_scopes_removed_at", _migrate_0005_document_scopes_removed_at),
+    ("0006_documents_archived_at", _migrate_0006_documents_archived_at),
+    ("0007_validation_metadata", _migrate_0007_validation_metadata),
+    ("0008_corpus_norms", _migrate_0008_corpus_norms),
+    ("0009_sampling_state", _migrate_0009_sampling_state),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
-# Used by the bootstrap detection to decide whether to stamp all migrations
-# without running them.
+# Used by the bootstrap detection to decide whether to stamp the
+# bootstrap-eligible migrations without running them.
 _LEGACY_TABLES = frozenset({"documents", "document_versions"})
+
+# Migrations whose effects are guaranteed to already be present in any DB
+# that triggers the legacy bootstrap path (i.e. the original ``_initialize``
+# created these structures). New migrations added after the bootstrap rule
+# was written must NOT be added here — they need to actually run on legacy
+# databases too. Per audit #224, the perf indexes (0003) are intentionally
+# not bootstrap-eligible because they did not exist before this commit.
+_BOOTSTRAP_STAMPED_MIGRATION_IDS = frozenset(
+    {
+        "0001_initial",
+        "0002_add_review_columns",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +404,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
     # --- Backwards-compatibility bootstrap --------------------------------
     # If schema_migrations is empty but the legacy tables already exist,
-    # stamp all current migrations as applied without running their callables.
-    # This adopts existing on-disk databases without touching their data.
+    # stamp the migrations whose effects are known to already be present
+    # (``_BOOTSTRAP_STAMPED_MIGRATION_IDS``) without running their callables.
+    # Any later migration drops through to the normal path so it actually
+    # runs on the legacy database — required for additive migrations like
+    # the perf indexes added by 0003 (audit #224).
     if not applied:
         existing_tables = {
             row[0]
@@ -189,9 +418,13 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             now = datetime.now(UTC).isoformat()
             conn.executemany(
                 "INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)",
-                [(migration_id, now) for migration_id, _ in MIGRATIONS],
+                [
+                    (migration_id, now)
+                    for migration_id, _ in MIGRATIONS
+                    if migration_id in _BOOTSTRAP_STAMPED_MIGRATION_IDS
+                ],
             )
-            return
+            applied = set(_BOOTSTRAP_STAMPED_MIGRATION_IDS)
 
     # --- Normal path: run unapplied migrations in order -------------------
     for migration_id, migrate_fn in MIGRATIONS:

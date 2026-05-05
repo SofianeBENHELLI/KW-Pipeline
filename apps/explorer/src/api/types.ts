@@ -166,3 +166,41 @@ export interface KnowledgeGraphPage {
   edges: GraphEdge[];
   next_cursor: string | null;
 }
+
+// ─── Taxonomy (ADR-017) ──────────────────────────────────────────────────────
+
+/**
+ * One node in the hybrid taxonomy tree. Mirrors
+ * ``app.schemas.taxonomy::TaxonomyCategory`` — see ADR-017 for the
+ * shape rationale (tree, not graph; ids stable across runs;
+ * description embedded by the classifier).
+ *
+ * ``source`` (#249) records which half of the hybrid taxonomy the
+ * category came from: ``"imposed"`` for operator-authored YAML
+ * entries, ``"computed"`` for auto-deduced topic clusters. Optional
+ * for forward/backward-compat with older API builds — a missing
+ * field is treated as ``"computed"`` by ``adaptTaxonomy`` since
+ * that is the safer assumption for the badge in the rail.
+ */
+export interface TaxonomyCategory {
+  id: string;
+  label: string;
+  description: string;
+  subcategories: TaxonomyCategory[];
+  source?: "computed" | "imposed";
+}
+
+/**
+ * Wire shape of ``GET /knowledge/taxonomy``. ``is_configured`` is
+ * ``false`` when **both** halves of the hybrid taxonomy are empty —
+ * no YAML and no topic clusters — and the route returns 200 with
+ * empty ``categories``. As soon as either half has content the
+ * route is configured and ``categories`` carries entries from both,
+ * each tagged with its ``source``.
+ */
+export interface TaxonomyResponse {
+  schema_version: string;
+  is_configured: boolean;
+  source_path: string | null;
+  categories: TaxonomyCategory[];
+}

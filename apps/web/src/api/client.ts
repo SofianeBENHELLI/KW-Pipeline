@@ -15,6 +15,10 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiAdminAuditEventsResponse,
+  ApiAdminHITLStateResponse,
+  ApiArchivedDocumentsResponse,
+  ApiAutoPromoteResult,
   ApiBatchUploadResult,
   ApiChatMode,
   ApiChatResponse,
@@ -23,8 +27,13 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiPurgeArtifactsResponse,
+  ApiPurgeBatchResponse,
   ApiRawExtraction,
+  ApiRelinkScopeRequest,
+  ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiUnarchiveResponse,
   ApiUploadResponse,
   ListDocumentsResponse,
 } from "./types";
@@ -32,6 +41,13 @@ import type {
 // ─── Base URL + transport ────────────────────────────────────────────────────
 
 const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+/** Resolved API base URL — exposed so the Settings surface can show
+ *  what's actually being targeted at runtime. Build-time only; the
+ *  web app does not let users mutate it (unlike the widget tile). */
+export function getApiBaseUrl(): string {
+  return BASE_URL;
+}
 
 // Delegate to `globalThis.fetch` at call time (rather than letting
 // openapi-fetch capture a reference at construction). This keeps test
@@ -41,6 +57,52 @@ const http = createClient<paths>({
   baseUrl: BASE_URL,
   fetch: (...args) => globalThis.fetch(...args),
 });
+
+// ─── 401 / session-expired hook (#83 slice 3) ────────────────────────────────
+
+/**
+ * Module-level callback the SessionGuardProvider registers in a
+ * ``useEffect`` so this fetch wrapper can flip the banner on when
+ * an :class:`ApiError` with ``status === 401`` is constructed.
+ *
+ * The seam is intentionally tiny: a single setter, a single call
+ * site, and a no-op default so this client keeps working in unit
+ * tests that don't mount the provider. ADR-019 §5 mandates the
+ * envelope; this is the JS-side hook that turns it into UX.
+ *
+ * Limitation: the default ``KW_AUTH_MODE=dev`` (per #245) never
+ * returns 401 in normal operation, so the hook is exercised via
+ * vitest mocks and the ``#force-session-expired`` URL-hash dev
+ * stub installed at the app root.
+ */
+type SessionTrigger = () => void;
+let sessionTrigger: SessionTrigger = () => {
+  // No-op until the provider registers a real one. Mirrors the
+  // useSessionGuard default, so the API client stays usable
+  // outside the React tree (codegen smoke tests, node scripts).
+};
+
+/**
+ * Register the callback that flips the session-expired banner on.
+ *
+ * Called once from ``<SessionGuardProvider>`` inside a useEffect —
+ * the registration happens before any user-driven request, because
+ * the provider sits at the app root above every component that
+ * fetches.
+ */
+export function setSessionTrigger(fn: SessionTrigger): void {
+  sessionTrigger = fn;
+}
+
+/**
+ * Reset the registered trigger back to the default no-op. Tests use
+ * this between cases so a 401 in one test doesn't leak into the next.
+ */
+export function clearSessionTrigger(): void {
+  sessionTrigger = () => {
+    /* no-op */
+  };
+}
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +114,11 @@ const http = createClient<paths>({
  * `ApiError` mirrors the public fields onto a JS Error subclass so call
  * sites can `throw err`, `if (err instanceof ApiError)`, and read the
  * structured fields without re-parsing the response.
+ *
+ * Constructing an ApiError with ``status === 401`` ALWAYS fires the
+ * session-expired trigger (#83 slice 3 / ADR-019 §5). The trigger is
+ * a no-op until ``<SessionGuardProvider>`` registers its setter, so
+ * unit tests that don't mount the provider stay quiet.
  */
 export class ApiError extends Error {
   constructor(
@@ -63,6 +130,19 @@ export class ApiError extends Error {
   ) {
     super(`API ${status}: ${detail}`);
     this.name = "ApiError";
+    // Fire the registered session-expired hook for any 401. Catches
+    // every code path that builds an ApiError — openapi-fetch's
+    // ``unwrap`` cascade, the multipart upload's ``asApiError``
+    // branch, and any future helper that throws an ApiError directly.
+    if (status === 401) {
+      try {
+        sessionTrigger();
+      } catch {
+        // Trigger callbacks are React state setters — they shouldn't
+        // throw, but defend so a buggy register doesn't take down
+        // unrelated request handling.
+      }
+    }
   }
 }
 
@@ -511,6 +591,213 @@ export async function askKnowledgeChat(
     await http.POST("/knowledge/chat", {
       body: { question, mode, top_k },
       signal,
+    }),
+  );
+}
+
+// ─── Admin / Archive (D.9 admin UI) ──────────────────────────────────────────
+
+/**
+ * GET /admin/archive/archived_documents
+ *
+ * Paginated walk of flag-archived documents (``archived_at IS NOT NULL``)
+ * sorted ``archived_at DESC``. Returns 403 ``KW_FORBIDDEN`` when the
+ * caller lacks the ``admin`` role — the UI uses that as its sole
+ * "is the user an admin?" probe (we never derive role client-side).
+ */
+export async function listArchivedDocuments(
+  options: { cursor?: string; limit?: number; signal?: AbortSignal } = {},
+): Promise<ApiArchivedDocumentsResponse> {
+  const { cursor, limit = 50, signal } = options;
+  const query: Record<string, string | number> = { limit };
+  if (cursor) query.cursor = cursor;
+  return unwrap(
+    await http.GET("/admin/archive/archived_documents", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/unarchive
+ *
+ * Admin-only. Clears ``archived_at`` so the document reappears on the
+ * standard read path. ``?confirm=true`` is REQUIRED for the real
+ * mutation (defence in depth — ADR-027 §5). 403 if non-admin.
+ */
+export async function unarchiveDocument(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiUnarchiveResponse> {
+  return unwrap(
+    await http.POST("/admin/archive/unarchive", {
+      params: { query: { confirm: true } },
+      body: { document_id: documentId },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/purge_artifacts
+ *
+ * Admin-only. Hard-deletes the document's source artifacts; the
+ * catalog row is preserved as an audit trace per the no-delete
+ * policy. ``?dry_run=true`` returns the impact preview without
+ * mutating state — the UI uses that for the confirmation modal.
+ * ``?confirm=true`` flips the real mutation; the route rejects
+ * passing both.
+ */
+export async function purgeArtifacts(
+  documentId: string,
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiPurgeArtifactsResponse> {
+  const dryRun = options.dryRun ?? false;
+  // ``confirm`` and ``dry_run`` are mutually exclusive — the route
+  // 400s if both are set. Keep the boolean inversion local so call
+  // sites just pick "preview vs real".
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/purge_artifacts", {
+      params: { query },
+      body: { document_id: documentId },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /admin/hitl/state (#215, EPIC-A close-out)
+ *
+ * Admin-only. Returns the HITL routing config + per-bucket SPC
+ * counters + drift ratios + the pending auto-promotion queue depth
+ * as a single read-only snapshot. Powers the ``/admin/hitl``
+ * dashboard. 403 if the caller lacks the ``admin`` role; 503 with
+ * ``KW_HITL_DISABLED`` when ``KW_HITL_DISABLE_SCORER=true``.
+ */
+export async function getAdminHITLState(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiAdminHITLStateResponse> {
+  return unwrap(
+    await http.GET("/admin/hitl/state", {
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/relink_scope
+ *
+ * Admin-only. Reactivates a soft-removed ``document_scopes`` row
+ * (ADR-027 §1.2 / #269). Same dry-run-then-real pattern as the
+ * other admin actions: ``?dry_run=true`` returns the impact preview
+ * without mutating state, ``?confirm=true`` flips the real call.
+ * Backend rejects passing both. Returns 404 if the scope link cannot
+ * be found.
+ */
+export async function relinkScope(
+  request: ApiRelinkScopeRequest,
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiRelinkScopeResponse> {
+  const dryRun = options.dryRun ?? false;
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/relink_scope", {
+      params: { query },
+      body: request,
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/hitl/run_auto_promote_pass (#215 slice 3)
+ *
+ * Admin-only. Synchronously runs one HITL auto-promotion pass and
+ * returns the structured per-version outcome. The dashboard exposes
+ * this behind a single "Run pass" button next to the queue-depth
+ * counter. 503 with ``KW_HITL_DISABLED`` when the worker is unwired
+ * (same kill switch as the scorer / router).
+ */
+export async function runAutoPromotePass(
+  options: { maxVersions?: number; signal?: AbortSignal } = {},
+): Promise<ApiAutoPromoteResult> {
+  const query: Record<string, number> = {};
+  if (options.maxVersions !== undefined) {
+    query.max_versions = options.maxVersions;
+  }
+  return unwrap(
+    await http.POST("/admin/hitl/run_auto_promote_pass", {
+      params: { query: query as never },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /admin/audit/events (#206 follow-up)
+ *
+ * Admin-only. Cursor-paginated walk over the structured audit event
+ * log, sorted ``created_at DESC``. Filter by ``event_name`` / ``actor``
+ * / ``since`` / ``until``; pass back ``next_cursor`` from a prior
+ * response to load the next page. The response always carries
+ * ``available_event_names`` so the UI's filter dropdown is
+ * self-populating.
+ *
+ * Returns 403 ``KW_FORBIDDEN`` when the caller lacks the ``admin``
+ * role; 503 ``KW_AUDIT_DISABLED`` when ``KW_AUDIT_ENABLED=false``
+ * (the in-memory default — the audit DB is opt-in for persistent
+ * deployments).
+ */
+export interface ListAuditEventsOptions {
+  eventName?: string;
+  actor?: string;
+  since?: string;
+  until?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+export async function listAuditEvents(
+  opts: ListAuditEventsOptions = {},
+): Promise<ApiAdminAuditEventsResponse> {
+  const { eventName, actor, since, until, cursor, limit = 50, signal } = opts;
+  const query: Record<string, string | number> = { limit };
+  if (eventName) query.event_name = eventName;
+  if (actor) query.actor = actor;
+  if (since) query.since = since;
+  if (until) query.until = until;
+  if (cursor) query.cursor = cursor;
+  return unwrap(
+    await http.GET("/admin/audit/events", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/purge_batch
+ *
+ * Admin-only. Bulk wrapper around ``purge_artifacts`` (ADR-027 §4 /
+ * #273). Best-effort: a per-doc failure is reported on the matching
+ * ``results[i]`` row rather than aborting the batch. The backend caps
+ * the list at 100 ids per call (422 with ``KW_UNPROCESSABLE_ENTITY``).
+ * Same dry-run-then-real flow as the per-doc routes.
+ */
+export async function purgeBatch(
+  documentIds: string[],
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiPurgeBatchResponse> {
+  const dryRun = options.dryRun ?? false;
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/purge_batch", {
+      params: { query },
+      body: { document_ids: documentIds },
+      signal: options.signal,
     }),
   );
 }

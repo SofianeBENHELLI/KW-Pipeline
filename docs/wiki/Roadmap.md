@@ -1,3 +1,5 @@
+<!-- $PublishToSwym{ "parent": "./Home.md" }$ -->
+
 # Roadmap
 
 The canonical, version-locked roadmap is [`docs/roadmap/mvp_backlog_review.md`](https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/docs/roadmap/mvp_backlog_review.md). This page summarizes status for newcomers.

@@ -61,6 +61,24 @@ class ErrorCode:
     # ─── Phase 3 grounded chat (POST /knowledge/chat) ──────────────
     CHAT_DISABLED = "KW_CHAT_DISABLED"
 
+    # ─── ADR-027 §3 — purged document / version reads ──────────────
+    # 410 Gone envelope code surfaced when ``purge_artifacts`` has
+    # tombstoned a version's bytes. Distinguished from KW_NOT_FOUND
+    # so consumers can render a tombstone card with the purge
+    # timestamp instead of a generic "not found" message.
+    PURGED = "KW_PURGED"
+
+    # ─── HITL auto-promotion (POST /admin/hitl/run_auto_promote_pass) ─
+    HITL_DISABLED = "KW_HITL_DISABLED"
+
+    # ─── Admin audit log viewer (GET /admin/audit/events, #206 follow-up) ─
+    # Surfaced as a 503 when ``KW_AUDIT_ENABLED=false`` (the in-memory
+    # default). The store still works in-process — but a deployment
+    # that opts out of the persistent audit DB has no historical
+    # rows to browse, so the route fails closed with a remediation
+    # hint pointing at the env var.
+    AUDIT_DISABLED = "KW_AUDIT_DISABLED"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"
@@ -80,6 +98,7 @@ _STATUS_FALLBACK_CODES: dict[int, str] = {
     403: ErrorCode.FORBIDDEN,
     404: ErrorCode.NOT_FOUND,
     409: ErrorCode.CONFLICT,
+    410: ErrorCode.PURGED,
     413: ErrorCode.PAYLOAD_TOO_LARGE,
     415: ErrorCode.UNSUPPORTED_MEDIA_TYPE,
     422: ErrorCode.UNPROCESSABLE_ENTITY,

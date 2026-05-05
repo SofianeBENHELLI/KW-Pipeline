@@ -6,6 +6,7 @@ from pydantic import Field
 
 from app.models.document import DocumentVersionStatus
 from app.schemas import APISchemaModel as BaseModel
+from app.schemas.scope import Scope
 
 
 def utc_now() -> datetime:
@@ -32,13 +33,36 @@ class DocumentVersion(BaseModel):
 
 
 class Document(BaseModel):
-    """Logical document family containing one or more versions."""
+    """Logical document family containing one or more versions.
+
+    ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
+    §4). Set when the orphan cascade flags a document as archived
+    because it lost its last active scope link (see
+    :class:`app.services.scope_cascade_service.ScopeCascadeService`).
+    Default read paths hide rows where ``archived_at IS NOT NULL`` so
+    archived documents are invisible to the standard surface while the
+    bytes / extractions / semantic JSON / markdown assets stay on disk
+    until the future Archive/Purge Admin tool acts on them.
+
+    ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
+    document currently lives in — populated by every
+    :class:`CatalogStore` read path so the frontend can render its
+    scope chip on any list/detail response without a follow-up call.
+    Soft-removed links (per the no-delete policy) are filtered out at
+    the store layer via ``list_scopes_for_document``. The default
+    ``[]`` keeps construction sites that don't care about scopes (e.g.
+    inline test fixtures, ``with_first_version``) terse — those callers
+    still serialize a present-but-empty list, which the OpenAPI
+    contract marks as required (defaults required = wire-honest).
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     original_filename: str
     latest_version_id: str
     created_at: datetime = Field(default_factory=utc_now)
+    archived_at: datetime | None = None
     versions: list[DocumentVersion] = Field(default_factory=list)
+    scopes: list[Scope] = Field(default_factory=list)
 
     @classmethod
     def with_first_version(cls, version: DocumentVersion) -> Self:
@@ -50,11 +74,108 @@ class Document(BaseModel):
         )
 
 
+class UploadDocumentResponse(DocumentVersion):
+    """Response body for ``POST /documents/upload`` (EPIC-D D.1, #218).
+
+    Extends :class:`DocumentVersion` with the workspace-scope links
+    that were created at upload time. ``scopes`` is the read-side
+    counterpart to the optional ``scope_kind`` / ``scope_ref`` query
+    params on the upload route — it surfaces every scope this upload
+    landed in so the client can refresh its workspace picker without
+    a follow-up ``list_scopes_for_document`` call.
+
+    Defaults to a single ``personal:<user_id>`` link via the
+    ``current_user`` resolved by :func:`get_current_user` when neither
+    query param is provided. Pre-D.1 callers ignore ``scopes`` because
+    every other field is unchanged from :class:`DocumentVersion`.
+    """
+
+    scopes: list[Scope] = Field(default_factory=list)
+
+
 class DocumentListResponse(BaseModel):
     """Cursor-paginated page of documents returned by ``GET /documents``."""
 
     items: list[Document]
     next_cursor: str | None = None
+
+
+# ─── Lineage (EPIC-C C.3, ADR-025) ────────────────────────────────────
+
+
+class LineageVersion(BaseModel):
+    """One row of a document family's version history (EPIC-C C.3).
+
+    Returned by ``GET /documents/{id}/lineage``. Mirrors a subset of
+    :class:`DocumentVersion` plus two derived fields the modal needs:
+
+    - ``is_latest`` — ``True`` for the version with the highest
+      ``version_number`` in the family. Lets the frontend render the
+      "current" badge without a second request.
+    - ``superseded_by_version_id`` — when this row's ``status`` is
+      :data:`DocumentVersionStatus.SUPERSEDED`, points to the id of the
+      next-higher version-numbered sibling that replaced it. ``None``
+      otherwise. Derived from ``(version_number, status)`` ordering at
+      response-build time per ADR-025 (the audit row that records the
+      transition is not joined into :class:`DocumentVersion` itself).
+    """
+
+    id: str
+    version_number: int
+    filename: str
+    status: DocumentVersionStatus
+    sha256: str
+    file_size: int
+    is_latest: bool
+    duplicate_of_version_id: str | None = None
+    superseded_by_version_id: str | None = None
+    ingested_at: datetime | None = None
+
+
+class LineageResponse(BaseModel):
+    """Response body for ``GET /documents/{id}/lineage`` (EPIC-C C.3).
+
+    ``family_filename`` is the filename of the latest version in the
+    family — that's the label the lineage modal hangs at the top of
+    the version tree. ``versions`` is sorted ASC by ``version_number``
+    so v1 → vN renders top-to-bottom in the UI.
+    """
+
+    document_id: str
+    family_filename: str
+    versions: list[LineageVersion]
+
+
+# ─── Similar documents (EPIC-C C.3, ADR-025 §3) ───────────────────────
+
+
+class SimilarDocument(BaseModel):
+    """One ranking row from ``GET /documents/{id}/similar``.
+
+    ``similarity`` is the Jaccard score in ``[0.0, 1.0]`` produced by
+    :class:`app.services.document_similarity_service.DocumentSimilarityService`.
+    ``family_filename`` and ``latest_version_status`` are surfaced so
+    the lineage modal can render the row without a follow-up
+    ``GET /documents/{id}`` per neighbor.
+    """
+
+    document_id: str
+    family_filename: str
+    similarity: float
+    latest_version_status: DocumentVersionStatus
+
+
+class SimilarDocumentsResponse(BaseModel):
+    """Response body for ``GET /documents/{id}/similar?k=N`` (EPIC-C C.3).
+
+    ``results`` is sorted by ``similarity`` descending; ties broken by
+    ``document_id`` ascending. An empty list with HTTP 200 is the
+    correct response when the query document has no topics yet (cold-
+    start) — see :class:`DocumentSimilarityService` for the contract.
+    """
+
+    document_id: str
+    results: list[SimilarDocument]
 
 
 class HealthResponse(BaseModel):
