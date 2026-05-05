@@ -67,6 +67,12 @@ const STATUS_LABEL: Record<string, string> = {
   REJECTED: "Rejected",
   FAILED: "Failed",
   SUPERSEDED: "Superseded",
+  // ADR-027 §3: terminal status assigned by the purge_artifacts
+  // admin route. Lineage modal still surfaces the row so audit
+  // consumers can see the version was tombstoned (matches the
+  // route layer's "show purged versions in mixed-status families"
+  // posture per ADR-027 §3).
+  PURGED: "Purged",
 };
 
 function statusVariant(status: string): LineageRow["statusVariant"] {
@@ -80,6 +86,7 @@ function statusVariant(status: string): LineageRow["statusVariant"] {
     case "FAILED":
       return "bad";
     case "SUPERSEDED":
+    case "PURGED":
       return "muted";
     default:
       return "info";

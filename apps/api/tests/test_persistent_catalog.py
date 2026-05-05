@@ -600,3 +600,157 @@ def test_sqlite_concurrent_status_transitions_only_one_wins(tmp_path):
     # Final state is the winning transition.
     final = services.documents.get_version(document_id, version_id)
     assert final.status == DocumentVersionStatus.EXTRACTING
+
+
+# ─── ADR-027 §1.3 / §3 — purge_version_artifacts on SQLite ────────────
+
+
+def test_sqlite_purge_version_artifacts_flips_status_and_overwrites_storage_uri(tmp_path):
+    """SQLite-side coverage for ADR-027 §3 ``purge_version_artifacts``.
+
+    Mirrors the in-memory path that the route exercises: walking a
+    version through the FSM to a terminal state (REJECTED here for
+    variety), then purging it. The catalog row stays put — only the
+    status + storage_uri move.
+    """
+    from datetime import UTC, datetime
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("p.txt", "text/plain", b"to be purged")
+    document_id, version_id = uploaded.document_id, uploaded.id
+
+    services.documents.update_status(
+        document_id=document_id, version_id=version_id, status=DocumentVersionStatus.EXTRACTING
+    )
+    services.documents.update_status(
+        document_id=document_id, version_id=version_id, status=DocumentVersionStatus.EXTRACTED
+    )
+    services.documents.update_status(
+        document_id=document_id, version_id=version_id, status=DocumentVersionStatus.NEEDS_REVIEW
+    )
+    services.documents.update_status(
+        document_id=document_id, version_id=version_id, status=DocumentVersionStatus.REJECTED
+    )
+
+    purged_at = datetime(2026, 5, 5, tzinfo=UTC)
+    tombstone = f"tombstone:purged:{document_id}:{version_id}:{purged_at.isoformat()}"
+    result = services.documents.catalog.purge_version_artifacts(
+        document_id,
+        version_id,
+        tombstone_uri=tombstone,
+        purged_at=purged_at,
+        actor="admin",
+    )
+
+    assert result.status is DocumentVersionStatus.PURGED
+    assert result.storage_uri == tombstone
+
+    # Re-read to confirm the SQLite row reflects the same state on a
+    # fresh connection.
+    refreshed = services.documents.get_version(document_id, version_id)
+    assert refreshed.status is DocumentVersionStatus.PURGED
+    assert refreshed.storage_uri == tombstone
+
+
+def test_sqlite_purge_version_artifacts_is_idempotent(tmp_path):
+    """Re-purging an already-PURGED version returns the existing tombstone
+    URI without overwriting it — the ADR-027 §1.3 idempotency contract."""
+    from datetime import UTC, datetime
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("p.txt", "text/plain", b"to be purged twice")
+    document_id, version_id = uploaded.document_id, uploaded.id
+
+    # Walk to a terminal state then purge.
+    for status in (
+        DocumentVersionStatus.EXTRACTING,
+        DocumentVersionStatus.EXTRACTED,
+        DocumentVersionStatus.NEEDS_REVIEW,
+        DocumentVersionStatus.REJECTED,
+    ):
+        services.documents.update_status(
+            document_id=document_id, version_id=version_id, status=status
+        )
+    first_purged_at = datetime(2026, 5, 5, tzinfo=UTC)
+    first_tombstone = f"tombstone:purged:{document_id}:{version_id}:{first_purged_at.isoformat()}"
+    services.documents.catalog.purge_version_artifacts(
+        document_id,
+        version_id,
+        tombstone_uri=first_tombstone,
+        purged_at=first_purged_at,
+        actor="admin",
+    )
+
+    # Re-purge with a different tombstone — the catalog must echo
+    # the first tombstone back without touching the row.
+    second_tombstone = f"tombstone:purged:{document_id}:{version_id}:2026-06-01T00:00:00+00:00"
+    result = services.documents.catalog.purge_version_artifacts(
+        document_id,
+        version_id,
+        tombstone_uri=second_tombstone,
+        purged_at=datetime(2026, 6, 1, tzinfo=UTC),
+        actor="admin",
+    )
+
+    assert result.status is DocumentVersionStatus.PURGED
+    assert result.storage_uri == first_tombstone  # original preserved
+
+
+def test_sqlite_purge_version_artifacts_raises_keyerror_for_missing_records(tmp_path):
+    from datetime import UTC, datetime
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("p.txt", "text/plain", b"x")
+
+    purged_at = datetime(2026, 5, 5, tzinfo=UTC)
+    with pytest.raises(KeyError, match="Document not found"):
+        services.documents.catalog.purge_version_artifacts(
+            "missing-doc",
+            "missing-version",
+            tombstone_uri="tombstone:purged:missing:missing:t",
+            purged_at=purged_at,
+            actor="admin",
+        )
+
+    with pytest.raises(KeyError, match="Document version not found"):
+        services.documents.catalog.purge_version_artifacts(
+            uploaded.document_id,
+            "missing-version",
+            tombstone_uri="tombstone:purged:doc:missing:t",
+            purged_at=purged_at,
+            actor="admin",
+        )
+
+
+def test_sqlite_find_version_by_hash_skips_purged_rows(tmp_path):
+    """A fresh upload of bytes that match a tombstoned version's hash
+    must start a brand-new version instead of resolving to the
+    tombstone — ADR-027 §3."""
+    from datetime import UTC, datetime
+
+    services = build_persistent_services(tmp_path)
+    uploaded = services.documents.upload("p.txt", "text/plain", b"unique bytes")
+    document_id, version_id = uploaded.document_id, uploaded.id
+
+    for status in (
+        DocumentVersionStatus.EXTRACTING,
+        DocumentVersionStatus.EXTRACTED,
+        DocumentVersionStatus.NEEDS_REVIEW,
+        DocumentVersionStatus.REJECTED,
+    ):
+        services.documents.update_status(
+            document_id=document_id, version_id=version_id, status=status
+        )
+    purged_at = datetime(2026, 5, 5, tzinfo=UTC)
+    services.documents.catalog.purge_version_artifacts(
+        document_id,
+        version_id,
+        tombstone_uri=f"tombstone:purged:{document_id}:{version_id}:{purged_at.isoformat()}",
+        purged_at=purged_at,
+        actor="admin",
+    )
+
+    # The find_version_by_hash query now returns None for the
+    # original sha256 — a re-upload must take the new-version path.
+    original_sha = uploaded.sha256
+    assert services.documents.catalog.find_version_by_hash(original_sha) is None

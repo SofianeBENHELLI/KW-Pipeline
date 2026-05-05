@@ -361,6 +361,39 @@ class CatalogStore(Protocol):
         missing.
         """
 
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,
+        actor: str,
+    ) -> DocumentVersion:
+        """Flip a version to ``PURGED`` + overwrite ``storage_uri`` with a tombstone.
+
+        ADR-027 §1.3 / §3 catalog-side primitive. Idempotent: re-purging
+        an already-``PURGED`` version is a no-op and returns the
+        version unchanged (so the route layer can return 200 with the
+        existing ``purged_at`` baked into the tombstone URI without a
+        second audit row). Drops the version from the in-memory
+        ``versions_by_hash`` index so future hash matches don't return
+        tombstones (the SQLite store has no such index — the
+        ``find_version_by_hash`` query already filters duplicates and
+        the tombstone URI is enough to short-circuit downstream reads).
+
+        Raises :class:`KeyError` when the document or version is
+        missing — same shape as :meth:`get_version`. The route layer
+        never reaches this method without first confirming the document
+        is archived (the §1.3 precondition), so this primitive does
+        not re-check that condition.
+
+        ``actor`` is the user id that triggered the purge — not
+        persisted on the version row (the audit row carries it) but
+        part of the contract so callers and instrumentation agree on
+        the shape.
+        """
+
 
 class InMemoryCatalogStore:
     """In-memory catalog implementation for unit tests and fast local demos."""
@@ -702,6 +735,45 @@ class InMemoryCatalogStore:
             document.archived_at = None
         return document
 
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,  # noqa: ARG002 — recorded on the audit row, not the version model.
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> DocumentVersion:
+        document = self._get_document_including_archived(document_id)
+        if document is None:
+            raise KeyError("Document not found.")
+        version: DocumentVersion | None = None
+        for candidate in document.versions:
+            if candidate.id == version_id:
+                version = candidate
+                break
+        if version is None:
+            raise KeyError("Document version not found.")
+        # Idempotent re-purge: already-PURGED rows are returned untouched
+        # so the route layer can honour ADR-027's "no extra audit row"
+        # contract by comparing the returned ``storage_uri`` against the
+        # incoming ``tombstone_uri`` it just computed.
+        if version.status is DocumentVersionStatus.PURGED:
+            return version
+        version.status = DocumentVersionStatus.PURGED
+        version.storage_uri = tombstone_uri
+        # Drop the version from the hash index so a subsequent upload of
+        # the same bytes doesn't resolve to a tombstone'd version (which
+        # would surface a 410 on a fresh ingestion path). The in-memory
+        # store keys by the version's pre-purge sha256; we delete the
+        # entry only when it still points at this version (a sibling
+        # version with the same hash, e.g. the original of a duplicate,
+        # must keep its index entry).
+        indexed = self.versions_by_hash.get(version.sha256)
+        if indexed is not None and indexed.id == version_id:
+            self.versions_by_hash.pop(version.sha256, None)
+        return version
+
 
 class SQLiteCatalogStore:
     """SQLite-backed catalog store for the local persistent MVP."""
@@ -731,15 +803,22 @@ class SQLiteCatalogStore:
         # the in-memory store's behaviour (it never indexes duplicates by
         # hash) and prevents a third upload of the same bytes from chaining
         # off a duplicate row instead of pointing at the original version.
+        # Also exclude ``PURGED`` rows (ADR-027 §3) so a fresh upload of
+        # bytes that match a tombstone'd version's hash starts a brand
+        # new version instead of resolving to a tombstone — the in-
+        # memory store achieves the same by dropping ``versions_by_hash``
+        # entries during ``purge_version_artifacts``.
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM document_versions
-                WHERE sha256 = ? AND duplicate_of_version_id IS NULL
+                WHERE sha256 = ?
+                  AND duplicate_of_version_id IS NULL
+                  AND status != ?
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
-                (sha256,),
+                (sha256, DocumentVersionStatus.PURGED.value),
             ).fetchone()
         return self._version_from_row(row) if row else None
 
@@ -1466,3 +1545,43 @@ class SQLiteCatalogStore:
             refreshed = self._get_document_including_archived(document_id)
         assert refreshed is not None  # we just confirmed existence
         return refreshed
+
+    def purge_version_artifacts(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        tombstone_uri: str,
+        purged_at: datetime,  # noqa: ARG002 — recorded on the audit row, not the version row.
+        actor: str,  # noqa: ARG002 — kept for Protocol parity; audit row carries actor.
+    ) -> DocumentVersion:
+        # Use ``get_version`` to surface "Document not found." vs
+        # "Document version not found." discriminated KeyErrors —
+        # mirrors the existing ``update_version_status`` shape so the
+        # route layer's 404 envelope stays consistent.
+        version = self.get_version(document_id=document_id, version_id=version_id)
+        # Idempotent re-purge: short-circuit before touching the row so
+        # the tombstone URI captured at the original purge moment is
+        # preserved (re-running the route with a fresh ``purged_at``
+        # would otherwise overwrite the timestamp embedded in the
+        # tombstone).
+        if version.status is DocumentVersionStatus.PURGED:
+            return version
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE document_versions
+                SET status = ?, storage_uri = ?
+                WHERE document_id = ? AND id = ?
+                """,
+                (
+                    DocumentVersionStatus.PURGED.value,
+                    tombstone_uri,
+                    document_id,
+                    version_id,
+                ),
+            )
+        # Re-read so the returned DocumentVersion reflects the
+        # tombstone URI / new status — the route layer hands the
+        # response back to clients verbatim.
+        return self.get_version(document_id=document_id, version_id=version_id)

@@ -4,6 +4,92 @@
  */
 
 export interface paths {
+    "/admin/archive/purge_artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Artifacts
+         * @description Hard-delete a document's source artifacts (ADR-027 §1.3).
+         *
+         *     Pre-conditions:
+         *
+         *     - The document must exist (404 otherwise).
+         *     - The document must already be archived (409 otherwise) —
+         *       archive-then-purge is the ordered ritual that gives an
+         *       operator a chance to reverse via ``unarchive`` before bytes
+         *       go.
+         *     - ``?confirm=true`` is required for non-dry-run mutating
+         *       actions (422 otherwise — ``KW_UNPROCESSABLE_ENTITY``).
+         *
+         *     Per version the route:
+         *
+         *     1. Computes a tombstone URI per ADR-027 §3
+         *        (``tombstone:purged:<doc>:<version>:<iso>``).
+         *     2. Calls :meth:`StorageService.delete` on the version's
+         *        current ``storage_uri`` (best-effort + idempotent per
+         *        ADR-027 §7).
+         *     3. Flips the version's status to :data:`DocumentVersionStatus.PURGED`
+         *        and overwrites ``storage_uri`` with the tombstone via
+         *        :meth:`CatalogStore.purge_version_artifacts`.
+         *     4. Emits a ``document.artifacts_purged`` audit event with
+         *        the storage URI before / after, the actor, and the
+         *        ``dry_run`` flag.
+         *
+         *     Idempotent: re-purging an already-PURGED version is a no-op
+         *     — the existing tombstone URI is echoed back and no audit
+         *     row is emitted (the empty audit row is the idempotency
+         *     signal). KG cleanup is out of scope: the cascade in #265
+         *     already removed KG nodes when the document was archived.
+         */
+        post: operations["admin_archive_purge_artifacts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/purge_batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Batch
+         * @description Bulk wrapper around ``purge_artifacts`` (ADR-027 §4).
+         *
+         *     Best-effort: a failure on one doc (e.g. ``document_not_archived``,
+         *     ``document_not_found``) does not abort the batch — the
+         *     per-doc failure surfaces as ``success=False`` +
+         *     ``error_code`` / ``error_message`` in the corresponding
+         *     :class:`PurgeBatchResult`. Successful per-doc purges carry
+         *     the full :class:`PurgeArtifactsResponse` under
+         *     ``purge_response`` so callers can recover the per-version
+         *     tombstone URIs without a follow-up call.
+         *
+         *     Capped at 100 ids per call (``KW_UNPROCESSABLE_ENTITY``);
+         *     chaining is the documented escape hatch for larger sweeps.
+         *     Each successful per-doc purge emits its own
+         *     ``document.artifacts_purged`` audit row — never a single
+         *     batch-level row, so the audit log stays queryable per
+         *     document.
+         */
+        post: operations["admin_archive_purge_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/archive/relink_scope": {
         parameters: {
             query?: never;
@@ -376,6 +462,13 @@ export interface paths {
          *     text/wiki). The Content-Type mirrors what the uploader declared
          *     at ingest time, and ``Content-Disposition: inline`` lets browsers
          *     render PDFs and images natively instead of forcing a download.
+         *
+         *     Returns HTTP 410 Gone when the version's status is
+         *     :data:`DocumentVersionStatus.PURGED` per ADR-027 §3 — the
+         *     bytes were intentionally deleted via ``purge_artifacts`` and
+         *     the storage URI is now a tombstone marker. Distinguishing
+         *     410 from 404 lets clients render a tombstone card with the
+         *     purge timestamp instead of a generic "not found" message.
          */
         get: operations["get_raw_file"];
         put?: never;
@@ -1066,7 +1159,7 @@ export interface components {
          * DocumentVersionStatus
          * @enum {string}
          */
-        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED";
+        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED" | "PURGED";
         /** EmbeddingsConfig */
         EmbeddingsConfig: {
             /** Configured */
@@ -1387,6 +1480,97 @@ export interface components {
             score_overall: number;
             /** Version Id */
             version_id: string;
+        };
+        /**
+         * PurgeArtifactsRequest
+         * @description Body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).
+         */
+        PurgeArtifactsRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose source artifacts (bytes, extractions, semantic JSON, Markdown asset) should be physically deleted. Resolved via the archived-inclusive accessor; the route 409s if the document isn't archived first per the §1.3 archive-then-purge precondition.
+             */
+            document_id: string;
+        };
+        /**
+         * PurgeArtifactsResponse
+         * @description Response body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).
+         *
+         *     ``versions_purged`` carries one row per version in the document
+         *     family — including versions that were already ``PURGED`` (the
+         *     idempotent re-purge case), in which case the row's
+         *     ``status_before`` is ``PURGED`` and the existing tombstone URI is
+         *     echoed back so callers can correlate without re-reading.
+         *
+         *     ``dry_run`` mirrors the request's ``?dry_run=true`` query param
+         *     so clients can disambiguate the impact preview from a real
+         *     mutation without re-reading the URL — same pattern as the other
+         *     admin-archive responses.
+         */
+        PurgeArtifactsResponse: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Versions Purged */
+            versions_purged: components["schemas"]["VersionPurgeResult"][];
+        };
+        /**
+         * PurgeBatchRequest
+         * @description Body for ``POST /admin/archive/purge_batch`` (ADR-027 §4).
+         *
+         *     Capped at 100 ids per call; the route returns 422 with
+         *     ``KW_UNPROCESSABLE_ENTITY`` for longer lists. Chaining multiple
+         *     calls is the documented escape hatch for larger sweeps.
+         */
+        PurgeBatchRequest: {
+            /**
+             * Document Ids
+             * @description Catalog ids to purge, max 100 per call. Each doc is processed independently — a failure on one (e.g. ``document_not_archived``) does not abort the batch.
+             */
+            document_ids: string[];
+        };
+        /**
+         * PurgeBatchResponse
+         * @description Response body for ``POST /admin/archive/purge_batch`` (ADR-027 §4).
+         *
+         *     Always HTTP 200 — per-doc failures are reported in
+         *     ``results[i]``. ``dry_run`` mirrors the ``?dry_run=true`` query
+         *     param for the same reason as the per-doc response.
+         */
+        PurgeBatchResponse: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Results */
+            results: components["schemas"]["PurgeBatchResult"][];
+        };
+        /**
+         * PurgeBatchResult
+         * @description Per-document outcome inside a :class:`PurgeBatchResponse`.
+         *
+         *     ``success`` discriminates the union: when ``True``, ``purge_response``
+         *     carries the full per-document :class:`PurgeArtifactsResponse`;
+         *     when ``False``, ``error_code`` + ``error_message`` describe what
+         *     went wrong. Mirrors the :class:`BatchUploadOutcome` shape so the
+         *     frontend's batch-result renderer is uniform across admin and
+         *     upload surfaces.
+         */
+        PurgeBatchResult: {
+            /** Document Id */
+            document_id: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            purge_response: components["schemas"]["PurgeArtifactsResponse"] | null;
+            /** Success */
+            success: boolean;
         };
         /**
          * RawExtraction
@@ -1876,6 +2060,43 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VersionPurgeResult
+         * @description Per-version purge outcome inside a :class:`PurgeArtifactsResponse`.
+         *
+         *     ``status_before`` is the version's status at the moment the route
+         *     sampled it — useful when the purge fans out across a multi-version
+         *     family with mixed terminal states (VALIDATED, REJECTED, FAILED,
+         *     SUPERSEDED). ``storage_uri_before`` is the original URI the
+         *     storage backend was holding the bytes under, surfaced for the
+         *     audit row payload (also included on the response so a dry-run
+         *     caller can preview which URIs would be deleted).
+         *
+         *     ``tombstone_uri`` is the post-purge ``storage_uri`` per ADR-027
+         *     §3 (``tombstone:purged:<doc>:<version>:<iso>``); future read
+         *     paths can ``startswith("tombstone:")`` to detect purged content
+         *     without joining against the audit log.
+         *
+         *     ``purged_at`` is ``None`` for a dry-run (no state change, the
+         *     timestamp doesn't exist yet) and the wall clock the route
+         *     stamped onto the audit event for a real mutation. ``bytes_estimate``
+         *     is the version's ``file_size`` if the catalog still holds it —
+         *     purely informational, surfaced so an operator can sanity-check
+         *     the freed-bytes total.
+         */
+        VersionPurgeResult: {
+            /** Bytes Estimate */
+            bytes_estimate: number | null;
+            /** Purged At */
+            purged_at: string | null;
+            status_before: components["schemas"]["DocumentVersionStatus"];
+            /** Storage Uri Before */
+            storage_uri_before: string;
+            /** Tombstone Uri */
+            tombstone_uri: string;
+            /** Version Id */
+            version_id: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1885,6 +2106,78 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_archive_purge_artifacts: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeArtifactsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeArtifactsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_purge_batch: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_archive_relink_scope: {
         parameters: {
             query?: {
@@ -2333,6 +2626,13 @@ export interface operations {
                     "text/markdown": string;
                 };
             };
+            /** @description Version artifacts were purged (ADR-027 §3). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2368,6 +2668,13 @@ export interface operations {
             };
             /** @description Document or version not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Version artifacts were purged (ADR-027 §3). */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
