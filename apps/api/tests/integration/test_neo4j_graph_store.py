@@ -111,9 +111,7 @@ def clean_graph(neo4j_config: dict[str, str]) -> Iterator[None]:
             session.run("MATCH (n:KnowledgeNode) DETACH DELETE n")
             # Drop every VECTOR index. LOOKUP indexes are Neo4j
             # built-ins and must not be touched.
-            result = session.run(
-                "SHOW INDEXES YIELD name, type WHERE type = 'VECTOR' RETURN name"
-            )
+            result = session.run("SHOW INDEXES YIELD name, type WHERE type = 'VECTOR' RETURN name")
             names = [str(record["name"]) for record in result]
             for name in names:
                 session.run(f"DROP INDEX {name} IF EXISTS")

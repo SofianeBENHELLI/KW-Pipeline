@@ -742,9 +742,7 @@ class Neo4jGraphStore:
                     "SHOW INDEXES YIELD name, state, type RETURN name, state, type",
                     {},
                 )
-                snapshot = ", ".join(
-                    f"{r['name']}:{r['state']}:{r['type']}" for r in all_rows
-                )
+                snapshot = ", ".join(f"{r['name']}:{r['state']}:{r['type']}" for r in all_rows)
                 raise RuntimeError(
                     f"vector index {name!r} did not reach ONLINE within 30s "
                     f"(last observed state: {state or '<missing>'}; all "
