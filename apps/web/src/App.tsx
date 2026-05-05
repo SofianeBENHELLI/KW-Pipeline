@@ -228,13 +228,19 @@ export function useDocumentCatalog(): DocumentCatalog {
  *    role client-side — the backend is the single source of truth.
  *  - everything else falls through to the legacy reviewer workbench.
  */
-// Lazy-load the admin view so it doesn't ship in the initial app
+// Lazy-load the admin views so they don't ship in the initial app
 // chunk — admin routes are admin-only and most users never land here.
 // Keeps the index bundle under the 80 KB budget enforced by
-// `scripts/check-bundle-size.mjs`.
+// `scripts/check-bundle-size.mjs`. Each admin page lives in its own
+// chunk so a power user only pays for what they navigate to.
 const AdminArchiveView = lazy(() =>
   import("./features/admin/AdminArchiveView").then((mod) => ({
     default: mod.AdminArchiveView,
+  })),
+);
+const AdminHITLView = lazy(() =>
+  import("./features/admin/AdminHITLView").then((mod) => ({
+    default: mod.AdminHITLView,
   })),
 );
 
@@ -246,6 +252,14 @@ export default function App() {
         element={
           <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
             <AdminArchiveView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/hitl"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+            <AdminHITLView />
           </Suspense>
         }
       />

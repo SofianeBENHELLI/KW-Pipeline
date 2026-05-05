@@ -15,7 +15,9 @@ import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/schema";
 import type {
+  ApiAdminHITLStateResponse,
   ApiArchivedDocumentsResponse,
+  ApiAutoPromoteResult,
   ApiBatchUploadResult,
   ApiChatMode,
   ApiChatResponse,
@@ -665,6 +667,25 @@ export async function purgeArtifacts(
 }
 
 /**
+ * GET /admin/hitl/state (#215, EPIC-A close-out)
+ *
+ * Admin-only. Returns the HITL routing config + per-bucket SPC
+ * counters + drift ratios + the pending auto-promotion queue depth
+ * as a single read-only snapshot. Powers the ``/admin/hitl``
+ * dashboard. 403 if the caller lacks the ``admin`` role; 503 with
+ * ``KW_HITL_DISABLED`` when ``KW_HITL_DISABLE_SCORER=true``.
+ */
+export async function getAdminHITLState(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiAdminHITLStateResponse> {
+  return unwrap(
+    await http.GET("/admin/hitl/state", {
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
  * POST /admin/archive/relink_scope
  *
  * Admin-only. Reactivates a soft-removed ``document_scopes`` row
@@ -684,6 +705,30 @@ export async function relinkScope(
     await http.POST("/admin/archive/relink_scope", {
       params: { query },
       body: request,
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/hitl/run_auto_promote_pass (#215 slice 3)
+ *
+ * Admin-only. Synchronously runs one HITL auto-promotion pass and
+ * returns the structured per-version outcome. The dashboard exposes
+ * this behind a single "Run pass" button next to the queue-depth
+ * counter. 503 with ``KW_HITL_DISABLED`` when the worker is unwired
+ * (same kill switch as the scorer / router).
+ */
+export async function runAutoPromotePass(
+  options: { maxVersions?: number; signal?: AbortSignal } = {},
+): Promise<ApiAutoPromoteResult> {
+  const query: Record<string, number> = {};
+  if (options.maxVersions !== undefined) {
+    query.max_versions = options.maxVersions;
+  }
+  return unwrap(
+    await http.POST("/admin/hitl/run_auto_promote_pass", {
+      params: { query: query as never },
       signal: options.signal,
     }),
   );

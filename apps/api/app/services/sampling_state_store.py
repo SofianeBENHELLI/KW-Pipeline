@@ -139,6 +139,24 @@ class SamplingStateStore(Protocol):
     ) -> SamplingCounters:
         """Return the bucket's counters; absent buckets read as zeroed."""
 
+    def list_all_buckets(  # pragma: no cover - Protocol
+        self,
+    ) -> list[tuple[SamplingBucket, SamplingCounters]]:
+        """Return every recorded ``(bucket, counters)`` pair.
+
+        Drives the Admin HITL dashboard (#215) — the operator-facing
+        ``GET /admin/hitl/state`` route enumerates every bucket the
+        router has touched and decorates each with the drift detector's
+        effective sampling rate. Buckets that have never carried a
+        decision do not appear (the store has no row for them); the
+        dashboard's empty state covers that case.
+
+        Order is implementation-defined but stable enough for tests;
+        both impls return rows ordered by ``(content_type,
+        topic_cluster)`` for determinism. The dashboard route then
+        re-sorts by drift_ratio DESC before rendering.
+        """
+
 
 @dataclass
 class _MutableCounters:
@@ -194,6 +212,13 @@ class InMemorySamplingStateStore:
         with self._lock:
             row = self._rows.get(bucket)
         return row.snapshot() if row is not None else SamplingCounters()
+
+    def list_all_buckets(self) -> list[tuple[SamplingBucket, SamplingCounters]]:
+        with self._lock:
+            pairs = [(bucket, row.snapshot()) for bucket, row in self._rows.items()]
+        # Stable sort so tests + dashboard rendering are deterministic.
+        pairs.sort(key=lambda pair: (pair[0].content_type, pair[0].topic_cluster))
+        return pairs
 
 
 class SQLiteSamplingStateStore:
@@ -298,6 +323,45 @@ class SQLiteSamplingStateStore:
             samples_human_after_auto=int(samples_human_after_auto),
             last_decision_at=last,
         )
+
+    def list_all_buckets(self) -> list[tuple[SamplingBucket, SamplingCounters]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT content_type, topic_cluster, samples_taken, samples_auto,"
+                "       samples_human, samples_human_after_auto, last_decision_at "
+                "FROM sampling_state "
+                "ORDER BY content_type, topic_cluster"
+            ).fetchall()
+        result: list[tuple[SamplingBucket, SamplingCounters]] = []
+        for row in rows:
+            (
+                content_type,
+                topic_cluster,
+                samples_taken,
+                samples_auto,
+                samples_human,
+                samples_human_after_auto,
+                last_decision_at,
+            ) = row
+            last = (
+                datetime.fromisoformat(last_decision_at) if last_decision_at is not None else None
+            )
+            result.append(
+                (
+                    SamplingBucket(
+                        content_type=content_type,
+                        topic_cluster=topic_cluster,
+                    ),
+                    SamplingCounters(
+                        samples_taken=int(samples_taken),
+                        samples_auto=int(samples_auto),
+                        samples_human=int(samples_human),
+                        samples_human_after_auto=int(samples_human_after_auto),
+                        last_decision_at=last,
+                    ),
+                )
+            )
+        return result
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

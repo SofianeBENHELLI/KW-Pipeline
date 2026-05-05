@@ -28,6 +28,12 @@ Holds:
   pass of the HITL auto-promotion worker. ADR-023 §6, EPIC-A slice 3
   (#215). A future scheduler will call this on a cron / asyncio
   interval; for now manual trigger only.
+* ``GET /admin/hitl/state`` — read-only snapshot of the HITL config
+  + per-bucket SPC counters + drift ratios + effective sampling
+  rates + the pending auto-promotion queue depth. Powers the Admin
+  HITL dashboard (EPIC-A close-out, #215). Counter resets are out
+  of scope per the no-delete policy; a future "vacuum" admin tool
+  slices in.
 
 Every archive route requires the ``admin`` role (ADR-019 §3 / #264) AND
 ``?confirm=true`` for non-dry-run mutating actions (defence in depth,
@@ -82,6 +88,10 @@ from app.schemas.admin_config import (
     PersistenceConfig,
     TaxonomyConfig,
     UploadConfig,
+)
+from app.schemas.admin_hitl import (
+    AdminHITLStateResponse,
+    BucketState,
 )
 from app.schemas.document import HealthResponse
 from app.schemas.scope import Scope
@@ -874,5 +884,119 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             },
         )
         return services.hitl_auto_promoter.run_pass(max_versions=max_versions)
+
+    @router.get(
+        "/admin/hitl/state",
+        operation_id="admin_hitl_get_state",
+        response_model=AdminHITLStateResponse,
+    )
+    def get_hitl_state(
+        _user: User = Depends(require_admin),
+    ) -> AdminHITLStateResponse:
+        """Read-only snapshot of HITL routing state (EPIC-A close-out, #215).
+
+        Surfaces three things the operator needs to see at a glance:
+
+        1. **Config posture** — the env-driven knobs the router and
+           drift detector were constructed with (threshold, baseline
+           sample rate, drift threshold + ramp factor, plus the
+           force-auto and scorer kill switches).
+        2. **Per-bucket SPC counters** — every bucket the router has
+           recorded a decision against, decorated with its drift
+           ratio and the drift detector's *current* effective sample
+           rate. Sorted by ``drift_ratio`` DESC so the noisiest
+           buckets surface at the top of the dashboard table.
+        3. **Pending auto-promotion queue depth** — the count of
+           rows the next ``run_auto_promote_pass`` invocation would
+           touch, so the dashboard can render the queue size next to
+           its trigger button without a second probe.
+
+        Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the
+        auto-promote-pass route) when ``KW_HITL_DISABLE_SCORER`` is
+        truthy — a disabled scorer means the router is also unwired
+        and the snapshot would be misleading. Read-only: no
+        ``?confirm=true`` ceremony.
+
+        Per ADR-023 §6 and EPIC-A's "auto-validated == human-validated
+        to consumers" rule, the dashboard never exposes individual
+        :class:`ValidationMetadata` rows — the metadata stays internal.
+        """
+        # Re-read settings on every request so ``monkeypatch.setenv``
+        # in tests is observed without restarting the app — same
+        # posture the existing ``/admin/config`` route uses.
+        settings = Settings()
+        if services.hitl_router is None:
+            # Tied kill-switch: scorer disabled => router/auto-promoter
+            # both None. The snapshot would report all-zero buckets
+            # and a stale config; failing fast is more honest.
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.HITL_DISABLED,
+                message=("HITL routing is not wired. Likely cause: KW_HITL_DISABLE_SCORER=true."),
+                retryable=False,
+                remediation=(
+                    "Unset KW_HITL_DISABLE_SCORER (or set it to false) "
+                    "and restart the API. The router + auto-promoter + "
+                    "dashboard share the same kill switch as the scorer."
+                ),
+            )
+
+        baseline_rate = settings.hitl_spc_sample_rate
+        drift_threshold = settings.hitl_drift_threshold
+        ramp_factor = settings.hitl_drift_ramp_factor
+
+        bucket_states: list[BucketState] = []
+        for sampling_bucket, counters in services.sampling_state.list_all_buckets():
+            # ``max(_, 1)`` floors the denominator so a bucket with no
+            # auto decisions yet doesn't blow up the response — the
+            # detector itself returns the baseline in that case.
+            denominator = max(counters.samples_auto, 1)
+            drift_ratio = counters.samples_human_after_auto / denominator
+            # Pre-cold-start (samples_auto == 0) the detector returns
+            # the baseline. Compute via the bucket's same logic so the
+            # dashboard matches what the router will see on the next
+            # decision.
+            if counters.samples_auto == 0 or drift_ratio <= drift_threshold:
+                effective_rate = baseline_rate
+            else:
+                effective_rate = min(1.0, baseline_rate * ramp_factor)
+            bucket_states.append(
+                BucketState(
+                    content_type=sampling_bucket.content_type,
+                    topic_cluster=sampling_bucket.topic_cluster,
+                    samples_taken=counters.samples_taken,
+                    samples_auto=counters.samples_auto,
+                    samples_human=counters.samples_human,
+                    samples_human_after_auto=counters.samples_human_after_auto,
+                    drift_ratio=drift_ratio,
+                    effective_sample_rate=effective_rate,
+                    last_decision_at=counters.last_decision_at,
+                )
+            )
+
+        # Sort hot-spots first so an admin scanning the table catches
+        # drifting buckets without scrolling. Tie-break on
+        # ``samples_taken`` DESC then bucket key for determinism.
+        bucket_states.sort(
+            key=lambda b: (
+                -b.drift_ratio,
+                -b.samples_taken,
+                b.content_type,
+                b.topic_cluster,
+            )
+        )
+
+        pending = len(services.validation_metadata.list_pending_auto_promotions())
+
+        return AdminHITLStateResponse(
+            enabled=not settings.hitl_scorer_disabled,
+            force_auto_corpus=settings.hitl_force_auto_corpus,
+            threshold=settings.hitl_auto_validate_threshold,
+            baseline_sample_rate=baseline_rate,
+            drift_threshold=drift_threshold,
+            drift_ramp_factor=ramp_factor,
+            pending_auto_promotions=pending,
+            buckets=bucket_states,
+        )
 
     return router
