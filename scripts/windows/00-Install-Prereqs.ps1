@@ -36,7 +36,8 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 } else {
     Write-Warn2 "git not found — installing via winget"
     winget install --id Git.Git --silent --accept-package-agreements --accept-source-agreements
-    Write-Done "git installed. Reopen this PowerShell window to refresh PATH."
+    Update-PathFromRegistry
+    Write-Done "git installed (PATH refreshed for this session)."
 }
 
 Write-Step "Checking cloudflared"
@@ -45,7 +46,8 @@ if (Get-Command cloudflared -ErrorAction SilentlyContinue) {
 } else {
     Write-Warn2 "cloudflared not found — installing via winget"
     winget install --id Cloudflare.cloudflared --silent --accept-package-agreements --accept-source-agreements
-    Write-Done "cloudflared installed. Reopen this PowerShell window to refresh PATH."
+    Update-PathFromRegistry
+    Write-Done "cloudflared installed (PATH refreshed for this session)."
 }
 
 Write-Host ""
