@@ -77,6 +77,13 @@ class IteropConfig(BaseModel):
 class HitlConfig(BaseModel):
     default_validation_method: Literal["human", "external", "auto"]
     iterop: IteropConfig
+    # ADR-023 §6 corpus-wide force-auto override (EPIC-A A.8). Surfaced
+    # here so the frontend renders a non-dismissible banner whenever
+    # the deployment is running with every version forced through the
+    # auto path — a load-bearing override an operator must see at a
+    # glance. Defaults to ``False`` (the safe default — manual review
+    # still gates publication unless an operator opts in).
+    force_auto_corpus: bool = False
 
 
 class LoggingConfig(BaseModel):

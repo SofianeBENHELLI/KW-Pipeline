@@ -88,6 +88,10 @@ def test_admin_config_default_posture(clean_env: None) -> None:
     assert body["hitl"]["iterop"]["enabled"] is False
     assert body["hitl"]["iterop"]["base_url_configured"] is False
     assert body["hitl"]["iterop"]["auth_configured"] is False
+    # EPIC-A A.8: force-auto admin override is off by default; the
+    # frontend reads this field to decide whether to render the
+    # corpus-wide banner.
+    assert body["hitl"]["force_auto_corpus"] is False
     # Sensible non-secret defaults are surfaced.
     assert body["upload"]["max_bytes"] == 50 * 1024 * 1024
     assert body["embeddings"]["model"] == "voyage-3"
@@ -159,6 +163,22 @@ def test_admin_config_surfaces_non_secret_overrides(
     # to normalize it.
     assert body["logging"]["level"] == "DEBUG"
     assert body["upload"]["max_bytes"] == 104_857_600
+
+
+def test_admin_config_surfaces_force_auto_corpus_override(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """EPIC-A A.8 (#215, ADR-023 §6): the force-auto corpus override
+    is surfaced on /admin/config so the frontend can render a
+    non-dismissible banner when it's active."""
+    monkeypatch.setenv("KW_HITL_FORCE_AUTO_CORPUS", "true")
+
+    client = TestClient(create_app())
+    response = client.get("/admin/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hitl"]["force_auto_corpus"] is True
 
 
 def test_admin_config_default_dev_mode_returns_200(clean_env: None) -> None:
