@@ -1,0 +1,9 @@
+Engineering Design Review — 2026-04-15
+Attendees: J. Pak (chair), M. Ortega, R. Devereaux, S. Cho
+Scope: Bracket revision 4471-B and the rest of the line-3 change basket
+
+The team approved engineering change request CR-2026-0142 contingent on the first-article inspection passing on five units.
+A second change basket covering harness routing on the same line was deferred to the May review pending a fresh interference check.
+Open nonconformances on line 3 dropped from eleven to seven over the past week; two Major findings remain past the ten-day containment window and were escalated to the supplier business review.
+Action: tighten AQL on lot 4471-* shipments to 1.5 until the supplier closes the bracket-fit corrective action.
+Action: publish the design review minutes to the controlled-document workspace within two business days.

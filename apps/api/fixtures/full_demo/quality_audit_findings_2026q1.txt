@@ -1,0 +1,10 @@
+Quality Audit Findings — 2026 Q1
+Auditor: Northwind Compliance Partners
+Scope: ISO 9001 surveillance audit of the manufacturing line and document control
+
+Finding QA-2026-Q1-01 (Major): Document control logs show three controlled procedures were revised without a recorded management review approval.
+Finding QA-2026-Q1-02 (Minor): Internal audit calendar drifted by two weeks against the published plan; corrective action is to refresh the audit schedule each January.
+Finding QA-2026-Q1-03 (Major): Three nonconformances opened in 2025 remained past their ten-business-day containment window without a documented escalation.
+Audit recommendations: refresh document-control training for revision approvers and tighten the management review cadence to monthly until the major findings are closed.
+The quality director will publish a closure plan within five business days and report progress at the next management review.
+ISO 9001 corrective actions follow the standard root-cause workflow with an assigned owner and a closure date.

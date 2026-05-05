@@ -1,0 +1,10 @@
+Supplier Qualification Checklist
+Owner: Procurement Operations
+Audience: Procurement reviewers and supplier business owners
+
+Every new supplier must clear a security screening review and submit evidence of an information security program before activation.
+Procurement validates the data classification of every supplier engagement and records the result in the vendor management system.
+Tier-1 suppliers must publish an annual SOC 2 Type II report; Tier-2 suppliers may substitute a documented self-assessment.
+Renewal dates and contractual contacts are mandatory fields; any record missing either is flagged for closure within five business days.
+Onboarding exceptions are escalated to Legal, Security, and Privacy with a five-day review SLA.
+Procurement maintains an audit trail for every screening, classification, and renewal decision.

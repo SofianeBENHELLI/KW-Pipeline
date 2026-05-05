@@ -1,0 +1,11 @@
+Customer Renewal Brief
+Customer: Northstar Retail Group
+Renewal owner: Customer Success
+Renewal cycle: 2026 Q3
+
+Northstar expanded usage from pilot stores to the regional operations team in 2025 and now covers fourteen sites.
+The renewal risk is medium because procurement requires updated data handling language and a refreshed AI Act self-attestation.
+Customer Success scored renewal health at 68 out of 100; usage trend is positive but the executive sponsor changed in February.
+The success plan recommends validating the semantic extraction before sharing renewal materials with Legal.
+The executive sponsor requested a Markdown-ready renewal summary with full source lineage for the legal review packet.
+The renewal risk score feeds the Q2 customer success quarterly business review and the renewal recommendation.

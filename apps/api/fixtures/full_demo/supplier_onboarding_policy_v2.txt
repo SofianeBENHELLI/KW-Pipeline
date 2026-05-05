@@ -1,0 +1,12 @@
+Supplier Onboarding Policy
+Version 2.0 — Issued 2026-02-15
+Owner: Procurement Operations
+Audience: Vendor managers and supplier success leads
+
+Suppliers must complete security screening AND a privacy impact assessment before receiving any production data.
+Finance approval is required before onboarding suppliers with annual spend above 25000 USD; the threshold dropped from 50000 USD in v1 after the 2025 audit.
+Every supplier record must include an accountable business owner, a renewal date, and a documented data classification.
+Tier-1 suppliers complete an annual on-site audit; Tier-2 suppliers complete a documentation-only review every eighteen months (down from two years).
+Onboarding exceptions must be reviewed by Legal, Security, AND Privacy within three business days.
+Supplier records are retained in the procurement system for ten years after contract termination.
+Procurement reviews the open onboarding queue twice weekly with the supplier success lead until every ticket clears.

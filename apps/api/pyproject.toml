@@ -52,6 +52,14 @@ dependencies = [
 # ``kw-demo`` boots ``uvicorn app.main:app`` with the demo-friendly
 # defaults baked in (issue #130). See ``app/demo.py``.
 kw-demo = "app.demo:main"
+# ``kw-demo-load`` populates a running demo backend with the full
+# fixture corpus under ``apps/api/fixtures/full_demo/`` so the UI can
+# demonstrate documents, chunks, version lineage, duplicate detection,
+# topic clustering, hybrid taxonomy, knowledge graph, similarity, and
+# the review FSM in one pass. See ``app/demo_loader.py`` for the
+# console wrapper and ``scripts/load_demo_dataset.py`` for the actual
+# loader implementation.
+kw-demo-load = "app.demo_loader:main"
 
 [project.optional-dependencies]
 test = [
