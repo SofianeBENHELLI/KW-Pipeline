@@ -161,8 +161,10 @@ def test_admin_config_surfaces_non_secret_overrides(
     assert body["upload"]["max_bytes"] == 104_857_600
 
 
-def test_admin_config_no_auth_required(clean_env: None) -> None:
-    """Same posture as ``/health`` — no auth header needed today."""
+def test_admin_config_default_dev_mode_returns_200(clean_env: None) -> None:
+    """Default ``KW_AUTH_MODE=dev`` resolves to the admin dev user, so
+    ``GET /admin/config`` is accessible out of the box (#83 slice 2 /
+    ADR-019 §3 — admin-gated endpoint, dev mode satisfies the gate)."""
     client = TestClient(create_app())
 
     response = client.get("/admin/config")

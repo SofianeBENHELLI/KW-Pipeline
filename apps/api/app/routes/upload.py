@@ -29,7 +29,7 @@ from app.schemas.document import (
     UploadDocumentResponse,
 )
 from app.schemas.scope import SCOPE_KINDS, Scope, ScopeKind
-from app.services.auth import User, get_current_user
+from app.services.auth import User, require_contributor
 
 from ._helpers import (
     SPOOL_ROLLOVER_BYTES,
@@ -109,7 +109,7 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
         scope_kind: str | None = None,
         scope_ref: str | None = None,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         settings = _request_settings()
         max_bytes = settings.max_upload_bytes
@@ -257,6 +257,7 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
     async def upload_documents_batch(
         files: list[UploadFile] = File(...),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        current_user: User = Depends(require_contributor),  # noqa: ARG001 — gate-only dep, body uses no actor today
     ) -> Any:
         """Bulk upload — one request, one structured per-file report (#82).
 
