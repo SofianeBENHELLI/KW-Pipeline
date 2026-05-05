@@ -40,9 +40,13 @@ if ($LASTEXITCODE -eq 0 -and $neo4jStatus -and $neo4jStatus -ne 'healthy') {
     Write-Host "    3. Ports 7687 or 7474 already bound. Run: ``netstat -ano | findstr ""7687 7474""``"
     $neo4jLogs = @()
     try {
-        $neo4jLogs = & docker logs --tail 8 kw-pipeline-neo4j 2>&1 | ForEach-Object { "$_" }
+        # Force-wrap in @() — when docker logs returns 0/1 lines or
+        # the catch fires, the assignment can land as $null or a
+        # scalar string, both of which break ``.Count`` under
+        # StrictMode (PropertyNotFoundStrict).
+        $neo4jLogs = @(& docker logs --tail 8 kw-pipeline-neo4j 2>&1 | ForEach-Object { "$_" })
     } catch {}
-    if ($neo4jLogs.Count -gt 0) {
+    if (@($neo4jLogs).Count -gt 0) {
         Write-Host "  Last log lines from kw-pipeline-neo4j:"
         foreach ($line in $neo4jLogs) {
             if ($line) { Write-Host "    $line" }
@@ -107,7 +111,10 @@ if (-not (Test-Path $cloudflaredConfig)) {
 # below.
 $cloudflaredLogs = @()
 try {
-    $cloudflaredLogs = & docker logs kw-pipeline-cloudflared 2>&1 | ForEach-Object { "$_" }
+    # Force-wrap in @() so a single-line / empty stream lands as an
+    # array, not a scalar / $null. PowerShell StrictMode raises
+    # PropertyNotFoundStrict on .Count of either.
+    $cloudflaredLogs = @(& docker logs kw-pipeline-cloudflared 2>&1 | ForEach-Object { "$_" })
 } catch {
     Write-Warn2 "Could not read 'docker logs kw-pipeline-cloudflared': $($_.Exception.Message)"
 }
@@ -129,7 +136,10 @@ if ($registered -ge 4) {
     # Surface the last few container log lines so an operator sees the
     # real cloudflared error (e.g. missing tunnel UUID, bad credentials
     # path) rather than a confusing PowerShell stderr-mapping error.
-    $tail = @($cloudflaredLogs) | Select-Object -Last 6
+    # ``Select-Object -Last 6`` on an empty pipeline returns nothing
+    # ($null), not an empty array — StrictMode then crashes on .Count.
+    # Same @() wrap pattern as the registered-count above.
+    $tail = @(@($cloudflaredLogs) | Select-Object -Last 6)
     if ($tail.Count -gt 0) {
         Write-Host "  Last log lines from kw-pipeline-cloudflared:"
         foreach ($line in $tail) {
