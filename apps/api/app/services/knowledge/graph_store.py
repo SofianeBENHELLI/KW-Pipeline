@@ -693,6 +693,16 @@ class Neo4jGraphStore:
         Neo4j 5.13+ ``CREATE VECTOR INDEX`` syntax with ``IF NOT
         EXISTS`` keeps the call safe across restarts. Cosine
         similarity matches Voyage's embedding space.
+
+        Index creation is asynchronous in Neo4j: ``CREATE VECTOR
+        INDEX`` returns immediately while the index transitions
+        through ``POPULATING`` to ``ONLINE``. Querying the index
+        before it is online fails with ``IllegalArgumentException:
+        There is no such vector schema index``. We poll
+        ``SHOW INDEXES`` for the named index until its ``state`` reads
+        ``ONLINE`` so the post-condition of this method matches the
+        name it is given: when it returns, the index is ready to
+        serve ``db.index.vector.queryNodes`` calls.
         """
         if dim <= 0:
             raise ValueError(f"vector index dim must be positive; got {dim}.")
@@ -709,6 +719,26 @@ class Neo4jGraphStore:
             """,
             {"dim": dim},
         )
+        # Poll SHOW INDEXES for the named index until it transitions to
+        # ONLINE. 30s ceiling is generous; an empty vector index
+        # typically lights up in well under a second, but loaded CI
+        # runners have been observed to take a beat between
+        # CREATE INDEX returning and the index becoming queryable.
+        deadline = time.monotonic() + 30.0
+        while True:
+            rows = self._read(
+                "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
+                {"name": name},
+            )
+            state = str(rows[0]["state"]) if rows else ""
+            if state == "ONLINE":
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"vector index {name!r} did not reach ONLINE within 30s "
+                    f"(last observed state: {state or '<missing>'})."
+                )
+            time.sleep(0.1)
 
     def set_chunk_embedding(  # pragma: no cover - exercised behind pytest -m integration
         self,
