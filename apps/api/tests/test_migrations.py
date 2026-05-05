@@ -480,3 +480,76 @@ def test_failing_migration_rolls_back_and_id_not_inserted(tmp_path, monkeypatch)
     tables = {row[0] for row in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn2.close()
     assert "should_not_exist" not in tables
+
+
+# ---------------------------------------------------------------------------
+# HITL slice 1 — validation_metadata + corpus_norms tables (#215)
+# ---------------------------------------------------------------------------
+
+
+def test_migration_0007_creates_validation_metadata_table(tmp_path):
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(validation_metadata)")}
+    conn.close()
+    expected = {
+        "version_id",
+        "confidence_overall",
+        "confidence_signals",
+        "confidence_weights",
+        "ocr_override_active",
+        "confidence_computed_at",
+        "confidence_computed_by_version",
+        "routing_decision",
+        "validation_method",
+        "validation_actor",
+    }
+    assert expected.issubset(cols)
+
+
+def test_migration_0008_creates_corpus_norms_table(tmp_path):
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(corpus_norms)")}
+    conn.close()
+    expected = {
+        "content_type",
+        "topic_cluster",
+        "metric_name",
+        "sample_count",
+        "mean",
+        "stddev",
+        "updated_at",
+    }
+    assert expected.issubset(cols)
+
+
+def test_validation_metadata_foreign_key_to_document_versions(tmp_path):
+    """The sidecar references ``document_versions(id)`` so a stale row
+    can't outlive the version it describes — guards against orphan
+    rows when the future Archive/Purge tool removes a version."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    fks = list(conn.execute("PRAGMA foreign_key_list(validation_metadata)"))
+    conn.close()
+    assert any(
+        row[2] == "document_versions" and row[3] == "version_id" and row[4] == "id" for row in fks
+    ), f"expected FK validation_metadata.version_id → document_versions.id, got {fks}"
+
+
+def test_corpus_norms_compound_primary_key(tmp_path):
+    """The PK is ``(content_type, topic_cluster, metric_name)`` so the
+    same bucket cannot be persisted twice."""
+    SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+
+    conn = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    pk_cols = [
+        row[1]
+        for row in conn.execute("PRAGMA table_info(corpus_norms)")
+        if row[5] != 0  # row[5] is the pk index (1-based for compound PKs)
+    ]
+    conn.close()
+    assert sorted(pk_cols) == sorted(["content_type", "topic_cluster", "metric_name"])

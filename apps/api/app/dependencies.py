@@ -9,6 +9,13 @@ from app.services.audit_event_store import (
 )
 from app.services.auth import AuthService, DisabledAuthService, build_auth_service
 from app.services.catalog_store import SQLiteCatalogStore
+from app.services.confidence_scorer import ConfidenceScorer
+from app.services.corpus_norms import (
+    CorpusNormsProvider,
+    InMemoryCorpusNormsStore,
+    LazyCorpusNorms,
+    SQLiteCorpusNormsStore,
+)
 from app.services.document_parser import ParserRegistry, PlainTextParser
 from app.services.document_service import DocumentService
 from app.services.document_similarity_service import DocumentSimilarityService
@@ -44,7 +51,79 @@ from app.services.storage_service import (
     StorageService,
 )
 from app.services.taxonomy_loader import load_taxonomy
+from app.services.validation_metadata_store import (
+    InMemoryValidationMetadataStore,
+    SQLiteValidationMetadataStore,
+    ValidationMetadataStore,
+)
 from app.settings import Settings
+
+
+class _CatalogNormSampleProvider:
+    """:class:`NormSampleProvider` adapter over the catalog.
+
+    The corpus-norms lazy materialisation path needs raw samples per
+    ``(content_type, topic_cluster)`` bucket. This adapter walks the
+    catalog's existing semantic documents once per bucket request and
+    returns the section-length / asset-count populations the
+    :class:`LazyCorpusNorms` wrapper hashes into a
+    :class:`CorpusNorm`.
+
+    The walk is bounded by the catalog size (one row per
+    ``DocumentVersion``); for the pilot this is small enough to scan
+    on-demand. The persisted norms then short-circuit subsequent
+    lookups so production traffic doesn't pay the walk cost again.
+
+    Bucket-isolation contract: we filter on ``content_type`` directly;
+    ``topic_cluster`` is filtered loosely (we accept every catalog
+    document regardless of its cluster). The clustering pass is
+    per-version, not catalog-wide, so persisting a cluster id with
+    each catalog row is a future-slice change. Until then, the
+    materialised norms span every cluster within a content type — a
+    coarser but safe baseline that the section-length signal still
+    benefits from.
+    """
+
+    def __init__(self, *, documents: DocumentService) -> None:
+        self._documents = documents
+
+    def section_length_samples(
+        self,
+        *,
+        content_type: str,
+        topic_cluster: str,
+    ) -> list[int]:
+        del topic_cluster  # see class docstring — coarse bucket
+        samples: list[int] = []
+        for doc in self._documents.list_documents():
+            for version in doc.versions:
+                if version.content_type != content_type:
+                    continue
+                try:
+                    semantic = self._documents.catalog.get_semantic_document(version.id)
+                except KeyError:
+                    continue
+                samples.extend(len(s.text or "") for s in semantic.sections)
+        return samples
+
+    def asset_count_samples(
+        self,
+        *,
+        content_type: str,
+        topic_cluster: str,
+    ) -> list[int]:
+        del topic_cluster
+        samples: list[int] = []
+        for doc in self._documents.list_documents():
+            for version in doc.versions:
+                if version.content_type != content_type:
+                    continue
+                try:
+                    semantic = self._documents.catalog.get_semantic_document(version.id)
+                except KeyError:
+                    continue
+                samples.append(len(semantic.assets))
+        return samples
 
 
 class _GraphStoreTopicProvider:
@@ -180,6 +259,18 @@ class PipelineServices:
     # while ``build_services`` / ``build_persistent_services`` pass
     # the canonical instance.
     review: ReviewService = field(init=False)
+    # HITL confidence scorer + sidecar metadata store (ADR-023, EPIC-A
+    # slice 1, #215). The scorer is a fire-and-log side-effect of the
+    # NEEDS_REVIEW transition; the metadata store persists every
+    # scoring pass for the next-slice ``hitl_router.py`` to consume.
+    # Both fields are ``None`` when ``KW_HITL_DISABLE_SCORER`` is
+    # truthy, in which case the transition keeps working without the
+    # scoring side-effect (demo-safety escape hatch per ADR-023 §5).
+    confidence_scorer: ConfidenceScorer | None = None
+    validation_metadata: ValidationMetadataStore = field(
+        default_factory=InMemoryValidationMetadataStore
+    )
+    corpus_norms: CorpusNormsProvider = field(default_factory=InMemoryCorpusNormsStore)
     # Topic-Jaccard document similarity (ADR-025 §3, EPIC-C C.2/C.3).
     # The provider is a thin adapter over the catalog + graph store so
     # the surface stays decoupled from any specific clustering wiring;
@@ -439,6 +530,31 @@ def _maybe_build_chat_service(
     )
 
 
+def _maybe_build_confidence_scorer(
+    settings: Settings,
+    *,
+    documents: DocumentService,
+    corpus_norms: CorpusNormsProvider,
+) -> ConfidenceScorer | None:
+    """Construct the HITL confidence scorer iff the kill switch is off.
+
+    Returns ``None`` when ``KW_HITL_DISABLE_SCORER`` is truthy — that
+    is the demo-safety escape hatch per ADR-023 §5. The
+    ``SemanticOutputService`` checks the field is non-``None`` before
+    invoking the scorer, so a ``None`` here cleanly disables the
+    fire-and-log side-effect at the NEEDS_REVIEW transition.
+    """
+    del documents  # held for forward-compat (e.g. when the OCR flag fn
+    # needs catalog access). The current default OCR flag is constant
+    # ``False``, so the scorer doesn't need ``documents`` yet.
+    if settings.hitl_scorer_disabled:
+        return None
+    return ConfidenceScorer(
+        weights=settings.hitl_weights,
+        corpus_norms=corpus_norms,
+    )
+
+
 def build_services(settings: Settings | None = None) -> PipelineServices:
     """Create fresh in-memory services for tests and ephemeral demos.
 
@@ -475,11 +591,27 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
+    # scorer is constructed unless the kill switch is on. The lazy
+    # provider sources samples from the catalog so unknown buckets
+    # warm up on first use.
+    corpus_norms_store: CorpusNormsProvider = LazyCorpusNorms(
+        store=InMemoryCorpusNormsStore(),
+        samples=_CatalogNormSampleProvider(documents=documents),
+    )
+    validation_metadata_store: ValidationMetadataStore = InMemoryValidationMetadataStore()
+    confidence_scorer = _maybe_build_confidence_scorer(
+        settings,
+        documents=documents,
+        corpus_norms=corpus_norms_store,
+    )
     semantic_outputs = SemanticOutputService(
         documents=documents,
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
+        confidence_scorer=confidence_scorer,
+        validation_metadata_store=validation_metadata_store,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
@@ -507,6 +639,9 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
+        confidence_scorer=confidence_scorer,
+        validation_metadata=validation_metadata_store,
+        corpus_norms=corpus_norms_store,
     )
 
 
@@ -545,11 +680,31 @@ def build_persistent_services(
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    # HITL slice 1 wiring (persistent path): SQLite-backed corpus
+    # norms + sidecar store. Both reuse the catalog database file so
+    # the schema migrations land beside ``document_versions`` and a
+    # backup of ``catalog.sqlite3`` carries the metadata along.
+    catalog_db_path = root / "catalog.sqlite3"
+    persisted_norms_store = SQLiteCorpusNormsStore(catalog_db_path)
+    corpus_norms_store: CorpusNormsProvider = LazyCorpusNorms(
+        store=persisted_norms_store,
+        samples=_CatalogNormSampleProvider(documents=documents),
+    )
+    validation_metadata_store: ValidationMetadataStore = SQLiteValidationMetadataStore(
+        catalog_db_path
+    )
+    confidence_scorer = _maybe_build_confidence_scorer(
+        settings,
+        documents=documents,
+        corpus_norms=corpus_norms_store,
+    )
     semantic_outputs = SemanticOutputService(
         documents=documents,
         extraction_jobs=extraction_jobs,
         semantic_extractor=semantic_extractor,
         markdown_generator=markdown_generator,
+        confidence_scorer=confidence_scorer,
+        validation_metadata_store=validation_metadata_store,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     return PipelineServices(
@@ -577,4 +732,7 @@ def build_persistent_services(
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         settings=settings,
+        confidence_scorer=confidence_scorer,
+        validation_metadata=validation_metadata_store,
+        corpus_norms=corpus_norms_store,
     )
