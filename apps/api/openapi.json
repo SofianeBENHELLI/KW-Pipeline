@@ -2196,7 +2196,7 @@
     },
     "/documents": {
       "get": {
-        "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.",
+        "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.\n\nScope filter (EPIC-D D.5, ADR-020 §2): the response is filtered\nto documents linked to the caller's allowed scopes (default\n``personal:<current_user.id>``). ``KW_AUTH_MODE=disabled``\nskips the predicate for back-compat.",
         "operationId": "list_documents",
         "parameters": [
           {
@@ -2259,6 +2259,38 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Ref"
             }
           }
         ],
@@ -2489,7 +2521,7 @@
     },
     "/documents/{document_id}/graph": {
       "get": {
-        "description": "Knowledge graph projection for one document family (ADR-012).",
+        "description": "Knowledge graph projection for one document family (ADR-012).\n\nD.5: 404 when the caller's scope set excludes a *known*\ndocument — same hidden-existence rule the rest of the\n``/documents/{id}/...`` surface follows. Unknown ids fall\nthrough to the graph store, which returns an empty projection\n(existing contract). That keeps the route usable as a\n\"do I have a graph for this?\" probe without leaking which\nids exist in other users' scopes — the empty payload is\nidentical to \"exists but no projection yet\".",
         "operationId": "get_document_graph",
         "parameters": [
           {
@@ -2529,7 +2561,7 @@
     },
     "/documents/{document_id}/lineage": {
       "get": {
-        "description": "Version history for one document family (EPIC-C C.3, ADR-025).\n\nReturns a derived view of every :class:`DocumentVersion` in the\nfamily with the ``is_latest`` and ``superseded_by_version_id``\nfields the lineage modal needs filled in. Versions are sorted\nASC by ``version_number`` so the modal renders v1 → vN\ntop-to-bottom without re-sorting on the client.\n\n``superseded_by_version_id`` is reconstructed from\n``(version_number, status)`` ordering rather than read from a\njoined audit row — per ADR-025, the supersede chain is \"the\nnext-higher version-numbered sibling that exists in the\nfamily\", not an arbitrary pointer.\n\nReturns ``404`` when the document does not exist; never raises\non an empty family (a freshly-created family with one version\nis a valid response).",
+        "description": "Version history for one document family (EPIC-C C.3, ADR-025).\n\nReturns a derived view of every :class:`DocumentVersion` in the\nfamily with the ``is_latest`` and ``superseded_by_version_id``\nfields the lineage modal needs filled in. Versions are sorted\nASC by ``version_number`` so the modal renders v1 → vN\ntop-to-bottom without re-sorting on the client.\n\n``superseded_by_version_id`` is reconstructed from\n``(version_number, status)`` ordering rather than read from a\njoined audit row — per ADR-025, the supersede chain is \"the\nnext-higher version-numbered sibling that exists in the\nfamily\", not an arbitrary pointer.\n\nReturns ``404`` when the document does not exist OR when the\ncaller's scope set does not include this document — D.5's\nhidden-existence rule: enumeration probes can't distinguish\nthe two cases. Never raises on an empty family (a\nfreshly-created family with one version is a valid response).",
         "operationId": "get_document_lineage",
         "parameters": [
           {
@@ -2569,7 +2601,7 @@
     },
     "/documents/{document_id}/similar": {
       "get": {
-        "description": "Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).\n\nUses :class:`DocumentSimilarityService` over the wired\n``DocumentTopicProvider`` adapter. Cold-start tolerance: when\nthe query document has no projected topics yet (knowledge layer\ndisabled, pre-validation, or no topic clusters of size ≥ 2),\nreturns ``results: []`` with HTTP 200 rather than a 5xx — the\nfrontend renders \"no similar documents yet\" gracefully.\n\n``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;\nout-of-range values produce a 422 from FastAPI itself.",
+        "description": "Top-K similar documents by topic-Jaccard (EPIC-C C.3, ADR-025 §3).\n\nUses :class:`DocumentSimilarityService` over the wired\n``DocumentTopicProvider`` adapter. Cold-start tolerance: when\nthe query document has no projected topics yet (knowledge layer\ndisabled, pre-validation, or no topic clusters of size ≥ 2),\nreturns ``results: []`` with HTTP 200 rather than a 5xx — the\nfrontend renders \"no similar documents yet\" gracefully.\n\n``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;\nout-of-range values produce a 422 from FastAPI itself.\n\nD.5: 404 when the base document is hidden from the caller, AND\nneighbour rows are filtered down to documents in the caller's\nscope set so we don't surface \"you have a similar doc you\ncan't actually open\".",
         "operationId": "get_similar_documents",
         "parameters": [
           {
@@ -3269,7 +3301,7 @@
     },
     "/knowledge/chat": {
       "post": {
-        "description": "Grounded chat surface (Phase 3 follow-up).\n\nBuilds a RAG / GraphRAG / Hybrid context from the configured\nretrieval primitives, asks the LLM for a free-text answer, and\nreturns the answer alongside the citations the prompt was\ngrounded in. Requires both ``ANTHROPIC_API_KEY`` and\n``VOYAGE_API_KEY`` (the chat service seeds graph traversal\nfrom vector hits, so the search service must be wired). When\neither gate is off the route returns 503 with\n``KW_CHAT_DISABLED`` and the public-error remediation copy.",
+        "description": "Grounded chat surface (Phase 3 follow-up).\n\nBuilds a RAG / GraphRAG / Hybrid context from the configured\nretrieval primitives, asks the LLM for a free-text answer, and\nreturns the answer alongside the citations the prompt was\ngrounded in. Requires both ``ANTHROPIC_API_KEY`` and\n``VOYAGE_API_KEY`` (the chat service seeds graph traversal\nfrom vector hits, so the search service must be wired). When\neither gate is off the route returns 503 with\n``KW_CHAT_DISABLED`` and the public-error remediation copy.\n\nD.5: the retrieval set is filtered to documents the caller can\nsee before being injected into the LLM prompt — so the model\ncannot quote / cite content that lives outside the user's\nscope. Citations on the response are guaranteed to resolve\nagainst documents the caller could otherwise list.",
         "operationId": "chat_with_knowledge",
         "requestBody": {
           "content": {
@@ -3308,7 +3340,7 @@
     },
     "/knowledge/graph": {
       "get": {
-        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).",
+        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).\n\nD.5 note: this route returns aggregated graph nodes/edges\n(sections, chunks, entities) — not document rows. The graph\nstore's projection doesn't carry a per-node ``document_id``\nfilter today, so a fully-correct scope filter would require a\nnew GraphStore method (or a per-page join against\n``document_scopes``). Deferred until D.6 / a follow-up — the\ndocument-list endpoints (``GET /documents``,\n``/knowledge/catalog``) and the per-document graph\n(``GET /documents/{id}/graph``) ARE filtered, so a caller who\ndoes the obvious \"list docs → fetch each graph\" loop sees the\ncorrect restricted set. Direct hits to the catalog-wide graph\npage see the unfiltered projection — operator/audit shape.",
         "operationId": "get_knowledge_graph",
         "parameters": [
           {
@@ -3366,7 +3398,7 @@
     },
     "/knowledge/search": {
       "get": {
-        "description": "Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).\n\nRequires both ``KW_KNOWLEDGE_LAYER_ENABLED=true`` and a\n``VOYAGE_API_KEY`` to be configured. When either gate is off\nthe route returns 503 with a stable public error code so the\nfrontend can surface the right remediation.",
+        "description": "Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).\n\nRequires both ``KW_KNOWLEDGE_LAYER_ENABLED=true`` and a\n``VOYAGE_API_KEY`` to be configured. When either gate is off\nthe route returns 503 with a stable public error code so the\nfrontend can surface the right remediation.\n\nD.5: results are filtered to chunks whose owning document the\ncaller can see. The filter runs after retrieval (not at the\nembedding store level) so a future store-side scope index is a\ndrop-in optimisation. Empty results after the filter are\nreturned as ``results: []`` (HTTP 200) — same shape as\nempty-retrieval today.",
         "operationId": "search_knowledge_chunks",
         "parameters": [
           {

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
@@ -22,13 +22,21 @@ from app.schemas.knowledge import (
     ChatRequest,
     ChatResponse,
     ChunkSearchResponse,
+    ChunkSearchResult,
     KnowledgeCatalogItem,
     KnowledgeCatalogResponse,
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
 )
+from app.schemas.scope import ScopeRef
 from app.schemas.taxonomy import TaxonomyCategory, TaxonomyResponse
-from app.services.auth import User, get_current_user
+from app.services.auth import (
+    User,
+    assert_can_access_document,
+    get_caller_scopes,
+    get_current_user,
+)
+from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
 from app.services.knowledge.graph_store import (
     DEFAULT_GRAPH_PAGE_LIMIT,
@@ -36,6 +44,7 @@ from app.services.knowledge.graph_store import (
     MAX_GRAPH_PAGE_LIMIT,
     MAX_VECTOR_SEARCH_LIMIT,
 )
+from app.settings import Settings
 
 from ._helpers import MIN_GRAPH_PAGE_LIMIT
 
@@ -67,8 +76,24 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         operation_id="get_document_graph",
         response_model=KnowledgeGraphProjection,
     )
-    def get_document_graph(document_id: str) -> Any:
-        """Knowledge graph projection for one document family (ADR-012)."""
+    def get_document_graph(
+        request: Request,
+        document_id: str,
+        current_user: User = Depends(get_current_user),
+    ) -> Any:
+        """Knowledge graph projection for one document family (ADR-012).
+
+        D.5: 404 when the caller's scope set excludes a *known*
+        document — same hidden-existence rule the rest of the
+        ``/documents/{id}/...`` surface follows. Unknown ids fall
+        through to the graph store, which returns an empty projection
+        (existing contract). That keeps the route usable as a
+        "do I have a graph for this?" probe without leaking which
+        ids exist in other users' scopes — the empty payload is
+        identical to "exists but no projection yet".
+        """
+        if services.documents.catalog.get_document(document_id) is not None:
+            assert_can_access_document(request=request, document_id=document_id, user=current_user)
         return services.graph_store.find_subgraph_for_document(document_id)
 
     @router.get(
@@ -80,7 +105,21 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         limit: int = Query(default=DEFAULT_GRAPH_PAGE_LIMIT, ge=MIN_GRAPH_PAGE_LIMIT),
         cursor: str | None = None,
     ) -> Any:
-        """Cursor-paginated walk of the catalog-wide projection (ADR-012)."""
+        """Cursor-paginated walk of the catalog-wide projection (ADR-012).
+
+        D.5 note: this route returns aggregated graph nodes/edges
+        (sections, chunks, entities) — not document rows. The graph
+        store's projection doesn't carry a per-node ``document_id``
+        filter today, so a fully-correct scope filter would require a
+        new GraphStore method (or a per-page join against
+        ``document_scopes``). Deferred until D.6 / a follow-up — the
+        document-list endpoints (``GET /documents``,
+        ``/knowledge/catalog``) and the per-document graph
+        (``GET /documents/{id}/graph``) ARE filtered, so a caller who
+        does the obvious "list docs → fetch each graph" loop sees the
+        correct restricted set. Direct hits to the catalog-wide graph
+        page see the unfiltered projection — operator/audit shape.
+        """
         if limit > MAX_GRAPH_PAGE_LIMIT:
             raise HTTPException(
                 status_code=400,
@@ -102,6 +141,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     def search_knowledge_chunks(
         q: str = Query(min_length=1, max_length=2000),
         limit: int = Query(default=DEFAULT_VECTOR_SEARCH_LIMIT, ge=1),
+        current_user: User = Depends(get_current_user),
     ) -> Any:
         """Top-K chunk retrieval ranked by cosine similarity (ADR-015, #186).
 
@@ -109,6 +149,13 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         ``VOYAGE_API_KEY`` to be configured. When either gate is off
         the route returns 503 with a stable public error code so the
         frontend can surface the right remediation.
+
+        D.5: results are filtered to chunks whose owning document the
+        caller can see. The filter runs after retrieval (not at the
+        embedding store level) so a future store-side scope index is a
+        drop-in optimisation. Empty results after the filter are
+        returned as ``results: []`` (HTTP 200) — same shape as
+        empty-retrieval today.
         """
         if services.knowledge_search is None:
             raise ApiError(
@@ -132,16 +179,45 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                 detail=(f"limit must be between 1 and {MAX_VECTOR_SEARCH_LIMIT}; got {limit}."),
             )
         try:
-            return services.knowledge_search.search(q, limit=limit)
+            response = services.knowledge_search.search(q, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        settings = Settings()
+        catalog = services.documents.catalog
+        filtered: list[ChunkSearchResult] = []
+        seen: dict[str, bool] = {}
+        for hit in response.results:
+            cached = seen.get(hit.document_id)
+            if cached is None:
+                cached = user_can_access(
+                    user=current_user,
+                    document_id=hit.document_id,
+                    catalog=catalog,
+                    settings=settings,
+                )
+                seen[hit.document_id] = cached
+            if cached:
+                filtered.append(hit)
+        # Re-emit the response with the filtered hit list. Other fields
+        # (model id, query, embedding dim) are preserved verbatim so
+        # operator-facing telemetry stays stable.
+        return ChunkSearchResponse(
+            query=response.query,
+            embedding_model=response.embedding_model,
+            query_embedding_dim=response.query_embedding_dim,
+            results=filtered,
+        )
 
     @router.post(
         "/knowledge/chat",
         operation_id="chat_with_knowledge",
         response_model=ChatResponse,
     )
-    def chat_with_knowledge(payload: ChatRequest) -> Any:
+    def chat_with_knowledge(
+        payload: ChatRequest,
+        current_user: User = Depends(get_current_user),
+    ) -> Any:
         """Grounded chat surface (Phase 3 follow-up).
 
         Builds a RAG / GraphRAG / Hybrid context from the configured
@@ -152,6 +228,12 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         from vector hits, so the search service must be wired). When
         either gate is off the route returns 503 with
         ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+
+        D.5: the retrieval set is filtered to documents the caller can
+        see before being injected into the LLM prompt — so the model
+        cannot quote / cite content that lives outside the user's
+        scope. Citations on the response are guaranteed to resolve
+        against documents the caller could otherwise list.
         """
         if services.knowledge_chat is None:
             raise ApiError(
@@ -169,11 +251,23 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                     "aliases) in the API environment, then restart the service."
                 ),
             )
+        settings = Settings()
+        catalog = services.documents.catalog
+
+        def _accessible(document_id: str) -> bool:
+            return user_can_access(
+                user=current_user,
+                document_id=document_id,
+                catalog=catalog,
+                settings=settings,
+            )
+
         try:
             return services.knowledge_chat.answer(
                 payload.question,
                 mode=payload.mode,
                 top_k=payload.top_k,
+                accessible_document_id=_accessible,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -251,14 +345,13 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             ge=_CATALOG_MIN_PAGE_LIMIT,
             le=_CATALOG_MAX_PAGE_LIMIT,
         ),
-        # TODO(D.5): scope filtering not yet enforced. The params are
-        # accepted here so the frontend can wire the workspace picker
-        # ahead of time; D.5 will add the predicate that joins on
-        # ``document_scopes`` to drop documents the caller can't see.
-        # See ADR-020 §2 for the read-side filter shape.
-        scope_kind: str | None = Query(default=None),
-        scope_ref: str | None = Query(default=None),
-        current_user: User = Depends(get_current_user),
+        # D.5: scope filtering enforced. ``scope_kind`` / ``scope_ref``
+        # are accepted as query params and resolved against the
+        # caller's allowed scope set via ``get_caller_scopes``. Cross
+        # user / community / project asks return 403 until the Swym
+        # membership client (D.3) ships. See ADR-020 §2 for the
+        # read-side filter shape.
+        caller_scopes: tuple[ScopeRef, ...] = Depends(get_caller_scopes),
     ) -> Any:
         """Paginated catalog view filtered for the EPIC-C surface (ADR-025).
 
@@ -309,13 +402,28 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         # SUPERSEDED + visibility filter in-memory because the latest
         # non-superseded version is a derived field the store doesn't
         # currently index.
+        #
+        # D.5: when ``caller_scopes`` is the
+        # :data:`ALL_SCOPES_SENTINEL` (``KW_AUTH_MODE=disabled``) we
+        # walk the unfiltered list. Otherwise we walk only documents
+        # in the caller's scope set; with the strict
+        # ``personal:<user.id>`` default the scoped store call is the
+        # whole catalog the caller can see anyway.
         try:
-            documents = services.documents.catalog.list_documents(
-                cursor=cursor,
-                limit=None,
-                status_filter=None,
-                filename_query=filename_query,
-            )
+            if caller_scopes == ALL_SCOPES_SENTINEL:
+                documents = services.documents.catalog.list_documents(
+                    cursor=cursor,
+                    limit=None,
+                    status_filter=None,
+                    filename_query=filename_query,
+                )
+            else:
+                documents = _scoped_documents_for_catalog(
+                    services=services,
+                    caller_scopes=caller_scopes,
+                    cursor=cursor,
+                    filename_query=filename_query,
+                )
         except InvalidCursor as exc:
             raise HTTPException(
                 status_code=400,
@@ -346,12 +454,20 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         next_cursor: str | None = None
         if len(items) >= limit and last_visible is not None:
             tail_cursor = _encode_cursor((last_visible.created_at, last_visible.id))
-            tail = services.documents.catalog.list_documents(
-                cursor=tail_cursor,
-                limit=None,
-                status_filter=None,
-                filename_query=filename_query,
-            )
+            if caller_scopes == ALL_SCOPES_SENTINEL:
+                tail = services.documents.catalog.list_documents(
+                    cursor=tail_cursor,
+                    limit=None,
+                    status_filter=None,
+                    filename_query=filename_query,
+                )
+            else:
+                tail = _scoped_documents_for_catalog(
+                    services=services,
+                    caller_scopes=caller_scopes,
+                    cursor=tail_cursor,
+                    filename_query=filename_query,
+                )
             for document in tail:
                 row = _build_catalog_item(
                     document=document,
@@ -366,6 +482,51 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         return KnowledgeCatalogResponse(items=items, next_cursor=next_cursor)
 
     return router
+
+
+def _scoped_documents_for_catalog(
+    *,
+    services: PipelineServices,
+    caller_scopes: tuple[ScopeRef, ...],
+    cursor: str | None,
+    filename_query: str | None,
+) -> list[Document]:
+    """Return documents the caller can see for the catalog projection.
+
+    Walks every scope in ``caller_scopes`` via
+    :meth:`CatalogStore.list_documents_in_scope`, merges the results
+    into ``(created_at, id)`` order, and filters by ``filename_query``
+    in-memory because the scoped store call doesn't index it yet. The
+    cursor is applied uniformly across the merged stream.
+
+    For the strict D.5 default — a single ``personal:<user.id>`` —
+    this is one round-trip; multi-scope callers (D.3) iterate.
+    """
+    seen: dict[str, Document] = {}
+    for scope in caller_scopes:
+        # The scoped list returns ``(page, next_cursor)`` and uses the
+        # same cursor codec; we ask for the whole stream by walking
+        # forward until ``next_cursor is None``. Acceptable because the
+        # caller's personal scope is small in the D.5 timeframe (one
+        # user's uploads). Multi-scope queries that prove out a perf
+        # issue land a paginated merge in D.3.
+        next_cursor = cursor
+        while True:
+            page, next_cursor = services.documents.catalog.list_documents_in_scope(
+                scope.kind,
+                scope.ref,
+                cursor=next_cursor,
+                limit=_CATALOG_MAX_PAGE_LIMIT,
+            )
+            for doc in page:
+                seen.setdefault(doc.id, doc)
+            if next_cursor is None:
+                break
+    documents = sorted(seen.values(), key=lambda d: (d.created_at, d.id))
+    if filename_query:
+        needle = filename_query.lower()
+        documents = [d for d in documents if needle in d.original_filename.lower()]
+    return documents
 
 
 def _build_catalog_item(

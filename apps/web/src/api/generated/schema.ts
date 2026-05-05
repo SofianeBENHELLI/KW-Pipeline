@@ -41,6 +41,11 @@ export interface paths {
          *       string after trim is treated as "no filter".
          *     - Filters apply before pagination. Re-walking with a different
          *       filter requires dropping the cursor.
+         *
+         *     Scope filter (EPIC-D D.5, ADR-020 §2): the response is filtered
+         *     to documents linked to the caller's allowed scopes (default
+         *     ``personal:<current_user.id>``). ``KW_AUTH_MODE=disabled``
+         *     skips the predicate for back-compat.
          */
         get: operations["list_documents"];
         put?: never;
@@ -125,6 +130,15 @@ export interface paths {
         /**
          * Get Document Graph
          * @description Knowledge graph projection for one document family (ADR-012).
+         *
+         *     D.5: 404 when the caller's scope set excludes a *known*
+         *     document — same hidden-existence rule the rest of the
+         *     ``/documents/{id}/...`` surface follows. Unknown ids fall
+         *     through to the graph store, which returns an empty projection
+         *     (existing contract). That keeps the route usable as a
+         *     "do I have a graph for this?" probe without leaking which
+         *     ids exist in other users' scopes — the empty payload is
+         *     identical to "exists but no projection yet".
          */
         get: operations["get_document_graph"];
         put?: never;
@@ -158,9 +172,11 @@ export interface paths {
          *     next-higher version-numbered sibling that exists in the
          *     family", not an arbitrary pointer.
          *
-         *     Returns ``404`` when the document does not exist; never raises
-         *     on an empty family (a freshly-created family with one version
-         *     is a valid response).
+         *     Returns ``404`` when the document does not exist OR when the
+         *     caller's scope set does not include this document — D.5's
+         *     hidden-existence rule: enumeration probes can't distinguish
+         *     the two cases. Never raises on an empty family (a
+         *     freshly-created family with one version is a valid response).
          */
         get: operations["get_document_lineage"];
         put?: never;
@@ -191,6 +207,11 @@ export interface paths {
          *
          *     ``k`` is clamped to ``[1, 50]`` by FastAPI's ``Query`` validator;
          *     out-of-range values produce a 422 from FastAPI itself.
+         *
+         *     D.5: 404 when the base document is hidden from the caller, AND
+         *     neighbour rows are filtered down to documents in the caller's
+         *     scope set so we don't surface "you have a similar doc you
+         *     can't actually open".
          */
         get: operations["get_similar_documents"];
         put?: never;
@@ -430,6 +451,12 @@ export interface paths {
          *     from vector hits, so the search service must be wired). When
          *     either gate is off the route returns 503 with
          *     ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+         *
+         *     D.5: the retrieval set is filtered to documents the caller can
+         *     see before being injected into the LLM prompt — so the model
+         *     cannot quote / cite content that lives outside the user's
+         *     scope. Citations on the response are guaranteed to resolve
+         *     against documents the caller could otherwise list.
          */
         post: operations["chat_with_knowledge"];
         delete?: never;
@@ -448,6 +475,19 @@ export interface paths {
         /**
          * Get Knowledge Graph
          * @description Cursor-paginated walk of the catalog-wide projection (ADR-012).
+         *
+         *     D.5 note: this route returns aggregated graph nodes/edges
+         *     (sections, chunks, entities) — not document rows. The graph
+         *     store's projection doesn't carry a per-node ``document_id``
+         *     filter today, so a fully-correct scope filter would require a
+         *     new GraphStore method (or a per-page join against
+         *     ``document_scopes``). Deferred until D.6 / a follow-up — the
+         *     document-list endpoints (``GET /documents``,
+         *     ``/knowledge/catalog``) and the per-document graph
+         *     (``GET /documents/{id}/graph``) ARE filtered, so a caller who
+         *     does the obvious "list docs → fetch each graph" loop sees the
+         *     correct restricted set. Direct hits to the catalog-wide graph
+         *     page see the unfiltered projection — operator/audit shape.
          */
         get: operations["get_knowledge_graph"];
         put?: never;
@@ -473,6 +513,13 @@ export interface paths {
          *     ``VOYAGE_API_KEY`` to be configured. When either gate is off
          *     the route returns 503 with a stable public error code so the
          *     frontend can surface the right remediation.
+         *
+         *     D.5: results are filtered to chunks whose owning document the
+         *     caller can see. The filter runs after retrieval (not at the
+         *     embedding store level) so a future store-side scope index is a
+         *     drop-in optimisation. Empty results after the filter are
+         *     returned as ``results: []`` (HTTP 200) — same shape as
+         *     empty-retrieval today.
          */
         get: operations["search_knowledge_chunks"];
         put?: never;
@@ -1582,6 +1629,8 @@ export interface operations {
                 cursor?: string | null;
                 status?: string[] | null;
                 q?: string | null;
+                scope_kind?: string | null;
+                scope_ref?: string | null;
             };
             header?: never;
             path?: never;

@@ -22,8 +22,17 @@ from .dev_mode import DEFAULT_DEV_ROLE, DEFAULT_DEV_USER_ID, DevModeAuthService
 from .disabled import ANONYMOUS_USER_ID, DisabledAuthService
 from .factory import build_auth_service
 from .protocol import AuthError, AuthService, Role, User
+from .scope_dependencies import assert_can_access_document, get_caller_scopes
+from .scope_filter import (
+    ALL_SCOPES_SENTINEL,
+    ScopeAccessDenied,
+    default_scopes_for,
+    resolve_caller_scopes,
+    user_can_access,
+)
 
 __all__ = [
+    "ALL_SCOPES_SENTINEL",
     "ANONYMOUS_USER_ID",
     "AuthError",
     "AuthService",
@@ -33,8 +42,14 @@ __all__ = [
     "DevModeAuthService",
     "DisabledAuthService",
     "Role",
+    "ScopeAccessDenied",
     "User",
+    "assert_can_access_document",
     "build_auth_service",
+    "default_scopes_for",
     "encode_hs256",
+    "get_caller_scopes",
     "get_current_user",
+    "resolve_caller_scopes",
+    "user_can_access",
 ]
