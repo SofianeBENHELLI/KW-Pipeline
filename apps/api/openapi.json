@@ -60,6 +60,96 @@
         "title": "AdminConfigResponse",
         "type": "object"
       },
+      "ArchivedDocumentItem": {
+        "description": "One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.\n\nSurface fields the admin UI needs to render an Archive view row\nwithout a per-doc detail fetch:\n\n- ``document_id`` / ``original_filename`` identify the row.\n- ``archived_at`` is the wall clock the orphan cascade (or a\n  future explicit-archive route) stamped on the document; the UI\n  renders it as a relative date.\n- ``last_active_scope_kind`` / ``last_active_scope_ref`` describe\n  the scope that was last removed before the cascade flagged the\n  document — so the admin can see *why* it ended up archived. Both\n  fall back to ``None`` when no scope-link history is recoverable\n  (e.g. a never-scoped document was archived directly).\n- ``versions_purged`` / ``versions_remaining`` split the version\n  family by :data:`DocumentVersionStatus.PURGED` so the operator\n  sees how much bytes-recovery surface is still on disk vs already\n  tombstone'd. The standard ``X / Y`` UI string is\n  ``versions_remaining / (versions_remaining + versions_purged)``.",
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "title": "Archived At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "last_active_scope_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active Scope Kind"
+          },
+          "last_active_scope_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active Scope Ref"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "versions_purged": {
+            "default": 0,
+            "title": "Versions Purged",
+            "type": "integer"
+          },
+          "versions_remaining": {
+            "default": 0,
+            "title": "Versions Remaining",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "original_filename",
+          "archived_at",
+          "last_active_scope_kind",
+          "last_active_scope_ref",
+          "versions_purged",
+          "versions_remaining"
+        ],
+        "title": "ArchivedDocumentItem",
+        "type": "object"
+      },
+      "ArchivedDocumentsResponse": {
+        "description": "Response body for ``GET /admin/archive/archived_documents``.\n\nCursor-paginated walk of every flag-archived row in the catalog,\nsorted by ``archived_at DESC`` (most-recently archived first) so\nthe admin UI's default view surfaces the freshest archives at the\ntop of the table.\n\n``next_cursor`` is opaque (the catalog's existing base64-JSON cursor\ncodec) and ``None`` when this page is the last one — same shape as\n:class:`DocumentListResponse`.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArchivedDocumentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ArchivedDocumentsResponse",
+        "type": "object"
+      },
       "AuditConfig": {
         "properties": {
           "db_path": {
@@ -2678,6 +2768,65 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/archive/archived_documents": {
+      "get": {
+        "description": "Paginated read of flag-archived documents (D.9 admin UI).\n\nReturns one page of rows where ``archived_at IS NOT NULL``,\nsorted ``archived_at DESC`` (most-recently archived first) with\n``id`` ASC as the tie-breaker. Each row carries the fields the\nadmin UI needs to render its table without per-doc probes:\n\n- ``original_filename`` and ``archived_at`` for the heading.\n- ``last_active_scope_kind`` / ``last_active_scope_ref`` —\n  derived from the most-recent soft-removed scope link on the\n  document so the operator can see which scope was last\n  removed before the cascade fired. ``None`` when no scope\n  history is recoverable.\n- ``versions_purged`` / ``versions_remaining`` — split the\n  version family by :data:`DocumentVersionStatus.PURGED` so\n  the UI shows recoverable bytes vs already-tombstone'd bytes.\n\nRead-only: no ``?confirm=true`` / ``?dry_run=true``\nceremony — the route doesn't mutate state.",
+        "operationId": "admin_archive_list_archived",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchivedDocumentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Archived Documents"
+      }
+    },
     "/admin/archive/purge_artifacts": {
       "post": {
         "description": "Hard-delete a document's source artifacts (ADR-027 §1.3).\n\nPre-conditions:\n\n- The document must exist (404 otherwise).\n- The document must already be archived (409 otherwise) —\n  archive-then-purge is the ordered ritual that gives an\n  operator a chance to reverse via ``unarchive`` before bytes\n  go.\n- ``?confirm=true`` is required for non-dry-run mutating\n  actions (422 otherwise — ``KW_UNPROCESSABLE_ENTITY``).\n\nPer version the route:\n\n1. Computes a tombstone URI per ADR-027 §3\n   (``tombstone:purged:<doc>:<version>:<iso>``).\n2. Calls :meth:`StorageService.delete` on the version's\n   current ``storage_uri`` (best-effort + idempotent per\n   ADR-027 §7).\n3. Flips the version's status to :data:`DocumentVersionStatus.PURGED`\n   and overwrites ``storage_uri`` with the tombstone via\n   :meth:`CatalogStore.purge_version_artifacts`.\n4. Emits a ``document.artifacts_purged`` audit event with\n   the storage URI before / after, the actor, and the\n   ``dry_run`` flag.\n\nIdempotent: re-purging an already-PURGED version is a no-op\n— the existing tombstone URI is echoed back and no audit\nrow is emitted (the empty audit row is the idempotency\nsignal). KG cleanup is out of scope: the cascade in #265\nalready removed KG nodes when the document was archived.",

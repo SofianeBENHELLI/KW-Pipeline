@@ -9,6 +9,11 @@ Slices 4+5+6 add the bytes-deletion surface: ``purge_artifacts``
 :class:`VersionPurgeResult` per-version row that carries the
 tombstone URI, and the per-batch :class:`PurgeBatchResult` envelope
 that lets a single doc fail without aborting the whole list.
+
+Slice D.9 (Admin UI) adds the read-side listing surface:
+:class:`ArchivedDocumentItem` + :class:`ArchivedDocumentsResponse`
+power ``GET /admin/archive/archived_documents`` so the operator UI
+can paginate over flag-archived rows without a per-doc probe.
 """
 
 from __future__ import annotations
@@ -207,7 +212,57 @@ class PurgeBatchResponse(BaseModel):
     dry_run: bool = False
 
 
+class ArchivedDocumentItem(BaseModel):
+    """One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.
+
+    Surface fields the admin UI needs to render an Archive view row
+    without a per-doc detail fetch:
+
+    - ``document_id`` / ``original_filename`` identify the row.
+    - ``archived_at`` is the wall clock the orphan cascade (or a
+      future explicit-archive route) stamped on the document; the UI
+      renders it as a relative date.
+    - ``last_active_scope_kind`` / ``last_active_scope_ref`` describe
+      the scope that was last removed before the cascade flagged the
+      document — so the admin can see *why* it ended up archived. Both
+      fall back to ``None`` when no scope-link history is recoverable
+      (e.g. a never-scoped document was archived directly).
+    - ``versions_purged`` / ``versions_remaining`` split the version
+      family by :data:`DocumentVersionStatus.PURGED` so the operator
+      sees how much bytes-recovery surface is still on disk vs already
+      tombstone'd. The standard ``X / Y`` UI string is
+      ``versions_remaining / (versions_remaining + versions_purged)``.
+    """
+
+    document_id: str
+    original_filename: str
+    archived_at: datetime
+    last_active_scope_kind: str | None = None
+    last_active_scope_ref: str | None = None
+    versions_purged: int = 0
+    versions_remaining: int = 0
+
+
+class ArchivedDocumentsResponse(BaseModel):
+    """Response body for ``GET /admin/archive/archived_documents``.
+
+    Cursor-paginated walk of every flag-archived row in the catalog,
+    sorted by ``archived_at DESC`` (most-recently archived first) so
+    the admin UI's default view surfaces the freshest archives at the
+    top of the table.
+
+    ``next_cursor`` is opaque (the catalog's existing base64-JSON cursor
+    codec) and ``None`` when this page is the last one — same shape as
+    :class:`DocumentListResponse`.
+    """
+
+    items: list[ArchivedDocumentItem] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
 __all__ = [
+    "ArchivedDocumentItem",
+    "ArchivedDocumentsResponse",
     "PurgeArtifactsRequest",
     "PurgeArtifactsResponse",
     "PurgeBatchRequest",

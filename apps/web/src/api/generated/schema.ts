@@ -4,6 +4,44 @@
  */
 
 export interface paths {
+    "/admin/archive/archived_documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Archived Documents
+         * @description Paginated read of flag-archived documents (D.9 admin UI).
+         *
+         *     Returns one page of rows where ``archived_at IS NOT NULL``,
+         *     sorted ``archived_at DESC`` (most-recently archived first) with
+         *     ``id`` ASC as the tie-breaker. Each row carries the fields the
+         *     admin UI needs to render its table without per-doc probes:
+         *
+         *     - ``original_filename`` and ``archived_at`` for the heading.
+         *     - ``last_active_scope_kind`` / ``last_active_scope_ref`` —
+         *       derived from the most-recent soft-removed scope link on the
+         *       document so the operator can see which scope was last
+         *       removed before the cascade fired. ``None`` when no scope
+         *       history is recoverable.
+         *     - ``versions_purged`` / ``versions_remaining`` — split the
+         *       version family by :data:`DocumentVersionStatus.PURGED` so
+         *       the UI shows recoverable bytes vs already-tombstone'd bytes.
+         *
+         *     Read-only: no ``?confirm=true`` / ``?dry_run=true``
+         *     ceremony — the route doesn't mutate state.
+         */
+        get: operations["admin_archive_list_archived"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/archive/purge_artifacts": {
         parameters: {
             query?: never;
@@ -784,6 +822,72 @@ export interface components {
             schema_version: string;
             taxonomy: components["schemas"]["TaxonomyConfig"];
             upload: components["schemas"]["UploadConfig"];
+        };
+        /**
+         * ArchivedDocumentItem
+         * @description One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.
+         *
+         *     Surface fields the admin UI needs to render an Archive view row
+         *     without a per-doc detail fetch:
+         *
+         *     - ``document_id`` / ``original_filename`` identify the row.
+         *     - ``archived_at`` is the wall clock the orphan cascade (or a
+         *       future explicit-archive route) stamped on the document; the UI
+         *       renders it as a relative date.
+         *     - ``last_active_scope_kind`` / ``last_active_scope_ref`` describe
+         *       the scope that was last removed before the cascade flagged the
+         *       document — so the admin can see *why* it ended up archived. Both
+         *       fall back to ``None`` when no scope-link history is recoverable
+         *       (e.g. a never-scoped document was archived directly).
+         *     - ``versions_purged`` / ``versions_remaining`` split the version
+         *       family by :data:`DocumentVersionStatus.PURGED` so the operator
+         *       sees how much bytes-recovery surface is still on disk vs already
+         *       tombstone'd. The standard ``X / Y`` UI string is
+         *       ``versions_remaining / (versions_remaining + versions_purged)``.
+         */
+        ArchivedDocumentItem: {
+            /**
+             * Archived At
+             * Format: date-time
+             */
+            archived_at: string;
+            /** Document Id */
+            document_id: string;
+            /** Last Active Scope Kind */
+            last_active_scope_kind: string | null;
+            /** Last Active Scope Ref */
+            last_active_scope_ref: string | null;
+            /** Original Filename */
+            original_filename: string;
+            /**
+             * Versions Purged
+             * @default 0
+             */
+            versions_purged: number;
+            /**
+             * Versions Remaining
+             * @default 0
+             */
+            versions_remaining: number;
+        };
+        /**
+         * ArchivedDocumentsResponse
+         * @description Response body for ``GET /admin/archive/archived_documents``.
+         *
+         *     Cursor-paginated walk of every flag-archived row in the catalog,
+         *     sorted by ``archived_at DESC`` (most-recently archived first) so
+         *     the admin UI's default view surfaces the freshest archives at the
+         *     top of the table.
+         *
+         *     ``next_cursor`` is opaque (the catalog's existing base64-JSON cursor
+         *     codec) and ``None`` when this page is the last one — same shape as
+         *     :class:`DocumentListResponse`.
+         */
+        ArchivedDocumentsResponse: {
+            /** Items */
+            items: components["schemas"]["ArchivedDocumentItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** AuditConfig */
         AuditConfig: {
@@ -2111,6 +2215,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_archive_list_archived: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedDocumentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_archive_purge_artifacts: {
         parameters: {
             query?: {

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Route, Routes } from "react-router-dom";
 import "./styles.css";
 import {
   SessionExpiredBanner,
@@ -217,7 +218,43 @@ export function useDocumentCatalog(): DocumentCatalog {
   };
 }
 
+/**
+ * Top-level app router (D.9).
+ *
+ * Two routes today:
+ *  - ``/admin/archive`` mounts the Admin UI Archive view; the route
+ *    handler 403s on a non-admin token and the page renders a
+ *    "Forbidden" state for that envelope. We never derive admin
+ *    role client-side — the backend is the single source of truth.
+ *  - everything else falls through to the legacy reviewer workbench.
+ */
+// Lazy-load the admin view so it doesn't ship in the initial app
+// chunk — admin routes are admin-only and most users never land here.
+// Keeps the index bundle under the 80 KB budget enforced by
+// `scripts/check-bundle-size.mjs`.
+const AdminArchiveView = lazy(() =>
+  import("./features/admin/AdminArchiveView").then((mod) => ({
+    default: mod.AdminArchiveView,
+  })),
+);
+
 export default function App() {
+  return (
+    <Routes>
+      <Route
+        path="/admin/archive"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+            <AdminArchiveView />
+          </Suspense>
+        }
+      />
+      <Route path="*" element={<ReviewerWorkbench />} />
+    </Routes>
+  );
+}
+
+function ReviewerWorkbench() {
   const catalog = useDocumentCatalog();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const session = useSessionGuard();

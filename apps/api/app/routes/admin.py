@@ -21,6 +21,9 @@ Holds:
 * ``POST /admin/archive/purge_batch`` — bulk wrapper around
   ``purge_artifacts``, capped at 100 ids per call, best-effort with
   per-doc error reporting. ADR-027 §4, slice 5 of D.9.
+* ``GET /admin/archive/archived_documents`` — paginated read of
+  flag-archived documents (``archived_at IS NOT NULL``), sorted
+  ``archived_at DESC``. Powers the Admin UI Archive view; D.9.
 * ``POST /admin/hitl/run_auto_promote_pass`` — runs one synchronous
   pass of the HITL auto-promotion worker. ADR-023 §6, EPIC-A slice 3
   (#215). A future scheduler will call this on a cron / asyncio
@@ -52,6 +55,8 @@ from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.admin_archive import (
+    ArchivedDocumentItem,
+    ArchivedDocumentsResponse,
     PurgeArtifactsRequest,
     PurgeArtifactsResponse,
     PurgeBatchRequest,
@@ -82,6 +87,7 @@ from app.schemas.document import HealthResponse
 from app.schemas.scope import Scope
 from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.auth import User, require_admin
+from app.services.catalog_store import InvalidCursor
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -709,6 +715,103 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             )
 
         return PurgeBatchResponse(results=results, dry_run=dry_run)
+
+    @router.get(
+        "/admin/archive/archived_documents",
+        operation_id="admin_archive_list_archived",
+        response_model=ArchivedDocumentsResponse,
+    )
+    def list_archived_documents(
+        cursor: str | None = Query(None),
+        limit: int = Query(50, ge=1, le=200),
+        _user: User = Depends(require_admin),
+    ) -> ArchivedDocumentsResponse:
+        """Paginated read of flag-archived documents (D.9 admin UI).
+
+        Returns one page of rows where ``archived_at IS NOT NULL``,
+        sorted ``archived_at DESC`` (most-recently archived first) with
+        ``id`` ASC as the tie-breaker. Each row carries the fields the
+        admin UI needs to render its table without per-doc probes:
+
+        - ``original_filename`` and ``archived_at`` for the heading.
+        - ``last_active_scope_kind`` / ``last_active_scope_ref`` —
+          derived from the most-recent soft-removed scope link on the
+          document so the operator can see which scope was last
+          removed before the cascade fired. ``None`` when no scope
+          history is recoverable.
+        - ``versions_purged`` / ``versions_remaining`` — split the
+          version family by :data:`DocumentVersionStatus.PURGED` so
+          the UI shows recoverable bytes vs already-tombstone'd bytes.
+
+        Read-only: no ``?confirm=true`` / ``?dry_run=true``
+        ceremony — the route doesn't mutate state.
+        """
+        try:
+            documents, next_cursor = services.documents.catalog.list_archived_documents(
+                cursor=cursor,
+                limit=limit,
+            )
+        except InvalidCursor as exc:
+            raise ApiError(
+                status_code=400,
+                code=ErrorCode.BAD_REQUEST,
+                message=f"Invalid cursor: {exc}",
+                retryable=False,
+                remediation=(
+                    "Drop the ``cursor`` query param to start at the "
+                    "first page. The cursor format is opaque; do not "
+                    "construct it client-side."
+                ),
+            ) from exc
+
+        items: list[ArchivedDocumentItem] = []
+        for document in documents:
+            # Bucket versions by PURGED vs not so the UI can render the
+            # "X / Y" recoverability hint without doing this math itself.
+            versions_purged = 0
+            versions_remaining = 0
+            for version in document.versions:
+                if version.status is DocumentVersionStatus.PURGED:
+                    versions_purged += 1
+                else:
+                    versions_remaining += 1
+
+            # The most-recent soft-removed scope link is the proxy for
+            # "the scope that was removed before the cascade archived
+            # the document". The store leaks soft-removed rows on
+            # ``Document.scopes`` for archived listings (the active
+            # filter would hide exactly the rows we want here). When
+            # no scope history is recoverable — never-scoped doc, or
+            # scope rows missing — both fields fall back to None and
+            # the UI renders a "—" placeholder.
+            last_active_scope_kind: str | None = None
+            last_active_scope_ref: str | None = None
+            removed_links = [s for s in document.scopes if s.removed_at is not None]
+            if removed_links:
+                # ``removed_at`` is the wall clock the cascade stamped
+                # on the link; the most recent removal is the one
+                # immediately preceding the archive.
+                latest_removed = max(
+                    removed_links,
+                    key=lambda s: s.removed_at,  # type: ignore[arg-type, return-value]
+                )
+                last_active_scope_kind = latest_removed.kind
+                last_active_scope_ref = latest_removed.ref
+
+            assert document.archived_at is not None  # store guarantees
+            items.append(
+                ArchivedDocumentItem(
+                    document_id=document.id,
+                    original_filename=document.original_filename,
+                    archived_at=document.archived_at,
+                    last_active_scope_kind=last_active_scope_kind,
+                    last_active_scope_ref=last_active_scope_ref,
+                    versions_purged=versions_purged,
+                    versions_remaining=versions_remaining,
+                )
+            )
+
+        return ArchivedDocumentsResponse(items=items, next_cursor=next_cursor)
 
     @router.post(
         "/admin/hitl/run_auto_promote_pass",

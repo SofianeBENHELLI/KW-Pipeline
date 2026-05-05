@@ -19,6 +19,7 @@
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import { SessionGuardProvider } from "../../_shared/auth";
 
@@ -109,11 +110,16 @@ function stubReload(): { reload: ReturnType<typeof vi.fn>; restore: () => void }
 }
 
 function renderApp(): void {
-  // The provider is wired in main.tsx; tests have to wrap manually
-  // because they bypass the bootstrapper.
+  // The provider + router are wired in main.tsx; tests have to wrap
+  // manually because they bypass the bootstrapper. ``MemoryRouter``
+  // gives the top-level <Routes> tree (added in D.9) its required
+  // routing context — every test stays on the catch-all reviewer
+  // workbench at "/" because the legacy assertions target it.
   render(
     <SessionGuardProvider>
-      <App />
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
     </SessionGuardProvider>,
   );
 }
