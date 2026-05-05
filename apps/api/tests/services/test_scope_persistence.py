@@ -197,9 +197,7 @@ class TestListDocumentsInScope:
         store.add_scope("d1", _scope(kind="project", ref="p1"))
         store.add_scope("d2", _scope(kind="swym_community", ref="abc"))
 
-        page, _ = store.list_documents_in_scope(
-            "swym_community", "abc", cursor=None, limit=10
-        )
+        page, _ = store.list_documents_in_scope("swym_community", "abc", cursor=None, limit=10)
         scopes_by_id = {d.id: d.scopes for d in page}
         assert {(s.kind, s.ref) for s in scopes_by_id["d1"]} == {
             ("swym_community", "abc"),
@@ -219,9 +217,7 @@ class TestListDocumentsInScope:
         store.add_scope("d1", _scope(kind="project", ref="p1"))
         store.remove_scope("d1", "project", "p1")
 
-        page, _ = store.list_documents_in_scope(
-            "swym_community", "abc", cursor=None, limit=10
-        )
+        page, _ = store.list_documents_in_scope("swym_community", "abc", cursor=None, limit=10)
         assert len(page) == 1
         assert {(s.kind, s.ref) for s in page[0].scopes} == {
             ("swym_community", "abc"),
