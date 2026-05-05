@@ -27,7 +27,10 @@ import type {
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
   ApiPurgeArtifactsResponse,
+  ApiPurgeBatchResponse,
   ApiRawExtraction,
+  ApiRelinkScopeRequest,
+  ApiRelinkScopeResponse,
   ApiSemanticDocument,
   ApiUnarchiveResponse,
   ApiUploadResponse,
@@ -683,6 +686,31 @@ export async function getAdminHITLState(
 }
 
 /**
+ * POST /admin/archive/relink_scope
+ *
+ * Admin-only. Reactivates a soft-removed ``document_scopes`` row
+ * (ADR-027 §1.2 / #269). Same dry-run-then-real pattern as the
+ * other admin actions: ``?dry_run=true`` returns the impact preview
+ * without mutating state, ``?confirm=true`` flips the real call.
+ * Backend rejects passing both. Returns 404 if the scope link cannot
+ * be found.
+ */
+export async function relinkScope(
+  request: ApiRelinkScopeRequest,
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiRelinkScopeResponse> {
+  const dryRun = options.dryRun ?? false;
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/relink_scope", {
+      params: { query },
+      body: request,
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
  * POST /admin/hitl/run_auto_promote_pass (#215 slice 3)
  *
  * Admin-only. Synchronously runs one HITL auto-promotion pass and
@@ -701,6 +729,30 @@ export async function runAutoPromotePass(
   return unwrap(
     await http.POST("/admin/hitl/run_auto_promote_pass", {
       params: { query: query as never },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/archive/purge_batch
+ *
+ * Admin-only. Bulk wrapper around ``purge_artifacts`` (ADR-027 §4 /
+ * #273). Best-effort: a per-doc failure is reported on the matching
+ * ``results[i]`` row rather than aborting the batch. The backend caps
+ * the list at 100 ids per call (422 with ``KW_UNPROCESSABLE_ENTITY``).
+ * Same dry-run-then-real flow as the per-doc routes.
+ */
+export async function purgeBatch(
+  documentIds: string[],
+  options: { dryRun?: boolean; signal?: AbortSignal } = {},
+): Promise<ApiPurgeBatchResponse> {
+  const dryRun = options.dryRun ?? false;
+  const query = dryRun ? { dry_run: true } : { confirm: true };
+  return unwrap(
+    await http.POST("/admin/archive/purge_batch", {
+      params: { query },
+      body: { document_ids: documentIds },
       signal: options.signal,
     }),
   );

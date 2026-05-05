@@ -1318,6 +1318,66 @@ pre {
   border-color: var(--danger);
 }
 
+/* Bulk-purge action bar above the archive table — only renders when
+   ≥ 1 row is selected. */
+.admin-archive-bulk-bar {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  align-items: center;
+}
+
+/* Narrow leading checkbox column for the multi-select archive table. */
+.admin-archive-table th.select-col,
+.admin-archive-table td.select-col {
+  width: 32px;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 4px;
+}
+
+/* Two-column form grid used by the relink-scope modal — same layout
+   primitive as ``.purge-preview`` so the modals look related. */
+.form-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.form-grid label {
+  display: contents;
+}
+
+.form-grid label > span {
+  text-align: right;
+}
+
+.form-grid input,
+.form-grid select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 14px;
+}
+
+/* Compact id list inside the bulk-purge modal — wraps so a 100-id
+   selection doesn't blow out the modal width. */
+.compact-id-list code {
+  word-break: break-all;
+}
+
+/* Inline danger-coloured text for in-flow error labels (per-doc
+   failures inside the bulk-purge preview). */
+.danger-text {
+  color: var(--danger);
+}
+
 /* Force-auto corpus banner (EPIC-A A.8, ADR-023 §6, #215).
    Sits at the top of the app shell when the operator has set
    KW_HITL_FORCE_AUTO_CORPUS=true. Non-dismissible — it's a config

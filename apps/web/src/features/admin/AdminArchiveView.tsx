@@ -1,18 +1,32 @@
 /**
  * Admin UI — Archive view (D.9, ADR-027 §1.4).
  *
- * Paginated table of flag-archived documents with two per-row actions:
+ * Paginated table of flag-archived documents with three per-row
+ * actions and one bulk action:
  *
  * 1. **Unarchive** — confirmation modal → POST `/admin/archive/unarchive`
  *    with `?confirm=true`. Reactivates the document on the standard
  *    read path. Idempotent on already-active rows (route returns 200
  *    with `archived_at_before === null`).
  *
- * 2. **Purge artifacts** — preview modal that first calls the route
+ * 2. **Relink scope…** — modal pre-filled from the row's
+ *    ``last_active_scope_*`` → dry-run preview → real
+ *    `POST /admin/archive/relink_scope` (ADR-027 §1.2 / #269).
+ *    Reactivates a soft-removed ``document_scopes`` row. See
+ *    ``RelinkModal`` for the form behaviour.
+ *
+ * 3. **Purge artifacts** — preview modal that first calls the route
  *    with `?dry_run=true` so the operator sees the per-version
  *    tombstone URI list + the freed-bytes estimate. Confirming flips
  *    to `?confirm=true` and renders the real result. Irreversible —
  *    the modal's CTA copy says so verbatim.
+ *
+ * 4. **Bulk Purge selected (N)…** — per-row checkboxes drive a
+ *    bulk action bar above the table. Clicking opens
+ *    ``BulkPurgeModal`` which runs the dry-run-then-real flow against
+ *    `POST /admin/archive/purge_batch` (ADR-027 §4 / #273). Capped at
+ *    100 docs per batch (mirrored client-side so the CTA disables
+ *    rather than tripping the 422).
  *
  * No client-side role check: the UI fires the request and renders a
  * "Forbidden" state if the backend responds 403 (`KW_FORBIDDEN`).
@@ -32,6 +46,9 @@
  *   and the operator can decide whether to skip; there's no point
  *   gating the click since the catalog row is the audit-keeping trace
  *   (a no-op purge call is idempotent and documented).
+ * - The bulk action bar above the table is hidden until ≥ 1 row is
+ *   selected. That keeps the table chrome quiet for the common
+ *   single-row workflow.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -45,6 +62,17 @@ import type {
   ApiArchivedDocumentItem,
   ApiPurgeArtifactsResponse,
 } from "../../api/types";
+import { BulkPurgeModal } from "./BulkPurgeModal";
+import { ModalShell } from "./ModalShell";
+import { RelinkModal } from "./RelinkModal";
+
+/** Pull the error message off any thrown unknown into a string the
+ *  inline notice can render. Centralised because every modal does it. */
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.detail;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -87,35 +115,6 @@ export function formatScopeRemoved(item: ApiArchivedDocumentItem): string {
   return `${kind}:${ref}`;
 }
 
-// ─── Modal primitives (inline; the app has no shared modal component) ───────
-
-interface ModalShellProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}
-
-function ModalShell({ title, onClose, children }: ModalShellProps) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="modal-card">
-        <header className="modal-header">
-          <h3>{title}</h3>
-          <button
-            type="button"
-            className="text-button"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // ─── Unarchive confirmation modal ────────────────────────────────────────────
 
 interface UnarchiveModalProps {
@@ -141,13 +140,7 @@ function UnarchiveModal({
         onClose();
       })
       .catch((err: unknown) => {
-        const message =
-          err instanceof ApiError
-            ? err.detail
-            : err instanceof Error
-              ? err.message
-              : "Unarchive failed.";
-        setError(message);
+        setError(errorMessage(err, "Unarchive failed."));
       })
       .finally(() => setBusy(false));
   }, [item.document_id, onCompleted, onClose]);
@@ -220,13 +213,7 @@ function PurgeModal({ item, onClose, onCompleted }: PurgeModalProps) {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const message =
-          err instanceof ApiError
-            ? err.detail
-            : err instanceof Error
-              ? err.message
-              : "Failed to preview purge impact.";
-        setPreviewError(message);
+        setPreviewError(errorMessage(err, "Failed to preview purge impact."));
       })
       .finally(() => {
         if (!cancelled) setPreviewLoading(false);
@@ -245,13 +232,7 @@ function PurgeModal({ item, onClose, onCompleted }: PurgeModalProps) {
         onClose();
       })
       .catch((err: unknown) => {
-        const message =
-          err instanceof ApiError
-            ? err.detail
-            : err instanceof Error
-              ? err.message
-              : "Purge failed.";
-        setPurgeError(message);
+        setPurgeError(errorMessage(err, "Purge failed."));
       })
       .finally(() => setPurging(false));
   }, [item.document_id, onCompleted, onClose]);
@@ -359,7 +340,9 @@ function PurgeModal({ item, onClose, onCompleted }: PurgeModalProps) {
 type ModalState =
   | { kind: "none" }
   | { kind: "unarchive"; item: ApiArchivedDocumentItem }
-  | { kind: "purge"; item: ApiArchivedDocumentItem };
+  | { kind: "purge"; item: ApiArchivedDocumentItem }
+  | { kind: "relink"; item: ApiArchivedDocumentItem }
+  | { kind: "bulk-purge"; documentIds: string[] };
 
 interface ToastState {
   message: string;
@@ -372,6 +355,10 @@ export function AdminArchiveView() {
   const [loadError, setLoadError] = useState<ApiError | string | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Bulk multi-select state. Set<document_id> of currently checked rows.
+  // Cleared whenever the list reloads so a refreshed table starts clean
+  // (also defends against a stale id surviving an unarchive/purge).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -379,6 +366,7 @@ export function AdminArchiveView() {
     try {
       const page = await listArchivedDocuments();
       setItems(page.items);
+      setSelectedIds(new Set());
     } catch (err: unknown) {
       if (err instanceof ApiError) setLoadError(err);
       else if (err instanceof Error) setLoadError(err.message);
@@ -401,6 +389,41 @@ export function AdminArchiveView() {
     setToast({ message: "Artifacts purged.", kind: "success" });
     await loadList();
   }, [loadList]);
+
+  const handleRelinkCompleted = useCallback(async () => {
+    setToast({ message: "Scope link reactivated.", kind: "success" });
+    await loadList();
+  }, [loadList]);
+
+  const handleBulkPurgeCompleted = useCallback(
+    async (toastMessage: string) => {
+      setToast({ message: toastMessage, kind: "success" });
+      await loadList();
+    },
+    [loadList],
+  );
+
+  const toggleRow = useCallback((documentId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      // If every visible row is already selected, clear; otherwise
+      // select all visible rows. Mirrors the semantic of a tri-state
+      // header checkbox without needing an indeterminate visual.
+      if (prev.size === items.length && items.length > 0) return new Set();
+      return new Set(items.map((it) => it.document_id));
+    });
+  }, [items]);
+
+  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const selectedCount = selectedIds.size;
 
   // Forbidden state: the backend's 403 on a non-admin caller is the
   // sole signal we ever consult about role. We don't try to derive
@@ -474,60 +497,120 @@ export function AdminArchiveView() {
         ) : items.length === 0 ? (
           <p className="muted">No archived documents.</p>
         ) : (
-          <table className="admin-archive-table">
-            <thead>
-              <tr>
-                <th scope="col">Filename</th>
-                <th scope="col">Scope removed</th>
-                <th scope="col">Versions</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const totalVersions =
-                  item.versions_remaining + item.versions_purged;
-                return (
-                  <tr key={item.document_id} data-testid="admin-archive-row">
-                    <td>
-                      <div>
-                        <strong>{item.original_filename}</strong>
-                      </div>
-                      <div className="muted" data-testid="row-archived-relative">
-                        {formatRelativeArchived(item.archived_at)}
-                      </div>
-                    </td>
-                    <td data-testid="row-scope-removed">
-                      {formatScopeRemoved(item)}
-                    </td>
-                    <td data-testid="row-version-counts">
-                      {item.versions_remaining} / {totalVersions}
-                    </td>
-                    <td>
-                      <div className="action-row">
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          onClick={() =>
-                            setModal({ kind: "unarchive", item })
-                          }
-                        >
-                          Unarchive
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          onClick={() => setModal({ kind: "purge", item })}
-                        >
-                          Purge…
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            {/* Bulk action bar — only renders when ≥ 1 row is selected.
+                Hidden otherwise to keep the table chrome quiet for the
+                common single-row workflow. */}
+            {selectedCount > 0 ? (
+              <div
+                className="action-row admin-archive-bulk-bar"
+                data-testid="admin-archive-bulk-bar"
+              >
+                <span className="muted">{selectedCount} selected</span>
+                <button
+                  type="button"
+                  className="primary-button danger"
+                  onClick={() =>
+                    setModal({
+                      kind: "bulk-purge",
+                      documentIds: Array.from(selectedIds),
+                    })
+                  }
+                >
+                  Purge selected ({selectedCount})…
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear
+                </button>
+              </div>
+            ) : null}
+            <table className="admin-archive-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="select-col">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all rows"
+                      data-testid="admin-archive-select-all"
+                    />
+                  </th>
+                  <th scope="col">Filename</th>
+                  <th scope="col">Scope removed</th>
+                  <th scope="col">Versions</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => {
+                  const totalVersions =
+                    item.versions_remaining + item.versions_purged;
+                  const isSelected = selectedIds.has(item.document_id);
+                  return (
+                    <tr key={item.document_id} data-testid="admin-archive-row">
+                      <td className="select-col">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleRow(item.document_id)}
+                          aria-label={`Select ${item.original_filename}`}
+                          data-testid="admin-archive-row-select"
+                        />
+                      </td>
+                      <td>
+                        <div>
+                          <strong>{item.original_filename}</strong>
+                        </div>
+                        <div className="muted" data-testid="row-archived-relative">
+                          {formatRelativeArchived(item.archived_at)}
+                        </div>
+                      </td>
+                      <td data-testid="row-scope-removed">
+                        {formatScopeRemoved(item)}
+                      </td>
+                      <td data-testid="row-version-counts">
+                        {item.versions_remaining} / {totalVersions}
+                      </td>
+                      <td>
+                        <div className="action-row">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              setModal({ kind: "unarchive", item })
+                            }
+                          >
+                            Unarchive
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              setModal({ kind: "relink", item })
+                            }
+                          >
+                            Relink scope…
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => setModal({ kind: "purge", item })}
+                          >
+                            Purge…
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
         )}
       </section>
 
@@ -543,6 +626,20 @@ export function AdminArchiveView() {
           item={modal.item}
           onClose={() => setModal({ kind: "none" })}
           onCompleted={handlePurgeCompleted}
+        />
+      ) : null}
+      {modal.kind === "relink" ? (
+        <RelinkModal
+          item={modal.item}
+          onClose={() => setModal({ kind: "none" })}
+          onCompleted={handleRelinkCompleted}
+        />
+      ) : null}
+      {modal.kind === "bulk-purge" ? (
+        <BulkPurgeModal
+          documentIds={modal.documentIds}
+          onClose={() => setModal({ kind: "none" })}
+          onCompleted={handleBulkPurgeCompleted}
         />
       ) : null}
     </main>

@@ -104,6 +104,28 @@ export type ApiBucketState = Schemas["BucketState"];
  *  surfaced inline on the dashboard's "Run pass" trigger. */
 export type ApiAutoPromoteResult = Schemas["AutoPromoteResult"];
 
+// ─── Admin / Archive relink + bulk purge (#218 D.9, slices 2 + 5) ──────────
+
+/** Body for ``POST /admin/archive/relink_scope``. */
+export type ApiRelinkScopeRequest = Schemas["RelinkScopeRequest"];
+
+/** Response body for ``POST /admin/archive/relink_scope``. */
+export type ApiRelinkScopeResponse = Schemas["RelinkScopeResponse"];
+
+/** ``ScopeKind`` literal pulled off the relink request payload. The
+ *  Pydantic ``Literal`` is inlined by openapi-typescript so we re-export
+ *  it from the request shape rather than from a top-level alias. */
+export type ApiScopeKind = ApiRelinkScopeRequest["scope_kind"];
+
+/** Body for ``POST /admin/archive/purge_batch``. */
+export type ApiPurgeBatchRequest = Schemas["PurgeBatchRequest"];
+
+/** Response body for ``POST /admin/archive/purge_batch``. */
+export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
+
+/** Per-document row inside a purge_batch response. */
+export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];
