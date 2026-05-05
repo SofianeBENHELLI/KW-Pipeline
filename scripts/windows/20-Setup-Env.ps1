@@ -89,12 +89,28 @@ $envFile = Get-DockerEnvFile
 
 if (-not $SkipNeo4jPatch) {
     Write-Step "Patching Neo4j password in docker-compose.yml"
-    if (-not $Neo4jPassword) {
-        $Neo4jPassword = Read-Host -Prompt "Neo4j password (will replace 'test_password_change_me')" -AsSecureString
-    }
-    $plainNeo4j = ConvertFrom-SecureStringToPlain $Neo4jPassword
-    if ([string]::IsNullOrEmpty($plainNeo4j)) {
-        throw "Neo4j password cannot be empty. Re-run with a value or pass -SkipNeo4jPatch."
+    # Loop the prompt so a too-short password gives a second chance
+    # instead of throwing. Neo4j 5.x community refuses to start with
+    # a password under 8 characters and the failure mode is opaque
+    # (the container restart-loops with InvalidPasswordException),
+    # so catch it here.
+    $minLength = 8
+    $plainNeo4j = $null
+    while (-not $plainNeo4j) {
+        if (-not $Neo4jPassword) {
+            $Neo4jPassword = Read-Host -Prompt "Neo4j password (will replace 'test_password_change_me'; min $minLength chars)" -AsSecureString
+        }
+        $plainNeo4j = ConvertFrom-SecureStringToPlain $Neo4jPassword
+        if ([string]::IsNullOrEmpty($plainNeo4j)) {
+            throw "Neo4j password cannot be empty. Re-run with a value or pass -SkipNeo4jPatch."
+        }
+        if ($plainNeo4j.Length -lt $minLength) {
+            Write-Warn2 "Password is $($plainNeo4j.Length) characters; Neo4j 5.x community requires at least $minLength."
+            Write-Host "  Pick a longer one, or pass -SkipNeo4jPatch and edit docker\docker-compose.yml manually."
+            $Neo4jPassword = $null
+            $plainNeo4j = $null
+            continue
+        }
     }
     $compose = Get-Content $composeFile -Raw
     if ($compose.Contains('test_password_change_me')) {
