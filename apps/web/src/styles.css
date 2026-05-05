@@ -1317,3 +1317,35 @@ pre {
   background: var(--danger);
   border-color: var(--danger);
 }
+
+/* Force-auto corpus banner (EPIC-A A.8, ADR-023 §6, #215).
+   Sits at the top of the app shell when the operator has set
+   KW_HITL_FORCE_AUTO_CORPUS=true. Non-dismissible — it's a config
+   alert, not a user notification. Same warning palette as the
+   session-expired banner so the visual rhythm stays consistent. */
+.kw-corpus-alert {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--warning);
+  background: #fff8e6;
+  color: #553300;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.kw-corpus-alert strong {
+  margin-right: 4px;
+}
+
+.kw-corpus-alert code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}

@@ -8,16 +8,19 @@ import {
 import {
   ApiError,
   clearSessionTrigger,
+  getApiBaseUrl,
   getDocument,
   listDocuments,
   setSessionTrigger,
 } from "./api/client";
 import type { ApiDocument } from "./api/types";
+import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
 import { SettingsLauncher, SettingsModal } from "./features/settings/SettingsModal";
+import { ForceAutoCorpusBanner } from "./ui/ForceAutoCorpusBanner";
 
 /**
  * Centralised document-catalog hook.
@@ -255,6 +258,14 @@ function ReviewerWorkbench() {
   const catalog = useDocumentCatalog();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const session = useSessionGuard();
+  // EPIC-A A.8 (#215, ADR-023 §6): the corpus-wide force-auto override
+  // is surfaced via /admin/config so operators see a non-dismissible
+  // banner whenever the deployment is auto-validating every version.
+  // Hidden for non-admin users (403) and on fetch errors — the banner
+  // is informational and a transient hiccup shouldn't block the app.
+  const adminConfig = useAdminConfig(getApiBaseUrl());
+  const forceAutoActive =
+    adminConfig.status === "ok" && adminConfig.config?.hitl.force_auto_corpus === true;
 
   // Register the 401-triggered session-expired hook on mount and tear
   // it down on unmount. The trigger is module-level state on the API
@@ -324,13 +335,19 @@ function ReviewerWorkbench() {
     bumpMutation();
   }, [refreshAll, refreshSelected, bumpMutation]);
 
-  // Banner sits at the top of every shell return — loading, error,
+  // Banners sit at the top of every shell return — loading, error,
   // and ready states all need to surface a 401 the same way.
+  // The force-auto banner sits above the session-expired banner so
+  // an operator's "every version is auto" alert is visible even
+  // when their session has just timed out.
   const banner = (
-    <SessionExpiredBanner
-      visible={session.expired}
-      onSignIn={handleSignInAgain}
-    />
+    <>
+      <ForceAutoCorpusBanner visible={forceAutoActive} />
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+      />
+    </>
   );
 
   if (loadingDocuments && documents.length === 0) {
