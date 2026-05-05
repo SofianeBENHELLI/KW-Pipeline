@@ -64,6 +64,11 @@ param(
 # ── State + helpers ──────────────────────────────────────────────────
 $script:Failures = @()
 $script:Successes = @()
+# Initialised so the `if ($documentId)` guard below the upload check is
+# safe under Set-StrictMode -Version Latest when the upload step skips
+# (curl missing) or fails (e.g. API down before any /documents call
+# returns a body).
+$documentId = $null
 
 function Pass([string]$check, [string]$detail = '') {
     $script:Successes += $check
