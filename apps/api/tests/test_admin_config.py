@@ -38,6 +38,10 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ANTHROPIC_API_KEY",
         "KW_ANTHROPIC_MODEL",
         "KW_LLM_MODEL",
+        "KW_LLM_PROVIDER",
+        "KW_GEMINI_API_KEY",
+        "GEMINI_API_KEY",
+        "KW_GEMINI_MODEL",
         "KW_VOYAGE_API_KEY",
         "VOYAGE_API_KEY",
         "KW_EMBEDDING_MODEL",
@@ -48,6 +52,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "KW_AUDIT_ENABLED",
         "KW_AUDIT_DB_PATH",
         "KW_HITL_DEFAULT_VALIDATION_METHOD",
+        "KW_HITL_FORCE_AUTO_CORPUS",
         "KW_ITEROP_ENABLED",
         "KW_ITEROP_WORKFLOW_REF",
         "KW_ITEROP_BASE_URL",
@@ -97,6 +102,12 @@ def test_admin_config_default_posture(clean_env: None) -> None:
     assert body["embeddings"]["model"] == "voyage-3"
     assert body["logging"]["format"] == "text"
     assert body["logging"]["level"] == "INFO"
+    # ADR-013 §6 multi-provider fields. With no key set, neither
+    # provider is configured and ``active_provider`` is None.
+    assert body["llm"]["provider_setting"] == "auto"
+    assert body["llm"]["active_provider"] is None
+    assert body["llm"]["gemini_configured"] is False
+    assert body["llm"]["anthropic_configured"] is False
 
 
 def test_admin_config_reports_configured_without_leaking_secrets(
@@ -145,7 +156,15 @@ def test_admin_config_reports_configured_without_leaking_secrets(
 def test_admin_config_surfaces_non_secret_overrides(
     monkeypatch: pytest.MonkeyPatch, clean_env: None
 ) -> None:
-    """Model ids / paths / log levels are non-secret and visible."""
+    """Model ids / paths / log levels are non-secret and visible.
+
+    Per ADR-013 §6, ``body["llm"]["model"]`` reports the *active*
+    provider's resolved model id, so this test wires a complete
+    Anthropic configuration before asserting on the override.
+    """
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("KW_LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("KW_LLM_MODEL", "claude-opus-4-7")
     monkeypatch.setenv("KW_EMBEDDING_MODEL", "voyage-3-large")
     monkeypatch.setenv("KW_LOG_FORMAT", "json")
@@ -157,12 +176,69 @@ def test_admin_config_surfaces_non_secret_overrides(
 
     body = response.json()
     assert body["llm"]["model"] == "claude-opus-4-7"
+    assert body["llm"]["anthropic_model"] == "claude-opus-4-7"
     assert body["embeddings"]["model"] == "voyage-3-large"
     assert body["logging"]["format"] == "json"
     # Level is uppercased on the way out so the frontend doesn't need
     # to normalize it.
     assert body["logging"]["level"] == "DEBUG"
     assert body["upload"]["max_bytes"] == 104_857_600
+
+
+def test_admin_config_reports_gemini_active_when_key_set(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """ADR-013 §6: in ``auto`` mode, Gemini wins over Anthropic."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-secret-gemini-12345")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-67890")
+
+    client = TestClient(create_app())
+    body = client.get("/admin/config").json()
+
+    assert body["llm"]["configured"] is True
+    assert body["llm"]["provider_setting"] == "auto"
+    assert body["llm"]["active_provider"] == "gemini"
+    assert body["llm"]["gemini_configured"] is True
+    assert body["llm"]["anthropic_configured"] is True
+    # ``model`` mirrors the active provider's default.
+    assert body["llm"]["model"] == "gemini-2.5-flash"
+    serialized = json.dumps(body)
+    assert "ai-secret-gemini-12345" not in serialized
+    assert "sk-ant-secret-67890" not in serialized
+
+
+def test_admin_config_reports_anthropic_when_pinned(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """``KW_LLM_PROVIDER=anthropic`` pins the choice even when Gemini key is also set."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key")
+
+    client = TestClient(create_app())
+    body = client.get("/admin/config").json()
+
+    assert body["llm"]["provider_setting"] == "anthropic"
+    assert body["llm"]["active_provider"] == "anthropic"
+    assert body["llm"]["model"] == "claude-sonnet-4-5"
+
+
+def test_admin_config_pinned_provider_without_key_yields_no_active(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """Pinning Gemini without ``GEMINI_API_KEY`` yields ``active_provider=None``."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key")  # present but ignored
+
+    client = TestClient(create_app())
+    body = client.get("/admin/config").json()
+
+    assert body["llm"]["provider_setting"] == "gemini"
+    assert body["llm"]["active_provider"] is None
+    assert body["llm"]["configured"] is False
 
 
 def test_admin_config_surfaces_force_auto_corpus_override(

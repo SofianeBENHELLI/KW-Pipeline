@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from app.schemas.taxonomy import Taxonomy
 from app.services.audit_event_store import (
@@ -34,6 +35,7 @@ from app.services.knowledge import (
     AnthropicLLMClient,
     EmbeddingClient,
     EntityExtractor,
+    GeminiLLMClient,
     GraphStore,
     InMemoryGraphStore,
     KnowledgeChatService,
@@ -416,19 +418,74 @@ def _build_parser_registry() -> ParserRegistry:
     )
 
 
-def _maybe_build_anthropic_llm(
+def _resolve_llm_provider(
+    settings: Settings,
+) -> Literal["gemini", "anthropic"] | None:
+    """Pick the active LLM provider per ADR-013 §6.
+
+    Resolution rules:
+
+    - ``llm_provider="auto"`` (default): Gemini wins when
+      ``GEMINI_API_KEY`` is set, otherwise Anthropic if its key is set,
+      otherwise ``None`` (no provider).
+    - ``llm_provider="gemini"`` / ``"anthropic"``: pin the choice;
+      returns ``None`` when the pinned provider's key is missing so the
+      Phase 2 / Phase 3 features stay disabled rather than silently
+      falling back to the other provider (operators pinning a provider
+      typically want to know when their config is wrong).
+
+    Returns the chosen provider name, or ``None`` when no LLM is
+    configured / the knowledge layer is disabled.
+    """
+    if not settings.knowledge_layer_enabled:
+        return None
+    has_gemini = bool(settings.gemini_api_key.strip())
+    has_anthropic = bool(settings.anthropic_api_key.strip())
+    pinned = settings.llm_provider
+    if pinned == "gemini":
+        return "gemini" if has_gemini else None
+    if pinned == "anthropic":
+        return "anthropic" if has_anthropic else None
+    # ``auto``: Gemini primary, Anthropic fallback.
+    if has_gemini:
+        return "gemini"
+    if has_anthropic:
+        return "anthropic"
+    return None
+
+
+def _maybe_build_llm(
     settings: Settings | None = None,
 ) -> tuple[LLMClient, str] | None:
-    """Build the Anthropic LLM client + return its model id, if enabled.
+    """Build the active LLM client + return its model id, if enabled.
 
     Returns ``None`` unless **both** the knowledge-layer kill switch is
-    truthy **and** the Anthropic API key is set. Callers (entity
+    truthy **and** a provider's API key is configured for the selected
+    provider (see :func:`_resolve_llm_provider`). Callers (entity
     extractor, chat service) reuse the same client so the prompt cache
     and retry budgets are amortised across phases.
     """
     settings = settings or Settings()
-    if not settings.knowledge_layer_enabled or not settings.anthropic_api_key.strip():
+    provider = _resolve_llm_provider(settings)
+    if provider is None:
         return None
+
+    from app.services.knowledge.llm_client import (  # noqa: PLC0415
+        DEFAULT_ANTHROPIC_MODEL,
+        DEFAULT_GEMINI_MODEL,
+    )
+
+    if provider == "gemini":
+        api_key = settings.gemini_api_key.strip()
+        model = settings.gemini_model.strip() or None
+        llm: LLMClient = (
+            GeminiLLMClient(api_key=api_key, model=model)
+            if model
+            else GeminiLLMClient(api_key=api_key)
+        )
+        return llm, (model or DEFAULT_GEMINI_MODEL)
+
+    # provider == "anthropic"
     api_key = settings.anthropic_api_key.strip()
     model = settings.anthropic_model.strip() or None
     llm = (
@@ -436,12 +493,13 @@ def _maybe_build_anthropic_llm(
         if model
         else AnthropicLLMClient(api_key=api_key)
     )
-    # ``AnthropicLLMClient.__init__`` defaults ``model`` to
-    # ``DEFAULT_ANTHROPIC_MODEL`` when not passed; mirror that here so
-    # the returned tuple always carries a non-empty model id.
-    from app.services.knowledge.llm_client import DEFAULT_ANTHROPIC_MODEL  # noqa: PLC0415
-
     return llm, (model or DEFAULT_ANTHROPIC_MODEL)
+
+
+# Backwards-compat alias. Older call sites and tests reach for the
+# previous name; the implementation now resolves whichever provider
+# the active settings select.
+_maybe_build_anthropic_llm = _maybe_build_llm
 
 
 def _maybe_build_entity_extractor(
@@ -452,11 +510,12 @@ def _maybe_build_entity_extractor(
     """Build the LLM-driven entity extractor if enabled (ADR-013).
 
     Returns ``None`` unless **both** the knowledge-layer kill switch is
-    truthy **and** the Anthropic API key is set. The Phase 1a-only path
-    (graph projection without entities) is preserved when the API key
-    is absent so contributors who don't have an Anthropic account can
-    still run the knowledge layer end-to-end against the in-memory
-    graph store.
+    truthy **and** an LLM provider is configured (Gemini primary,
+    Anthropic fallback per ADR-013 §6). The Phase 1a-only path (graph
+    projection without entities) is preserved when no provider is
+    configured so contributors who don't have either API key can still
+    run the knowledge layer end-to-end against the in-memory graph
+    store.
 
     Callers may pass a pre-built ``llm`` to share one client across
     Phase 2 (entity extractor) and Phase 3 (chat service); when omitted
@@ -464,7 +523,7 @@ def _maybe_build_entity_extractor(
     """
     settings = settings or Settings()
     if llm is None:
-        built = _maybe_build_anthropic_llm(settings)
+        built = _maybe_build_llm(settings)
         if built is None:
             return None
         llm = built[0]
@@ -559,11 +618,12 @@ def _maybe_build_chat_service(
 ) -> KnowledgeChatService | None:
     """Wire the Phase 3 chat service when every dependency is available.
 
-    The chat surface needs all three of: an LLM client (Anthropic key),
-    a vector retrieval service (Voyage key + embedding write path),
-    and a graph store (always present, but only meaningful once the
-    knowledge layer is enabled). Any missing dependency yields
-    ``None`` and the route returns 503 with ``KW_CHAT_DISABLED``.
+    The chat surface needs all three of: an LLM client (Gemini or
+    Anthropic key, per ADR-013 §6), a vector retrieval service (Voyage
+    key + embedding write path), and a graph store (always present,
+    but only meaningful once the knowledge layer is enabled). Any
+    missing dependency yields ``None`` and the route returns 503 with
+    ``KW_CHAT_DISABLED``.
     """
     if llm is None or llm_model is None or knowledge_search is None:
         return None
@@ -676,7 +736,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # Build the LLM once and share it between the entity extractor and
     # the chat service so they amortise the same prompt cache and
     # respect the same retry budget.
-    llm_pair = _maybe_build_anthropic_llm(settings)
+    llm_pair = _maybe_build_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
@@ -774,7 +834,7 @@ def build_persistent_services(
         if embedding_client is not None
         else None
     )
-    llm_pair = _maybe_build_anthropic_llm(settings)
+    llm_pair = _maybe_build_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)

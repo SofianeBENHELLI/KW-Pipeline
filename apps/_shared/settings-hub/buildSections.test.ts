@@ -23,7 +23,17 @@ const DEFAULT_CONFIG: AdminConfigResponse = {
     neo4j_configured: false,
     neo4j_database: "neo4j",
   },
-  llm: { configured: false, model: "", max_input_tokens_per_document: 0 },
+  llm: {
+    configured: false,
+    model: "",
+    max_input_tokens_per_document: 0,
+    provider_setting: "auto",
+    active_provider: null,
+    gemini_configured: false,
+    gemini_model: "",
+    anthropic_configured: false,
+    anthropic_model: "",
+  },
   embeddings: { configured: false, model: "voyage-3" },
   taxonomy: { path: "", cosine_threshold: 0.55 },
   ner: { enabled: false, spacy_model: "en_core_web_sm" },
@@ -63,10 +73,44 @@ describe("buildDiagnosticTiles", () => {
 
   it("flips Phase 2 to ``ok`` once the LLM key is configured", () => {
     const tiles = buildDiagnosticTiles(
-      withConfig({ llm: { configured: true, model: "claude-sonnet-4-5", max_input_tokens_per_document: 0 } }),
+      withConfig({
+        llm: {
+          configured: true,
+          model: "claude-sonnet-4-5",
+          max_input_tokens_per_document: 0,
+          provider_setting: "auto",
+          active_provider: "anthropic",
+          gemini_configured: false,
+          gemini_model: "",
+          anthropic_configured: true,
+          anthropic_model: "",
+        },
+      }),
     );
     const phase2 = tiles.find((t) => t.id === "phase2");
     expect(phase2?.state).toBe("ok");
+    expect(phase2?.sublabel).toBe("Anthropic extraction");
+  });
+
+  it("labels Phase 2 'Gemini extraction' when Gemini is the active provider", () => {
+    const tiles = buildDiagnosticTiles(
+      withConfig({
+        llm: {
+          configured: true,
+          model: "gemini-2.5-flash",
+          max_input_tokens_per_document: 0,
+          provider_setting: "auto",
+          active_provider: "gemini",
+          gemini_configured: true,
+          gemini_model: "",
+          anthropic_configured: false,
+          anthropic_model: "",
+        },
+      }),
+    );
+    const phase2 = tiles.find((t) => t.id === "phase2");
+    expect(phase2?.state).toBe("ok");
+    expect(phase2?.sublabel).toBe("Gemini extraction");
   });
 
   it("renders ITEROP as ``warn`` when enabled but auth is missing", () => {
@@ -129,8 +173,16 @@ describe("buildSettingsSections", () => {
   it("marks every dependent row inactive when the parent feature is off", () => {
     const sections = buildSettingsSections(DEFAULT_CONFIG);
     const llm = sections.find((s) => s.id === "llm");
-    // Every row in the LLM section is inactive when configured=false.
-    expect(llm?.rows.every((r) => r.status === "inactive")).toBe(true);
+    // Per-provider rows are inactive when nothing is configured; the
+    // provider-mode row stays active because it tells the operator
+    // which resolution rule is in effect (default ``auto``).
+    const dependentRows = llm?.rows.filter(
+      (r) => r.key !== "llm.provider_setting",
+    );
+    expect(dependentRows?.every((r) => r.status === "inactive")).toBe(true);
+    const modeRow = llm?.rows.find((r) => r.key === "llm.provider_setting");
+    expect(modeRow?.status).toBe("active");
+    expect(modeRow?.value).toBe("auto");
   });
 
   it("flips dependent rows to active when the parent feature is configured", () => {
@@ -140,12 +192,20 @@ describe("buildSettingsSections", () => {
           configured: true,
           model: "claude-opus-4-7",
           max_input_tokens_per_document: 1000,
+          provider_setting: "anthropic",
+          active_provider: "anthropic",
+          gemini_configured: false,
+          gemini_model: "",
+          anthropic_configured: true,
+          anthropic_model: "claude-opus-4-7",
         },
       }),
     );
     const llm = sections.find((s) => s.id === "llm");
-    const apiKeyRow = llm?.rows.find((r) => r.key === "llm.configured");
-    const modelRow = llm?.rows.find((r) => r.key === "llm.model");
+    const apiKeyRow = llm?.rows.find(
+      (r) => r.key === "llm.anthropic_configured",
+    );
+    const modelRow = llm?.rows.find((r) => r.key === "llm.anthropic_model");
     // The API-key row is always ``secret-redacted`` when configured —
     // never ``active`` — because the value is intentionally redacted.
     expect(apiKeyRow?.status).toBe("secret-redacted");
@@ -153,6 +213,47 @@ describe("buildSettingsSections", () => {
     // Sibling rows (model, token cap) become active.
     expect(modelRow?.status).toBe("active");
     expect(modelRow?.value).toBe("claude-opus-4-7");
+  });
+
+  it("renders Gemini-active and Anthropic-fallback rows side by side", () => {
+    const sections = buildSettingsSections(
+      withConfig({
+        llm: {
+          configured: true,
+          model: "gemini-2.5-flash",
+          max_input_tokens_per_document: 0,
+          provider_setting: "auto",
+          active_provider: "gemini",
+          gemini_configured: true,
+          gemini_model: "",
+          anthropic_configured: true,
+          anthropic_model: "",
+        },
+      }),
+    );
+    const llm = sections.find((s) => s.id === "llm");
+    const active = llm?.rows.find((r) => r.key === "llm.active_provider");
+    const mode = llm?.rows.find((r) => r.key === "llm.provider_setting");
+    const geminiKey = llm?.rows.find((r) => r.key === "llm.gemini_configured");
+    const anthropicKey = llm?.rows.find(
+      (r) => r.key === "llm.anthropic_configured",
+    );
+    expect(active?.value).toBe("Gemini (primary)");
+    expect(active?.status).toBe("active");
+    expect(mode?.value).toBe("auto");
+    // Both API keys are present, both rendered as secret-redacted —
+    // the fallback's row stays informational even though it isn't the
+    // active provider right now.
+    expect(geminiKey?.status).toBe("secret-redacted");
+    expect(anthropicKey?.status).toBe("secret-redacted");
+  });
+
+  it("reports 'no provider configured' when neither key is set", () => {
+    const sections = buildSettingsSections(DEFAULT_CONFIG);
+    const llm = sections.find((s) => s.id === "llm");
+    const active = llm?.rows.find((r) => r.key === "llm.active_provider");
+    expect(active?.value).toBe("no provider configured");
+    expect(active?.status).toBe("inactive");
   });
 
   it("includes the ITEROP workflow ref verbatim when set", () => {

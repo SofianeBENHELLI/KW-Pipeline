@@ -36,6 +36,74 @@ function bytesLabel(n: number): string {
   return `${n} B`;
 }
 
+/**
+ * Project the multi-provider :class:`LLMConfig` (ADR-013 §6) onto the
+ * row list. Renders, in order:
+ *
+ *   - Active provider badge (or "no provider configured")
+ *   - Provider-mode setting (auto / gemini / anthropic)
+ *   - Gemini API key + model (independent of which provider is active)
+ *   - Anthropic API key + model
+ *   - Token-budget cap
+ *
+ * Each provider's rows stay rendered even when the *other* provider
+ * is active, so operators can see the fallback posture at a glance.
+ */
+function buildLlmRows(llm: import("./types").LLMConfig): SettingRow[] {
+  const activeLabel = llm.active_provider
+    ? llm.active_provider === "gemini"
+      ? "Gemini (primary)"
+      : "Anthropic (Claude)"
+    : "no provider configured";
+  const rows: SettingRow[] = [
+    row(
+      "llm.active_provider",
+      "Active provider",
+      activeLabel,
+      llm.active_provider ? "active" : "inactive",
+    ),
+    row(
+      "llm.provider_setting",
+      "Provider mode",
+      llm.provider_setting,
+      "active",
+    ),
+    row(
+      "llm.gemini_configured",
+      "Gemini API key",
+      llm.gemini_configured ? "configured" : "not configured",
+      llm.gemini_configured ? "secret-redacted" : "inactive",
+    ),
+    row(
+      "llm.gemini_model",
+      "Gemini model",
+      llm.gemini_model || "(SDK default — gemini-2.5-flash)",
+      llm.gemini_configured ? "active" : "inactive",
+    ),
+    row(
+      "llm.anthropic_configured",
+      "Anthropic API key",
+      llm.anthropic_configured ? "configured" : "not configured",
+      llm.anthropic_configured ? "secret-redacted" : "inactive",
+    ),
+    row(
+      "llm.anthropic_model",
+      "Anthropic model",
+      llm.anthropic_model || "(SDK default — claude-sonnet-4-5)",
+      llm.anthropic_configured ? "active" : "inactive",
+    ),
+    row(
+      "llm.max_input_tokens_per_document",
+      "Max input tokens / document",
+      llm.max_input_tokens_per_document === 0
+        ? "unbounded"
+        : llm.max_input_tokens_per_document,
+      llm.configured ? "active" : "inactive",
+    ),
+  ];
+  return rows;
+}
+
 export function buildSettingsSections(
   config: AdminConfigResponse,
 ): SettingsSection[] {
@@ -127,29 +195,8 @@ export function buildSettingsSections(
 
   sections.push({
     id: "llm",
-    title: "LLM (Phase 2)",
-    rows: [
-      row(
-        "llm.configured",
-        "Anthropic API key",
-        config.llm.configured ? "configured" : "not configured",
-        config.llm.configured ? "secret-redacted" : "inactive",
-      ),
-      row(
-        "llm.model",
-        "Model",
-        config.llm.model || "(SDK default)",
-        config.llm.configured ? "active" : "inactive",
-      ),
-      row(
-        "llm.max_input_tokens_per_document",
-        "Max input tokens / document",
-        config.llm.max_input_tokens_per_document === 0
-          ? "unbounded"
-          : config.llm.max_input_tokens_per_document,
-        config.llm.configured ? "active" : "inactive",
-      ),
-    ],
+    title: "LLM (Phase 2 / 3)",
+    rows: buildLlmRows(config.llm),
   });
 
   sections.push({
@@ -328,7 +375,11 @@ export function buildDiagnosticTiles(
     {
       id: "phase2",
       label: "Phase 2",
-      sublabel: phase2On ? "LLM extraction" : "No LLM key",
+      sublabel: phase2On
+        ? config.llm.active_provider === "gemini"
+          ? "Gemini extraction"
+          : "Anthropic extraction"
+        : "No LLM key",
       state: phase2On ? "ok" : "off",
     },
     {

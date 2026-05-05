@@ -57,7 +57,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 
-from app.dependencies import PipelineServices
+from app.dependencies import PipelineServices, _resolve_llm_provider
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.admin_archive import (
@@ -103,9 +103,45 @@ from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
 from app.services.catalog_store import InvalidCursor
+from app.services.knowledge.llm_client import (
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_GEMINI_MODEL,
+)
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
+
+
+def _build_llm_config(settings: Settings) -> LLMConfig:
+    """Project the LLM-provider-related settings onto the public response shape.
+
+    Surfaces both providers' configured-flag + non-secret model id, plus
+    the resolved ``active_provider`` per :func:`_resolve_llm_provider`
+    so the Settings widget can show "Gemini in use, Anthropic available
+    as fallback" without re-implementing the resolution rules.
+
+    The legacy ``configured`` / ``model`` fields stay populated so any
+    pre-amendment client keeps rendering. They mirror whichever
+    provider is currently active.
+    """
+    active = _resolve_llm_provider(settings)
+    if active == "gemini":
+        active_model = settings.gemini_model.strip() or DEFAULT_GEMINI_MODEL
+    elif active == "anthropic":
+        active_model = settings.anthropic_model.strip() or DEFAULT_ANTHROPIC_MODEL
+    else:
+        active_model = ""
+    return LLMConfig(
+        configured=active is not None,
+        model=active_model,
+        max_input_tokens_per_document=settings.entity_extractor_max_input_tokens_per_document,
+        provider_setting=settings.llm_provider,
+        active_provider=active,
+        gemini_configured=bool(settings.gemini_api_key),
+        gemini_model=settings.gemini_model,
+        anthropic_configured=bool(settings.anthropic_api_key),
+        anthropic_model=settings.anthropic_model,
+    )
 
 
 def _build_admin_config(settings: Settings) -> AdminConfigResponse:
@@ -136,11 +172,7 @@ def _build_admin_config(settings: Settings) -> AdminConfigResponse:
             ),
             neo4j_database=settings.neo4j_database,
         ),
-        llm=LLMConfig(
-            configured=bool(settings.anthropic_api_key),
-            model=settings.anthropic_model,
-            max_input_tokens_per_document=settings.entity_extractor_max_input_tokens_per_document,
-        ),
+        llm=_build_llm_config(settings),
         embeddings=EmbeddingsConfig(
             configured=bool(settings.voyage_api_key),
             model=settings.embedding_model,

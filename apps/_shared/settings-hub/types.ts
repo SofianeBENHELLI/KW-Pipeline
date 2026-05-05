@@ -33,10 +33,25 @@ export interface KnowledgeLayerConfig {
   neo4j_database: string;
 }
 
+export type LLMProviderSetting = "auto" | "gemini" | "anthropic";
+export type ActiveLLMProvider = "gemini" | "anthropic";
+
 export interface LLMConfig {
+  /** True when *any* provider is currently active (per ADR-013 §6 resolution). */
   configured: boolean;
+  /** Resolved active provider's model id (or "" when no provider is active). */
   model: string;
   max_input_tokens_per_document: number;
+  /** Operator-set provider preference. ``auto`` is the default. */
+  provider_setting: LLMProviderSetting;
+  /** Provider actually wired up at request time, or null when none. */
+  active_provider: ActiveLLMProvider | null;
+  gemini_configured: boolean;
+  /** Raw ``KW_GEMINI_MODEL`` value; empty when not overridden. */
+  gemini_model: string;
+  anthropic_configured: boolean;
+  /** Raw ``KW_ANTHROPIC_MODEL`` / ``KW_LLM_MODEL`` value; empty when not overridden. */
+  anthropic_model: string;
 }
 
 export interface EmbeddingsConfig {
