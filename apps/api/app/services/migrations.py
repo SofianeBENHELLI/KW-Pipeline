@@ -257,6 +257,43 @@ def _migrate_0008_corpus_norms(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0009_sampling_state(conn: sqlite3.Connection) -> None:
+    """SPC sampling state per ``(content_type, topic_cluster)`` bucket
+    (ADR-023 §6, EPIC-A A.3, #215).
+
+    Backs :class:`SQLiteSamplingStateStore`. The HITL router bumps
+    these counters every time it makes a routing decision so the
+    future drift detector can detect "this bucket's auto-rate is
+    diverging from its observed human-flip rate" without a SQL
+    materialisation pass over the audit table.
+
+    Counters are non-negative and monotonic — the router only ever
+    increments — and ``samples_human_after_auto`` is reserved for the
+    drift signal the auto-promotion / drift-detector worker (next
+    slice) writes when a human reviewer overturns a previously-auto
+    decision.
+
+    The compound primary key keeps a bucket from being recorded twice
+    and lets the in-memory + SQLite implementations share an
+    ``INSERT OR IGNORE`` + ``UPDATE`` write pattern that's portable
+    across SQLite versions older than the UPSERT cutoff (3.24).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sampling_state (
+            content_type            TEXT NOT NULL,
+            topic_cluster           TEXT NOT NULL,
+            samples_taken           INTEGER NOT NULL DEFAULT 0,
+            samples_auto            INTEGER NOT NULL DEFAULT 0,
+            samples_human           INTEGER NOT NULL DEFAULT 0,
+            samples_human_after_auto INTEGER NOT NULL DEFAULT 0,
+            last_decision_at        TEXT,
+            PRIMARY KEY (content_type, topic_cluster)
+        )
+        """
+    )
+
+
 def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
     """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
 
@@ -307,6 +344,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0006_documents_archived_at", _migrate_0006_documents_archived_at),
     ("0007_validation_metadata", _migrate_0007_validation_metadata),
     ("0008_corpus_norms", _migrate_0008_corpus_norms),
+    ("0009_sampling_state", _migrate_0009_sampling_state),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
