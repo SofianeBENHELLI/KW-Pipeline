@@ -735,9 +735,20 @@ class Neo4jGraphStore:
             if state == "ONLINE":
                 return
             if time.monotonic() >= deadline:
+                # Surface every index Neo4j knows about so a missed
+                # name shows up clearly when this RuntimeError is
+                # the cause of a CI failure.
+                all_rows = self._read(
+                    "SHOW INDEXES YIELD name, state, type RETURN name, state, type",
+                    {},
+                )
+                snapshot = ", ".join(
+                    f"{r['name']}:{r['state']}:{r['type']}" for r in all_rows
+                )
                 raise RuntimeError(
                     f"vector index {name!r} did not reach ONLINE within 30s "
-                    f"(last observed state: {state or '<missing>'})."
+                    f"(last observed state: {state or '<missing>'}; all "
+                    f"indexes: {snapshot or '<none>'})."
                 )
             time.sleep(0.1)
 
