@@ -538,7 +538,7 @@
         "type": "object"
       },
       "Document": {
-        "description": "Logical document family containing one or more versions.\n\n<<<<<<< HEAD\n    ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020\n    §4). Set when the orphan cascade flags a document as archived\n    because it lost its last active scope link (see\n    :class:`app.services.scope_cascade_service.ScopeCascadeService`).\n    Default read paths hide rows where ``archived_at IS NOT NULL`` so\n    archived documents are invisible to the standard surface while the\n    bytes / extractions / semantic JSON / markdown assets stay on disk\n    until the future Archive/Purge Admin tool acts on them.\n=======\n    ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the\n    document currently lives in — populated by every\n    :class:`CatalogStore` read path so the frontend can render its\n    scope chip on any list/detail response without a follow-up call.\n    Soft-removed links (per the no-delete policy) are filtered out at\n    the store layer via ``list_scopes_for_document``. The default\n    ``[]`` keeps construction sites that don't care about scopes (e.g.\n    inline test fixtures, ``with_first_version``) terse — those callers\n    still serialize a present-but-empty list, which the OpenAPI\n    contract marks as required (defaults required = wire-honest).\n>>>>>>> origin/main",
+        "description": "Logical document family containing one or more versions.\n\n``archived_at`` is the soft-archive flag (no-delete policy, ADR-020\n§4). Set when the orphan cascade flags a document as archived\nbecause it lost its last active scope link (see\n:class:`app.services.scope_cascade_service.ScopeCascadeService`).\nDefault read paths hide rows where ``archived_at IS NOT NULL`` so\narchived documents are invisible to the standard surface while the\nbytes / extractions / semantic JSON / markdown assets stay on disk\nuntil the future Archive/Purge Admin tool acts on them.\n\n``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the\ndocument currently lives in — populated by every\n:class:`CatalogStore` read path so the frontend can render its\nscope chip on any list/detail response without a follow-up call.\nSoft-removed links (per the no-delete policy) are filtered out at\nthe store layer via ``list_scopes_for_document``. The default\n``[]`` keeps construction sites that don't care about scopes (e.g.\ninline test fixtures, ``with_first_version``) terse — those callers\nstill serialize a present-but-empty list, which the OpenAPI\ncontract marks as required (defaults required = wire-honest).",
         "properties": {
           "archived_at": {
             "anyOf": [
@@ -1561,6 +1561,99 @@
         "title": "RawSection",
         "type": "object"
       },
+      "RelinkScopeRequest": {
+        "description": "Body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).",
+        "properties": {
+          "document_id": {
+            "description": "Catalog id of the document whose scope link to re-activate.",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "scope_kind": {
+            "description": "Scope flavor — ``personal``, ``swym_community``, or ``project``. Matches the ``ScopeKind`` literal from ADR-020 §1.",
+            "enum": [
+              "personal",
+              "swym_community",
+              "project"
+            ],
+            "title": "Scope Kind",
+            "type": "string"
+          },
+          "scope_ref": {
+            "description": "Scope reference (community id, user id, project id) — interpretation depends on ``scope_kind``.",
+            "title": "Scope Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "scope_kind",
+          "scope_ref"
+        ],
+        "title": "RelinkScopeRequest",
+        "type": "object"
+      },
+      "RelinkScopeResponse": {
+        "description": "Response body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).\n\n``removed_at_before`` is the soft-removal timestamp the link\ncarried before the call; ``None`` when the link was already\nactive (the idempotent no-op case). ``relinked_at`` is the wall\nclock the route stamped onto the audit event; ``None`` for a\ndry-run or the idempotent no-op.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "relinked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relinked At"
+          },
+          "removed_at_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At Before"
+          },
+          "scope_kind": {
+            "enum": [
+              "personal",
+              "swym_community",
+              "project"
+            ],
+            "title": "Scope Kind",
+            "type": "string"
+          },
+          "scope_ref": {
+            "title": "Scope Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "scope_kind",
+          "scope_ref",
+          "removed_at_before",
+          "relinked_at",
+          "dry_run"
+        ],
+        "title": "RelinkScopeResponse",
+        "type": "object"
+      },
       "ReviewRequest": {
         "description": "Optional reviewer note attached to a validate or reject decision.",
         "properties": {
@@ -2023,6 +2116,67 @@
         "title": "TaxonomyResponse",
         "type": "object"
       },
+      "UnarchiveRequest": {
+        "description": "Body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).",
+        "properties": {
+          "document_id": {
+            "description": "Catalog id of the document whose ``archived_at`` flag should be cleared. Looked up via the archived-inclusive accessor so a flag-archived row still resolves.",
+            "title": "Document Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "title": "UnarchiveRequest",
+        "type": "object"
+      },
+      "UnarchiveResponse": {
+        "description": "Response body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).\n\n``archived_at_before`` is the ``archived_at`` timestamp the row\ncarried before the call; ``None`` when the document was already\nactive (the idempotent no-op case). ``unarchived_at`` is the wall\nclock the route stamped onto the audit event; ``None`` for a\ndry-run (no audit row was written) or for the idempotent no-op\n(no transition fired).\n\n``dry_run`` mirrors the request's ``?dry_run=true`` query param so\nclients can disambiguate the \"would-have-mutated\" payload from a\nreal mutation without re-reading the URL.",
+        "properties": {
+          "archived_at_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At Before"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "unarchived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unarchived At"
+          }
+        },
+        "required": [
+          "document_id",
+          "archived_at_before",
+          "unarchived_at",
+          "dry_run"
+        ],
+        "title": "UnarchiveResponse",
+        "type": "object"
+      },
       "UploadConfig": {
         "properties": {
           "allowed_content_types": {
@@ -2210,6 +2364,128 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/archive/relink_scope": {
+      "post": {
+        "description": "Reactivate a soft-removed ``document_scopes`` row (ADR-027 §1.2).\n\nWraps the existing :meth:`CatalogStore.add_scope` reactivation\npath from #262: that method already clears ``removed_at`` and\noverwrites ``added_at`` / ``added_by`` with the new caller's\nidentity when the row was previously soft-removed. The admin\nwrapper just gates the action behind ``require_admin`` plus\n``?confirm=true`` and surfaces the pre-action ``removed_at``\ntimestamp for the audit log.",
+        "operationId": "admin_archive_relink_scope",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelinkScopeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelinkScopeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relink Scope"
+      }
+    },
+    "/admin/archive/unarchive": {
+      "post": {
+        "description": "Clear ``documents.archived_at`` on a flag-archived row (ADR-027 §1.1).\n\nThe catalog method is idempotent on already-active documents,\nso this route's idempotency story is also \"200 OK + no audit\nrow\" rather than a 409 — the ADR-027 §1.1 example shows 409\nfor the bytes-purge precondition, not for unarchive. Real\noperator workflows re-run the route safely as a status check.",
+        "operationId": "admin_archive_unarchive",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnarchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnarchiveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unarchive Document"
+      }
+    },
     "/admin/config": {
       "get": {
         "operationId": "admin_config",

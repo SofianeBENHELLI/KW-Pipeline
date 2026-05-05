@@ -49,6 +49,52 @@ const http = createClient<paths>({
   fetch: (...args) => globalThis.fetch(...args),
 });
 
+// ─── 401 / session-expired hook (#83 slice 3) ────────────────────────────────
+
+/**
+ * Module-level callback the SessionGuardProvider registers in a
+ * ``useEffect`` so this fetch wrapper can flip the banner on when
+ * an :class:`ApiError` with ``status === 401`` is constructed.
+ *
+ * The seam is intentionally tiny: a single setter, a single call
+ * site, and a no-op default so this client keeps working in unit
+ * tests that don't mount the provider. ADR-019 §5 mandates the
+ * envelope; this is the JS-side hook that turns it into UX.
+ *
+ * Limitation: the default ``KW_AUTH_MODE=dev`` (per #245) never
+ * returns 401 in normal operation, so the hook is exercised via
+ * vitest mocks and the ``#force-session-expired`` URL-hash dev
+ * stub installed at the app root.
+ */
+type SessionTrigger = () => void;
+let sessionTrigger: SessionTrigger = () => {
+  // No-op until the provider registers a real one. Mirrors the
+  // useSessionGuard default, so the API client stays usable
+  // outside the React tree (codegen smoke tests, node scripts).
+};
+
+/**
+ * Register the callback that flips the session-expired banner on.
+ *
+ * Called once from ``<SessionGuardProvider>`` inside a useEffect —
+ * the registration happens before any user-driven request, because
+ * the provider sits at the app root above every component that
+ * fetches.
+ */
+export function setSessionTrigger(fn: SessionTrigger): void {
+  sessionTrigger = fn;
+}
+
+/**
+ * Reset the registered trigger back to the default no-op. Tests use
+ * this between cases so a 401 in one test doesn't leak into the next.
+ */
+export function clearSessionTrigger(): void {
+  sessionTrigger = () => {
+    /* no-op */
+  };
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 /**
@@ -59,6 +105,11 @@ const http = createClient<paths>({
  * `ApiError` mirrors the public fields onto a JS Error subclass so call
  * sites can `throw err`, `if (err instanceof ApiError)`, and read the
  * structured fields without re-parsing the response.
+ *
+ * Constructing an ApiError with ``status === 401`` ALWAYS fires the
+ * session-expired trigger (#83 slice 3 / ADR-019 §5). The trigger is
+ * a no-op until ``<SessionGuardProvider>`` registers its setter, so
+ * unit tests that don't mount the provider stay quiet.
  */
 export class ApiError extends Error {
   constructor(
@@ -70,6 +121,19 @@ export class ApiError extends Error {
   ) {
     super(`API ${status}: ${detail}`);
     this.name = "ApiError";
+    // Fire the registered session-expired hook for any 401. Catches
+    // every code path that builds an ApiError — openapi-fetch's
+    // ``unwrap`` cascade, the multipart upload's ``asApiError``
+    // branch, and any future helper that throws an ApiError directly.
+    if (status === 401) {
+      try {
+        sessionTrigger();
+      } catch {
+        // Trigger callbacks are React state setters — they shouldn't
+        // throw, but defend so a buggy register doesn't take down
+        // unrelated request handling.
+      }
+    }
   }
 }
 

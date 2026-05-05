@@ -44,6 +44,17 @@ class StorageService(Protocol):
     def get(self, uri: str) -> bytes:
         """Load bytes from a URI-like handle."""
 
+    def delete(self, uri: str) -> None:
+        """Delete the object at ``uri``. Best-effort + idempotent: a
+        missing object is not an error.
+
+        Per ADR-027 §7: admin-tool only — not exposed via any HTTP route
+        in this PR. The follow-up ``purge_artifacts`` route is the only
+        sanctioned caller. The contract is "best-effort, idempotent" so
+        a partial prior purge that left the catalog out of sync with
+        the storage backend converges on retry rather than failing.
+        """
+
 
 @dataclass
 class InMemoryStorageService:
@@ -72,6 +83,15 @@ class InMemoryStorageService:
     def get(self, uri: str) -> bytes:
         """Load bytes previously stored under a memory URI."""
         return self.objects[uri]
+
+    def delete(self, uri: str) -> None:
+        """Drop the URI from the in-memory dict. Idempotent.
+
+        Per ADR-027 §7: admin-tool only. Deleting an unknown URI is
+        not an error — the contract converges on the missing state
+        regardless of the start state.
+        """
+        self.objects.pop(uri, None)
 
 
 @dataclass
@@ -112,6 +132,21 @@ class FileSystemStorageService:
         """Load bytes from a `file://` URI under the configured root."""
         path = self._path_from_uri(uri)
         return path.read_bytes()
+
+    def delete(self, uri: str) -> None:
+        """Remove the file at ``uri``. Best-effort + idempotent.
+
+        Per ADR-027 §7: admin-tool only. Validates the URI is rooted
+        beneath ``self.root`` (same guard ``get`` uses) so a stray
+        path-traversal attempt fails fast instead of silently
+        unlinking an unrelated file. ``FileNotFoundError`` is
+        swallowed — deleting a missing file is the contract.
+        """
+        path = self._path_from_uri(uri)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
 
     def _path_for_key(self, key: str) -> Path:
         key_path = PurePosixPath(key)

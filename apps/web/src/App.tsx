@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./styles.css";
-import { ApiError, getDocument, listDocuments } from "./api/client";
+import {
+  SessionExpiredBanner,
+  useSessionGuard,
+} from "../../_shared/auth";
+import {
+  ApiError,
+  clearSessionTrigger,
+  getDocument,
+  listDocuments,
+  setSessionTrigger,
+} from "./api/client";
 import type { ApiDocument } from "./api/types";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
@@ -207,6 +217,45 @@ export function useDocumentCatalog(): DocumentCatalog {
 export default function App() {
   const catalog = useDocumentCatalog();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const session = useSessionGuard();
+
+  // Register the 401-triggered session-expired hook on mount and tear
+  // it down on unmount. The trigger is module-level state on the API
+  // client (#83 slice 3 / ADR-019 §5) so any code path that throws an
+  // ApiError(401) — openapi-fetch's unwrap, the multipart upload's
+  // asApiError branch, anything else — flips this banner without
+  // per-call-site branching.
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => {
+      clearSessionTrigger();
+    };
+  }, [session.trigger]);
+
+  // Dev stub: ``KW_AUTH_MODE=dev`` (default per #245) never returns
+  // 401 in normal operation, so reviewers can't see the banner via
+  // the live backend. Loading the app with ``#force-session-expired``
+  // in the URL hash flips the banner once on mount so the affordance
+  // stays reviewable on a demo build. Removed once bearer mode is
+  // the default and real 401s show up organically.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash === "#force-session-expired") {
+      session.trigger();
+    }
+  }, [session]);
+
+  // Sign-in action behaviour:
+  //   * dev mode (default): reload picks up a fresh dev user on the
+  //     very next request — see ADR-019 §3.
+  //   * bearer mode: reload bounces the user through whatever IdP
+  //     redirect their token issuer wires up. Until the future
+  //     refresh-token slice (ADR-019 follow-up), reload is the only
+  //     thing the frontend can do — it has no sign-in form of its
+  //     own (out of scope for #83 slice 3).
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
   const {
     documents,
     selected,
@@ -238,9 +287,19 @@ export default function App() {
     bumpMutation();
   }, [refreshAll, refreshSelected, bumpMutation]);
 
+  // Banner sits at the top of every shell return — loading, error,
+  // and ready states all need to surface a 401 the same way.
+  const banner = (
+    <SessionExpiredBanner
+      visible={session.expired}
+      onSignIn={handleSignInAgain}
+    />
+  );
+
   if (loadingDocuments && documents.length === 0) {
     return (
       <main className="app-shell" aria-label="Orbital document review workbench">
+        {banner}
         <p className="muted" role="status" aria-live="polite">
           Loading documents…
         </p>
@@ -252,6 +311,7 @@ export default function App() {
     const message = error instanceof ApiError ? error.detail : error;
     return (
       <main className="app-shell" aria-label="Orbital document review workbench">
+        {banner}
         <div className="notice danger" role="alert">
           <strong>Failed to load documents</strong>
           <span>{message}</span>
@@ -269,6 +329,7 @@ export default function App() {
 
   return (
     <main className="app-shell" aria-label="Orbital document review workbench">
+      {banner}
       <PipelineWidget
         documents={documents}
         selectedDocumentId={selectedId ?? ""}

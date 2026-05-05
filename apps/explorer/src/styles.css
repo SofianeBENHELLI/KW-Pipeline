@@ -1235,3 +1235,43 @@ body {
   border-top: 1px solid var(--line);
   font-size: 11px;
 }
+
+/* Session-expired banner (#83 slice 3 / ADR-019 §5).
+   Mounted above the explorer header so the affordance is the first
+   thing the user sees on a 401. Themed with the warning palette to
+   match the rest of the explorer's notice surfaces. */
+.kw-session-expired,
+.kx-session-expired {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 8px;
+  border: 1px solid #f0c674;
+  background: #fff8e6;
+  color: #553300;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.kw-session-expired__copy {
+  flex: 1 1 auto;
+  line-height: 1.4;
+}
+
+.kw-session-expired__action {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid #1869c8;
+  background: #1869c8;
+  color: white;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kw-session-expired__action:hover {
+  background: #134f99;
+}
+

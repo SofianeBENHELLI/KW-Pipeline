@@ -4,6 +4,60 @@
  */
 
 export interface paths {
+    "/admin/archive/relink_scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relink Scope
+         * @description Reactivate a soft-removed ``document_scopes`` row (ADR-027 §1.2).
+         *
+         *     Wraps the existing :meth:`CatalogStore.add_scope` reactivation
+         *     path from #262: that method already clears ``removed_at`` and
+         *     overwrites ``added_at`` / ``added_by`` with the new caller's
+         *     identity when the row was previously soft-removed. The admin
+         *     wrapper just gates the action behind ``require_admin`` plus
+         *     ``?confirm=true`` and surfaces the pre-action ``removed_at``
+         *     timestamp for the audit log.
+         */
+        post: operations["admin_archive_relink_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Document
+         * @description Clear ``documents.archived_at`` on a flag-archived row (ADR-027 §1.1).
+         *
+         *     The catalog method is idempotent on already-active documents,
+         *     so this route's idempotency story is also "200 OK + no audit
+         *     row" rather than a 409 — the ADR-027 §1.1 example shows 409
+         *     for the bytes-purge precondition, not for unarchive. Real
+         *     operator workflows re-run the route safely as a status check.
+         */
+        post: operations["admin_archive_unarchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/config": {
         parameters: {
             query?: never;
@@ -849,27 +903,25 @@ export interface components {
          * Document
          * @description Logical document family containing one or more versions.
          *
-         *     <<<<<<< HEAD
-         *         ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
-         *         §4). Set when the orphan cascade flags a document as archived
-         *         because it lost its last active scope link (see
-         *         :class:`app.services.scope_cascade_service.ScopeCascadeService`).
-         *         Default read paths hide rows where ``archived_at IS NOT NULL`` so
-         *         archived documents are invisible to the standard surface while the
-         *         bytes / extractions / semantic JSON / markdown assets stay on disk
-         *         until the future Archive/Purge Admin tool acts on them.
-         *     =======
-         *         ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
-         *         document currently lives in — populated by every
-         *         :class:`CatalogStore` read path so the frontend can render its
-         *         scope chip on any list/detail response without a follow-up call.
-         *         Soft-removed links (per the no-delete policy) are filtered out at
-         *         the store layer via ``list_scopes_for_document``. The default
-         *         ``[]`` keeps construction sites that don't care about scopes (e.g.
-         *         inline test fixtures, ``with_first_version``) terse — those callers
-         *         still serialize a present-but-empty list, which the OpenAPI
-         *         contract marks as required (defaults required = wire-honest).
-         *     >>>>>>> origin/main
+         *     ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
+         *     §4). Set when the orphan cascade flags a document as archived
+         *     because it lost its last active scope link (see
+         *     :class:`app.services.scope_cascade_service.ScopeCascadeService`).
+         *     Default read paths hide rows where ``archived_at IS NOT NULL`` so
+         *     archived documents are invisible to the standard surface while the
+         *     bytes / extractions / semantic JSON / markdown assets stay on disk
+         *     until the future Archive/Purge Admin tool acts on them.
+         *
+         *     ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
+         *     document currently lives in — populated by every
+         *     :class:`CatalogStore` read path so the frontend can render its
+         *     scope chip on any list/detail response without a follow-up call.
+         *     Soft-removed links (per the no-delete policy) are filtered out at
+         *     the store layer via ``list_scopes_for_document``. The default
+         *     ``[]`` keeps construction sites that don't care about scopes (e.g.
+         *     inline test fixtures, ``with_first_version``) terse — those callers
+         *     still serialize a present-but-empty list, which the OpenAPI
+         *     contract marks as required (defaults required = wire-honest).
          */
         Document: {
             /** Archived At */
@@ -1313,6 +1365,58 @@ export interface components {
             text: string;
         };
         /**
+         * RelinkScopeRequest
+         * @description Body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).
+         */
+        RelinkScopeRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose scope link to re-activate.
+             */
+            document_id: string;
+            /**
+             * Scope Kind
+             * @description Scope flavor — ``personal``, ``swym_community``, or ``project``. Matches the ``ScopeKind`` literal from ADR-020 §1.
+             * @enum {string}
+             */
+            scope_kind: "personal" | "swym_community" | "project";
+            /**
+             * Scope Ref
+             * @description Scope reference (community id, user id, project id) — interpretation depends on ``scope_kind``.
+             */
+            scope_ref: string;
+        };
+        /**
+         * RelinkScopeResponse
+         * @description Response body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).
+         *
+         *     ``removed_at_before`` is the soft-removal timestamp the link
+         *     carried before the call; ``None`` when the link was already
+         *     active (the idempotent no-op case). ``relinked_at`` is the wall
+         *     clock the route stamped onto the audit event; ``None`` for a
+         *     dry-run or the idempotent no-op.
+         */
+        RelinkScopeResponse: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Relinked At */
+            relinked_at: string | null;
+            /** Removed At Before */
+            removed_at_before: string | null;
+            /**
+             * Scope Kind
+             * @enum {string}
+             */
+            scope_kind: "personal" | "swym_community" | "project";
+            /** Scope Ref */
+            scope_ref: string;
+        };
+        /**
          * ReviewRequest
          * @description Optional reviewer note attached to a validate or reject decision.
          */
@@ -1562,6 +1666,45 @@ export interface components {
             /** Source Path */
             source_path: string | null;
         };
+        /**
+         * UnarchiveRequest
+         * @description Body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).
+         */
+        UnarchiveRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose ``archived_at`` flag should be cleared. Looked up via the archived-inclusive accessor so a flag-archived row still resolves.
+             */
+            document_id: string;
+        };
+        /**
+         * UnarchiveResponse
+         * @description Response body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).
+         *
+         *     ``archived_at_before`` is the ``archived_at`` timestamp the row
+         *     carried before the call; ``None`` when the document was already
+         *     active (the idempotent no-op case). ``unarchived_at`` is the wall
+         *     clock the route stamped onto the audit event; ``None`` for a
+         *     dry-run (no audit row was written) or for the idempotent no-op
+         *     (no transition fired).
+         *
+         *     ``dry_run`` mirrors the request's ``?dry_run=true`` query param so
+         *     clients can disambiguate the "would-have-mutated" payload from a
+         *     real mutation without re-reading the URL.
+         */
+        UnarchiveResponse: {
+            /** Archived At Before */
+            archived_at_before: string | null;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Unarchived At */
+            unarchived_at: string | null;
+        };
         /** UploadConfig */
         UploadConfig: {
             /** Allowed Content Types */
@@ -1637,6 +1780,78 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_archive_relink_scope: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelinkScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelinkScopeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_unarchive: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnarchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnarchiveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_config: {
         parameters: {
             query?: never;
