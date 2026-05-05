@@ -211,3 +211,118 @@ class TestRemoveScope:
 
         page, _ = store.list_documents_in_scope("project", "p1", cursor=None, limit=10)
         assert {d.id for d in page} == {"d2"}
+
+
+class TestSoftRemoveAndReactivate:
+    """No-delete policy (2026-05-05): ``remove_scope`` flags the row as
+    ``removed_at`` instead of physically deleting it; ``add_scope`` for
+    the same triple reactivates a flagged row with the new caller's
+    identity. Source data is never lost — the future Archive/Purge
+    Admin tool is the only path to physical deletion.
+    """
+
+    def test_remove_scope_does_not_delete_row_physically_in_sqlite(self, tmp_path: Path) -> None:
+        """Direct SQL inspection: a soft-removed row stays in the table
+        with a non-null ``removed_at``. Purely SQLite-only — the
+        in-memory store is exercised via the public Protocol elsewhere."""
+        import sqlite3
+
+        store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+        _seed_document(store)
+        store.add_scope("doc-1", _scope(kind="swym_community", ref="abc"))
+        store.remove_scope("doc-1", "swym_community", "abc")
+
+        with sqlite3.connect(tmp_path / "catalog.sqlite3") as conn:
+            row = conn.execute(
+                "SELECT scope_kind, scope_ref, removed_at FROM document_scopes "
+                "WHERE document_id = ?",
+                ("doc-1",),
+            ).fetchone()
+        assert row is not None, "row must NOT be physically deleted"
+        assert row[0] == "swym_community"
+        assert row[1] == "abc"
+        assert row[2] is not None, "removed_at must be stamped"
+
+    def test_add_after_remove_reactivates_with_new_actor(self, store: CatalogStore):
+        """Re-linking a soft-removed scope reactivates the row with the
+        new caller's ``added_at`` / ``added_by`` (a re-link is a fresh
+        audit event). The link reappears on read paths."""
+        _seed_document(store)
+        original = _scope(
+            kind="swym_community",
+            ref="abc-123",
+            added_by="alice",
+            added_at=datetime(2026, 5, 4, 10, 0, tzinfo=UTC),
+        )
+        store.add_scope("doc-1", original)
+        store.remove_scope("doc-1", "swym_community", "abc-123")
+
+        # After remove, the read paths hide the link.
+        assert store.list_scopes_for_document("doc-1") == []
+        page, _ = store.list_documents_in_scope("swym_community", "abc-123", cursor=None, limit=10)
+        assert page == []
+
+        # Reactivate with a different actor + later timestamp.
+        relink = _scope(
+            kind="swym_community",
+            ref="abc-123",
+            added_by="bob",
+            added_at=datetime(2026, 5, 5, 9, 0, tzinfo=UTC),
+        )
+        store.add_scope("doc-1", relink)
+
+        scopes = store.list_scopes_for_document("doc-1")
+        assert len(scopes) == 1
+        assert scopes[0].kind == "swym_community"
+        assert scopes[0].ref == "abc-123"
+        assert scopes[0].added_by == "bob", (
+            "reactivation overwrites added_by with the re-link caller"
+        )
+        assert scopes[0].added_at == datetime(2026, 5, 5, 9, 0, tzinfo=UTC)
+        assert scopes[0].removed_at is None
+
+        # The reverse index also picks the reactivation up.
+        page, _ = store.list_documents_in_scope("swym_community", "abc-123", cursor=None, limit=10)
+        assert {d.id for d in page} == {"doc-1"}
+
+    def test_remove_scope_is_invisible_to_list_scopes(self, store: CatalogStore):
+        _seed_document(store)
+        store.add_scope("doc-1", _scope(kind="personal", ref="dev"))
+        store.add_scope("doc-1", _scope(kind="swym_community", ref="abc"))
+        store.remove_scope("doc-1", "swym_community", "abc")
+
+        scopes = store.list_scopes_for_document("doc-1")
+        assert [(s.kind, s.ref) for s in scopes] == [("personal", "dev")], (
+            "removed scope must not appear in list_scopes_for_document"
+        )
+
+    def test_double_remove_preserves_original_removed_at(self, tmp_path: Path) -> None:
+        """Removing an already-removed link is a no-op — the original
+        ``removed_at`` timestamp is preserved (audit-faithful: the
+        first removal is the canonical event)."""
+        import sqlite3
+        import time
+
+        store = SQLiteCatalogStore(tmp_path / "catalog.sqlite3")
+        _seed_document(store)
+        store.add_scope("doc-1", _scope(kind="project", ref="p1"))
+        store.remove_scope("doc-1", "project", "p1")
+
+        with sqlite3.connect(tmp_path / "catalog.sqlite3") as conn:
+            first_removed_at = conn.execute(
+                "SELECT removed_at FROM document_scopes WHERE document_id = ?",
+                ("doc-1",),
+            ).fetchone()[0]
+
+        # Wait long enough that a second timestamp would differ if it
+        # were stamped.
+        time.sleep(0.01)
+        store.remove_scope("doc-1", "project", "p1")
+
+        with sqlite3.connect(tmp_path / "catalog.sqlite3") as conn:
+            second_removed_at = conn.execute(
+                "SELECT removed_at FROM document_scopes WHERE document_id = ?",
+                ("doc-1",),
+            ).fetchone()[0]
+
+        assert first_removed_at == second_removed_at

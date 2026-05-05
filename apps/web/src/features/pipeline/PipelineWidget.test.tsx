@@ -66,6 +66,7 @@ const UPLOAD_RESPONSE: ApiUploadResponse = {
       ref: "user-1",
       added_at: "2026-05-01T00:00:00Z",
       added_by: "user-1",
+      removed_at: null,
     },
   ],
 };

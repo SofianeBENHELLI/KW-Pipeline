@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -210,22 +210,34 @@ class CatalogStore(Protocol):
     def add_scope(self, document_id: str, scope: Scope) -> None:
         """Persist a ``(document_id, scope_kind, scope_ref)`` link.
 
-        Idempotent: re-adding the same triple is a no-op. The
-        first-write's ``added_at`` and ``added_by`` are preserved on
-        re-add — the audit trail records who *originally* linked the
-        document into the scope, not the most recent caller. This
-        matches the "scope link is itself an auditable event"
-        framing in ADR-020 §2.
+        Two cases:
+
+        - The triple does not exist → insert with the caller's
+          ``added_at`` / ``added_by``. ``removed_at`` is NULL.
+        - The triple exists but was soft-removed (``removed_at IS NOT
+          NULL``) → reactivate by clearing ``removed_at`` and
+          overwriting ``added_at`` / ``added_by`` with the caller's
+          identity (a re-link is a fresh audit event).
+        - The triple exists and is active (``removed_at IS NULL``) →
+          no-op. The original first-write ``added_at`` / ``added_by``
+          are preserved.
+
+        ``scope.removed_at`` on input is ignored — this method is the
+        public API for **adding/reactivating** a link. Use
+        :meth:`remove_scope` to flag a link as removed.
         """
 
     def list_scopes_for_document(self, document_id: str) -> list[Scope]:
-        """Return every :class:`Scope` row recorded for ``document_id``.
+        """Return every active :class:`Scope` row for ``document_id``.
 
-        Order is insertion order so callers can show "first linked"
-        prominently if they want to. Returns an empty list when the
-        document has no scope links — including when ``document_id``
-        does not exist (the scope table is decoupled from the
-        document family for forward-compat with bulk-link routes).
+        Filters out soft-removed rows (``removed_at IS NOT NULL``) per
+        the no-delete policy: removed scopes stay in the catalog for a
+        future Archive/Purge Admin tool but they are invisible to
+        normal reads. Order is insertion order. Returns an empty list
+        when the document has no active scope links — including when
+        ``document_id`` does not exist (the scope table is decoupled
+        from the document family for forward-compat with bulk-link
+        routes).
         """
 
     def list_documents_in_scope(
@@ -245,6 +257,10 @@ class CatalogStore(Protocol):
         cursor token to feed back as ``cursor`` for the next page,
         or ``None`` when this page is the last one.
 
+        Soft-removed scope links (``removed_at IS NOT NULL``) are
+        filtered out; only documents whose scope link is currently
+        active are visible.
+
         Implementations look the (kind, ref) up via the
         ``idx_document_scopes_lookup`` index (SQLite) or the in-memory
         reverse index (in-memory store) and then materialise the
@@ -254,12 +270,19 @@ class CatalogStore(Protocol):
         """
 
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
-        """Remove a single ``(document_id, scope_kind, scope_ref)`` link.
+        """Soft-remove a single ``(document_id, scope_kind, scope_ref)`` link.
 
-        Idempotent: removing a link that doesn't exist is a no-op,
-        not an error. Added now for the future EPIC-D D.6 cascade
-        (community-deletion → unlink-every-document) so the Protocol
-        doesn't churn when that slice lands.
+        Per the no-delete policy: the row stays in the catalog with
+        ``removed_at`` set to the current UTC timestamp. Subsequent
+        ``list_scopes_for_document`` / ``list_documents_in_scope``
+        calls hide the link; :meth:`add_scope` for the same triple
+        will reactivate it.
+
+        Idempotent: flagging an already-removed or non-existent link
+        is a no-op (``removed_at`` is not bumped on the second call —
+        the original removal timestamp is preserved for audit). A
+        future Archive/Purge Admin tool is the only path to physical
+        deletion.
         """
 
 
@@ -414,20 +437,46 @@ class InMemoryCatalogStore:
 
     def add_scope(self, document_id: str, scope: Scope) -> None:
         existing = self.scopes_by_document.setdefault(document_id, [])
-        # Idempotent on (kind, ref) — first-write wins so the recorded
-        # ``added_at`` / ``added_by`` are stable for audit reads.
-        for already in existing:
+        for index, already in enumerate(existing):
             if already.kind == scope.kind and already.ref == scope.ref:
+                if already.removed_at is not None:
+                    # Reactivate: clear removed_at, overwrite added_at /
+                    # added_by with the new caller's identity (re-link is
+                    # a fresh audit event).
+                    existing[index] = Scope(
+                        kind=scope.kind,
+                        ref=scope.ref,
+                        added_at=scope.added_at,
+                        added_by=scope.added_by,
+                        removed_at=None,
+                    )
+                    self.documents_by_scope.setdefault((scope.kind, scope.ref), set()).add(
+                        document_id
+                    )
+                # Active row exists → no-op (first-write wins for active
+                # links; the original added_at / added_by are preserved).
                 return
-        existing.append(scope)
+        # Fresh insert — store with removed_at coerced to None even if the
+        # caller passed a non-None value (add_scope is the add path).
+        existing.append(
+            Scope(
+                kind=scope.kind,
+                ref=scope.ref,
+                added_at=scope.added_at,
+                added_by=scope.added_by,
+                removed_at=None,
+            )
+        )
         self.documents_by_scope.setdefault((scope.kind, scope.ref), set()).add(document_id)
 
     def list_scopes_for_document(self, document_id: str) -> list[Scope]:
-        # Return a shallow copy so callers can't mutate the persisted
-        # list. The Scope models themselves are Pydantic frozen-ish
-        # (no ``frozen=True`` config) but we don't expose the storage
-        # list directly so test mutations don't corrupt the store.
-        return list(self.scopes_by_document.get(document_id, ()))
+        # Filter soft-removed rows. Return a shallow copy so callers
+        # can't mutate the persisted list.
+        return [
+            scope
+            for scope in self.scopes_by_document.get(document_id, ())
+            if scope.removed_at is None
+        ]
 
     def list_documents_in_scope(
         self,
@@ -437,6 +486,9 @@ class InMemoryCatalogStore:
         cursor: str | None,
         limit: int,
     ) -> tuple[list[Document], str | None]:
+        # The reverse index is maintained to only contain active links;
+        # remove_scope drops the doc id from the set when the link is
+        # flagged. So no extra filter is needed here.
         document_ids = self.documents_by_scope.get((scope_kind, scope_ref), set())
         candidates = [self.documents[d] for d in document_ids if d in self.documents]
         ordered = sorted(candidates, key=lambda d: (d.created_at, d.id))
@@ -455,13 +507,21 @@ class InMemoryCatalogStore:
         return page, next_cursor
 
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
+        # Soft-remove: flag the row with removed_at, drop from the
+        # reverse index. The forward-index list keeps the row so
+        # add_scope can reactivate it.
         existing = self.scopes_by_document.get(document_id)
         if existing is not None:
-            self.scopes_by_document[document_id] = [
-                s for s in existing if not (s.kind == scope_kind and s.ref == scope_ref)
-            ]
-            if not self.scopes_by_document[document_id]:
-                del self.scopes_by_document[document_id]
+            for index, scope in enumerate(existing):
+                if scope.kind == scope_kind and scope.ref == scope_ref and scope.removed_at is None:
+                    existing[index] = Scope(
+                        kind=scope.kind,
+                        ref=scope.ref,
+                        added_at=scope.added_at,
+                        added_by=scope.added_by,
+                        removed_at=datetime.now(UTC),
+                    )
+                    break
         reverse = self.documents_by_scope.get((scope_kind, scope_ref))
         if reverse is not None:
             reverse.discard(document_id)
@@ -879,17 +939,24 @@ class SQLiteCatalogStore:
     # ------- Workspace scope membership (ADR-020 §1, EPIC-D D.1) ------- #
 
     def add_scope(self, document_id: str, scope: Scope) -> None:
-        # ``INSERT OR IGNORE`` makes the call idempotent on the
-        # ``(document_id, scope_kind, scope_ref)`` primary key — re-adding
-        # the same triple preserves the original ``added_at`` /
-        # ``added_by`` (first-write wins). Matches the in-memory impl.
+        # UPSERT pattern: inserting a fresh row stores added_at/added_by;
+        # hitting the (document_id, scope_kind, scope_ref) PK on a
+        # previously soft-removed row reactivates it (clear removed_at,
+        # overwrite added_at/added_by with the re-link caller's identity).
+        # Hitting the PK on an active row is a no-op via the WHERE clause
+        # on the DO UPDATE — first-write wins for active links.
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO document_scopes (
-                    document_id, scope_kind, scope_ref, added_at, added_by
+                INSERT INTO document_scopes (
+                    document_id, scope_kind, scope_ref, added_at, added_by, removed_at
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(document_id, scope_kind, scope_ref) DO UPDATE SET
+                    removed_at = NULL,
+                    added_at = excluded.added_at,
+                    added_by = excluded.added_by
+                WHERE document_scopes.removed_at IS NOT NULL
                 """,
                 (
                     document_id,
@@ -904,9 +971,9 @@ class SQLiteCatalogStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT scope_kind, scope_ref, added_at, added_by
+                SELECT scope_kind, scope_ref, added_at, added_by, removed_at
                 FROM document_scopes
-                WHERE document_id = ?
+                WHERE document_id = ? AND removed_at IS NULL
                 ORDER BY added_at ASC
                 """,
                 (document_id,),
@@ -924,7 +991,10 @@ class SQLiteCatalogStore:
         # Fetch ``limit + 1`` rows so we can emit a next-cursor only when
         # there's strictly more data behind the page. Matches the
         # in-memory impl's "page short of limit signals end" rule.
-        clauses: list[str] = ["s.scope_kind = ?", "s.scope_ref = ?"]
+        # ``s.removed_at IS NULL`` filters soft-removed scope links per
+        # the no-delete policy — flagged rows stay in the table for the
+        # future Archive/Purge Admin tool but are invisible to reads.
+        clauses: list[str] = ["s.scope_kind = ?", "s.scope_ref = ?", "s.removed_at IS NULL"]
         params: list[object] = [scope_kind, scope_ref]
         if cursor is not None:
             after_created_at, after_id = _decode_cursor(cursor)
@@ -969,20 +1039,36 @@ class SQLiteCatalogStore:
         return page, next_cursor
 
     def remove_scope(self, document_id: str, scope_kind: str, scope_ref: str) -> None:
-        # Idempotent: a non-existent row produces zero rowcount, no error.
+        # Soft-remove: stamp removed_at on the active row only. Already-
+        # removed rows preserve their original removed_at timestamp;
+        # non-existent rows produce zero rowcount (idempotent). The row
+        # is never physically deleted — the future Archive/Purge Admin
+        # tool is the only path to that.
         with self._connect() as connection:
             connection.execute(
                 """
-                DELETE FROM document_scopes
-                WHERE document_id = ? AND scope_kind = ? AND scope_ref = ?
+                UPDATE document_scopes
+                SET removed_at = ?
+                WHERE document_id = ?
+                  AND scope_kind = ?
+                  AND scope_ref = ?
+                  AND removed_at IS NULL
                 """,
-                (document_id, scope_kind, scope_ref),
+                (
+                    datetime.now(UTC).isoformat(),
+                    document_id,
+                    scope_kind,
+                    scope_ref,
+                ),
             )
 
     def _scope_from_row(self, row: sqlite3.Row) -> Scope:
+        # Migration 0005 guarantees ``removed_at`` is on every row; the
+        # column may be NULL but the SELECT always includes it.
         return Scope(
             kind=row["scope_kind"],
             ref=row["scope_ref"],
             added_at=row["added_at"],
             added_by=row["added_by"],
+            removed_at=row["removed_at"],
         )

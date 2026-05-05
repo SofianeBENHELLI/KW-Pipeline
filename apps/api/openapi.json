@@ -1559,7 +1559,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "One row of the ``document_scopes`` join table.\n\nReturned by :meth:`CatalogStore.list_scopes_for_document` and by\nthe upload-route response when a scope link was created. The pair\n``(kind, ref)`` identifies the scope; ``added_at`` / ``added_by``\nrecord who linked the document into that scope and when.\n\nThe ``ref`` field is intentionally opaque to this layer: its\ninterpretation depends on ``kind`` (a 3DSwym community id, a\nuser id, an internal project id) and is owned by ADR-026 / the\nmembership client. The catalog persists it as a flat string.",
+        "description": "One row of the ``document_scopes`` join table.\n\nReturned by :meth:`CatalogStore.list_scopes_for_document` and by\nthe upload-route response when a scope link was created. The pair\n``(kind, ref)`` identifies the scope; ``added_at`` / ``added_by``\nrecord who linked the document into that scope and when.\n\nThe ``ref`` field is intentionally opaque to this layer: its\ninterpretation depends on ``kind`` (a 3DSwym community id, a\nuser id, an internal project id) and is owned by ADR-026 / the\nmembership client. The catalog persists it as a flat string.\n\n``removed_at`` is the soft-remove flag (no-delete policy). When set,\nthe link is hidden from every read path but the row stays in the\ncatalog so a future Archive/Purge Admin tool can reverse or finalise\nthe removal. ``add_scope`` reactivates a removed row by clearing\n``removed_at`` and overwriting ``added_at`` / ``added_by`` with the\nnew caller's identity.",
         "properties": {
           "added_at": {
             "format": "date-time",
@@ -1582,13 +1582,26 @@
           "ref": {
             "title": "Ref",
             "type": "string"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
           }
         },
         "required": [
           "kind",
           "ref",
           "added_at",
-          "added_by"
+          "added_by",
+          "removed_at"
         ],
         "title": "Scope",
         "type": "object"

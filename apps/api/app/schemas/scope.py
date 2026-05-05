@@ -60,12 +60,20 @@ class Scope(BaseModel):
     interpretation depends on ``kind`` (a 3DSwym community id, a
     user id, an internal project id) and is owned by ADR-026 / the
     membership client. The catalog persists it as a flat string.
+
+    ``removed_at`` is the soft-remove flag (no-delete policy). When set,
+    the link is hidden from every read path but the row stays in the
+    catalog so a future Archive/Purge Admin tool can reverse or finalise
+    the removal. ``add_scope`` reactivates a removed row by clearing
+    ``removed_at`` and overwriting ``added_at`` / ``added_by`` with the
+    new caller's identity.
     """
 
     kind: ScopeKind
     ref: str
     added_at: datetime
     added_by: str
+    removed_at: datetime | None = None
 
 
 __all__ = ["SCOPE_KINDS", "Scope", "ScopeKind", "ScopeRef"]

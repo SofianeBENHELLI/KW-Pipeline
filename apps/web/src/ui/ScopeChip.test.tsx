@@ -30,6 +30,7 @@ function scope(
     ref,
     added_at: "2026-05-01T00:00:00Z",
     added_by,
+    removed_at: null,
   };
 }
 

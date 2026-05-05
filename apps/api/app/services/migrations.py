@@ -150,6 +150,23 @@ def _migrate_0003_perf_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0005_document_scopes_removed_at(conn: sqlite3.Connection) -> None:
+    """Add ``removed_at`` to ``document_scopes`` for soft-remove semantics.
+
+    Per the no-delete policy (no real deletion of document source data —
+    flag-only, real purge handled by a future Archive/Purge Admin tool),
+    ``CatalogStore.remove_scope`` no longer deletes the row but flags
+    it with a ``removed_at`` timestamp. ``add_scope`` reactivates a
+    flagged row instead of failing the PK constraint.
+
+    SQLite does not support ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``,
+    so we inspect ``PRAGMA table_info`` first.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(document_scopes)").fetchall()}
+    if "removed_at" not in existing:
+        conn.execute("ALTER TABLE document_scopes ADD COLUMN removed_at TEXT")
+
+
 def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
     """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
 
@@ -196,6 +213,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
     ("0003_perf_indexes", _migrate_0003_perf_indexes),
     ("0004_document_scopes", _migrate_0004_document_scopes),
+    ("0005_document_scopes_removed_at", _migrate_0005_document_scopes_removed_at),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
