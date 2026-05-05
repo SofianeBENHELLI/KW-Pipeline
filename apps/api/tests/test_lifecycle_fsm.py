@@ -54,20 +54,38 @@ LEGAL_TRANSITIONS: list[tuple[DocumentVersionStatus, DocumentVersionStatus]] = [
     (DocumentVersionStatus.FAILED, DocumentVersionStatus.EXTRACTING),
     # ADR-025: VALIDATED → SUPERSEDED, fired automatically by
     # ``ReviewService.handle_validation`` when a newer sibling
-    # validates. ``SUPERSEDED`` itself is fully terminal.
+    # validates. ``SUPERSEDED`` itself is fully terminal w.r.t. the
+    # review/lifecycle FSM (the ADR-027 PURGED edge below is admin-
+    # only and never fires from review code).
     (DocumentVersionStatus.VALIDATED, DocumentVersionStatus.SUPERSEDED),
+    # ADR-027 §3 / slice 6: every previously-terminal status can
+    # transition to PURGED via the ``purge_artifacts`` admin route.
+    # The route never calls ``update_status`` directly (it goes through
+    # ``CatalogStore.purge_version_artifacts``), but the FSM still has
+    # to admit the edge for ``assert_transition`` to accept it on
+    # parity test paths.
+    (DocumentVersionStatus.VALIDATED, DocumentVersionStatus.PURGED),
+    (DocumentVersionStatus.REJECTED, DocumentVersionStatus.PURGED),
+    (DocumentVersionStatus.SUPERSEDED, DocumentVersionStatus.PURGED),
+    (DocumentVersionStatus.FAILED, DocumentVersionStatus.PURGED),
+    (DocumentVersionStatus.DUPLICATE_DETECTED, DocumentVersionStatus.PURGED),
+    # PURGED → PURGED self-loop so the catalog idempotent re-purge
+    # path stays valid against the FSM (the route layer short-circuits
+    # before calling update_status, but a future caller that goes
+    # through the FSM check shouldn't surprise-raise).
+    (DocumentVersionStatus.PURGED, DocumentVersionStatus.PURGED),
 ]
 
-# Truly-terminal states — once reached, no outgoing transitions exist.
+# Truly-terminal states — once reached, no outgoing transitions exist
+# **except** the admin-only ``* → PURGED`` edge from ADR-027 §3.
 # ``FAILED`` is intentionally NOT here: issue #87 added a controlled
-# ``FAILED → EXTRACTING`` edge for the retry-extraction surface. The
-# transition is exercised separately in
-# :class:`TestFailedRetryTransition` below.
-# ``VALIDATED`` is also intentionally NOT here: ADR-025 added a
-# controlled ``VALIDATED → SUPERSEDED`` edge fired automatically by
-# the review service when a newer sibling validates. The other
-# review-gate state (``REJECTED``), ``DUPLICATE_DETECTED``, and the
-# new ADR-025 terminal ``SUPERSEDED`` remain fully terminal.
+# ``FAILED → EXTRACTING`` edge for the retry-extraction surface (and
+# ADR-027 added the FAILED → PURGED edge). The transition is exercised
+# separately. ``VALIDATED`` is also intentionally NOT here: ADR-025 +
+# ADR-027 give it two outgoing edges. ``REJECTED`` /
+# ``DUPLICATE_DETECTED`` / ``SUPERSEDED`` only have the PURGED edge
+# left, so the "no outgoing edges" expectation no longer holds at the
+# FSM level — the test below now asserts they only point at PURGED.
 TERMINAL_STATES: list[DocumentVersionStatus] = [
     DocumentVersionStatus.DUPLICATE_DETECTED,
     DocumentVersionStatus.REJECTED,
@@ -106,8 +124,13 @@ class TestAllowedTransitionsMap:
             assert status in ALLOWED_TRANSITIONS
 
     @pytest.mark.parametrize("terminal", TERMINAL_STATES)
-    def test_terminal_states_map_to_empty_set(self, terminal: DocumentVersionStatus):
-        assert ALLOWED_TRANSITIONS[terminal] == frozenset()
+    def test_terminal_states_only_point_at_purged(self, terminal: DocumentVersionStatus):
+        # ADR-027 §3 / slice 6: every previously-terminal status now
+        # has exactly one outgoing edge — to PURGED. Fired only by
+        # the ``purge_artifacts`` admin route via
+        # ``CatalogStore.purge_version_artifacts``; no other code
+        # path may write PURGED.
+        assert ALLOWED_TRANSITIONS[terminal] == frozenset({DocumentVersionStatus.PURGED})
 
 
 class TestAllowedPredecessorsMap:
@@ -160,9 +183,19 @@ class TestAssertTransition:
             assert_transition(DocumentVersionStatus.STORED, DocumentVersionStatus.VALIDATED)
 
     @pytest.mark.parametrize("terminal", TERMINAL_STATES)
-    def test_no_transitions_out_of_terminal_states(self, terminal: DocumentVersionStatus):
-        # Pick any non-equal status as a target; terminal states accept none.
-        target = next(s for s in DocumentVersionStatus if s != terminal)
+    def test_no_transitions_out_of_terminal_states_except_purged(
+        self, terminal: DocumentVersionStatus
+    ):
+        # Pick any status other than the terminal itself AND PURGED
+        # — those are the only two legal moves (terminal → terminal
+        # is not legal except for PURGED → PURGED, which is the
+        # idempotent re-purge case captured in TERMINAL_STATES'
+        # docstring above).
+        target = next(
+            s
+            for s in DocumentVersionStatus
+            if s != terminal and s is not DocumentVersionStatus.PURGED
+        )
         with pytest.raises(IllegalTransition, match="Cannot transition"):
             assert_transition(terminal, target)
 

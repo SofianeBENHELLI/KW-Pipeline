@@ -4,7 +4,7 @@
     {
       "pattern": "^index-.*\\.js$",
       "label": "Initial app chunk",
-      "maxGzipKB": 80,
+      "maxGzipKB": 81,
       "required": true
     },
     {

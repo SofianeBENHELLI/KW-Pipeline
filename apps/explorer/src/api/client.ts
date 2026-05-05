@@ -25,7 +25,16 @@ import type {
 
 // Re-export from the shared module so existing import sites
 // (``import { ApiError } from "./api/client"``) keep working.
-export { ApiError } from "../../../_shared/api-core";
+//
+// ``setSessionTrigger`` / ``clearSessionTrigger`` are surfaced here
+// so ``<SessionGuardProvider>`` (mounted at the explorer's root)
+// can register its 401-trigger via this same module path
+// (#83 slice 3).
+export {
+  ApiError,
+  setSessionTrigger,
+  clearSessionTrigger,
+} from "../../../_shared/api-core";
 
 const SETTINGS_KEY = "apiBaseUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";

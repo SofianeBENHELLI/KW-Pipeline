@@ -153,6 +153,18 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
     ) -> Any:
         document = services.documents.get_document(document_id)
         if document is None:
+            # ADR-027 §3 / slice 6: a fully-purged document is hidden
+            # from the standard read path (the catalog filters
+            # ``archived_at IS NULL`` per #265). Reach into the
+            # archived-inclusive accessor and surface a 410 Gone
+            # only when *every* version in the family is PURGED;
+            # otherwise the row really does not exist for this
+            # caller and the original 404 stands.
+            archived = services.documents.catalog._get_document_including_archived(  # type: ignore[attr-defined]
+                document_id,
+            )
+            if archived is not None and _all_versions_purged(archived):
+                raise _purged_document_error(document_id)
             raise HTTPException(status_code=404, detail="Document not found.")
         # Hidden-existence semantics (D.5): a 404 here is indistinguishable
         # from "document doesn't exist", so an enumeration probe can't
@@ -264,6 +276,20 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=RawExtraction,
     )
     def get_extraction(document_id: str, version_id: str) -> Any:
+        # ADR-027 §3 / slice 6: 410 Gone for purged versions. Check
+        # the version's status before reading the extraction so a
+        # tombstoned version surfaces the same 410 envelope as the
+        # raw-bytes route — consistent client experience.
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
         try:
             return services.extraction_jobs.get_raw_extraction(
                 document_id=document_id,
@@ -320,6 +346,17 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         response_model=SemanticDocument,
     )
     def get_semantic_document(document_id: str, version_id: str) -> Any:
+        # ADR-027 §3 / slice 6: 410 Gone for purged versions.
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
         try:
             return services.semantic_outputs.get(document_id=document_id, version_id=version_id)
         except KeyError as exc:
@@ -333,9 +370,21 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 "content": {"text/markdown": {"schema": {"type": "string"}}},
                 "description": "Generated Markdown for the version.",
             },
+            410: {"description": "Version artifacts were purged (ADR-027 §3)."},
         },
     )
     def get_markdown(document_id: str, version_id: str) -> Response:
+        # ADR-027 §3 / slice 6: 410 Gone for purged versions.
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
         try:
             markdown = services.semantic_outputs.get_markdown(
                 document_id=document_id,
@@ -354,6 +403,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 "description": "Original uploaded binary for the version.",
             },
             404: {"description": "Document or version not found."},
+            410: {"description": "Version artifacts were purged (ADR-027 §3)."},
         },
     )
     def get_raw_file(document_id: str, version_id: str) -> Response:
@@ -363,11 +413,24 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         text/wiki). The Content-Type mirrors what the uploader declared
         at ingest time, and ``Content-Disposition: inline`` lets browsers
         render PDFs and images natively instead of forcing a download.
+
+        Returns HTTP 410 Gone when the version's status is
+        :data:`DocumentVersionStatus.PURGED` per ADR-027 §3 — the
+        bytes were intentionally deleted via ``purge_artifacts`` and
+        the storage URI is now a tombstone marker. Distinguishing
+        410 from 404 lets clients render a tombstone card with the
+        purge timestamp instead of a generic "not found" message.
         """
         try:
-            version = services.documents.get_version(document_id=document_id, version_id=version_id)
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
         try:
             payload = services.documents.storage.get(version.storage_uri)
         except (KeyError, FileNotFoundError, ValueError) as exc:
@@ -533,6 +596,91 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         )
 
     return router
+
+
+def _all_versions_purged(document: Document) -> bool:
+    """Return True when every version in the family is ``PURGED``.
+
+    ADR-027 §3 / slice 6: a document whose versions are all purged
+    surfaces as HTTP 410 Gone instead of 404 — consumers can render a
+    tombstone card. A doc with at least one non-purged version is
+    treated as a normal hidden-archived row (404 to standard reads
+    via the catalog filter; admin tool can still reach it).
+    """
+    if not document.versions:
+        return False
+    return all(v.status is DocumentVersionStatus.PURGED for v in document.versions)
+
+
+def _purged_document_error(document_id: str) -> ApiError:
+    """Build the ADR-027 §3 410 Gone envelope for a fully-purged document."""
+    return ApiError(
+        status_code=410,
+        code=ErrorCode.PURGED,
+        message=(
+            f"Document {document_id!r} was purged; the source artifacts are no longer available."
+        ),
+        retryable=False,
+        remediation=(
+            "Contact your admin to recover from audit log if needed; "
+            "the catalog row is preserved as an audit trace."
+        ),
+    )
+
+
+def _purged_version_error(*, document_id: str, version: DocumentVersion) -> ApiError:
+    """Build the ADR-027 §3 410 Gone envelope for a purged version.
+
+    Surfaces the tombstone URI on ``error.detail`` so audit consumers
+    can correlate without joining against the audit log; the URI is
+    parseable per ADR-027 §3 (``tombstone:purged:<doc>:<ver>:<iso>``).
+    Standard ``Document.storage_uri`` reads do NOT return the
+    tombstone — the 410 envelope is the only sanctioned surface for
+    it.
+    """
+    return ApiError(
+        status_code=410,
+        code=ErrorCode.PURGED,
+        message=(
+            f"Version {version.id!r} of document {document_id!r} was "
+            "purged; the source artifacts are no longer available."
+        ),
+        retryable=False,
+        remediation=("Contact your admin to recover from audit log if needed."),
+        detail={
+            "code": ErrorCode.PURGED,
+            "document_id": document_id,
+            "version_id": version.id,
+            "tombstone_uri": version.storage_uri,
+        },
+    )
+
+
+def _get_version_including_archived(
+    *,
+    services: PipelineServices,
+    document_id: str,
+    version_id: str,
+) -> DocumentVersion:
+    """Resolve a version even when its parent document is archived.
+
+    Slice 6: PURGED versions live on archived documents (the §1.3
+    archive-then-purge precondition guarantees that), so the standard
+    :meth:`DocumentService.get_version` path — which delegates to
+    :meth:`CatalogStore.get_version` — would still see them, but the
+    catalog's archived filter makes the document fetch return None.
+    Reach into ``_get_document_including_archived`` so the route can
+    surface a 410 instead of a 404 for purged content.
+    """
+    archived = services.documents.catalog._get_document_including_archived(  # type: ignore[attr-defined]
+        document_id,
+    )
+    if archived is None:
+        raise KeyError("Document not found.")
+    for candidate in archived.versions:
+        if candidate.id == version_id:
+            return candidate
+    raise KeyError("Document version not found.")
 
 
 def _build_lineage_response(document: Document) -> LineageResponse:

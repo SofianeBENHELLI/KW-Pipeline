@@ -26,6 +26,46 @@
  */
 
 /**
+ * Module-level session-expired trigger (#83 slice 3 / ADR-019 §5).
+ *
+ * The widget + explorer apps register their ``SessionGuardProvider``
+ * callback here via :func:`setSessionTrigger`. ApiError's constructor
+ * fires it for any 401 response so the user-facing banner appears
+ * automatically — every route, every helper, no per-call-site
+ * branching.
+ *
+ * Default is a no-op so unit tests, node scripts, and any other
+ * consumer outside the React tree stay quiet without bespoke setup.
+ *
+ * Limitation: the default ``KW_AUTH_MODE=dev`` (per #245) never
+ * returns 401 in normal operation, so the hook is exercised via
+ * vitest mocks and the ``#force-session-expired`` URL-hash dev stub
+ * each app installs at its root.
+ */
+type SessionTrigger = () => void;
+let sessionTrigger: SessionTrigger = () => {
+  // No-op until a provider registers.
+};
+
+/**
+ * Register the callback that flips the session-expired banner on
+ * across every consumer of the shared ApiError class.
+ */
+export function setSessionTrigger(fn: SessionTrigger): void {
+  sessionTrigger = fn;
+}
+
+/**
+ * Reset the trigger to the default no-op. Tests call this between
+ * cases so a 401 in one test doesn't leak into the next.
+ */
+export function clearSessionTrigger(): void {
+  sessionTrigger = () => {
+    /* no-op */
+  };
+}
+
+/**
  * Error thrown by the shared fetch wrapper when an HTTP response is
  * non-OK. Carries every field the public error envelope can supply so
  * UI surfaces never inspect the message string to decide what to do.
@@ -35,6 +75,11 @@
  * dashboard tiles), so ``instanceof ApiError`` is reliable WITHIN a
  * bundle but NOT across two bundles. That's fine in practice — every
  * caller is inside the bundle that imported the class.
+ *
+ * Constructing an ApiError with ``status === 401`` always fires the
+ * registered :func:`setSessionTrigger` callback (#83 slice 3 /
+ * ADR-019 §5). The trigger defaults to a no-op so this works
+ * without a SessionGuardProvider mounted.
  */
 export class ApiError extends Error {
   constructor(
@@ -46,6 +91,15 @@ export class ApiError extends Error {
   ) {
     super(`API ${status}: ${detail}`);
     this.name = "ApiError";
+    if (status === 401) {
+      try {
+        sessionTrigger();
+      } catch {
+        // Trigger callbacks are React state setters — they shouldn't
+        // throw, but defend so a buggy register doesn't take down
+        // unrelated request handling.
+      }
+    }
   }
 }
 

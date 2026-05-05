@@ -4,6 +4,222 @@
  */
 
 export interface paths {
+    "/admin/archive/archived_documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Archived Documents
+         * @description Paginated read of flag-archived documents (D.9 admin UI).
+         *
+         *     Returns one page of rows where ``archived_at IS NOT NULL``,
+         *     sorted ``archived_at DESC`` (most-recently archived first) with
+         *     ``id`` ASC as the tie-breaker. Each row carries the fields the
+         *     admin UI needs to render its table without per-doc probes:
+         *
+         *     - ``original_filename`` and ``archived_at`` for the heading.
+         *     - ``last_active_scope_kind`` / ``last_active_scope_ref`` —
+         *       derived from the most-recent soft-removed scope link on the
+         *       document so the operator can see which scope was last
+         *       removed before the cascade fired. ``None`` when no scope
+         *       history is recoverable.
+         *     - ``versions_purged`` / ``versions_remaining`` — split the
+         *       version family by :data:`DocumentVersionStatus.PURGED` so
+         *       the UI shows recoverable bytes vs already-tombstone'd bytes.
+         *
+         *     Read-only: no ``?confirm=true`` / ``?dry_run=true``
+         *     ceremony — the route doesn't mutate state.
+         */
+        get: operations["admin_archive_list_archived"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/purge_artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Artifacts
+         * @description Hard-delete a document's source artifacts (ADR-027 §1.3).
+         *
+         *     Pre-conditions:
+         *
+         *     - The document must exist (404 otherwise).
+         *     - The document must already be archived (409 otherwise) —
+         *       archive-then-purge is the ordered ritual that gives an
+         *       operator a chance to reverse via ``unarchive`` before bytes
+         *       go.
+         *     - ``?confirm=true`` is required for non-dry-run mutating
+         *       actions (422 otherwise — ``KW_UNPROCESSABLE_ENTITY``).
+         *
+         *     Per version the route:
+         *
+         *     1. Computes a tombstone URI per ADR-027 §3
+         *        (``tombstone:purged:<doc>:<version>:<iso>``).
+         *     2. Calls :meth:`StorageService.delete` on the version's
+         *        current ``storage_uri`` (best-effort + idempotent per
+         *        ADR-027 §7).
+         *     3. Flips the version's status to :data:`DocumentVersionStatus.PURGED`
+         *        and overwrites ``storage_uri`` with the tombstone via
+         *        :meth:`CatalogStore.purge_version_artifacts`.
+         *     4. Emits a ``document.artifacts_purged`` audit event with
+         *        the storage URI before / after, the actor, and the
+         *        ``dry_run`` flag.
+         *
+         *     Idempotent: re-purging an already-PURGED version is a no-op
+         *     — the existing tombstone URI is echoed back and no audit
+         *     row is emitted (the empty audit row is the idempotency
+         *     signal). KG cleanup is out of scope: the cascade in #265
+         *     already removed KG nodes when the document was archived.
+         */
+        post: operations["admin_archive_purge_artifacts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/purge_batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Batch
+         * @description Bulk wrapper around ``purge_artifacts`` (ADR-027 §4).
+         *
+         *     Best-effort: a failure on one doc (e.g. ``document_not_archived``,
+         *     ``document_not_found``) does not abort the batch — the
+         *     per-doc failure surfaces as ``success=False`` +
+         *     ``error_code`` / ``error_message`` in the corresponding
+         *     :class:`PurgeBatchResult`. Successful per-doc purges carry
+         *     the full :class:`PurgeArtifactsResponse` under
+         *     ``purge_response`` so callers can recover the per-version
+         *     tombstone URIs without a follow-up call.
+         *
+         *     Capped at 100 ids per call (``KW_UNPROCESSABLE_ENTITY``);
+         *     chaining is the documented escape hatch for larger sweeps.
+         *     Each successful per-doc purge emits its own
+         *     ``document.artifacts_purged`` audit row — never a single
+         *     batch-level row, so the audit log stays queryable per
+         *     document.
+         */
+        post: operations["admin_archive_purge_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/relink_scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relink Scope
+         * @description Reactivate a soft-removed ``document_scopes`` row (ADR-027 §1.2).
+         *
+         *     Wraps the existing :meth:`CatalogStore.add_scope` reactivation
+         *     path from #262: that method already clears ``removed_at`` and
+         *     overwrites ``added_at`` / ``added_by`` with the new caller's
+         *     identity when the row was previously soft-removed. The admin
+         *     wrapper just gates the action behind ``require_admin`` plus
+         *     ``?confirm=true`` and surfaces the pre-action ``removed_at``
+         *     timestamp for the audit log.
+         */
+        post: operations["admin_archive_relink_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/archive/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Document
+         * @description Clear ``documents.archived_at`` on a flag-archived row (ADR-027 §1.1).
+         *
+         *     The catalog method is idempotent on already-active documents,
+         *     so this route's idempotency story is also "200 OK + no audit
+         *     row" rather than a 409 — the ADR-027 §1.1 example shows 409
+         *     for the bytes-purge precondition, not for unarchive. Real
+         *     operator workflows re-run the route safely as a status check.
+         */
+        post: operations["admin_archive_unarchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/audit/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description Paginated read of the structured audit event log (#206 follow-up).
+         *
+         *     The viewer is read-only — the audit table is append-only by
+         *     design. Events sort by ``created_at DESC`` so the freshest
+         *     rows surface at the top of the operator's table; ``cursor``
+         *     encodes the page boundary opaquely so the same-timestamp tie
+         *     case paginates cleanly across both store impls.
+         *
+         *     Returns 503 with ``KW_AUDIT_DISABLED`` when
+         *     ``KW_AUDIT_ENABLED=false`` (the in-memory default). The store
+         *     still works in-process for live event capture but a
+         *     deployment that opts out of the persistent DB has no
+         *     historical rows to browse, so the route fails closed with a
+         *     remediation hint pointing at the env var.
+         *
+         *     ``available_event_names`` is included on every response so
+         *     the UI's filter dropdown can be self-populating without a
+         *     second probe — cheap by construction since the audit table
+         *     indexes ``event_name`` directly.
+         */
+        get: operations["admin_audit_list_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/config": {
         parameters: {
             query?: never;
@@ -13,6 +229,86 @@ export interface paths {
         };
         /** Admin Config */
         get: operations["admin_config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/hitl/run_auto_promote_pass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Auto Promote Pass
+         * @description Run one HITL auto-promotion pass (ADR-023 §6, slice 3, #215).
+         *
+         *     Synchronous: the worker runs in-line within the request and
+         *     the structured :class:`AutoPromoteResult` is returned directly
+         *     so operators see the full per-version outcome without grepping
+         *     logs. A future cron scheduler will call this same route on an
+         *     interval; for now manual trigger.
+         *
+         *     Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the route's
+         *     admin gate) when the auto-promoter is not wired —
+         *     ``KW_HITL_DISABLE_SCORER=true`` disables the scorer, the router
+         *     and (transitively) the worker. The empty result is also a
+         *     valid response: an admin clicking the button when no rows are
+         *     pending sees ``scanned=0, promoted=[], skipped=[], failed=[]``
+         *     and a 200.
+         */
+        post: operations["admin_hitl_run_auto_promote_pass"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/hitl/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Hitl State
+         * @description Read-only snapshot of HITL routing state (EPIC-A close-out, #215).
+         *
+         *     Surfaces three things the operator needs to see at a glance:
+         *
+         *     1. **Config posture** — the env-driven knobs the router and
+         *        drift detector were constructed with (threshold, baseline
+         *        sample rate, drift threshold + ramp factor, plus the
+         *        force-auto and scorer kill switches).
+         *     2. **Per-bucket SPC counters** — every bucket the router has
+         *        recorded a decision against, decorated with its drift
+         *        ratio and the drift detector's *current* effective sample
+         *        rate. Sorted by ``drift_ratio`` DESC so the noisiest
+         *        buckets surface at the top of the dashboard table.
+         *     3. **Pending auto-promotion queue depth** — the count of
+         *        rows the next ``run_auto_promote_pass`` invocation would
+         *        touch, so the dashboard can render the queue size next to
+         *        its trigger button without a second probe.
+         *
+         *     Returns 503 with ``KW_HITL_DISABLED`` (mirrored on the
+         *     auto-promote-pass route) when ``KW_HITL_DISABLE_SCORER`` is
+         *     truthy — a disabled scorer means the router is also unwired
+         *     and the snapshot would be misleading. Read-only: no
+         *     ``?confirm=true`` ceremony.
+         *
+         *     Per ADR-023 §6 and EPIC-A's "auto-validated == human-validated
+         *     to consumers" rule, the dashboard never exposes individual
+         *     :class:`ValidationMetadata` rows — the metadata stays internal.
+         */
+        get: operations["admin_hitl_get_state"];
         put?: never;
         post?: never;
         delete?: never;
@@ -288,6 +584,13 @@ export interface paths {
          *     text/wiki). The Content-Type mirrors what the uploader declared
          *     at ingest time, and ``Content-Disposition: inline`` lets browsers
          *     render PDFs and images natively instead of forcing a download.
+         *
+         *     Returns HTTP 410 Gone when the version's status is
+         *     :data:`DocumentVersionStatus.PURGED` per ADR-027 §3 — the
+         *     bytes were intentionally deleted via ``purge_artifacts`` and
+         *     the storage URI is now a tombstone marker. Distinguishing
+         *     410 from 404 lets clients render a tombstone card with the
+         *     purge timestamp instead of a generic "not found" message.
          */
         get: operations["get_raw_file"];
         put?: never;
@@ -580,6 +883,35 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdminAuditEventsResponse
+         * @description Response body of ``GET /admin/audit/events`` (#206 follow-up).
+         *
+         *     Cursor-paginated, sorted ``created_at DESC`` so the freshest
+         *     events surface at the top of the table. ``next_cursor`` is opaque
+         *     (the audit store's base64-JSON codec) and ``None`` when this page
+         *     is the last one.
+         *
+         *     ``available_event_names`` is a one-shot ``SELECT DISTINCT
+         *     event_name`` against the store — included on every response so
+         *     the UI's filter dropdown doesn't need a second probe to populate.
+         *     Cheap by construction (the audit table is small and the store
+         *     indexes on ``event_name``).
+         */
+        AdminAuditEventsResponse: {
+            /**
+             * Available Event Names
+             * @description Distinct ``event_name`` values currently in the store, sorted lexicographically. The UI's filter dropdown is populated from this list so a deployment that has never fired a particular event doesn't surface it as a filter option.
+             */
+            available_event_names: string[];
+            /** Items */
+            items: components["schemas"]["AuditEventItem"][];
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page. ``None`` means this page is the last one. Pass it back as ``?cursor=...`` on the next request.
+             */
+            next_cursor: string | null;
+        };
+        /**
          * AdminConfigResponse
          * @description Sanitized snapshot of the running deployment's configuration.
          *
@@ -604,12 +936,195 @@ export interface components {
             taxonomy: components["schemas"]["TaxonomyConfig"];
             upload: components["schemas"]["UploadConfig"];
         };
+        /**
+         * AdminHITLStateResponse
+         * @description Snapshot of the HITL routing state for the Admin dashboard.
+         *
+         *     Read-only — the route never mutates and the counters are monotonic
+         *     by design. The configuration block at the top mirrors the env vars
+         *     the operator pinned at deploy time so the UI can render a
+         *     "deployment posture" header without a second probe to
+         *     ``/admin/config``. The bucket list is sorted by ``drift_ratio``
+         *     DESC so the noisiest buckets surface at the top of the table.
+         */
+        AdminHITLStateResponse: {
+            /**
+             * Baseline Sample Rate
+             * @description Mirrors ``KW_HITL_SPC_SAMPLE_RATE`` — the cold-start fraction of versions that *would* auto-validate but are escalated to a human as a quality probe.
+             */
+            baseline_sample_rate: number;
+            /**
+             * Buckets
+             * @description Per-bucket SPC counters + derived drift signals, sorted by ``drift_ratio`` DESC so the noisiest buckets surface at the top. Empty when no routing decisions have been recorded yet (cold-start deployment).
+             */
+            buckets: components["schemas"]["BucketState"][];
+            /**
+             * Drift Ramp Factor
+             * @description Mirrors ``KW_HITL_DRIFT_RAMP_FACTOR`` — the multiplier applied to ``baseline_sample_rate`` for drifting buckets, capped at 1.0.
+             */
+            drift_ramp_factor: number;
+            /**
+             * Drift Threshold
+             * @description Mirrors ``KW_HITL_DRIFT_THRESHOLD`` — the ``samples_human_after_auto / samples_auto`` ratio above which a bucket's sampling rate ramps.
+             */
+            drift_threshold: number;
+            /**
+             * Enabled
+             * @description Mirrors ``not KW_HITL_DISABLE_SCORER``. When ``False`` the router and auto-promoter are both unwired; this snapshot reports the env state but every bucket count is zero (the router never ran).
+             */
+            enabled: boolean;
+            /**
+             * Force Auto Corpus
+             * @description Mirrors ``KW_HITL_FORCE_AUTO_CORPUS`` (ADR-023 §6). When ``True`` the router auto-routes every version regardless of score, OCR flag, or SPC sampling. The UI surfaces a loud warning banner in this state.
+             */
+            force_auto_corpus: boolean;
+            /**
+             * Pending Auto Promotions
+             * @description Count of ``ValidationMetadata`` rows where ``routing_decision == 'auto'`` AND ``validation_method IS NULL`` — the queue the auto-promotion worker would process on the next pass. The dashboard's ``Run pass`` trigger calls ``POST /admin/hitl/run_auto_promote_pass`` to drain it.
+             */
+            pending_auto_promotions: number;
+            /**
+             * Threshold
+             * @description Mirrors ``KW_HITL_AUTO_VALIDATE_THRESHOLD`` — versions with confidence ≥ this value are routed to the auto path.
+             */
+            threshold: number;
+        };
+        /**
+         * ArchivedDocumentItem
+         * @description One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.
+         *
+         *     Surface fields the admin UI needs to render an Archive view row
+         *     without a per-doc detail fetch:
+         *
+         *     - ``document_id`` / ``original_filename`` identify the row.
+         *     - ``archived_at`` is the wall clock the orphan cascade (or a
+         *       future explicit-archive route) stamped on the document; the UI
+         *       renders it as a relative date.
+         *     - ``last_active_scope_kind`` / ``last_active_scope_ref`` describe
+         *       the scope that was last removed before the cascade flagged the
+         *       document — so the admin can see *why* it ended up archived. Both
+         *       fall back to ``None`` when no scope-link history is recoverable
+         *       (e.g. a never-scoped document was archived directly).
+         *     - ``versions_purged`` / ``versions_remaining`` split the version
+         *       family by :data:`DocumentVersionStatus.PURGED` so the operator
+         *       sees how much bytes-recovery surface is still on disk vs already
+         *       tombstone'd. The standard ``X / Y`` UI string is
+         *       ``versions_remaining / (versions_remaining + versions_purged)``.
+         */
+        ArchivedDocumentItem: {
+            /**
+             * Archived At
+             * Format: date-time
+             */
+            archived_at: string;
+            /** Document Id */
+            document_id: string;
+            /** Last Active Scope Kind */
+            last_active_scope_kind: string | null;
+            /** Last Active Scope Ref */
+            last_active_scope_ref: string | null;
+            /** Original Filename */
+            original_filename: string;
+            /**
+             * Versions Purged
+             * @default 0
+             */
+            versions_purged: number;
+            /**
+             * Versions Remaining
+             * @default 0
+             */
+            versions_remaining: number;
+        };
+        /**
+         * ArchivedDocumentsResponse
+         * @description Response body for ``GET /admin/archive/archived_documents``.
+         *
+         *     Cursor-paginated walk of every flag-archived row in the catalog,
+         *     sorted by ``archived_at DESC`` (most-recently archived first) so
+         *     the admin UI's default view surfaces the freshest archives at the
+         *     top of the table.
+         *
+         *     ``next_cursor`` is opaque (the catalog's existing base64-JSON cursor
+         *     codec) and ``None`` when this page is the last one — same shape as
+         *     :class:`DocumentListResponse`.
+         */
+        ArchivedDocumentsResponse: {
+            /** Items */
+            items: components["schemas"]["ArchivedDocumentItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** AuditConfig */
         AuditConfig: {
             /** Db Path */
             db_path: string;
             /** Enabled */
             enabled: boolean;
+        };
+        /**
+         * AuditEventItem
+         * @description One row of the audit log viewer table.
+         *
+         *     ``payload`` is the full ``extra`` dict the structured-logging
+         *     emitter passed to ``log.info(...)`` when the event fired —
+         *     surfaced verbatim so the operator can inspect the per-event
+         *     context (document_id, before/after fields, scope kind/ref, etc.)
+         *     without joining against any other surface.
+         *
+         *     ``actor`` is projected out of the payload (audit emitters stash
+         *     it under ``payload['actor']``); ``None`` when the event was
+         *     emitted by a system-initiated cascade with no human principal
+         *     (e.g. the orphan archive cascade).
+         */
+        AuditEventItem: {
+            /**
+             * Actor
+             * @description Acting principal — the user id the route stamped onto ``payload['actor']`` (or ``None`` for system-initiated events with no human caller).
+             */
+            actor: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             * @description Wall clock the event was emitted (UTC, seconds resolution).
+             */
+            created_at: string;
+            /**
+             * Event Name
+             * @description Dotted event name, e.g. ``routing.decided``, ``review.validated``, ``document.archived_orphan``. The full vocabulary is documented in ``docs/architecture/observability.md``.
+             */
+            event_name: string;
+            /**
+             * Id
+             * @description Stable display id synthesised from the row's wall-clock + event name + actor. Opaque — the UI uses it as a React key only; do not parse it.
+             */
+            id: string;
+            /**
+             * Payload
+             * @description Full structured-logging payload. Arbitrary JSON-shaped — the UI renders it as pretty JSON in the row's expanded panel.
+             */
+            payload: Record<string, never>;
+        };
+        /**
+         * AutoPromoteResult
+         * @description One pass over the pending auto-routed versions (slice 3, #215).
+         *
+         *     Returned by :meth:`HITLAutoPromoter.run_pass` and surfaced by the
+         *     admin trigger route so operators see the exact set of versions the
+         *     pass touched, with the reason for every skip and the message for
+         *     every failure. ``scanned`` counts every row pulled from the store
+         *     in the pass — it equals ``len(promoted) + len(skipped) + len(failed)``
+         *     by construction.
+         */
+        AutoPromoteResult: {
+            /** Failed */
+            failed: components["schemas"]["FailedVersion"][];
+            /** Promoted */
+            promoted: components["schemas"]["PromotedVersion"][];
+            /** Scanned */
+            scanned: number;
+            /** Skipped */
+            skipped: components["schemas"]["SkippedVersion"][];
         };
         /**
          * BatchUploadOutcome
@@ -693,6 +1208,82 @@ export interface components {
         Body_upload_documents_batch: {
             /** Files */
             files: string[];
+        };
+        /**
+         * BucketState
+         * @description One ``(content_type, topic_cluster)`` row in the dashboard table.
+         *
+         *     Mirrors the SPC ``sampling_state`` table the HITL router writes
+         *     on every routing decision, plus two derived fields the dashboard
+         *     needs to render hot-spots without recomputing client-side:
+         *
+         *     - ``drift_ratio`` is ``samples_human_after_auto / max(samples_auto, 1)``,
+         *       the same ratio the :class:`HITLDriftDetector` reads to decide
+         *       whether to ramp. The route encodes the ``max(_, 1)`` so a
+         *       cold-start bucket (no auto decisions yet) reports ``0.0``
+         *       instead of a ``ZeroDivisionError`` and the UI can sort the
+         *       table without special-casing.
+         *
+         *     - ``effective_sample_rate`` is what the drift detector returns
+         *       for this bucket *today* — the configured baseline for non-drifting
+         *       buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above
+         *       the threshold. Letting the route compute this means the UI
+         *       doesn't have to mirror the detector's logic and the snapshot
+         *       stays consistent with what the router will see on the next
+         *       decision.
+         *
+         *     ``topic_cluster`` is the canonical SPC bucket key — the
+         *     ``"_unknown_"`` sentinel from
+         *     :data:`app.services.sampling_state_store.UNKNOWN_TOPIC_CLUSTER`
+         *     surfaces verbatim so operators can see "no cluster" rows next to
+         *     real clusters.
+         */
+        BucketState: {
+            /**
+             * Content Type
+             * @description MIME-style content type the SPC bucket is keyed on (e.g. ``text/plain``, ``application/pdf``). Mirrors the catalog's ``DocumentVersion.content_type``.
+             */
+            content_type: string;
+            /**
+             * Drift Ratio
+             * @description ``samples_human_after_auto / max(samples_auto, 1)``. When above ``drift_threshold`` the drift detector ramps this bucket's sampling rate. Cold-start buckets (``samples_auto == 0``) report ``0.0`` so the table sort stays well-defined.
+             */
+            drift_ratio: number;
+            /**
+             * Effective Sample Rate
+             * @description What :meth:`HITLDriftDetector.sampling_rate` returns for this bucket today: the configured baseline for non-drifting buckets, ``min(1.0, baseline * ramp_factor)`` for buckets above the drift threshold.
+             */
+            effective_sample_rate: number;
+            /**
+             * Last Decision At
+             * @description Wall clock the last routing decision for this bucket was stamped onto the SPC counters. ``None`` for buckets that exist but never recorded a decision (a defensive case the in-memory store guards against by only inserting on decision).
+             */
+            last_decision_at: string | null;
+            /**
+             * Samples Auto
+             * @description Decisions where the router picked ``auto``.
+             */
+            samples_auto: number;
+            /**
+             * Samples Human
+             * @description Decisions where the router picked ``human`` (covers below-threshold, OCR-override, and SPC-escalated paths).
+             */
+            samples_human: number;
+            /**
+             * Samples Human After Auto
+             * @description Drift signal — bumped when a human reviewer flips a previously-auto-routed version (the ``hitl.review_service`` rejection handler writes this column).
+             */
+            samples_human_after_auto: number;
+            /**
+             * Samples Taken
+             * @description Total routing decisions recorded for this bucket.
+             */
+            samples_taken: number;
+            /**
+             * Topic Cluster
+             * @description Topic-cluster id the bucket is keyed on, or ``"_unknown_"`` when no cluster was assigned. Same sentinel :class:`HITLRouter` stamps on routing decisions.
+             */
+            topic_cluster: string;
         };
         /**
          * ChatCitation
@@ -849,27 +1440,25 @@ export interface components {
          * Document
          * @description Logical document family containing one or more versions.
          *
-         *     <<<<<<< HEAD
-         *         ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
-         *         §4). Set when the orphan cascade flags a document as archived
-         *         because it lost its last active scope link (see
-         *         :class:`app.services.scope_cascade_service.ScopeCascadeService`).
-         *         Default read paths hide rows where ``archived_at IS NOT NULL`` so
-         *         archived documents are invisible to the standard surface while the
-         *         bytes / extractions / semantic JSON / markdown assets stay on disk
-         *         until the future Archive/Purge Admin tool acts on them.
-         *     =======
-         *         ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
-         *         document currently lives in — populated by every
-         *         :class:`CatalogStore` read path so the frontend can render its
-         *         scope chip on any list/detail response without a follow-up call.
-         *         Soft-removed links (per the no-delete policy) are filtered out at
-         *         the store layer via ``list_scopes_for_document``. The default
-         *         ``[]`` keeps construction sites that don't care about scopes (e.g.
-         *         inline test fixtures, ``with_first_version``) terse — those callers
-         *         still serialize a present-but-empty list, which the OpenAPI
-         *         contract marks as required (defaults required = wire-honest).
-         *     >>>>>>> origin/main
+         *     ``archived_at`` is the soft-archive flag (no-delete policy, ADR-020
+         *     §4). Set when the orphan cascade flags a document as archived
+         *     because it lost its last active scope link (see
+         *     :class:`app.services.scope_cascade_service.ScopeCascadeService`).
+         *     Default read paths hide rows where ``archived_at IS NOT NULL`` so
+         *     archived documents are invisible to the standard surface while the
+         *     bytes / extractions / semantic JSON / markdown assets stay on disk
+         *     until the future Archive/Purge Admin tool acts on them.
+         *
+         *     ``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the
+         *     document currently lives in — populated by every
+         *     :class:`CatalogStore` read path so the frontend can render its
+         *     scope chip on any list/detail response without a follow-up call.
+         *     Soft-removed links (per the no-delete policy) are filtered out at
+         *     the store layer via ``list_scopes_for_document``. The default
+         *     ``[]`` keeps construction sites that don't care about scopes (e.g.
+         *     inline test fixtures, ``with_first_version``) terse — those callers
+         *     still serialize a present-but-empty list, which the OpenAPI
+         *     contract marks as required (defaults required = wire-honest).
          */
         Document: {
             /** Archived At */
@@ -959,13 +1548,29 @@ export interface components {
          * DocumentVersionStatus
          * @enum {string}
          */
-        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED";
+        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED" | "PURGED";
         /** EmbeddingsConfig */
         EmbeddingsConfig: {
             /** Configured */
             configured: boolean;
             /** Model */
             model: string;
+        };
+        /**
+         * FailedVersion
+         * @description One version whose promotion raised an exception.
+         *
+         *     The error string carries the exception's message; the worker logs
+         *     the full traceback at ``error`` level so operators can correlate
+         *     via the structured event ``hitl.auto_promote.version_failed``.
+         */
+        FailedVersion: {
+            /** Document Id */
+            document_id: string;
+            /** Error */
+            error: string;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * GraphEdge
@@ -1048,6 +1653,11 @@ export interface components {
              * @enum {string}
              */
             default_validation_method: "human" | "external" | "auto";
+            /**
+             * Force Auto Corpus
+             * @default false
+             */
+            force_auto_corpus: boolean;
             iterop: components["schemas"]["IteropConfig"];
         };
         /** IteropConfig */
@@ -1265,6 +1875,113 @@ export interface components {
             persistent: boolean;
         };
         /**
+         * PromotedVersion
+         * @description One version the worker successfully promoted to VALIDATED.
+         *
+         *     ``score_overall`` is the ``ConfidenceScore.overall`` the router
+         *     used to pick ``auto`` — surfaced so the admin response carries the
+         *     audit-relevant context without a follow-up read.
+         */
+        PromotedVersion: {
+            /** Document Id */
+            document_id: string;
+            /** Score Overall */
+            score_overall: number;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * PurgeArtifactsRequest
+         * @description Body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).
+         */
+        PurgeArtifactsRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose source artifacts (bytes, extractions, semantic JSON, Markdown asset) should be physically deleted. Resolved via the archived-inclusive accessor; the route 409s if the document isn't archived first per the §1.3 archive-then-purge precondition.
+             */
+            document_id: string;
+        };
+        /**
+         * PurgeArtifactsResponse
+         * @description Response body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).
+         *
+         *     ``versions_purged`` carries one row per version in the document
+         *     family — including versions that were already ``PURGED`` (the
+         *     idempotent re-purge case), in which case the row's
+         *     ``status_before`` is ``PURGED`` and the existing tombstone URI is
+         *     echoed back so callers can correlate without re-reading.
+         *
+         *     ``dry_run`` mirrors the request's ``?dry_run=true`` query param
+         *     so clients can disambiguate the impact preview from a real
+         *     mutation without re-reading the URL — same pattern as the other
+         *     admin-archive responses.
+         */
+        PurgeArtifactsResponse: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Versions Purged */
+            versions_purged: components["schemas"]["VersionPurgeResult"][];
+        };
+        /**
+         * PurgeBatchRequest
+         * @description Body for ``POST /admin/archive/purge_batch`` (ADR-027 §4).
+         *
+         *     Capped at 100 ids per call; the route returns 422 with
+         *     ``KW_UNPROCESSABLE_ENTITY`` for longer lists. Chaining multiple
+         *     calls is the documented escape hatch for larger sweeps.
+         */
+        PurgeBatchRequest: {
+            /**
+             * Document Ids
+             * @description Catalog ids to purge, max 100 per call. Each doc is processed independently — a failure on one (e.g. ``document_not_archived``) does not abort the batch.
+             */
+            document_ids: string[];
+        };
+        /**
+         * PurgeBatchResponse
+         * @description Response body for ``POST /admin/archive/purge_batch`` (ADR-027 §4).
+         *
+         *     Always HTTP 200 — per-doc failures are reported in
+         *     ``results[i]``. ``dry_run`` mirrors the ``?dry_run=true`` query
+         *     param for the same reason as the per-doc response.
+         */
+        PurgeBatchResponse: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Results */
+            results: components["schemas"]["PurgeBatchResult"][];
+        };
+        /**
+         * PurgeBatchResult
+         * @description Per-document outcome inside a :class:`PurgeBatchResponse`.
+         *
+         *     ``success`` discriminates the union: when ``True``, ``purge_response``
+         *     carries the full per-document :class:`PurgeArtifactsResponse`;
+         *     when ``False``, ``error_code`` + ``error_message`` describe what
+         *     went wrong. Mirrors the :class:`BatchUploadOutcome` shape so the
+         *     frontend's batch-result renderer is uniform across admin and
+         *     upload surfaces.
+         */
+        PurgeBatchResult: {
+            /** Document Id */
+            document_id: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            purge_response: components["schemas"]["PurgeArtifactsResponse"] | null;
+            /** Success */
+            success: boolean;
+        };
+        /**
          * RawExtraction
          * @description Inspectable parser output stored before semantic extraction.
          */
@@ -1326,6 +2043,58 @@ export interface components {
             source_reference_ids: string[];
             /** Text */
             text: string;
+        };
+        /**
+         * RelinkScopeRequest
+         * @description Body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).
+         */
+        RelinkScopeRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose scope link to re-activate.
+             */
+            document_id: string;
+            /**
+             * Scope Kind
+             * @description Scope flavor — ``personal``, ``swym_community``, or ``project``. Matches the ``ScopeKind`` literal from ADR-020 §1.
+             * @enum {string}
+             */
+            scope_kind: "personal" | "swym_community" | "project";
+            /**
+             * Scope Ref
+             * @description Scope reference (community id, user id, project id) — interpretation depends on ``scope_kind``.
+             */
+            scope_ref: string;
+        };
+        /**
+         * RelinkScopeResponse
+         * @description Response body for ``POST /admin/archive/relink_scope`` (ADR-027 §1.2).
+         *
+         *     ``removed_at_before`` is the soft-removal timestamp the link
+         *     carried before the call; ``None`` when the link was already
+         *     active (the idempotent no-op case). ``relinked_at`` is the wall
+         *     clock the route stamped onto the audit event; ``None`` for a
+         *     dry-run or the idempotent no-op.
+         */
+        RelinkScopeResponse: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Relinked At */
+            relinked_at: string | null;
+            /** Removed At Before */
+            removed_at_before: string | null;
+            /**
+             * Scope Kind
+             * @enum {string}
+             */
+            scope_kind: "personal" | "swym_community" | "project";
+            /** Scope Ref */
+            scope_ref: string;
         };
         /**
          * ReviewRequest
@@ -1483,6 +2252,24 @@ export interface components {
             results: components["schemas"]["SimilarDocument"][];
         };
         /**
+         * SkippedVersion
+         * @description One version the worker skipped (race-safe no-op).
+         *
+         *     ``reason`` is one of :data:`SkippedReason`; see the docstring for
+         *     the vocabulary.
+         */
+        SkippedVersion: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "already_validated" | "version_no_longer_needs_review" | "document_not_found" | "version_not_found";
+            /** Version Id */
+            version_id: string;
+        };
+        /**
          * SourceReference
          * @description Pointer from extracted or semantic content back to source text.
          */
@@ -1577,6 +2364,45 @@ export interface components {
             /** Source Path */
             source_path: string | null;
         };
+        /**
+         * UnarchiveRequest
+         * @description Body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).
+         */
+        UnarchiveRequest: {
+            /**
+             * Document Id
+             * @description Catalog id of the document whose ``archived_at`` flag should be cleared. Looked up via the archived-inclusive accessor so a flag-archived row still resolves.
+             */
+            document_id: string;
+        };
+        /**
+         * UnarchiveResponse
+         * @description Response body for ``POST /admin/archive/unarchive`` (ADR-027 §1.1).
+         *
+         *     ``archived_at_before`` is the ``archived_at`` timestamp the row
+         *     carried before the call; ``None`` when the document was already
+         *     active (the idempotent no-op case). ``unarchived_at`` is the wall
+         *     clock the route stamped onto the audit event; ``None`` for a
+         *     dry-run (no audit row was written) or for the idempotent no-op
+         *     (no transition fired).
+         *
+         *     ``dry_run`` mirrors the request's ``?dry_run=true`` query param so
+         *     clients can disambiguate the "would-have-mutated" payload from a
+         *     real mutation without re-reading the URL.
+         */
+        UnarchiveResponse: {
+            /** Archived At Before */
+            archived_at_before: string | null;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Unarchived At */
+            unarchived_at: string | null;
+        };
         /** UploadConfig */
         UploadConfig: {
             /** Allowed Content Types */
@@ -1643,6 +2469,43 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VersionPurgeResult
+         * @description Per-version purge outcome inside a :class:`PurgeArtifactsResponse`.
+         *
+         *     ``status_before`` is the version's status at the moment the route
+         *     sampled it — useful when the purge fans out across a multi-version
+         *     family with mixed terminal states (VALIDATED, REJECTED, FAILED,
+         *     SUPERSEDED). ``storage_uri_before`` is the original URI the
+         *     storage backend was holding the bytes under, surfaced for the
+         *     audit row payload (also included on the response so a dry-run
+         *     caller can preview which URIs would be deleted).
+         *
+         *     ``tombstone_uri`` is the post-purge ``storage_uri`` per ADR-027
+         *     §3 (``tombstone:purged:<doc>:<version>:<iso>``); future read
+         *     paths can ``startswith("tombstone:")`` to detect purged content
+         *     without joining against the audit log.
+         *
+         *     ``purged_at`` is ``None`` for a dry-run (no state change, the
+         *     timestamp doesn't exist yet) and the wall clock the route
+         *     stamped onto the audit event for a real mutation. ``bytes_estimate``
+         *     is the version's ``file_size`` if the catalog still holds it —
+         *     purely informational, surfaced so an operator can sanity-check
+         *     the freed-bytes total.
+         */
+        VersionPurgeResult: {
+            /** Bytes Estimate */
+            bytes_estimate: number | null;
+            /** Purged At */
+            purged_at: string | null;
+            status_before: components["schemas"]["DocumentVersionStatus"];
+            /** Storage Uri Before */
+            storage_uri_before: string;
+            /** Tombstone Uri */
+            tombstone_uri: string;
+            /** Version Id */
+            version_id: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1652,6 +2515,224 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_archive_list_archived: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedDocumentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_purge_artifacts: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeArtifactsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeArtifactsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_purge_batch: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_relink_scope: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelinkScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelinkScopeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_archive_unarchive: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnarchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnarchiveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_audit_list_events: {
+        parameters: {
+            query?: {
+                /** @description Restrict results to a single dotted event name (e.g. ``review.validated``). The full vocabulary is surfaced on the response's ``available_event_names`` so the UI dropdown is self-populating. */
+                event_name?: string | null;
+                /** @description Restrict results to events emitted by a specific principal — matches the ``actor`` field projected out of the structured-logging payload (the admin routes stash ``actor=user.id``). Rows with no actor are excluded only when this filter is set. */
+                actor?: string | null;
+                /** @description Lower-bound timestamp (inclusive). Events with ``created_at < since`` are skipped. */
+                since?: string | null;
+                /** @description Upper-bound timestamp (inclusive). Events with ``created_at > until`` are skipped. */
+                until?: string | null;
+                /** @description Opaque cursor returned in a prior response's ``next_cursor``. Pass it to advance pages within the current filter set; drop it to start over. */
+                cursor?: string | null;
+                /** @description Page size. Defaults to 50 to keep the dashboard responsive; the upper bound mirrors the audit store's ``MAX_QUERY_LIMIT`` so an over-eager filter can't drag back the entire table. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_config: {
         parameters: {
             query?: never;
@@ -1668,6 +2749,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConfigResponse"];
+                };
+            };
+        };
+    };
+    admin_hitl_run_auto_promote_pass: {
+        parameters: {
+            query?: {
+                /** @description Optional cap on the number of pending versions the pass touches. Pass ``null`` (omit the param) to process every pending row. Bounded ``[1, 1000]`` to keep the synchronous request shape responsive — a real scheduler will pick the right batch size when it lands. */
+                max_versions?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoPromoteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_hitl_get_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHITLStateResponse"];
                 };
             };
         };
@@ -1996,6 +3129,13 @@ export interface operations {
                     "text/markdown": string;
                 };
             };
+            /** @description Version artifacts were purged (ADR-027 §3). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2031,6 +3171,13 @@ export interface operations {
             };
             /** @description Document or version not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Version artifacts were purged (ADR-027 §3). */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };

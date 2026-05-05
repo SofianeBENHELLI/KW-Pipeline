@@ -46,6 +46,7 @@ const DEFAULT_CONFIG: AdminConfigResponse = {
       base_url_configured: false,
       auth_configured: false,
     },
+    force_auto_corpus: false,
   },
   logging: { format: "text", level: "INFO" },
 };

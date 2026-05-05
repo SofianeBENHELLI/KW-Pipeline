@@ -451,6 +451,141 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # HITL routing (ADR-023, EPIC-A, #215). Five tunable signal weights,
+    # an auto-validate threshold, and a kill switch. Defaults — equal
+    # weights of 0.2 each, threshold 0.85, scorer enabled — match the
+    # ADR's "deployment-level config, not per-scope" decision (ADR-020
+    # §3). The threshold is read but not enforced by the scorer; the
+    # next-slice ``hitl_router.py`` will consume it to pick a routing
+    # decision.
+    # ------------------------------------------------------------------
+    hitl_disable_scorer_raw: str = Field(
+        default="",
+        alias="hitl_disable_scorer",
+        validation_alias=AliasChoices("KW_HITL_DISABLE_SCORER"),
+        description=(
+            "Truthy (``1``/``true``/``yes``/``on``) opts the HITL "
+            "confidence scorer out of the NEEDS_REVIEW transition. "
+            "Use this as the demo-safety escape hatch when the scorer "
+            "code path is suspected to be flaky on a customer fixture; "
+            "every other side-effect of the transition keeps running. "
+            "Defaults to empty (scorer enabled) so the audit trail "
+            "lights up out of the box."
+        ),
+    )
+    hitl_weight_ocr: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("KW_HITL_WEIGHT_OCR"),
+        description=(
+            "Weight for the OCR signal in the HITL confidence score "
+            "(ADR-023 §2). Note the OCR override is independent of "
+            "this weight — when a version is OCR'd the score is forced "
+            "to 0.0 regardless. The weight controls how much OCR-related "
+            "info contributes when the override is *not* active. "
+            "Negative values raise on construction."
+        ),
+        ge=0.0,
+    )
+    hitl_weight_orphan_ratio: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("KW_HITL_WEIGHT_ORPHAN_RATIO"),
+        description="Weight for the orphan-chunk-ratio signal (ADR-023 §2).",
+        ge=0.0,
+    )
+    hitl_weight_length_z: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("KW_HITL_WEIGHT_LENGTH_Z"),
+        description="Weight for the section-length z-score signal (ADR-023 §2).",
+        ge=0.0,
+    )
+    hitl_weight_topic_incoherence: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("KW_HITL_WEIGHT_TOPIC_INCOHERENCE"),
+        description="Weight for the topic-incoherence signal (ADR-023 §2).",
+        ge=0.0,
+    )
+    hitl_weight_citation_coverage: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("KW_HITL_WEIGHT_CITATION_COVERAGE"),
+        description=(
+            "Weight for the citation-coverage signal (ADR-023 §2), "
+            "which falls back to asset-count z-score when Phase 2 is off."
+        ),
+        ge=0.0,
+    )
+    hitl_auto_validate_threshold: float = Field(
+        default=0.85,
+        validation_alias=AliasChoices("KW_HITL_AUTO_VALIDATE_THRESHOLD"),
+        description=(
+            "Auto-validate threshold — versions with confidence "
+            "≥ this value are routed to the auto path by "
+            "``hitl_router.py`` (slice 2). The scorer reads this only "
+            "for the audit trail; enforcement lives in the router. "
+            "Range [0.0, 1.0]."
+        ),
+        ge=0.0,
+        le=1.0,
+    )
+    hitl_force_auto_corpus_raw: str = Field(
+        default="",
+        alias="hitl_force_auto_corpus",
+        validation_alias=AliasChoices("KW_HITL_FORCE_AUTO_CORPUS"),
+        description=(
+            "ADR-023 §6 admin-mode override. Truthy "
+            "(``1``/``true``/``yes``/``on``) makes the HITL router "
+            "auto-route every version regardless of score, OCR flag, "
+            "or SPC sampling. Used for backfill / corpus-replay runs "
+            "where every version is already trusted. The router emits "
+            "a loud ``hitl.force_auto_corpus_active`` warning at "
+            "construction so accidental production usage is visible."
+        ),
+    )
+    hitl_spc_sample_rate: float = Field(
+        default=0.05,
+        validation_alias=AliasChoices("KW_HITL_SPC_SAMPLE_RATE"),
+        description=(
+            "Baseline SPC (statistical process control) sampling rate "
+            "for the HITL router (ADR-023 §6). Fraction of versions "
+            "that *would* auto-validate but are escalated to a human "
+            "as a quality probe. Default ``0.05`` keeps the auto-rate "
+            "honest without flooding the review queue. The drift "
+            "detector ramps this rate per-bucket; see "
+            "``hitl_drift_threshold`` / ``hitl_drift_ramp_factor``. "
+            "Range [0.0, 1.0]."
+        ),
+        ge=0.0,
+        le=1.0,
+    )
+    hitl_drift_threshold: float = Field(
+        default=0.10,
+        validation_alias=AliasChoices("KW_HITL_DRIFT_THRESHOLD"),
+        description=(
+            "Drift ratio above which a bucket's SPC sampling rate "
+            "ramps (ADR-023 §6, EPIC-A A.3 part 2). The ratio is "
+            "``samples_human_after_auto / samples_auto`` per "
+            "``(content_type, topic_cluster)`` bucket — when human "
+            "reviewers reject auto-eligible versions at a rate above "
+            "this floor, the bucket's sampling rate ramps up to "
+            "catch more regressions. Range [0.0, 1.0+); typical "
+            "value ``0.10`` (10% rejection rate triggers ramp)."
+        ),
+        ge=0.0,
+    )
+    hitl_drift_ramp_factor: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("KW_HITL_DRIFT_RAMP_FACTOR"),
+        description=(
+            "Multiplier applied to ``hitl_spc_sample_rate`` for "
+            "drifting buckets (ADR-023 §6, EPIC-A A.3 part 2). With "
+            "the default ``0.05`` baseline + ``10.0`` ramp factor, a "
+            "drifting bucket samples at ``0.5`` (capped at ``1.0``). "
+            "Tune up to escalate harder; tune down for less reactive "
+            "behaviour. Range [0.0, ∞)."
+        ),
+        ge=0.0,
+    )
+
+    # ------------------------------------------------------------------
     # Logging (issue #42). ``json`` is the production / container shape
     # that the on-call workflow greps; ``text`` is the stdlib default
     # used for local development to keep tracebacks human-readable.
@@ -516,6 +651,33 @@ class Settings(BaseSettings):
     def iterop_enabled(self) -> bool:
         """Truthy parse of the ITEROP adapter kill switch."""
         return _truthy(self.iterop_enabled_raw)
+
+    @property
+    def hitl_scorer_disabled(self) -> bool:
+        """Truthy parse of the HITL scorer opt-out (ADR-023 §5)."""
+        return _truthy(self.hitl_disable_scorer_raw)
+
+    @property
+    def hitl_force_auto_corpus(self) -> bool:
+        """Truthy parse of the corpus-wide force-auto override (ADR-023 §6)."""
+        return _truthy(self.hitl_force_auto_corpus_raw)
+
+    @property
+    def hitl_weights(self) -> dict[str, float]:
+        """Map of canonical signal name → configured weight.
+
+        Keys match :data:`app.services.confidence_scorer.ALL_SIGNALS`
+        so the scorer can normalise the dict directly. Values are
+        passed through verbatim — the scorer raises on negative or
+        all-zero inputs.
+        """
+        return {
+            "ocr": self.hitl_weight_ocr,
+            "orphan_ratio": self.hitl_weight_orphan_ratio,
+            "length_z": self.hitl_weight_length_z,
+            "topic_incoherence": self.hitl_weight_topic_incoherence,
+            "citation_coverage": self.hitl_weight_citation_coverage,
+        }
 
 
 def _truthy(raw: str) -> bool:

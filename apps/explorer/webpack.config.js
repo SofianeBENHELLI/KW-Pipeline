@@ -23,6 +23,13 @@ module.exports = (_env, argv) => {
     devtool: isProd ? false : "source-map",
     resolve: {
       extensions: [".tsx", ".ts", ".jsx", ".js"],
+      // Force module lookups to start from this app's ``node_modules``
+      // and fall back to the standard ``node_modules`` resolution.
+      // ``apps/_shared/`` has no node_modules of its own (#83 slice 3
+      // pulled React-using code in there), so without this webpack
+      // can't resolve ``react/jsx-runtime`` / ``@widget-lab/*`` when
+      // bundling files from the shared package.
+      modules: [path.resolve(__dirname, "node_modules"), "node_modules"],
     },
     module: {
       rules: [

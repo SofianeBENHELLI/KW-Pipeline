@@ -55,7 +55,9 @@ from app.schemas.semantic_document import SemanticDocument
 from app.services.document_service import DocumentService
 from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.projector import KnowledgeProjector
+from app.services.sampling_state_store import SamplingBucket, SamplingStateStore
 from app.services.semantic_output_service import SemanticOutputService
+from app.services.validation_metadata_store import ValidationMetadataStore
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +70,17 @@ class ReviewService:
     Construct one per :class:`PipelineServices` container; the service
     is stateless (it only holds references to its collaborators) so a
     single instance can serve every request.
+
+    HITL drift signal (EPIC-A A.3 part 2, ADR-023 §6)
+    -------------------------------------------------
+    When a human reviewer rejects a version that the router originally
+    decided to auto-validate (i.e. ``ValidationMetadata.routing_decision
+    == "auto"``), the rejection counts as a drift signal: the SPC
+    sampler escalated this version to a human as a quality probe and
+    the human disagreed with the router's auto-eligibility. We bump
+    ``samples_human_after_auto`` for the bucket so the drift detector
+    can ramp the bucket's sampling rate. Wiring is fire-and-log: a
+    sampling-store hiccup must not roll back the rejection.
     """
 
     def __init__(
@@ -77,11 +90,19 @@ class ReviewService:
         semantic_outputs: SemanticOutputService,
         knowledge_projector: KnowledgeProjector | None = None,
         entity_extractor: EntityExtractor | None = None,
+        validation_metadata: ValidationMetadataStore | None = None,
+        sampling_state: SamplingStateStore | None = None,
     ) -> None:
         self._documents = documents
         self._semantic_outputs = semantic_outputs
         self._knowledge_projector = knowledge_projector
         self._entity_extractor = entity_extractor
+        # EPIC-A A.3 part 2 drift-signal collaborators. Both optional
+        # so existing tests that build ``ReviewService`` by hand
+        # without the HITL wiring keep working — the drift bump is a
+        # no-op when either is missing.
+        self._validation_metadata = validation_metadata
+        self._sampling_state = sampling_state
 
     def handle_validation(
         self,
@@ -211,8 +232,76 @@ class ReviewService:
                 version=version,
                 semantic=result,
             )
+        else:
+            # decision == "rejected". EPIC-A A.3 part 2 drift signal
+            # (ADR-023 §6): if the router had decided to auto-validate
+            # this version (i.e. SPC sampler escalated to human and the
+            # human disagreed), bump the per-bucket drift counter. The
+            # drift detector reads the counter on the next router pass
+            # and ramps the bucket's sampling rate.
+            self._maybe_record_drift_event(version=version, version_id=version_id)
 
         return result
+
+    def _maybe_record_drift_event(self, *, version: Any, version_id: str) -> None:
+        """Bump ``samples_human_after_auto`` if the rejection is a drift signal.
+
+        Fire-and-log per ADR-012 §3 — a sampling-store hiccup must
+        never roll back the rejection. The drift signal is best-effort
+        observability; the catalog stays the source of truth.
+
+        Drift signal definition (ADR-023 §6):
+        - The router's persisted ``routing_decision`` was ``"auto"``,
+          AND
+        - ``validation_method`` is still unset (no auto-promotion yet —
+          the SPC sampler escalated to a human review),
+        - AND a human just rejected this version.
+
+        That trio is the canonical "the router would have auto'd, the
+        sampler probed, the human disagreed" event.
+        """
+        if self._validation_metadata is None or self._sampling_state is None:
+            return
+        try:
+            metadata = self._validation_metadata.get(version_id)
+        except Exception:  # noqa: BLE001 - fire-and-log boundary
+            log.exception(
+                "hitl.drift_signal.metadata_lookup_failed",
+                extra={"version_id": version_id},
+            )
+            return
+        if metadata is None:
+            return
+        if metadata.routing_decision != "auto":
+            # Below-threshold + ocr_override + below-confidence rejections
+            # don't count as drift — the router never thought this
+            # version was auto-eligible in the first place.
+            return
+        if metadata.validation_method is not None:
+            # The auto-promoter already promoted this row; we shouldn't
+            # be in handle_rejection on an already-validated version
+            # (the FSM blocks it). Defensive guard so a future race
+            # doesn't double-count.
+            return
+        bucket = SamplingBucket.from_optional(
+            content_type=version.content_type,
+            topic_cluster=None,
+        )
+        try:
+            self._sampling_state.record_drift_event(bucket=bucket)
+            log.info(
+                "hitl.drift_signal.recorded",
+                extra={
+                    "version_id": version_id,
+                    "bucket_content_type": bucket.content_type,
+                    "bucket_topic_cluster": bucket.topic_cluster,
+                },
+            )
+        except Exception:  # noqa: BLE001 - fire-and-log boundary
+            log.exception(
+                "hitl.drift_signal.bump_failed",
+                extra={"version_id": version_id},
+            )
 
     def _maybe_supersede_prior_validated(
         self,

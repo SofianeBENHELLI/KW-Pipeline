@@ -189,6 +189,111 @@ def _migrate_0006_documents_archived_at(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE documents ADD COLUMN archived_at TEXT")
 
 
+def _migrate_0007_validation_metadata(conn: sqlite3.Connection) -> None:
+    """HITL validation metadata sidecar (ADR-023, EPIC-A A.5, #215).
+
+    Sidecar table keyed by ``version_id`` that holds the 5-signal
+    confidence breakdown plus the routing decision the
+    ``hitl_router.py`` next slice will write. Kept off the public
+    ``Document`` / ``DocumentVersion`` API surface per EPIC-A's
+    "auto-validated == human-validated to consumers" rule, so the
+    visibility is by-construction (no route reads from this table on
+    the public read path).
+
+    The JSON-text columns (``confidence_signals`` / ``confidence_weights``)
+    serialise the per-signal dicts; SQLite's JSON support is sufficient
+    for the v1 ad-hoc audit queries we need ("show me every
+    auto-validated version with orphan_ratio > 0.3"). A future
+    migration can promote them to typed columns without breaking the
+    contract — the sidecar isolation is the load-bearing property.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS validation_metadata (
+            version_id        TEXT PRIMARY KEY,
+            confidence_overall REAL,
+            confidence_signals TEXT,
+            confidence_weights TEXT,
+            ocr_override_active INTEGER,
+            confidence_computed_at TEXT,
+            confidence_computed_by_version TEXT,
+            routing_decision TEXT,
+            validation_method TEXT,
+            validation_actor TEXT,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id)
+        )
+        """
+    )
+
+
+def _migrate_0008_corpus_norms(conn: sqlite3.Connection) -> None:
+    """Corpus norms backing the length / asset z-score signals (ADR-023 §1, §4).
+
+    Stores ``(mean, stddev, sample_count)`` per
+    ``(content_type, topic_cluster, metric_name)`` bucket. The scorer
+    consults this table to compute z-scores for the
+    ``section_length`` and ``asset_count`` signals; missing buckets
+    score ``1.0`` (cold-start tolerance, see ADR-023 §1).
+
+    Materialised on-demand: the first request for an unknown bucket
+    triggers a one-time scan of the catalog's existing semantic
+    documents to compute the norms and persist the row. The compound
+    primary key keeps a bucket from being recorded twice; an ``INSERT
+    OR REPLACE`` on the recompute path is idempotent.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS corpus_norms (
+            content_type    TEXT NOT NULL,
+            topic_cluster   TEXT NOT NULL,
+            metric_name     TEXT NOT NULL,
+            sample_count    INTEGER NOT NULL,
+            mean            REAL NOT NULL,
+            stddev          REAL NOT NULL,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (content_type, topic_cluster, metric_name)
+        )
+        """
+    )
+
+
+def _migrate_0009_sampling_state(conn: sqlite3.Connection) -> None:
+    """SPC sampling state per ``(content_type, topic_cluster)`` bucket
+    (ADR-023 §6, EPIC-A A.3, #215).
+
+    Backs :class:`SQLiteSamplingStateStore`. The HITL router bumps
+    these counters every time it makes a routing decision so the
+    future drift detector can detect "this bucket's auto-rate is
+    diverging from its observed human-flip rate" without a SQL
+    materialisation pass over the audit table.
+
+    Counters are non-negative and monotonic — the router only ever
+    increments — and ``samples_human_after_auto`` is reserved for the
+    drift signal the auto-promotion / drift-detector worker (next
+    slice) writes when a human reviewer overturns a previously-auto
+    decision.
+
+    The compound primary key keeps a bucket from being recorded twice
+    and lets the in-memory + SQLite implementations share an
+    ``INSERT OR IGNORE`` + ``UPDATE`` write pattern that's portable
+    across SQLite versions older than the UPSERT cutoff (3.24).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sampling_state (
+            content_type            TEXT NOT NULL,
+            topic_cluster           TEXT NOT NULL,
+            samples_taken           INTEGER NOT NULL DEFAULT 0,
+            samples_auto            INTEGER NOT NULL DEFAULT 0,
+            samples_human           INTEGER NOT NULL DEFAULT 0,
+            samples_human_after_auto INTEGER NOT NULL DEFAULT 0,
+            last_decision_at        TEXT,
+            PRIMARY KEY (content_type, topic_cluster)
+        )
+        """
+    )
+
+
 def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
     """Workspace scoping (ADR-020 §1, EPIC-D D.1, #218).
 
@@ -237,6 +342,9 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0004_document_scopes", _migrate_0004_document_scopes),
     ("0005_document_scopes_removed_at", _migrate_0005_document_scopes_removed_at),
     ("0006_documents_archived_at", _migrate_0006_documents_archived_at),
+    ("0007_validation_metadata", _migrate_0007_validation_metadata),
+    ("0008_corpus_norms", _migrate_0008_corpus_norms),
+    ("0009_sampling_state", _migrate_0009_sampling_state),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.

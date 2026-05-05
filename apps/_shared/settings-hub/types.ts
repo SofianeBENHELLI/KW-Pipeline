@@ -84,6 +84,14 @@ export interface IteropConfig {
 export interface HitlConfig {
   default_validation_method: ValidationMethod;
   iterop: IteropConfig;
+  /**
+   * ADR-023 §6 corpus-wide force-auto override (EPIC-A A.8).
+   * When ``true``, every version is auto-validated regardless of
+   * confidence score / OCR override / SPC sampling. Surfaced here
+   * so the host app can render a non-dismissible banner — a
+   * load-bearing override an operator must see at a glance.
+   */
+  force_auto_corpus: boolean;
 }
 
 export interface LoggingConfig {

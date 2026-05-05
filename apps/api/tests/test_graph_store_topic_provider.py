@@ -127,8 +127,6 @@ def test_topic_ids_for_document_drops_missing_or_empty_ids(monkeypatch) -> None:
 def test_known_document_ids_returns_catalog_ids() -> None:
     """``known_document_ids`` reads from the catalog, not the graph."""
     documents = DocumentService(storage=InMemoryStorageService())
-    provider = _GraphStoreTopicProvider(
-        documents=documents, graph_store=InMemoryGraphStore()
-    )
+    provider = _GraphStoreTopicProvider(documents=documents, graph_store=InMemoryGraphStore())
     # Empty catalog → empty list.
     assert provider.known_document_ids() == []

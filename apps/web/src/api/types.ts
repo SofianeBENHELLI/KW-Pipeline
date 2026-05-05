@@ -67,6 +67,77 @@ export type ApiBatchUploadOutcome = Schemas["BatchUploadOutcome"];
 export type ApiBatchUploadSummary = Schemas["BatchUploadSummary"];
 export type ApiBatchUploadResult = Schemas["BatchUploadResult"];
 
+// ─── Admin / Archive (D.9 admin UI) ─────────────────────────────────────────
+
+/** One row of the Archive listing (``GET /admin/archive/archived_documents``).
+ *  Carries the version-purged / version-remaining split + the most-recently
+ *  removed scope link so the admin UI can render a row without per-doc
+ *  probes. */
+export type ApiArchivedDocumentItem = Schemas["ArchivedDocumentItem"];
+
+/** Paginated response from ``GET /admin/archive/archived_documents``. */
+export type ApiArchivedDocumentsResponse = Schemas["ArchivedDocumentsResponse"];
+
+/** Response body of ``POST /admin/archive/unarchive``. */
+export type ApiUnarchiveResponse = Schemas["UnarchiveResponse"];
+
+/** Response body of ``POST /admin/archive/purge_artifacts``. Carries
+ *  per-version tombstone URIs and the dry-run flag. */
+export type ApiPurgeArtifactsResponse = Schemas["PurgeArtifactsResponse"];
+
+/** Per-version row inside a purge response. */
+export type ApiVersionPurgeResult = Schemas["VersionPurgeResult"];
+
+// ─── Admin / HITL dashboard (#215, EPIC-A close-out) ───────────────────────
+
+/** Read-only HITL routing state snapshot powering the Admin HITL
+ *  dashboard. Surfaces config posture + per-bucket SPC counters +
+ *  drift ratios + the pending auto-promotion queue depth. */
+export type ApiAdminHITLStateResponse = Schemas["AdminHITLStateResponse"];
+
+/** One ``(content_type, topic_cluster)`` row of the dashboard table —
+ *  the SPC sampling counters plus the route-derived drift_ratio /
+ *  effective_sample_rate. */
+export type ApiBucketState = Schemas["BucketState"];
+
+/** Result envelope of ``POST /admin/hitl/run_auto_promote_pass``,
+ *  surfaced inline on the dashboard's "Run pass" trigger. */
+export type ApiAutoPromoteResult = Schemas["AutoPromoteResult"];
+
+// ─── Admin / Audit log viewer (#206 follow-up) ────────────────────────────
+
+/** One row in the Admin Audit Log Viewer table. ``actor`` is projected
+ *  out of ``payload['actor']`` server-side so the UI can filter on it
+ *  without re-parsing the JSON blob. */
+export type ApiAuditEventItem = Schemas["AuditEventItem"];
+
+/** Paginated response from ``GET /admin/audit/events``. Carries the
+ *  cursor for "Load more" plus ``available_event_names`` so the UI's
+ *  filter dropdown is self-populating without a second probe. */
+export type ApiAdminAuditEventsResponse = Schemas["AdminAuditEventsResponse"];
+
+// ─── Admin / Archive relink + bulk purge (#218 D.9, slices 2 + 5) ──────────
+
+/** Body for ``POST /admin/archive/relink_scope``. */
+export type ApiRelinkScopeRequest = Schemas["RelinkScopeRequest"];
+
+/** Response body for ``POST /admin/archive/relink_scope``. */
+export type ApiRelinkScopeResponse = Schemas["RelinkScopeResponse"];
+
+/** ``ScopeKind`` literal pulled off the relink request payload. The
+ *  Pydantic ``Literal`` is inlined by openapi-typescript so we re-export
+ *  it from the request shape rather than from a top-level alias. */
+export type ApiScopeKind = ApiRelinkScopeRequest["scope_kind"];
+
+/** Body for ``POST /admin/archive/purge_batch``. */
+export type ApiPurgeBatchRequest = Schemas["PurgeBatchRequest"];
+
+/** Response body for ``POST /admin/archive/purge_batch``. */
+export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
+
+/** Per-document row inside a purge_batch response. */
+export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];
