@@ -34,13 +34,13 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 
 describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
   beforeEach(() => {
-    // Returning ``items: []`` from the catalog walk pushes
-    // ``useExplorerData`` into ``sample-fallback`` mode, which is the
-    // deterministic SAMPLE_SNAPSHOT we want every test to render
-    // against.
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      Promise.resolve(makeJsonResponse({ items: [], next_cursor: null })),
-    );
+    // Rejecting fetch pushes ``useExplorerData`` into ``sample-fallback``
+    // mode (network unreachable), which still renders the deterministic
+    // SAMPLE_SNAPSHOT every cluster-rail / detail-panel assertion in
+    // this file relies on. Returning ``items: []`` is no longer
+    // equivalent — that path now resolves to the real "empty corpus"
+    // empty-state with zero clusters and zero docs.
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
     // ``Element.prototype.scrollIntoView`` and ``scrollTo`` are not
     // implemented in jsdom; stub so DetailPanel's and DocViewer's
     // effects don't throw. (Visual scroll behaviour is verified

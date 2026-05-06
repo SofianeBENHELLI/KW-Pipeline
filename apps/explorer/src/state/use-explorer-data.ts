@@ -46,7 +46,27 @@ import {
 
 const CONTENT_FETCH_CONCURRENCY = 3;
 
-export type DataMode = "loading" | "live" | "sample-fallback";
+export type DataMode = "loading" | "live" | "sample-fallback" | "empty";
+
+/**
+ * A "no documents yet" snapshot for the empty-corpus path. The
+ * sample data is reserved for the unreachable-backend fallback so an
+ * operator who has just stood up the API and uploaded nothing sees
+ * a real empty state rather than the demo corpus pretending to be
+ * theirs.
+ */
+const EMPTY_SNAPSHOT: ExplorerSnapshot = {
+  documents: [],
+  docEdges: [],
+  chunks: [],
+  concepts: [],
+  chunkConcept: [],
+  conceptEdges: [],
+  docContent: {},
+  clusters: {},
+  isSample: false,
+  corpusLabel: "Empty corpus",
+};
 
 export interface ExplorerDataState {
   snapshot: ExplorerSnapshot;
@@ -82,8 +102,8 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
         if (controller.signal.aborted) return;
         if (page.items.length === 0) {
           setState({
-            snapshot: { ...SAMPLE_SNAPSHOT, corpusLabel: "Sample · backend empty" },
-            mode: "sample-fallback",
+            snapshot: EMPTY_SNAPSHOT,
+            mode: "empty",
             error: null,
             refreshing: false,
           });

@@ -148,6 +148,8 @@ export default function App(): React.ReactElement {
   const filtersDirty = useMemo(() => {
     if (draftFilters.types.size !== filters.types.size) return true;
     for (const t of draftFilters.types) if (!filters.types.has(t)) return true;
+    if (draftFilters.sources.size !== filters.sources.size) return true;
+    for (const s of draftFilters.sources) if (!filters.sources.has(s)) return true;
     return false;
   }, [draftFilters, filters]);
   const applyFilters = useCallback(() => {
@@ -162,6 +164,26 @@ export default function App(): React.ReactElement {
       sources: new Set(filters.sources),
     });
   }, [filters]);
+  // Sources known to the corpus — derived from live data, alphabetised
+  // so the chip order is stable across refreshes. Used by the SOURCE
+  // section to render one chip per source.
+  const knownSources = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of snapshot.documents) set.add(d.source);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [snapshot]);
+  // Single source-of-truth doc filter. ``filters.sources`` empty means
+  // "no source filter" (all sources pass) — that's the convention for
+  // a dynamic chip set; ``filters.types`` is the inverse (every entry
+  // in DOC_TYPES is opt-out so the empty set means "hide everything").
+  const docPassesFilters = useCallback(
+    (d: ExplorerDocument) => {
+      if (!filters.types.has(d.type)) return false;
+      if (filters.sources.size > 0 && !filters.sources.has(d.source)) return false;
+      return true;
+    },
+    [filters],
+  );
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Version-history modal — lifted to App level so a click on any
@@ -211,13 +233,21 @@ export default function App(): React.ReactElement {
     //      (taxonomy ids surface here even when no doc has been
     //      classified to them yet — operators want to see their
     //      categories listed even if they're empty).
-    //   3. Module-level CLUSTERS as a final fallback for the sample
-    //      corpus shape.
+    //
+    // Empty *computed* clusters are filtered out so the rail never
+    // shows phantom seeds against an empty corpus; *imposed*
+    // (operator-authored) ones are kept even when empty so the
+    // operator's tree is always visible. This is the single
+    // source-of-truth for both the rail render and the
+    // <expanded>/<total> counter in HIERARCHY.
     const set = new Set<string>();
     snapshot.documents.forEach((d) => set.add(d.cluster));
     Object.keys(snapshot.clusters).forEach((k) => set.add(k));
-    Object.keys(CLUSTERS).forEach((k) => set.add(k));
-    return [...set];
+    return [...set].filter((ck) => {
+      const hasDocs = snapshot.documents.some((d) => d.cluster === ck);
+      const isImposed = snapshot.clusters[ck]?.source === "imposed";
+      return hasDocs || isImposed;
+    });
   }, [snapshot]);
 
   const toggleCluster = useCallback((key: string) => {
@@ -546,7 +576,7 @@ export default function App(): React.ReactElement {
       if (expandedClusters.has(ck)) {
         const docs = snapshot.documents
           .filter((d) => d.cluster === ck)
-          .filter((d) => filters.types.has(d.type));
+          .filter(docPassesFilters);
         n += docs.length;
         docs.forEach((d) => {
           if (expandedDocs.has(d.id)) n += chunksForDoc(snapshot, d.id).length;
@@ -760,6 +790,12 @@ export default function App(): React.ReactElement {
                 <Icon name="warn" size={11} /> Sample data — backend unreachable
               </div>
             )}
+            {data.mode === "empty" && (
+              <div className="kx-empty-banner">
+                <Icon name="info" size={11} /> No documents yet. Upload one via Orbital
+                to populate the corpus.
+              </div>
+            )}
           </Section>
 
           <Section title="HIERARCHY">
@@ -794,7 +830,7 @@ export default function App(): React.ReactElement {
                 const isExp = expandedClusters.has(ck);
                 const docs = snapshot.documents
                   .filter((d) => d.cluster === ck)
-                  .filter((d) => filters.types.has(d.type));
+                  .filter(docPassesFilters);
                 // Prefer the snapshot's runtime catalogue (which carries
                 // the live ``source`` flag from the taxonomy fetch);
                 // fall back to the seed CLUSTERS dict for label/hue if
@@ -910,6 +946,46 @@ export default function App(): React.ReactElement {
                 count={snapshot.documents.filter((d) => d.type === k).length}
               />
             ))}
+          </Section>
+
+          <Section
+            title="SOURCE"
+            right={
+              draftFilters.sources.size > 0 ? (
+                <button
+                  type="button"
+                  className="kx-mini-btn"
+                  onClick={() => setDraftFilters((f) => ({ ...f, sources: new Set() }))}
+                  title="Clear all source filters (show every source)"
+                  aria-label="Clear source filters"
+                >
+                  ×
+                </button>
+              ) : null
+            }
+          >
+            {knownSources.length === 0 ? (
+              <p className="kx-tax-status" style={{ marginTop: 0 }}>
+                No sources known yet — they appear here once documents are uploaded.
+              </p>
+            ) : (
+              knownSources.map((src) => (
+                <FilterRow
+                  key={src}
+                  checked={draftFilters.sources.has(src)}
+                  onChange={() =>
+                    setDraftFilters((f) => {
+                      const ns = new Set(f.sources);
+                      if (ns.has(src)) ns.delete(src);
+                      else ns.add(src);
+                      return { ...f, sources: ns };
+                    })
+                  }
+                  label={src}
+                  count={snapshot.documents.filter((d) => d.source === src).length}
+                />
+              ))
+            )}
             <div className="kx-filter-actions">
               <button
                 type="button"
@@ -930,6 +1006,11 @@ export default function App(): React.ReactElement {
                 Reset
               </button>
             </div>
+            <p className="kx-filter-hint">
+              {draftFilters.sources.size === 0
+                ? "No source selected — every source is shown."
+                : `${draftFilters.sources.size} source${draftFilters.sources.size === 1 ? "" : "s"} selected (others hidden).`}
+            </p>
           </Section>
 
           <Section title="LEGEND">
