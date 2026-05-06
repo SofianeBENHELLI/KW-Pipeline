@@ -1,0 +1,11 @@
+Paint Shop Process Specification — NX-EV-2027
+Plant: Plant 2 — Paint shop South building
+Owner: Manufacturing Engineering — Surface Treatment
+
+Process flow: e-coat dip → seam sealing → primer → basecoat → clearcoat → bake oven, with a wet-on-wet base+clear application for the standard palette.
+E-coat tank: 320 m³ cathodic dip with 200 V applied potential, target dry film thickness 22 ± 2 µm on every body-in-white area documented in the cathodic coverage map.
+Seam sealing: PVC-based, robotic application by 4 ABB IRB-7600 arms, bead width 4 mm verified by inline 3D vision at the exit of the booth.
+Top-coat: HVLP electrostatic guns with pigment changeover via colour purge to support the 6-colour palette and a special-paint cell for the launch edition.
+Bake oven: 30 min at 165 °C peak metal temperature, monitored by 24 datalogger profile every shift.
+Throughput target: 38 jobs/hour at the painted-body buffer, defect rate ≤ 0.8 % first-time-right after the inspection deck.
+Hand-off to final assembly is governed by manufacturing_final_assembly_takt.txt; pretreatment chemistry is logged in the SCADA per the MES integration in manufacturing_mes_scada_integration.txt.

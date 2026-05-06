@@ -1,0 +1,12 @@
+Type Approval Roadmap — EU Whole Vehicle Type Approval
+Program: NX-EV-2027 sedan
+Owner: Homologation — Type Approval EU
+Type approval authority: Luxembourg SNCH
+
+Application strategy: WVTA-Light at SOP under the framework regulation, then full WVTA at the model-year update once the AWD trim and the SUV body style join the platform.
+Scope of regulations: 47 individual UN/EU acts including R155 (cybersecurity, see cyber_unece_r155_policy.txt), R156 (software updates), R100 (HV safety), R157 (ADAS, see automotive_adas_l2plus_feature_definition.txt), and Euro 7 non-exhaust limits (homologation_euro7_emissions_plan.txt).
+Test ordering: highest-risk regulations sequenced first, with a fast-track for the cybersecurity audit because the CSMS evidence is reusable across the platform.
+Documentation pack: 1 200 pages baseline, including the safety case from vv_iso26262_asild_verification.txt, the durability evidence from vv_durability_validation_240cycles.txt, and the crash test report set.
+Timeline: type-approval submission planned 4 weeks ahead of SOP, certificate expected 2 weeks ahead of vehicle handover; contingency 6 weeks budgeted in the program plan.
+Cross-region: simultaneous filings in UK, Switzerland; China and US handled separately under their own regulations and gap analysis tracked in a parallel workstream.
+Risks: pending guidance on the R157 ALKS extended ODD; mitigation by limiting the launch ODD to the conservative envelope already approved for analogous vehicles.

@@ -1,0 +1,12 @@
+Dual-Sourcing Strategy — Inverter SiC and Gate Drivers
+Program: NX-EV-2027
+Owner: Strategic Purchasing — Power Electronics
+Cycle: Approval at the next Sourcing Steering Committee
+
+Risk drivers: SiC die supply concentrated on 3 wafer fabs globally, geopolitical exposure on one node, and historic single-supplier dependency on the gate-driver IC.
+Strategy: dual-source the SiC die at 60/40 split between Supplier A (incumbent, Japan) and Supplier B (challenger, Germany), with capacity allocation rebalanced quarterly based on the scorecard outcome from sourcing_tier1_scorecard_q2.txt.
+Gate driver IC: dual-source between the incumbent and a US-based fabless supplier; both pass the same automotive AEC-Q100 grade-1 qualification.
+Inventory buffer: 12 weeks safety stock at the contract-manufacturing site, paid by the BOM owner via the indirect cost pool.
+Engineering enablement: hardware adapter PCBs allow either gate-driver pinout to drop into the inverter assembly without re-spinning the main control board.
+Risk mitigation roadmap aligned with the homologation timing in homologation_type_approval_roadmap_eu.txt and the manufacturing ramp documented in manufacturing_final_assembly_takt.txt.
+Sign-off path: CFO + COO + CTO at the steering committee, with a recovery playbook attached to every sourcing case.

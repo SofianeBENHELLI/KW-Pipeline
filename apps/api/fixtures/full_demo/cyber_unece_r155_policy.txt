@@ -1,0 +1,11 @@
+UNECE R155 Cybersecurity Policy
+Owner: Vehicle Cybersecurity Office
+Reference: UN Regulation 155, ISO/SAE 21434, internal CSMS-2026
+
+The Cybersecurity Management System governs every system and supplier touching the vehicle E/E architecture defined in automotive_ee_architecture_overview.txt.
+TARA discipline: every software item under change control runs a threat analysis and risk assessment with a documented cybersecurity case before release; example tracked in cyber_tara_hmi.txt.
+Supply chain: every Tier-1 contributing software signs the Cybersecurity Interface Agreement and reports vulnerabilities to the OEM PSIRT within 72 hours; suppliers are vetted via supplier_onboarding_policy_v3.txt.
+OTA updates: signed end-to-end with a hardware-rooted trust chain on every ECU and the HPC; signing keys rotated every 18 months with offline ceremony.
+Incident response: 24x7 PSIRT pager rotation; vehicle telemetry collected and triaged in line with the data-minimisation policy filed with the regulator.
+Vulnerability management: SBOM updated on every release, CVSS triage SLAs (critical ≤ 7 days, high ≤ 30 days, medium ≤ 90 days, low next release).
+This policy is the basis of the type-approval cybersecurity audit referenced in homologation_type_approval_roadmap_eu.txt.

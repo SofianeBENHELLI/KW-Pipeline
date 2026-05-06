@@ -1,0 +1,11 @@
+Euro 7 Compliance Plan — Non-Exhaust Emissions
+Program: NX-EV-2027 (battery-electric, but the platform also serves the PHEV NX-PHEV-2028)
+Owner: Homologation — Type Approval
+
+For the BEV variant, Euro 7 introduces non-exhaust emission limits for brake-particle and tyre-wear matter, both relevant despite the absence of a tailpipe.
+Brake-particle emissions: target ≤ 3 mg/km PM10 with regenerative-braking calibrated to favour electric retardation in the type-approval drive cycle.
+Tyre wear: regulated mass per km against a future GTR; mitigation through OEM-specified tyre compound and rolling-resistance class.
+Compliance evidence package includes the WLTP+RDE-equivalent measurement campaign, the brake-particle test bench results, and the tyre conformity documentation from the supplier.
+For the PHEV variant on the same platform, the exhaust limits remain — combustion calibration is being carried over with a 30 % NOx reduction versus the Euro 6e baseline.
+The plan synchronises with the type-approval timeline in homologation_type_approval_roadmap_eu.txt and the durability evidence in vv_durability_validation_240cycles.txt.
+Risks: late finalisation of the GTR on tyre wear could delay the SOP-Y3 model-year update for non-EU markets; mitigation flagged with the steering committee.

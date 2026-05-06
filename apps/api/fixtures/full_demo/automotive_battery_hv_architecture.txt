@@ -1,0 +1,13 @@
+High-Voltage Battery Pack Architecture Specification
+Program: NX-EV-2027 (D-segment battery-electric vehicle)
+Owner: Vehicle Engineering — HV Energy Storage
+Audience: System engineers, BMS team, thermal team, safety team
+
+The HV battery pack delivers a usable energy of 87 kWh at beginning of life with a nominal pack voltage of 400 V DC.
+Pack architecture uses 12 modules of 24 prismatic cells in series-parallel configuration; each module is monitored by a dedicated cell sensing circuit reporting to the master BMS over isolated CAN.
+Thermal management is liquid-cooled with a dedicated chiller loop sized for 3C continuous discharge at 35 °C ambient.
+Safety: each module integrates a current-interrupt device and a venting channel routed through the underbody crash structure designed to deflect thermal runaway propagation.
+Functional safety target: ASIL D for HV isolation monitoring per ISO 26262, with redundant insulation resistance measurement on both poles.
+Pack mass target: 540 kg including BMS harness; gravimetric energy density 161 Wh/kg.
+Interfaces: HV pyrofuse to inverter, LV 12 V wake-up, isolated CAN to vehicle gateway, refrigerant circuit to thermal module.
+The battery pack design is validated against ECE R100 rev 3, GB 38031, and the internal NX-EV-2027 abuse test plan.

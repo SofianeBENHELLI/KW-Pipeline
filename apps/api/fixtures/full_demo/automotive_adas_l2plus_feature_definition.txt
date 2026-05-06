@@ -1,0 +1,13 @@
+ADAS L2+ Feature Definition — Highway Pilot Assist
+Program: NX-EV-2027
+Owner: ADAS / AD Engineering
+Status: Definition phase, gate G2 review pending
+
+Highway Pilot Assist provides hands-on lane-centering and adaptive cruise control between 0 and 130 km/h on geofenced limited-access highways.
+Sensor set: 1 front camera 8 MP, 5 short-range corner radars, 1 long-range front radar, 12 ultrasonic sensors for low-speed assist.
+Compute: Tier-1 supplied SoC running the AUTOSAR Adaptive runtime with 8 ARM cores, 24 TOPS NPU, dual-redundant power rail.
+Human-machine interface: 12.3" cluster shows lane state, hands-on/hands-off prompts, take-over requests with visual + audible + haptic cascading escalation.
+Operational design domain: highways with clear lane markings, weather above the perception availability threshold, no roadworks zones marked in the HD map.
+Functional safety: ASIL B for the lateral controller, ASIL D for the take-over request chain, fault tolerance time interval 250 ms.
+Performance targets: lateral position accuracy ±15 cm RMS, longitudinal control accuracy ±2 km/h vs setpoint, false take-over rate < 1 per 1000 km.
+Validation strategy aligned with the V&V plan vv_hil_strategy_adas.txt and the simulation campaign in simulation_crash_frontal_results.txt.

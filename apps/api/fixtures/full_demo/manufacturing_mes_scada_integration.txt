@@ -1,0 +1,11 @@
+MES / SCADA Integration Plan — Plant 2
+Owner: Plant IT + Manufacturing Engineering
+Status: Integration test phase, go-live aligned with VPC2
+
+The MES (Siemens Opcenter) acts as the single source of truth for vehicle build records, work-order routing, and quality holds across the entire Plant 2 floor.
+SCADA layer (AVEVA System Platform) collects shop-floor signals from PLCs (Siemens S7-1500, Allen-Bradley ControlLogix) at a 200 ms cadence and aggregates them into the MES via OPC UA.
+Critical signals: torque traces from every spindle (target 100 % traceability), weld controller output (resistance, current, force), paint thickness measurements, leak test results, end-of-line ADAS calibration confirmation.
+The MES exposes a REST API to the enterprise quality management system so PPAP and warranty traceability can pull build genealogy.
+Cybersecurity: OT network segmented from IT, all OPC UA endpoints mutually authenticated with X.509 certificates rotated quarterly; aligned with cyber_unece_r155_policy.txt for any in-vehicle telemetry.
+SLOs: MES uptime 99.95 %, SCADA acquisition latency p99 ≤ 250 ms, build-record completeness 100 % at the line release point.
+The integration spec is the contract for the MES vendor and for Plant IT; deviations route through the engineering change board described in engineering_change_request_4471.txt.

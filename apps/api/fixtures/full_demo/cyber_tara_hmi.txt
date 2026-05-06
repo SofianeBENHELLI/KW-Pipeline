@@ -1,0 +1,12 @@
+TARA — Threat Analysis and Risk Assessment for HMI Cluster
+Item: Driver-facing 12.3" instrument cluster + the take-over arbitration logic
+Owner: Vehicle Cybersecurity Office
+Reference: ISO/SAE 21434 §15, internal TARA-CL-2026-007
+
+Item definition: rendering of speed, ADAS state, take-over requests; receives signals from the HPC over Ethernet TSN and the chassis CAN.
+Damage scenarios: spoofing of the take-over request indicator (impact: safety severe, ASIL D-relevant), tampering of speedometer (impact: legal moderate), denial-of-display (impact: operational severe).
+Threat scenarios: compromised app on the HPC injecting a forged DoIP message; denial-of-service on the TSN ring through malformed gPTP frames; rogue ECU on the diagnostic bus.
+Attack feasibility: medium for the HPC compromise path (requires a chained vulnerability), low for the TSN denial-of-service (requires physical access).
+Risk values: take-over spoofing R = 5 (max in the OEM scheme), addressed by mutual TLS and message signing on the take-over request channel and a watchdog pattern on the cluster MCU.
+Cybersecurity goals trace to the take-over chain documented in automotive_adas_l2plus_feature_definition.txt and back to the UNECE R155 policy cyber_unece_r155_policy.txt.
+Test coverage handed over to V&V in vv_iso26262_asild_verification.txt with shared fault-injection cases.

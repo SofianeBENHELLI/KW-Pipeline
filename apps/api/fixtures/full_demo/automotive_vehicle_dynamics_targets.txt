@@ -1,0 +1,12 @@
+Vehicle Dynamics Targets — Ride and Handling
+Program: NX-EV-2027
+Owner: Chassis Engineering — Vehicle Dynamics
+Cycle: Pre-development virtual sign-off, hardware sign-off at MR3
+
+Curb mass distribution target 52 % front / 48 % rear with the HV battery pack centered between the axles.
+Roll gradient target 4.2 deg/g at the kerb weight + 2 occupants load case, achieved by torsion bar tuning and active anti-roll bars on the top trim.
+Steering on-centre feel: 0.6 N·m/deg torque gradient at 100 km/h, characterised on the K&C rig and verified on the proving ground.
+Ride comfort: target ISO 2631 weighted acceleration below 0.55 m/s² at 100 km/h on the Belgian-block reference surface; class-leading versus the 2024 benchmark vehicle.
+Braking: 100-0 km/h stopping distance ≤ 35 m on the dry-asphalt reference, brake-by-wire pedal feel tuned through the iBooster control law.
+NVH: in-cabin SPL ≤ 62 dB(A) at 120 km/h cruise, refer to simulation_nvh_powertrain.txt for the powertrain contribution model.
+Vehicle dynamics targets are cascaded down to the chassis BOM in automotive_bom_top_level.txt and validated through the durability cycle vv_durability_validation_240cycles.txt.

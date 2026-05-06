@@ -1,0 +1,12 @@
+NVH Simulation — Powertrain Contribution to Cabin SPL
+Program: NX-EV-2027
+Owner: Simulation — NVH
+Tool: ANSA pre-processing, MSC NASTRAN modal solution, OptiStruct optimisation, SEA above 800 Hz
+
+Scope: predict cabin sound pressure level at the driver and rear-passenger ears across cruise, full-throttle, and ramp-up manoeuvres.
+Mesh: 8 M shell elements on the trimmed body with all interior absorption layers, glass, and seal sections; modal solution to 600 Hz, SEA model above.
+Excitation sources: rear motor airborne and structureborne paths, inverter switching whine at 16 kHz folded by the SEA bands, road-input from the chassis tyre patch.
+Predicted cabin SPL at 120 km/h cruise = 60.6 dB(A) for the driver ear, within the target ≤ 62 dB(A) from automotive_vehicle_dynamics_targets.txt.
+Top three contributors at cruise: tyre cavity resonance (29 % of total energy), inverter switching whine (22 %), wind noise around the A-pillar.
+Mitigation: secondary mass damper on the rear subframe, additional rear-arch foam, A-pillar seal upgrade — combined ΔSPL = 1.4 dB(A).
+The aero contribution to the cabin wind noise is sourced from simulation_cfd_aero_analysis.txt; the inverter content links into automotive_ee_architecture_overview.txt.

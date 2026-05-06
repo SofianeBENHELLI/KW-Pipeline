@@ -1,0 +1,12 @@
+Final Assembly Takt Time Analysis
+Plant: Plant 2 — Final assembly line FAL-3
+Owner: Manufacturing Engineering — Industrial Engineering
+Cycle: Pre-MR3 capacity sign-off
+
+Target line takt: 60 s per vehicle to support 60 jobs per hour and the SOP-Y2 production volume of 220k units per year on a 2-shift schedule.
+Station inventory: 96 manned stations, 18 robotic stations, 4 inline test cells (toe-and-thrust, headlight aim, infotainment EOL, brake roller).
+Work content balance ratio: 0.92 across the line, with the bottleneck at station FAL-3-67 (ADAS module + HV interlock check) at 58 s nominal.
+Mixed-model build sequence: 4-trim mix, sequencer pulls from the body buffer 6 jobs ahead so the trim cells receive harness kits in JIS within the 12-min cell window.
+Operator ergonomics: every station rated against the EAWS scoring tool; no station above amber at the 80th-percentile operator anthropometry.
+Continuous improvement: line balance reviewed every 4 weeks against actuals from the MES; corrective actions tracked alongside the corrective-action log in quality_corrective_action_log.txt.
+Capacity buffer: 8 % over-equipped to absorb variability surfaced by the production FMEA, see also vv_durability_validation_240cycles.txt for end-of-line aging signals.

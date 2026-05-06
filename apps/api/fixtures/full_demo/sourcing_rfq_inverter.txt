@@ -1,0 +1,13 @@
+Request for Quotation — Traction Inverter Assembly
+Program: NX-EV-2027
+Owner: Strategic Purchasing — Power Electronics
+Issued: 2026-03-15, responses due 2026-04-30
+
+Scope: 350 kW SiC traction inverter, including the power module, gate-driver board, DC-link capacitor, and water-cooled cold plate.
+Volumes: 220 000 units per year for 5 years SOP-Y2 onwards, plus a +25 % capacity option for the AWD upgrade.
+Technical envelope: 800 V DC architecture, peak phase current 600 A, switching frequency 16 kHz, junction temperature ≤ 175 °C.
+Functional safety: ASIL C inverter control with documented hardware metric report; software per ISO 26262 supplier role assignment in the DIA.
+Cybersecurity: must comply with the OEM cybersecurity baseline cyber_unece_r155_policy.txt for any over-the-air calibration update.
+Commercial terms: target ex-works price ≤ 980 EUR at year-3 quantities, NRE ≤ 4 M EUR amortised over the program life, payment terms net 60.
+Bidder qualification: must be present on the approved supplier list governed by supplier_onboarding_policy_v3.txt and meet the dual-sourcing constraints in sourcing_dual_sourcing_igbt.txt.
+Award decision: target sourcing committee 2026-06-15, supplier nomination communicated 2026-07-01.
