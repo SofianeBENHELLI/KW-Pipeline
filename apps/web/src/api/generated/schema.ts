@@ -352,6 +352,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/by-hash/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check Document Hash
+         * @description Pre-import duplicate check (#292).
+         *
+         *     Returns whether ``sha256`` already exists in the catalog so the
+         *     Forge widget can flag duplicates *before* streaming bytes
+         *     across the wire. The check is read-only — it never mutates the
+         *     catalog and never spawns a new version. Always 200; absence is
+         *     signalled by ``exists=False`` (no 404) so the client skips a
+         *     status-branch.
+         */
+        get: operations["check_document_hash"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/upload": {
         parameters: {
             query?: never;
@@ -1478,6 +1505,34 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
             /** Versions */
             versions: components["schemas"]["DocumentVersion"][];
+        };
+        /**
+         * DocumentHashCheckResponse
+         * @description Response body for ``GET /documents/by-hash/{sha256}`` (#292).
+         *
+         *     Lets a client decide *before* streaming bytes whether a SHA-256
+         *     digest already exists in the catalog. When ``exists`` is ``True``,
+         *     the remaining fields point to the canonical version the new upload
+         *     would be flagged as a duplicate of. When ``False``, every other
+         *     field is ``None`` and the client is free to proceed with the
+         *     upload — the bytes haven't been seen before.
+         *
+         *     Always 200; absence is signalled by ``exists=False`` rather than
+         *     404 so the frontend doesn't have to branch on HTTP status.
+         */
+        DocumentHashCheckResponse: {
+            /** Document Id */
+            document_id: string | null;
+            /** Exists */
+            exists: boolean;
+            /** Original Filename */
+            original_filename: string | null;
+            /** Sha256 */
+            sha256: string;
+            /** Version Id */
+            version_id: string | null;
+            /** Version Number */
+            version_number: number | null;
         };
         /**
          * DocumentListResponse
@@ -2828,6 +2883,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_document_hash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentHashCheckResponse"];
                 };
             };
             /** @description Validation Error */

@@ -955,6 +955,73 @@
         "title": "Document",
         "type": "object"
       },
+      "DocumentHashCheckResponse": {
+        "description": "Response body for ``GET /documents/by-hash/{sha256}`` (#292).\n\nLets a client decide *before* streaming bytes whether a SHA-256\ndigest already exists in the catalog. When ``exists`` is ``True``,\nthe remaining fields point to the canonical version the new upload\nwould be flagged as a duplicate of. When ``False``, every other\nfield is ``None`` and the client is free to proceed with the\nupload — the bytes haven't been seen before.\n\nAlways 200; absence is signalled by ``exists=False`` rather than\n404 so the frontend doesn't have to branch on HTTP status.",
+        "properties": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "version_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Number"
+          }
+        },
+        "required": [
+          "exists",
+          "document_id",
+          "version_id",
+          "version_number",
+          "original_filename",
+          "sha256"
+        ],
+        "title": "DocumentHashCheckResponse",
+        "type": "object"
+      },
       "DocumentListResponse": {
         "description": "Cursor-paginated page of documents returned by ``GET /documents``.",
         "properties": {
@@ -3696,6 +3763,46 @@
           }
         },
         "summary": "List Documents"
+      }
+    },
+    "/documents/by-hash/{sha256}": {
+      "get": {
+        "description": "Pre-import duplicate check (#292).\n\nReturns whether ``sha256`` already exists in the catalog so the\nForge widget can flag duplicates *before* streaming bytes\nacross the wire. The check is read-only — it never mutates the\ncatalog and never spawns a new version. Always 200; absence is\nsignalled by ``exists=False`` (no 404) so the client skips a\nstatus-branch.",
+        "operationId": "check_document_hash",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHashCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Document Hash"
       }
     },
     "/documents/upload": {

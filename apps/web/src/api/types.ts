@@ -49,6 +49,12 @@ export type ApiScope = Schemas["Scope"];
 // the call site stays pinned to the regenerated OpenAPI contract.
 export type ApiUploadResponse = Schemas["UploadDocumentResponse"];
 
+// ─── Hash precheck (#292) ──────────────────────────────────────────────────
+// Response of ``GET /documents/by-hash/{sha256}``. ``exists=true`` means
+// the catalog already has this digest and the upload will be flagged
+// as DUPLICATE_DETECTED — Forge surfaces this before sending bytes.
+export type ApiDocumentHashCheck = Schemas["DocumentHashCheckResponse"];
+
 // ─── Knowledge graph ─────────────────────────────────────────────────────────
 
 export type ApiGraphNode = Schemas["GraphNode"];

@@ -421,4 +421,33 @@ describe("KnowledgeGraphView (Demo KG / Lane D)", () => {
     );
     expect(screen.getByText(/click a node or edge above/i)).toBeInTheDocument();
   });
+
+  it("renders the navigation toolbar with zoom controls and a node search (#292)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const toolbar = screen.getByTestId("graph-navigation-toolbar");
+    expect(within(toolbar).getByLabelText(/Zoom in/i)).toBeInTheDocument();
+    expect(within(toolbar).getByLabelText(/Zoom out/i)).toBeInTheDocument();
+    expect(within(toolbar).getByLabelText(/Reset zoom and pan/i)).toBeInTheDocument();
+    expect(within(toolbar).getByLabelText(/Fit graph to viewport/i)).toBeInTheDocument();
+    expect(within(toolbar).getByPlaceholderText(/Find a node/i)).toBeInTheDocument();
+  });
+
+  it("typing in the search field selects the matching node (#292)", async () => {
+    mockEnrichedFetch();
+
+    render(<KnowledgeGraphView documentId="doc-001" />);
+    await screen.findByTestId("nvl-stub");
+
+    const search = screen.getByPlaceholderText(/Find a node/i);
+    fireEvent.change(search, { target: { value: "audit plan" } });
+
+    // Selection bumps the inspector detail panel into the node-detail
+    // view; assert against that surface rather than reaching into the
+    // NVL stub.
+    expect(await screen.findByTestId("graph-detail-node")).toBeInTheDocument();
+  });
 });

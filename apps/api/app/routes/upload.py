@@ -26,6 +26,7 @@ from app.schemas.document import (
     BatchUploadOutcome,
     BatchUploadResult,
     BatchUploadSummary,
+    DocumentHashCheckResponse,
     UploadDocumentResponse,
 )
 from app.schemas.scope import SCOPE_KINDS, Scope, ScopeKind
@@ -248,6 +249,50 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
                 return result
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get(
+        "/documents/by-hash/{sha256}",
+        operation_id="check_document_hash",
+        response_model=DocumentHashCheckResponse,
+    )
+    async def check_document_hash(
+        sha256: str,
+        current_user: User = Depends(require_contributor),  # noqa: ARG001 — gate-only
+    ) -> DocumentHashCheckResponse:
+        """Pre-import duplicate check (#292).
+
+        Returns whether ``sha256`` already exists in the catalog so the
+        Forge widget can flag duplicates *before* streaming bytes
+        across the wire. The check is read-only — it never mutates the
+        catalog and never spawns a new version. Always 200; absence is
+        signalled by ``exists=False`` (no 404) so the client skips a
+        status-branch.
+        """
+        normalised = sha256.strip().lower()
+        if len(normalised) != 64 or any(c not in "0123456789abcdef" for c in normalised):
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="sha256 must be a 64-char lowercase hex digest.",
+                retryable=False,
+                remediation=(
+                    "Compute the SHA-256 of the file bytes and send "
+                    "the lowercase hex digest (64 hex characters)."
+                ),
+            )
+        catalog = services.documents.catalog
+        version = catalog.find_version_by_hash(normalised)
+        if version is None:
+            return DocumentHashCheckResponse(exists=False, sha256=normalised)
+        document = catalog.get_document(version.document_id)
+        return DocumentHashCheckResponse(
+            exists=True,
+            sha256=normalised,
+            document_id=version.document_id,
+            version_id=version.id,
+            version_number=version.version_number,
+            original_filename=document.original_filename if document else None,
+        )
 
     @router.post(
         "/documents/upload/batch",

@@ -374,15 +374,6 @@ function ReviewerWorkbench() {
     bumpMutation,
   } = catalog;
 
-  const handleUploaded = useCallback(
-    async (newDocumentId: string) => {
-      await refreshAll();
-      selectDocument(newDocumentId);
-      bumpMutation();
-    },
-    [refreshAll, selectDocument, bumpMutation],
-  );
-
   const handleMutationCompleted = useCallback(async () => {
     await Promise.all([refreshSelected(), refreshAll()]);
     bumpMutation();
@@ -441,7 +432,6 @@ function ReviewerWorkbench() {
         documents={documents}
         selectedDocumentId={selectedId ?? ""}
         onSelectDocument={selectDocument}
-        onUploaded={handleUploaded}
         filter={filter}
         onFilterChange={setFilter}
       />
@@ -455,7 +445,7 @@ function ReviewerWorkbench() {
         />
       ) : (
         <section className="workspace">
-          <p className="muted">No documents found. Upload a document to get started.</p>
+          <p className="muted">No documents found. Import documents from the Forge widget to get started.</p>
         </section>
       )}
       <SearchPanel

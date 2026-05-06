@@ -24,6 +24,7 @@ import type {
   ApiChatResponse,
   ApiChunkSearchResponse,
   ApiDocument,
+  ApiDocumentHashCheck,
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
@@ -305,6 +306,24 @@ export async function getDocument(
  * bodies cleanly, so we drop down to native fetch here. Path and response
  * shape stay pinned via the imported response type.
  */
+/**
+ * GET /documents/by-hash/{sha256} (#292)
+ *
+ * Pre-import duplicate check. The Forge widget hashes the picked file
+ * locally and calls this before posting bytes — when ``exists=true``
+ * we surface a duplicate banner and let the operator decide whether
+ * to skip or proceed.
+ */
+export async function checkDocumentHash(
+  sha256: string,
+): Promise<ApiDocumentHashCheck> {
+  const { data, error, response } = await http.GET("/documents/by-hash/{sha256}", {
+    params: { path: { sha256 } },
+  });
+  if (error !== undefined || data === undefined) throw await asApiError(response);
+  return data;
+}
+
 export async function uploadDocument(
   file: File,
   documentId?: string,

@@ -250,3 +250,28 @@ class BatchUploadResult(BaseModel):
 
     results: list[BatchUploadOutcome]
     summary: BatchUploadSummary
+
+
+# ─── Hash precheck (#292) ───────────────────────────────────────────
+
+
+class DocumentHashCheckResponse(BaseModel):
+    """Response body for ``GET /documents/by-hash/{sha256}`` (#292).
+
+    Lets a client decide *before* streaming bytes whether a SHA-256
+    digest already exists in the catalog. When ``exists`` is ``True``,
+    the remaining fields point to the canonical version the new upload
+    would be flagged as a duplicate of. When ``False``, every other
+    field is ``None`` and the client is free to proceed with the
+    upload — the bytes haven't been seen before.
+
+    Always 200; absence is signalled by ``exists=False`` rather than
+    404 so the frontend doesn't have to branch on HTTP status.
+    """
+
+    exists: bool
+    document_id: str | None = None
+    version_id: str | None = None
+    version_number: int | None = None
+    original_filename: str | None = None
+    sha256: str
