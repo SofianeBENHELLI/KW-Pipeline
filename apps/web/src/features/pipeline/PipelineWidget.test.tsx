@@ -236,6 +236,31 @@ describe("PipelineWidget", () => {
     expect(screen.getByTestId("version-count")).toHaveTextContent(/2 versions/);
   });
 
+  it("renders the Purge-all button only when onPurgeAllRequest is set and the list is non-empty (#292 §5)", () => {
+    const onPurgeAllRequest = vi.fn();
+    const { rerender } = render(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" })]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        onPurgeAllRequest={onPurgeAllRequest}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("purge-all-button"));
+    expect(onPurgeAllRequest).toHaveBeenCalledTimes(1);
+
+    // Hidden when there are no documents (nothing to purge).
+    rerender(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        onPurgeAllRequest={onPurgeAllRequest}
+      />,
+    );
+    expect(screen.queryByTestId("purge-all-button")).not.toBeInTheDocument();
+  });
+
   it("renders an empty-state message when documents is empty", () => {
     render(
       <PipelineWidget

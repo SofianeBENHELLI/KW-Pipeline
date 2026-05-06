@@ -61,8 +61,11 @@ from app.dependencies import PipelineServices, _resolve_llm_provider
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.admin_archive import (
+    ORBITAL_PURGE_ALL_PHRASE,
     ArchivedDocumentItem,
     ArchivedDocumentsResponse,
+    OrbitalPurgeAllRequest,
+    OrbitalPurgeAllResponse,
     OrbitalPurgeDocumentRequest,
     OrbitalPurgeDocumentResponse,
     PurgeArtifactsRequest,
@@ -895,6 +898,190 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             archived_at=archived_at,
             versions_purged=purge_response.versions_purged,
             kg_subgraph_purged=kg_purged,
+        )
+
+    def _orbital_purge_one(
+        document_id: str,
+        *,
+        actor: str,
+        actor_role: str,
+    ) -> OrbitalPurgeDocumentResponse:
+        """Bulk-friendly variant of the per-document Orbital cascade (#292).
+
+        Same archive + purge_artifacts + KG cleanup + audit emission as
+        :func:`orbital_purge_document`, but skips the
+        ``confirmation_filename`` check (the bulk gate is the operator
+        typing :data:`ORBITAL_PURGE_ALL_PHRASE` once at the modal —
+        per-doc filenames aren't relevant when nuking the catalog).
+        Returns the per-document response shape so the bulk wrapper
+        can stitch them into its results list.
+        """
+        catalog = services.documents.catalog
+        document = catalog._get_document_including_archived(  # type: ignore[attr-defined]
+            document_id,
+        )
+        if document is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Document not found: {document_id!r}.",
+                retryable=False,
+                remediation="Document missing during bulk purge — likely a concurrent change.",
+            )
+
+        archived_at = document.archived_at or datetime.now(UTC)
+        if document.archived_at is None:
+            catalog.flag_document_archived(
+                document_id,
+                archived_at=archived_at,
+                actor=actor,
+            )
+
+        purge_response = _purge_one_document(
+            document_id,
+            dry_run=False,
+            actor=actor,
+            actor_role=actor_role,
+        )
+
+        kg_purged = False
+        graph_store = getattr(services, "graph_store", None)
+        if graph_store is not None:
+            for version in document.versions:
+                try:
+                    graph_store.delete_subgraph_for_version(
+                        document_id=document_id,
+                        version_id=version.id,
+                    )
+                    kg_purged = True
+                except Exception as exc:  # noqa: BLE001 — best-effort.
+                    log.warning(
+                        "orbital.document.purge.kg_delete_failed",
+                        extra={
+                            "document_id": document_id,
+                            "version_id": version.id,
+                            "error": str(exc),
+                        },
+                    )
+
+        log.info(
+            "orbital.document.purge",
+            extra={
+                "document_id": document_id,
+                "original_filename": document.original_filename,
+                "archived_at": archived_at.isoformat(),
+                "versions_purged": len(purge_response.versions_purged),
+                "kg_subgraph_purged": kg_purged,
+                "actor": actor,
+                "actor_role": actor_role,
+            },
+        )
+
+        return OrbitalPurgeDocumentResponse(
+            document_id=document_id,
+            original_filename=document.original_filename,
+            archived_at=archived_at,
+            versions_purged=purge_response.versions_purged,
+            kg_subgraph_purged=kg_purged,
+        )
+
+    @router.post(
+        "/admin/orbital/purge_all",
+        operation_id="admin_orbital_purge_all",
+        response_model=OrbitalPurgeAllResponse,
+    )
+    def orbital_purge_all(
+        body: OrbitalPurgeAllRequest,
+        confirm: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> OrbitalPurgeAllResponse:
+        """Hard-delete every active document in the catalog (#292 §5 — bulk override).
+
+        The user picked option 3 in #292 (Orbital is the sanctioned
+        hard-delete surface) and explicitly asked for a bulk button.
+        Two independent gates protect this path:
+
+        1. ``?confirm=true`` query flag (matches the per-doc route).
+        2. ``confirmation_phrase`` body field — must equal
+           :data:`ORBITAL_PURGE_ALL_PHRASE` exactly (case-sensitive).
+           A misclick stops at the modal; a malformed request stops
+           at the server.
+
+        Iterates every active document (``archived_at IS NULL``),
+        cascades the same archive + purge_artifacts + KG cleanup as
+        the per-doc route, and emits one ``orbital.document.purge``
+        audit event per row plus a single
+        ``orbital.knowledge_space.purge`` summary event with the total
+        count + actor.
+
+        Best-effort: a per-document failure is logged + recorded in
+        ``failures`` but doesn't abort the batch.
+        """
+        if not confirm:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.UNPROCESSABLE_ENTITY,
+                message="Orbital purge_all requires ?confirm=true.",
+                retryable=False,
+                remediation=(
+                    "Append ?confirm=true to the request once the "
+                    "operator has acknowledged the modal."
+                ),
+            )
+        if body.confirmation_phrase != ORBITAL_PURGE_ALL_PHRASE:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=(f"confirmation_phrase must equal {ORBITAL_PURGE_ALL_PHRASE!r}."),
+                retryable=False,
+                remediation=(
+                    "Type the exact phrase shown in the Orbital purge-all "
+                    "modal (case-sensitive) before submitting."
+                ),
+            )
+
+        catalog = services.documents.catalog
+        # Snapshot the ids of every active document upfront — the
+        # per-doc cascade flips ``archived_at`` so iterating
+        # ``list_documents`` mid-loop would skip rows.
+        ids: list[str] = [doc.id for doc in catalog.list_documents()]
+
+        results: list[OrbitalPurgeDocumentResponse] = []
+        failures: list[str] = []
+        for document_id in ids:
+            try:
+                results.append(
+                    _orbital_purge_one(
+                        document_id,
+                        actor=user.id,
+                        actor_role=user.role,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 — best-effort, recorded.
+                log.warning(
+                    "orbital.knowledge_space.purge.doc_failed",
+                    extra={
+                        "document_id": document_id,
+                        "error": str(exc),
+                    },
+                )
+                failures.append(document_id)
+
+        log.info(
+            "orbital.knowledge_space.purge",
+            extra={
+                "documents_purged": len(results),
+                "failed": len(failures),
+                "actor": user.id,
+                "actor_role": user.role,
+            },
+        )
+
+        return OrbitalPurgeAllResponse(
+            documents_purged=len(results),
+            failed=len(failures),
+            results=results,
+            failures=failures,
         )
 
     @router.get(

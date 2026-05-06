@@ -199,3 +199,115 @@ class TestOrbitalPurgeDocument:
         )
 
         assert response.status_code == 403
+
+
+class TestOrbitalPurgeAll:
+    """Coverage for ``POST /admin/orbital/purge_all`` (#292 — bulk override)."""
+
+    def test_missing_confirm_query_returns_422(self, bearer_env: None) -> None:
+        client, _ = _client_and_services()
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+
+        response = client.post(
+            "/admin/orbital/purge_all",
+            json={"confirmation_phrase": "PURGE ALL DOCUMENTS"},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "KW_UNPROCESSABLE_ENTITY"
+
+    def test_wrong_phrase_returns_422_and_does_not_mutate(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        _seed_active(services, "doc-1")
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+
+        response = client.post(
+            "/admin/orbital/purge_all?confirm=true",
+            json={"confirmation_phrase": "purge all documents"},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "KW_VALIDATION_ERROR"
+
+        # State unchanged.
+        version = services.documents.catalog.get_version("doc-1", "doc-1-v1")
+        assert version.status is DocumentVersionStatus.VALIDATED
+
+    def test_happy_path_purges_every_active_document(
+        self, bearer_env: None, audit_capture: InMemoryAuditEventStore
+    ) -> None:
+        client, services = _client_and_services()
+        _seed_active(services, "doc-1", filename="a.pdf")
+        _seed_active(services, "doc-2", filename="b.pdf")
+        _seed_active(services, "doc-3", filename="c.pdf")
+        headers = {"Authorization": f"Bearer {_token('admin', 'alice')}"}
+
+        response = client.post(
+            "/admin/orbital/purge_all?confirm=true",
+            json={"confirmation_phrase": "PURGE ALL DOCUMENTS"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["documents_purged"] == 3
+        assert body["failed"] == 0
+        assert {r["document_id"] for r in body["results"]} == {
+            "doc-1",
+            "doc-2",
+            "doc-3",
+        }
+
+        # Catalog read paths now return zero active documents.
+        active = services.documents.catalog.list_documents()
+        assert active == []
+
+        # Each version is PURGED with a tombstone URI.
+        for doc_id in ("doc-1", "doc-2", "doc-3"):
+            version = services.documents.catalog.get_version(doc_id, f"{doc_id}-v1")
+            assert version.status is DocumentVersionStatus.PURGED
+            assert version.storage_uri.startswith("tombstone:")
+
+        # Audit: one orbital.knowledge_space.purge summary event +
+        # one orbital.document.purge per row.
+        events = audit_capture.query()
+        names = [e.event_name for e in events]
+        assert names.count("orbital.document.purge") == 3
+        assert names.count("orbital.knowledge_space.purge") == 1
+        summary = next(e for e in events if e.event_name == "orbital.knowledge_space.purge")
+        assert summary.payload["documents_purged"] == 3
+        assert summary.payload["failed"] == 0
+        assert summary.payload["actor"] == "alice"
+
+    def test_empty_catalog_is_a_no_op_with_zero_count(self, bearer_env: None) -> None:
+        client, _ = _client_and_services()
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+
+        response = client.post(
+            "/admin/orbital/purge_all?confirm=true",
+            json={"confirmation_phrase": "PURGE ALL DOCUMENTS"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {
+            "documents_purged": 0,
+            "failed": 0,
+            "results": [],
+            "failures": [],
+        }
+
+    def test_non_admin_returns_403(self, bearer_env: None) -> None:
+        client, _ = _client_and_services()
+        headers = {"Authorization": f"Bearer {_token('contributor')}"}
+
+        response = client.post(
+            "/admin/orbital/purge_all?confirm=true",
+            json={"confirmation_phrase": "PURGE ALL DOCUMENTS"},
+            headers=headers,
+        )
+
+        assert response.status_code == 403

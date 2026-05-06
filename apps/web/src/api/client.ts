@@ -28,6 +28,7 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
   ApiPurgeArtifactsResponse,
   ApiPurgeBatchResponse,
@@ -708,6 +709,29 @@ export async function orbitalPurgeDocument(
         document_id: documentId,
         confirmation_filename: confirmationFilename,
       },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/orbital/purge_all (#292 — bulk override)
+ *
+ * Admin-only. Hard-deletes every active document in the catalog in
+ * one audited cascade. Two gates: ``?confirm=true`` and a
+ * ``confirmation_phrase`` body field that must equal
+ * ``ORBITAL_PURGE_ALL_PHRASE`` (case-sensitive). Emits
+ * ``orbital.knowledge_space.purge`` plus one
+ * ``orbital.document.purge`` per purged row.
+ */
+export async function orbitalPurgeAll(
+  confirmationPhrase: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiOrbitalPurgeAllResponse> {
+  return unwrap(
+    await http.POST("/admin/orbital/purge_all", {
+      params: { query: { confirm: true } },
+      body: { confirmation_phrase: confirmationPhrase },
       signal: options.signal,
     }),
   );

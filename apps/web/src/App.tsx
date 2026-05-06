@@ -17,6 +17,7 @@ import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
+import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
 import { PurgeDialog } from "./features/purge/PurgeDialog";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
@@ -375,16 +376,27 @@ function ReviewerWorkbench() {
     bumpMutation,
   } = catalog;
 
-  // #292 §5 — purge dialog target. ``null`` keeps the modal hidden;
-  // setting it to a document opens the confirmation modal.
+  // #292 §5 — purge dialog targets. ``null`` keeps the per-row modal
+  // hidden; the bulk modal toggles via its own boolean.
   const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
+  const [purgeAllOpen, setPurgeAllOpen] = useState(false);
 
   const handlePurgeRequest = useCallback((document: ApiDocument) => {
     setPurgeTarget(document);
   }, []);
 
+  const handlePurgeAllRequest = useCallback(() => {
+    setPurgeAllOpen(true);
+  }, []);
+
   const handlePurged = useCallback(async () => {
     setPurgeTarget(null);
+    await refreshAll();
+    bumpMutation();
+  }, [bumpMutation, refreshAll]);
+
+  const handlePurgedAll = useCallback(async () => {
+    setPurgeAllOpen(false);
     await refreshAll();
     bumpMutation();
   }, [bumpMutation, refreshAll]);
@@ -450,6 +462,7 @@ function ReviewerWorkbench() {
         filter={filter}
         onFilterChange={setFilter}
         onPurgeRequest={handlePurgeRequest}
+        onPurgeAllRequest={handlePurgeAllRequest}
       />
       <PurgeDialog
         document={
@@ -463,6 +476,12 @@ function ReviewerWorkbench() {
         }
         onCancel={() => setPurgeTarget(null)}
         onPurged={() => void handlePurged()}
+      />
+      <PurgeAllDialog
+        open={purgeAllOpen}
+        documentCount={documents.length}
+        onCancel={() => setPurgeAllOpen(false)}
+        onPurged={() => void handlePurgedAll()}
       />
       {selected !== null ? (
         <ReviewWorkspace

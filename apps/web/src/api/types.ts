@@ -102,6 +102,17 @@ export type ApiOrbitalPurgeDocumentRequest =
 export type ApiOrbitalPurgeDocumentResponse =
   Schemas["OrbitalPurgeDocumentResponse"];
 
+/** Response body of ``POST /admin/orbital/purge_all`` (#292 — bulk override). */
+export type ApiOrbitalPurgeAllResponse =
+  Schemas["OrbitalPurgeAllResponse"];
+
+/**
+ * Operator-typed phrase the bulk-purge route demands as a second
+ * confirmation. Mirrors ``ORBITAL_PURGE_ALL_PHRASE`` in
+ * ``app/schemas/admin_archive.py``.
+ */
+export const ORBITAL_PURGE_ALL_PHRASE = "PURGE ALL DOCUMENTS";
+
 // ─── Admin / HITL dashboard (#215, EPIC-A close-out) ───────────────────────
 
 /** Read-only HITL routing state snapshot powering the Admin HITL

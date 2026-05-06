@@ -317,6 +317,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/orbital/purge_all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Orbital Purge All
+         * @description Hard-delete every active document in the catalog (#292 §5 — bulk override).
+         *
+         *     The user picked option 3 in #292 (Orbital is the sanctioned
+         *     hard-delete surface) and explicitly asked for a bulk button.
+         *     Two independent gates protect this path:
+         *
+         *     1. ``?confirm=true`` query flag (matches the per-doc route).
+         *     2. ``confirmation_phrase`` body field — must equal
+         *        :data:`ORBITAL_PURGE_ALL_PHRASE` exactly (case-sensitive).
+         *        A misclick stops at the modal; a malformed request stops
+         *        at the server.
+         *
+         *     Iterates every active document (``archived_at IS NULL``),
+         *     cascades the same archive + purge_artifacts + KG cleanup as
+         *     the per-doc route, and emits one ``orbital.document.purge``
+         *     audit event per row plus a single
+         *     ``orbital.knowledge_space.purge`` summary event with the total
+         *     count + actor.
+         *
+         *     Best-effort: a per-document failure is logged + recorded in
+         *     ``failures`` but doesn't abort the batch.
+         */
+        post: operations["admin_orbital_purge_all"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orbital/purge_document": {
         parameters: {
             query?: never;
@@ -1966,6 +2006,46 @@ export interface components {
             spacy_model: string;
         };
         /**
+         * OrbitalPurgeAllRequest
+         * @description Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).
+         *
+         *     The operator types :data:`ORBITAL_PURGE_ALL_PHRASE` verbatim into
+         *     the modal — the route 422s on any other value so a misclick can't
+         *     nuke the catalog. Combined with ``?confirm=true`` this gives the
+         *     bulk path two independent gates.
+         */
+        OrbitalPurgeAllRequest: {
+            /**
+             * Confirmation Phrase
+             * @description Operator-typed phrase — must equal 'PURGE ALL DOCUMENTS' exactly (case-sensitive). The route 422s with ``KW_VALIDATION_ERROR`` on mismatch.
+             */
+            confirmation_phrase: string;
+        };
+        /**
+         * OrbitalPurgeAllResponse
+         * @description Response body for ``POST /admin/orbital/purge_all`` (#292).
+         *
+         *     Carries one :class:`OrbitalPurgeDocumentResponse` per active
+         *     document the route processed. ``documents_purged`` is the count
+         *     of fully-cascaded rows (matches the audit row's payload).
+         *     Best-effort: a per-document failure surfaces as ``failed`` but
+         *     doesn't abort the batch — same shape as :class:`PurgeBatchResponse`
+         *     in spirit.
+         */
+        OrbitalPurgeAllResponse: {
+            /** Documents Purged */
+            documents_purged: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /** Failures */
+            failures: string[];
+            /** Results */
+            results: components["schemas"]["OrbitalPurgeDocumentResponse"][];
+        };
+        /**
          * OrbitalPurgeDocumentRequest
          * @description Body for ``POST /admin/orbital/purge_document`` (#292).
          *
@@ -2950,6 +3030,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminHITLStateResponse"];
+                };
+            };
+        };
+    };
+    admin_orbital_purge_all: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrbitalPurgeAllRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrbitalPurgeAllResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -14,6 +14,8 @@ interface PipelineWidgetProps {
   onFilterChange?: (next: { status: string[]; q: string }) => void;
   /** #292 §5 — when set, each row shows a Purge button that opens the modal. */
   onPurgeRequest?: (document: ApiDocument) => void;
+  /** #292 §5 — when set, a "Purge all" button appears in the header. */
+  onPurgeAllRequest?: () => void;
 }
 
 /**
@@ -48,6 +50,7 @@ export function PipelineWidget({
   filter,
   onFilterChange,
   onPurgeRequest,
+  onPurgeAllRequest,
 }: PipelineWidgetProps) {
   const activeViewId = filter
     ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
@@ -82,6 +85,17 @@ export function PipelineWidget({
           <p className="eyebrow">Orbital</p>
           <h1 id="pipeline-widget-title">KW Pipeline</h1>
         </div>
+        {onPurgeAllRequest && sortedDocuments.length > 0 && (
+          <button
+            type="button"
+            className="button button-danger purge-all-button"
+            onClick={onPurgeAllRequest}
+            aria-label="Purge all documents"
+            data-testid="purge-all-button"
+          >
+            Purge all
+          </button>
+        )}
       </div>
 
       <p className="muted forge-hint" data-testid="forge-import-hint">
