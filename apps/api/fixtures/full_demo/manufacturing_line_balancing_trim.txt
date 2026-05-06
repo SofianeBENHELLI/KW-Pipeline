@@ -1,0 +1,11 @@
+Line Balancing Study — Trim Line FAL-3 Trim Subsection
+Plant: Plant 2
+Owner: Manufacturing Engineering — Industrial Engineering
+
+Scope: 14 trim stations from headliner install through cockpit module decking, current weighted average cycle 56 s versus 60 s takt with two amber stations.
+Bottleneck root cause: cockpit decking station carries both the airbag torque-controlled fastening plus the IVI cable harness routing — work content 64 s under nominal conditions.
+Recommendation: split the cockpit decking into a pre-decking subassembly cell upstream of FAL-3 so the on-line work content drops to 49 s.
+Side benefit: the pre-decking subassembly cell becomes a controlled torque environment that reduces the variation source flagged in the PFMEA for steering-column attachment.
+Headcount impact: net +1 operator across two shifts; cost-of-quality saving offsets the headcount within 14 weeks per the IE business case.
+Implementation gate: requires the MES routing change documented in manufacturing_mes_scada_integration.txt and a re-validation of the EOL ADAS calibration documented in vv_hil_strategy_adas.txt.
+Sign-off: plant manager + central manufacturing engineering, scheduled for the next monthly operations review.

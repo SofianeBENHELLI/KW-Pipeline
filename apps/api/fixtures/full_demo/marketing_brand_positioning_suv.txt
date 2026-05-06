@@ -1,0 +1,11 @@
+Brand Positioning Brief — Sedan vs SUV
+Program: NX-EV-2027
+Owner: Marketing — Product & Brand Strategy
+
+Decision: lead with the sedan body style at SOP, follow with the SUV variant 14 months later, both built on the shared NX skateboard platform.
+Sedan rationale: differentiated drag coefficient (0.21 Cd) maximises real-world range, signals software-first technology positioning to the urban EV buyer described in marketing_customer_segment_urban_ev.txt.
+SUV rationale: captures the larger volume pool in EU and US markets, monetises the AWD powertrain option, supports the family-trip use case underserved by the segment.
+Brand promise: refined urban EV with class-leading software, transparent ownership cost, and a charging experience benchmarked against the best public network operators.
+Communication pillars: range honesty (cold-weather curves published), software cadence (quarterly OTA), repairability and right-to-repair commitments.
+Marketing risks: cannibalisation between sedan and SUV during the 14-month overlap; mitigated by trim-line differentiation and price ladder discipline.
+The press launch sequence is in marketing_launch_plan_press_kit.txt and ties back to the homologation timing of homologation_type_approval_roadmap_eu.txt.

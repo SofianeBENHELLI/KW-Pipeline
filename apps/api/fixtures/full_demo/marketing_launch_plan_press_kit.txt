@@ -1,0 +1,11 @@
+Launch Plan and Press Kit Outline — NX-EV-2027 Sedan
+Owner: Marketing — Product Launch & PR
+Lead market: Germany, France, UK; secondary: Italy, Spain, Benelux
+
+Reveal milestones: digital teaser drop at week -16, world première live-stream at week -8, journalist drives starting at week -4, customer order books open at week 0.
+Press kit assets: 80-page kit including powertrain whitepaper, ADAS safety story, cybersecurity posture summary, sustainability roadmap, ownership-cost calculator.
+Influencer programme: 24 long-form reviewers, 12 short-form creators, 3 content windows aligned with Euro NCAP results from vv_crash_test_plan_euroncap.txt.
+Test-drive logistics: 60 fleet vehicles routed across 9 markets, charged on a partner network with branded curated routes for media.
+KPIs: organic share-of-voice ≥ 18 % vs the segment leader in week +1, configurator sessions ≥ 220k in week 0-4, hand-raisers ≥ 45k by week +12.
+Risk: launch readiness depends on closing the 4 red suppliers from sourcing_tier1_scorecard_q2.txt and the closure of the open ASIL D verification deviations vv_iso26262_asild_verification.txt.
+Sign-off: CMO + COO at the launch readiness review, gating market-by-market.

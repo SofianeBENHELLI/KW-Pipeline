@@ -1,0 +1,13 @@
+E/E Architecture Overview — Zonal Backbone
+Program: NX-EV-2027
+Owner: E/E Architecture, Vehicle Engineering
+Reference: ASPICE-aligned, AUTOSAR Classic + Adaptive, SOA backbone
+
+The vehicle uses a 4-zone E/E architecture: Front-Left, Front-Right, Rear-Left, Rear-Right, plus a central HPC compute brick and a connectivity gateway.
+Each zone controller aggregates body, lighting, low-power actuators, and sensor pre-processing for its quadrant; ASIL B as the floor with selective ASIL D paths for braking and steering.
+Backbone: 1 Gb Ethernet TSN ring with redundant paths between zones; legacy CAN-FD fallback for body and chassis nodes during the transition program.
+HPC: dual-SoC compute brick runs ADAS, IVI cluster, telematics in containerised AUTOSAR Adaptive partitions; failover orchestrator monitors heartbeat across SoCs.
+Power topology: dual 12 V grids isolated by an intelligent power distribution unit (iPDU) per zone; sleep current target 8 mA at the battery terminal.
+Software update path: signed OTA images delivered through the connectivity gateway, zone-by-zone roll-out with A/B partitions on the HPC and the gateway.
+The cybersecurity baseline cyber_unece_r155_policy.txt governs every signed update.
+The E/E topology drives the ECU SW architecture documented in ecu_software_architecture_v3.txt and feeds the BOM split in automotive_bom_top_level.txt.

@@ -1,0 +1,13 @@
+ECU Software Architecture
+Version 3.0 — Issued 2026-04-30
+Owner: E/E Architecture — Software Platform
+Audience: ECU teams, integration team, V&V, cybersecurity, homologation
+
+Production-baseline architecture for SOP-Y2; closes every v2 open item and consolidates the AUTOSAR Adaptive runtime to release R23-11 across the HPC.
+Service catalogue v3: 64 services after the addition of brake-particle telemetry (Euro 7, see homologation_euro7_emissions_plan.txt), tyre-wear estimator, and the connected-charging service.
+Clock synchronisation: gPTP grandmaster on the gateway, redundant slave on the HPC; max sync error budget 100 µs across the entire E/E network.
+HPC arrangement: dual-SoC with the new orchestrator releasing partitions in a deterministic order, supporting graceful degradation modes for ADAS, IVI, and connectivity.
+Cybersecurity: every binary signed with the SOP-Y2 platform key; revocation list distributed via OTA. SBOM coverage 100 % including the open-source components inventoried with their CVE history.
+Update orchestration: campaign manager schedules OTA waves by region and trim, supports staged rollback at the fleet level, integrated with the dealer DMS for service-mode updates.
+Compliance trace: every ASIL D service maps to a verification artefact in vv_iso26262_asild_verification.txt; every cybersecurity goal traces to a TARA item including cyber_tara_hmi.txt.
+Sign-off chain: software platform owner → safety manager → cybersecurity manager → homologation manager → CTO at the SOP-Y2 release readiness gate.

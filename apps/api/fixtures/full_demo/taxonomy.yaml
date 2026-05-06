@@ -1,23 +1,127 @@
 taxonomy:
   schema_version: v0.1
   categories:
+    - id: engineering
+      label: Engineering
+      description: Vehicle engineering — system architecture, BOM, ADAS, chassis, HV battery.
+      subcategories:
+        - id: engineering.battery
+          label: HV Battery & Powertrain
+          description: HV battery pack, inverter, e-motor architecture.
+        - id: engineering.adas
+          label: ADAS / AD
+          description: Advanced driver assistance and autonomous driving features.
+        - id: engineering.ee
+          label: E/E Architecture
+          description: Zonal compute, AUTOSAR, Ethernet TSN backbone.
+        - id: engineering.chassis
+          label: Chassis & Vehicle Dynamics
+          description: Suspension, brakes, ride and handling targets.
+        - id: engineering.bom
+          label: Bill of Materials
+          description: Top-level vehicle BOM and cost-target tracking.
+    - id: manufacturing
+      label: Manufacturing
+      description: Plant, production, body shop, paint shop, final assembly, MES.
+      subcategories:
+        - id: manufacturing.bodyshop
+          label: Body Shop
+          description: Welding cells, BIW dimensional control.
+        - id: manufacturing.paint
+          label: Paint Shop
+          description: E-coat, basecoat, clearcoat, bake oven.
+        - id: manufacturing.finalassembly
+          label: Final Assembly
+          description: Trim line, takt time, line balancing.
+        - id: manufacturing.mes
+          label: MES and Industry 4.0
+          description: MES, SCADA, OPC UA, OT/IT segmentation.
     - id: quality
-      label: Quality & Compliance
-      description: ISO 9001 program, audits, nonconformances, corrective actions.
+      label: Quality and Compliance
+      description: ISO 9001 / IATF 16949 program, audits, nonconformances, corrective actions.
       subcategories:
         - id: quality.audits
-          label: Audits & nonconformances
+          label: Audits and nonconformances
           description: Surveillance audits, findings, and CAPA closure.
+    - id: validation-verification
+      label: Validation and Verification
+      description: HIL/SIL/MIL, crash tests, durability, ISO 26262 ASIL D verification.
+      subcategories:
+        - id: validation-verification.adas
+          label: ADAS V and V
+          description: HIL/SIL strategy for ADAS features.
+        - id: validation-verification.crash
+          label: Crash and Passive Safety
+          description: Euro NCAP and internal crash test campaigns.
+        - id: validation-verification.durability
+          label: Durability
+          description: Proving-ground accelerated mileage validation.
+        - id: validation-verification.functional-safety
+          label: Functional Safety
+          description: ISO 26262 verification artefacts.
+    - id: sourcing
+      label: Sourcing and Supply Chain
+      description: Tier-1 supplier scorecards, dual-sourcing, RFQ, supplier development.
+      subcategories:
+        - id: sourcing.scorecards
+          label: Supplier scorecards
+          description: Quarterly business review metrics.
+        - id: sourcing.rfq
+          label: RFQ and Award
+          description: Sourcing-cycle artefacts.
     - id: suppliers
-      label: Supplier Management
-      description: Supplier onboarding, qualification, and renewal.
+      label: Supplier Onboarding
+      description: Onboarding, screening, qualification policy.
       subcategories:
         - id: suppliers.onboarding
           label: Onboarding
           description: Screening, classification, and tier-based qualification.
+    - id: marketing
+      label: Marketing
+      description: Customer segments, brand positioning, launch communication.
+      subcategories:
+        - id: marketing.research
+          label: Customer research
+          description: Segment studies, NPS, customer insights.
+        - id: marketing.launch
+          label: Product launch
+          description: Press kits, reveal sequencing, KPIs.
+    - id: simulation
+      label: Simulation and CAE
+      description: CFD, crash, NVH, durability simulation feeding the V and V campaign.
+      subcategories:
+        - id: simulation.cfd
+          label: CFD and Aerodynamics
+          description: External aero, cooling-flow, wind noise.
+        - id: simulation.crash
+          label: Crash CAE
+          description: Explicit FE crash simulation.
+        - id: simulation.nvh
+          label: NVH
+          description: Noise, vibration and harshness modelling.
+    - id: cybersecurity
+      label: Cybersecurity
+      description: UNECE R155, ISO/SAE 21434, TARA, OTA security.
+      subcategories:
+        - id: cybersecurity.tara
+          label: TARA
+          description: Threat analysis and risk assessment items.
+        - id: cybersecurity.policy
+          label: CSMS policy
+          description: Cybersecurity management system baseline.
+    - id: homologation
+      label: Homologation and Regulatory
+      description: Type approval, Euro 7, regional regulatory compliance.
+      subcategories:
+        - id: homologation.eu
+          label: EU type approval
+          description: WVTA filings, R155 / R156 / R157 compliance.
     - id: customer-success
       label: Customer Success
-      description: Renewal risk scoring, playbooks, and account health.
-    - id: engineering
+      description: Renewal risk scoring, playbooks, account health.
+    - id: engineering-change
       label: Engineering Change
-      description: Engineering change requests, design reviews, and effectivity.
+      description: Engineering change requests, design reviews, effectivity.
+    - id: ecu-software
+      label: ECU Software Platform
+      description: AUTOSAR architecture, OTA, software lifecycle.

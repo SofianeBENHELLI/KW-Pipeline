@@ -1,0 +1,12 @@
+Physical Crash Test Plan — Euro NCAP 2026 Protocol
+Program: NX-EV-2027
+Owner: V&V — Passive Safety
+Test centre: in-house impact lab + external partner for the side pole and far-side tests
+
+Crash matrix targets the Euro NCAP 2026 Five-Star envelope: full-width frontal 50 km/h, MPDB 50 km/h, side mobile barrier 60 km/h, far-side oblique, side pole 32 km/h, rear shunt 80 km/h.
+Dummies: THOR-50M, WorldSID-50M, Q3 / Q6 child dummies front and rear, with the new far-side WorldSID instrumentation pack.
+Sensors: per-vehicle 220 channels logged at 20 kHz, 8 high-speed cameras at 1000 fps, redundant load-cell wall instrumented at 60 channels.
+Build configuration: VPC2 BIW with production trim, HV battery substituted by a mass-and-CG dummy until the live-pack abuse test cleared per battery_hv_architecture sign-off.
+Pass criteria mapped to the Euro NCAP scoring algorithm; AOP for adult occupant ≥ 90 %, child ≥ 85 %, vulnerable road user ≥ 75 %, safety assist ≥ 80 %.
+Cross-link: simulation predictions in simulation_crash_frontal_results.txt set expectation bands; deviations > 8 % trigger a model-correction loop with the CAE team.
+Sign-off path: every crash mode's PV report routes through the safety review board before the production release at SOP-Y2.

@@ -1,0 +1,12 @@
+Vehicle Durability Validation Plan — 240k km Equivalent
+Program: NX-EV-2027
+Owner: V&V — Vehicle Durability
+Cycle: Pre-MR3 sign-off
+
+Equivalent customer mileage target: 240 000 km accelerated through 3 fleet vehicles on the proving-ground durability schedule.
+Schedule mix: 35 % Belgian-block, 25 % rough-road, 15 % cobblestone, 10 % corrosion soak, 10 % thermal soak, 5 % towing-with-trailer.
+Instrumentation: full strain-gauge harness on the suspension links, accelerometers on every body mount, in-cabin OBD logger sampling at 100 Hz.
+Failure modes tracked: weld fatigue (especially the underbody seams from manufacturing_body_shop_welding_cell.txt), bushing wear, paint degradation referred back to manufacturing_paint_shop_process_spec.txt, wiring harness chafing.
+HV battery durability: separate cycler runs to 1500 full equivalent cycles in parallel, capacity-fade target ≤ 20 % SOH at end-of-cycle.
+Reliability target: B10 mileage ≥ 240k for the powertrain, ≥ 320k for the body structure, ≥ 180k for the chassis bushings.
+Findings route through the corrective-action workflow quality_corrective_action_log.txt with closed-loop traceability against the design change board.

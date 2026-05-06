@@ -1,0 +1,13 @@
+ISO 26262 ASIL D Verification Log — Brake-by-Wire System
+Program: NX-EV-2027
+Owner: Functional Safety
+Reference: ISO 26262:2018 part 4-9, internal safety case BR-2026-001
+
+Item under verification: brake-by-wire actuator and its dual redundant control software with cross-monitoring.
+Safety goal: avoid unintended brake release during deceleration; ASIL D classification with FTTI 100 ms.
+Verification methods used: requirement-based testing, fault-injection on the HIL bench from vv_hil_strategy_adas.txt, formal verification on the cross-monitor state machine, FMEA-driven test cases.
+Diagnostic coverage: 99.5 % single-point fault metric, 95 % latent-fault metric, both validated against the ISO 26262 metrics.
+Independence proof: both control channels developed by different teams with separate compilation toolchains; the safety analysis verifies absence of common-cause failures.
+Test execution status: 100 % requirements covered, 982 / 982 test cases passed, 4 deviations open with documented impact analysis filed under safety case BR-2026-001.
+Sign-off chain: safety manager → independent assessor → confirmation review with regulator-recognised assessment body before production release.
+Issues that touch the lateral controller scope are tracked in vv_hil_strategy_adas.txt and the HMI escalation logic in cyber_tara_hmi.txt.

@@ -143,25 +143,84 @@ class LoadSummary:
 # summary table. The cluster labels are presentation-only — the actual
 # topic clustering happens server-side from the fixture text — but
 # grouping them here keeps the loader output legible.
+#
+# The corpus is sized and themed to look like a realistic automotive-OEM
+# document set: engineering, manufacturing, V&V, sourcing, marketing,
+# simulation, cybersecurity, homologation, plus the original quality /
+# customer-success / supplier-management baseline. Many fixtures cite
+# each other on purpose so the topic-clustering and similarity surfaces
+# return non-trivial results when the demo is loaded against a backend
+# with the knowledge layer enabled.
 TEXT_FIXTURES: list[tuple[str, str]] = [
+    # Quality and Compliance
     ("quality_iso9001_handbook.txt", "quality"),
     ("quality_audit_findings_2026q1.txt", "quality"),
     ("quality_corrective_action_log.txt", "quality"),
+    # Supplier Onboarding (single-version baseline; the multi-version
+    # family is uploaded separately via SUPPLIER_FAMILY below).
     ("supplier_qualification_checklist.txt", "suppliers"),
+    # Customer Success
     ("customer_renewal_brief.txt", "customer-success"),
     ("customer_success_playbook.txt", "customer-success"),
-    ("engineering_change_request_4471.txt", "engineering"),
-    ("engineering_design_review_minutes.txt", "engineering"),
+    # Engineering Change baseline
+    ("engineering_change_request_4471.txt", "engineering-change"),
+    ("engineering_design_review_minutes.txt", "engineering-change"),
+    # Engineering — Vehicle, ADAS, E/E, BOM
+    ("automotive_battery_hv_architecture.txt", "engineering"),
+    ("automotive_adas_l2plus_feature_definition.txt", "engineering"),
+    ("automotive_vehicle_dynamics_targets.txt", "engineering"),
+    ("automotive_ee_architecture_overview.txt", "engineering"),
+    ("automotive_bom_top_level.txt", "engineering"),
+    # Manufacturing
+    ("manufacturing_body_shop_welding_cell.txt", "manufacturing"),
+    ("manufacturing_paint_shop_process_spec.txt", "manufacturing"),
+    ("manufacturing_final_assembly_takt.txt", "manufacturing"),
+    ("manufacturing_mes_scada_integration.txt", "manufacturing"),
+    ("manufacturing_line_balancing_trim.txt", "manufacturing"),
+    # Validation and Verification
+    ("vv_hil_strategy_adas.txt", "validation-verification"),
+    ("vv_crash_test_plan_euroncap.txt", "validation-verification"),
+    ("vv_durability_validation_240cycles.txt", "validation-verification"),
+    ("vv_iso26262_asild_verification.txt", "validation-verification"),
+    # Sourcing and Supply Chain
+    ("sourcing_tier1_scorecard_q2.txt", "sourcing"),
+    ("sourcing_dual_sourcing_igbt.txt", "sourcing"),
+    ("sourcing_rfq_inverter.txt", "sourcing"),
+    # Marketing
+    ("marketing_customer_segment_urban_ev.txt", "marketing"),
+    ("marketing_brand_positioning_suv.txt", "marketing"),
+    ("marketing_launch_plan_press_kit.txt", "marketing"),
+    # Simulation / CAE
+    ("simulation_cfd_aero_analysis.txt", "simulation"),
+    ("simulation_crash_frontal_results.txt", "simulation"),
+    ("simulation_nvh_powertrain.txt", "simulation"),
+    # Cybersecurity
+    ("cyber_unece_r155_policy.txt", "cybersecurity"),
+    ("cyber_tara_hmi.txt", "cybersecurity"),
+    # Homologation / Regulatory
+    ("homologation_euro7_emissions_plan.txt", "homologation"),
+    ("homologation_type_approval_roadmap_eu.txt", "homologation"),
 ]
 
-# Multi-version family — uploaded as the same document family so the
+# Multi-version families — uploaded into one document each so the
 # supersede flow lights up. Order matters: v1 is uploaded first, then
-# validated, then v2 is appended, validated (which moves v1 to
-# SUPERSEDED), then v3.
+# validated; v2 is appended, validated (which moves v1 to SUPERSEDED);
+# v3 ditto. Two families demonstrate that auto-supersede is generic.
 SUPPLIER_FAMILY: list[tuple[str, str]] = [
     ("supplier_onboarding_policy_v1.txt", "suppliers"),
     ("supplier_onboarding_policy_v2.txt", "suppliers"),
     ("supplier_onboarding_policy_v3.txt", "suppliers"),
+]
+
+ECU_FAMILY: list[tuple[str, str]] = [
+    ("ecu_software_architecture_v1.txt", "ecu-software"),
+    ("ecu_software_architecture_v2.txt", "ecu-software"),
+    ("ecu_software_architecture_v3.txt", "ecu-software"),
+]
+
+VERSION_FAMILIES: list[tuple[str, list[tuple[str, str]]]] = [
+    ("supplier_onboarding_policy", SUPPLIER_FAMILY),
+    ("ecu_software_architecture", ECU_FAMILY),
 ]
 
 # Fixture intentionally rejected so the rejection FSM transition is
@@ -303,17 +362,30 @@ def _load_topic_corpus(client: httpx.Client, summary: LoadSummary) -> None:
             _validate(client, row)
 
 
-def _load_supplier_family(client: httpx.Client, summary: LoadSummary) -> None:
-    """Upload v1 → v2 → v3 into one document family, validating in order.
+def _load_version_families(client: httpx.Client, summary: LoadSummary) -> None:
+    """Upload every version family declared in ``VERSION_FAMILIES``.
 
-    Each validate call after v1 implicitly moves the prior validated
-    sibling to ``SUPERSEDED`` (review_service._maybe_supersede_prior_validated).
-    The summary table reflects the final post-supersede state.
+    Each family is uploaded as v1 → v2 → v3 into one document, validating
+    in order. Each validate call after v1 implicitly moves the prior
+    validated sibling to ``SUPERSEDED``
+    (review_service._maybe_supersede_prior_validated). The summary table
+    reflects the final post-supersede state.
     """
+    for family_label, family in VERSION_FAMILIES:
+        _load_one_family(client, summary, family_label=family_label, family=family)
+
+
+def _load_one_family(
+    client: httpx.Client,
+    summary: LoadSummary,
+    *,
+    family_label: str,
+    family: list[tuple[str, str]],
+) -> None:
     parent_document_id: str | None = None
     family_versions: list[LoadedVersion] = []
 
-    for filename, cluster in SUPPLIER_FAMILY:
+    for filename, cluster in family:
         path = FULL_DEMO_DIR / filename
         row = _upload(client, path, document_id=parent_document_id, cluster=cluster)
         summary.versions.append(row)
@@ -328,11 +400,13 @@ def _load_supplier_family(client: httpx.Client, summary: LoadSummary) -> None:
         _validate(
             client,
             row,
-            note=f"demo loader: validated {filename} into family {parent_document_id}",
+            note=(
+                f"demo loader: validated {filename} into {family_label} family {parent_document_id}"
+            ),
         )
 
-    # After all three are validated, refresh the rows so the summary
-    # reflects the SUPERSEDED state of v1 and v2. We re-read the document
+    # After every version is validated, refresh the rows so the summary
+    # reflects the SUPERSEDED state of v1..vN-1. We re-read the document
     # once and overlay the latest status onto our local rows.
     if parent_document_id is None:
         return
@@ -524,11 +598,10 @@ def _print_summary(summary: LoadSummary, api: str) -> None:
 
 
 def _missing_fixtures() -> list[Path]:
-    expected = (
-        [FULL_DEMO_DIR / name for name, _ in TEXT_FIXTURES]
-        + [FULL_DEMO_DIR / name for name, _ in SUPPLIER_FAMILY]
-        + [FULL_DEMO_DIR / "taxonomy.yaml"]
-    )
+    expected: list[Path] = [FULL_DEMO_DIR / name for name, _ in TEXT_FIXTURES]
+    for _, family in VERSION_FAMILIES:
+        expected.extend(FULL_DEMO_DIR / name for name, _ in family)
+    expected.append(FULL_DEMO_DIR / "taxonomy.yaml")
     return [path for path in expected if not path.exists()]
 
 
@@ -576,7 +649,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     with httpx.Client(base_url=args.api, timeout=60.0) as client:
         _check_health(client)
         _load_topic_corpus(client, summary)
-        _load_supplier_family(client, summary)
+        _load_version_families(client, summary)
         _load_duplicate(client, summary)
         _load_binary_fixtures(client, summary)
         _aggregate_status_counts(summary)

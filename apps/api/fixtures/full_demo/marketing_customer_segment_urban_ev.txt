@@ -1,0 +1,10 @@
+Customer Segment Study — Urban EV Buyer 2026
+Owner: Marketing — Customer Insights
+Source: 4 800-respondent quantitative study + 24 in-depth interviews across France, Germany, UK, Italy
+
+Target segment: 30-50 year old urban professionals replacing a premium D-segment ICE vehicle with a battery-electric alternative.
+Top decision drivers: real-world range ≥ 500 km WLTP, public DC fast-charging time ≤ 22 minutes 10-80 %, software update cadence, residual value at year 4.
+Pain points around the existing offer: opaque charging pricing, anxiety about cold-weather range degradation, perceived complexity of the in-vehicle infotainment.
+Brand consideration set: 6 OEMs in cross-shopping, with 2 challengers gaining share quarter over quarter on the back of a software-first positioning.
+Pricing sensitivity: net-of-incentive sticker price elasticity -1.4 in the 60-75k EUR band, dropping to -0.8 above 80k where premium features dominate.
+Implications for the NX-EV-2027 product positioning are summarised in marketing_brand_positioning_suv.txt and the launch communication plan in marketing_launch_plan_press_kit.txt.

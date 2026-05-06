@@ -1,0 +1,12 @@
+Crash Simulation Results — Frontal MPDB 50 km/h
+Program: NX-EV-2027
+Owner: Simulation — Passive Safety
+Tool: LS-DYNA explicit, vehicle model 1.4 M elements, dummy THOR-50M
+
+Input: VPC2 BIW geometry, production trim mass distribution, frozen battery pack mass-and-CG, restraint system R3.0.
+Pulse: peak deceleration 38 g at 42 ms, mean deceleration 18 g over 80 ms, intrusion budget at the firewall ≤ 110 mm.
+Dummy injury predictions: HIC15 = 380, chest deflection 36 mm, femur load 5.6 kN — all below the Euro NCAP 2026 5-star thresholds.
+HV battery integrity: no contact between the front longitudinal and the pack envelope within the 60 ms simulation window; pyrofuse activation predicted at 28 ms.
+Comparison with the prior simulation iteration shows a 14 mm reduction in firewall intrusion thanks to the optimised front longitudinal documented in engineering_change_request_4471.txt.
+This simulation feeds the physical test campaign in vv_crash_test_plan_euroncap.txt; deviations > 8 % between simulation and test trigger a model-correction workflow.
+Outputs delivered to the safety review board ahead of the next gate review.

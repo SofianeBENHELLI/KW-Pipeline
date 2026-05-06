@@ -1,0 +1,11 @@
+CFD Aerodynamic Analysis Report — NX-EV-2027 Sedan
+Owner: Simulation — External Aerodynamics
+Tool: STAR-CCM+ unsteady Reynolds-averaged Navier-Stokes, hybrid wall-modelled LES on the underbody region
+
+Baseline coefficient of drag at 130 km/h: Cd = 0.218 with the design-frozen body, target ≤ 0.21 to support the WLTP range claim documented in marketing_customer_segment_urban_ev.txt.
+Mesh: 240 M cells trimmed grid, prism layers resolving y+ ≈ 1 on the underbody, 5 mm surface refinement near the front fascia.
+Sensitivity study identifies the largest gains: lower-front spoiler optimisation (-7 counts), wheel-deflector geometry (-4 counts), tailgate spoiler kick angle (-3 counts).
+Cooling-flow study isolated to a separate steady-state run with porous media for the front-end cooling pack; pressure drop budget aligns with the powertrain thermal model.
+Wind-noise companion study runs on the same mesh family and feeds simulation_nvh_powertrain.txt for the cabin SPL prediction.
+Correlation: open-jet wind tunnel measurement at the partner facility within 4 counts of the CFD prediction at the four critical attitude points.
+Sign-off: aero engineering committee, deliverable feeding the styling clinic ahead of the Style Freeze gate.

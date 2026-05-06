@@ -1,0 +1,13 @@
+Body Shop Welding Cell Layout — Cell BS-04
+Plant: Plant 2 — NX-EV-2027 lead production line
+Owner: Manufacturing Engineering — Body Shop
+Cycle: Sign-off ahead of equipment installation
+
+Cell BS-04 joins the underbody floor pan to the front-rail subassembly through 122 resistance spot welds, 6 stud welds, and 2 friction-stir welded longitudinal seams.
+Robots: 8 KUKA KR-280 6-axis arms with integrated servo guns; cycle time 58 s, takt time 60 s.
+Tooling: dedicated geo-fixture with auto-actuated NC blocks, pin-and-bushing locators class IT8 to hit the body-in-white dimensional plan.
+Quality gate: 100 % in-line laser triangulation scan after the cell, deviation envelope ±0.5 mm at every CMM-equivalent point.
+Joining process specifications follow the welding control plan; weld nugget diameter target 5.5 mm verified by destructive shear-tear sample every 200 BIWs.
+Material handling: AGV-fed sub-assembly buffer, JIS sequencing tied to the MES schedule.
+Safety: Cat 4 PLe light curtains on the operator side, dual e-stop chain integrated into the line PLC.
+Cell BS-04 feeds the trim line documented in manufacturing_line_balancing_trim.txt.

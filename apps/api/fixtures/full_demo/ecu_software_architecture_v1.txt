@@ -1,0 +1,13 @@
+ECU Software Architecture
+Version 1.0 — Issued 2025-11-01
+Owner: E/E Architecture — Software Platform
+Audience: ECU teams, integration team, V&V
+
+Baseline architecture for the NX-EV-2027 zone-controller and HPC software platform.
+Operating system split: AUTOSAR Classic on every safety-critical ECU, AUTOSAR Adaptive on the HPC for ADAS, IVI, and OTA orchestration.
+Communication middleware: SOME/IP-SD over Ethernet TSN backbone, with CAN-FD as legacy fallback for body and chassis nodes.
+Service catalogue v1: 42 services covering powertrain, ADAS, body, infotainment, telematics; service interface freeze planned for the v2 update.
+Cybersecurity: SecOC on every safety-relevant CAN frame, mTLS on every Ethernet service endpoint, signed binaries verified at boot.
+Diagnostic stack: UDS over DoIP for off-board access, UDS over CAN for legacy bus; per-ECU minimum DTC catalogue published in DEXT.
+Toolchain: Vector DaVinci Configurator + Polarspace Code Composer; build artefacts archived on the central artifact server with SBOM.
+Open items: SOME/IP service rate limits, the heartbeat strategy across the dual-SoC HPC, and the OTA staging model for the gateway.

@@ -1,0 +1,12 @@
+HIL Test Strategy — ADAS Highway Pilot
+Program: NX-EV-2027
+Owner: V&V — ADAS validation
+Standards reference: ISO 26262, ISO 21448 (SOTIF), UNECE R157
+
+Test pyramid: 70 % MIL on the closed-loop simulator, 20 % SIL with the production binary, 10 % HIL on the bench, plus closed-track and public-road campaigns gated on HIL pass.
+HIL bench: dSPACE SCALEXIO with the production HPC under test, fault-injection cards on every CAN/Ethernet link, replay of 12 000 scenarios from the scenario library.
+Scenario library covers cut-in, cut-out, lane drift, ghost target, sensor blockage, GNSS spoofing, and the high-priority SOTIF triggering conditions.
+Pass criteria mapped one-to-one to the requirements in automotive_adas_l2plus_feature_definition.txt and traced in Polarion.
+Coverage targets: 100 % requirement coverage, ≥ 95 % statement coverage on the lateral-control software unit, structural coverage MC/DC on the take-over arbitration logic.
+Regression budget: full HIL pass < 18 hours wall clock; nightly smoke under 90 minutes.
+Defects route through the standard change board described in engineering_change_request_4471.txt; safety-relevant findings escalate to the ASIL-D verification log vv_iso26262_asild_verification.txt.

@@ -1,0 +1,12 @@
+Top-Level Bill of Materials — NX-EV-2027 Sedan
+Owner: Program Management Office — BOM control
+Revision: REV-04, baseline frozen for VPC1 build
+
+Body-in-white: 312 kg aluminium-steel hybrid structure, painted at the in-house paint shop per manufacturing_paint_shop_process_spec.txt.
+HV battery pack: 540 kg, 87 kWh usable, sourced via the dual-supplier strategy in sourcing_dual_sourcing_igbt.txt.
+Powertrain: rear-axle e-motor 220 kW + optional front-axle motor 120 kW for the AWD trim; torque vectoring controlled by the HPC.
+Interior: 14-way power front seats, 12.3" cluster + 15.6" centre IVI, 16-speaker premium audio for the top trim.
+Chassis: 5-link rear suspension, double-wishbone front, MR-fluid adaptive dampers on the top trim.
+Closures: frameless doors with capacitive handle, frunk with electric pop-up, tailgate with hands-free kick sensor.
+Total target curb mass 1985 kg; cost target margin +6 % versus the 2024 benchmark for the equivalent trim.
+Critical-path long-lead items: HV battery cells (24 weeks), inverter SiC dies (32 weeks), ADAS HPC SoC (28 weeks).

@@ -1,0 +1,12 @@
+Tier-1 Supplier Scorecard — Q2
+Owner: Purchasing — Powertrain & E/E commodity
+Cycle: Quarterly business review
+
+Coverage: top 24 Tier-1 suppliers by spend across the NX-EV-2027 BOM (powertrain, E/E, body, chassis).
+Metrics weighting: quality 30 %, delivery 30 %, cost 20 %, technology roadmap 10 %, sustainability 10 %.
+Quality KPIs: PPM in the field, PPM at IQC (incoming quality control), 8D closure latency, escape rate to the customer.
+Delivery KPIs: on-time-in-full, line-stop incidents, recovery latency after a missed delivery window, expedite cost.
+Sustainability: scope-1+2 emissions disclosure, scope-3 attestation maturity, REACH and conflict-minerals reporting cadence.
+Q2 verdict: 4 suppliers green, 16 suppliers amber, 4 suppliers red — including an inverter supplier flagged for repeated solder-paste defects feeding into the dual-sourcing strategy in sourcing_dual_sourcing_igbt.txt.
+Action: business reviews scheduled for the 4 red suppliers, with corrective-action plans tracked in quality_corrective_action_log.txt.
+Onboarding criteria for any new supplier follow supplier_onboarding_policy_v3.txt.

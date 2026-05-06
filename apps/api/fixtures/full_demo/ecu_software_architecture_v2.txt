@@ -1,0 +1,13 @@
+ECU Software Architecture
+Version 2.0 — Issued 2026-02-12
+Owner: E/E Architecture — Software Platform
+Audience: ECU teams, integration team, V&V, cybersecurity
+
+Closes the v1 open items and adds the cybersecurity scope demanded by UNECE R155 (see cyber_unece_r155_policy.txt).
+Service catalogue v2: 56 services after the addition of HV battery telemetry, brake-by-wire arbitration, and ADAS scenario tagging.
+SOME/IP rate limits: every service annotated with a maximum request rate enforced by the gateway; the rate-limit table is generated from the service catalogue at build time.
+HPC heartbeat: dual-SoC arrangement with a watchdog ASIC that monitors both SoCs at 50 Hz; failure on one SoC triggers a controlled hand-over within 200 ms.
+OTA staging: A/B partitioning extended to every zone controller with > 4 MB of code; rollback is automatic on failed boot or failed health check.
+Cybersecurity update: SBOM signed and shipped with every binary; vulnerability triage SLAs from cyber_unece_r155_policy.txt enforced on every release branch.
+Toolchain change: integration build moves to Bazel for hermetic builds; binary reproducibility verified for every release artefact.
+Open items: AUTOSAR Adaptive runtime upgrade to release R23-11, finalisation of the ECU software clock synchronisation strategy.
