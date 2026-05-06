@@ -19,7 +19,12 @@ import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
-import { SettingsLauncher, SettingsModal } from "./features/settings/SettingsModal";
+import { SettingsLauncher } from "./features/settings/SettingsLauncher";
+// SettingsModal pulls in the shared DemoToggle (446 LOC) + the admin
+// config form, which is only needed when the user clicks the gear.
+// Lazy-load it so the initial chunk stays under its bundle budget
+// (#125). The Suspense boundary lives on the modal mount-point below.
+const SettingsModal = lazy(() => import("./features/settings/SettingsModal").then((m) => ({ default: m.SettingsModal })));
 import { ForceAutoCorpusBanner } from "./ui/ForceAutoCorpusBanner";
 
 /**
@@ -465,18 +470,26 @@ function ReviewerWorkbench() {
         onSelectCitation={(citation) => selectDocument(citation.document_id)}
       />
       <SettingsLauncher onClick={() => setSettingsOpen(true)} />
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onCorpusRefreshNeeded={() => {
-          // Transitional Demo toggle (apps/_shared/demo-toggle): re-fetch
-          // the document list once the bundled loader finishes or the
-          // dataset is reset, so the pipeline widget / review workspace
-          // / search panel reflect the new corpus on the next render.
-          void refreshAll();
-          bumpMutation();
-        }}
-      />
+      {/* The modal only mounts (and only fetches its lazy chunk) the
+          first time the user opens it. Suspense fallback is null
+          because the launcher already gives the operator a hold —
+          no spinner needed for what's effectively a button click. */}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            onCorpusRefreshNeeded={() => {
+              // Transitional Demo toggle (apps/_shared/demo-toggle): re-fetch
+              // the document list once the bundled loader finishes or the
+              // dataset is reset, so the pipeline widget / review workspace
+              // / search panel reflect the new corpus on the next render.
+              void refreshAll();
+              bumpMutation();
+            }}
+          />
+        </Suspense>
+      )}
     </main>
   );
 }
