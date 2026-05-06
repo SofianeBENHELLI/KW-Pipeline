@@ -1,0 +1,23 @@
+taxonomy:
+  schema_version: v0.1
+  categories:
+    - id: quality
+      label: Quality & Compliance
+      description: ISO 9001 program, audits, nonconformances, corrective actions.
+      subcategories:
+        - id: quality.audits
+          label: Audits & nonconformances
+          description: Surveillance audits, findings, and CAPA closure.
+    - id: suppliers
+      label: Supplier Management
+      description: Supplier onboarding, qualification, and renewal.
+      subcategories:
+        - id: suppliers.onboarding
+          label: Onboarding
+          description: Screening, classification, and tier-based qualification.
+    - id: customer-success
+      label: Customer Success
+      description: Renewal risk scoring, playbooks, and account health.
+    - id: engineering
+      label: Engineering Change
+      description: Engineering change requests, design reviews, and effectivity.

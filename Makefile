@@ -11,7 +11,7 @@ WEB_DIR := apps/web
 WIDGET_DIR := apps/widget
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help demo-smoke demo-api demo-web demo-widget demo-neo4j demo-graph
+.PHONY: help demo-smoke demo-api demo-web demo-widget demo-neo4j demo-graph demo-load
 
 help:
 	@echo "KW-Pipeline demo targets:"
@@ -21,6 +21,7 @@ help:
 	@echo "  make demo-widget  Start the 3DX KnowledgeForge widget dev server (https://localhost:8081)"
 	@echo "  make demo-neo4j   Bring up the optional Neo4j store via docker compose"
 	@echo "  make demo-graph   Alias of demo-neo4j"
+	@echo "  make demo-load    Load the full demo dataset against a running demo-api"
 	@echo ""
 	@echo "See docs/demo/customer_kg_demo.md for the full runbook."
 
@@ -55,3 +56,12 @@ demo-neo4j:
 
 # Friendly alias.
 demo-graph: demo-neo4j
+
+# Full demo loader — populates a running demo-api with the rich corpus
+# under apps/api/fixtures/full_demo/ so the UI can demonstrate
+# documents, chunks, taxonomy, version lineage, duplicate detection,
+# topic clustering, knowledge graph, similarity, and the review FSM.
+# Requires `make demo-api` (or ./scripts/demo-backend.sh) to be running
+# in another terminal first.
+demo-load:
+	cd $(API_DIR) && $(PYTHON) scripts/load_demo_dataset.py

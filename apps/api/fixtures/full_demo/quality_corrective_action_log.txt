@@ -1,0 +1,9 @@
+Corrective Action Log
+Owner: Quality Operations
+Cadence: Reviewed weekly by the quality director
+
+Corrective action CAR-2026-014 closes finding QA-2026-Q1-01 by adding a mandatory management review checkbox to the document-control workflow.
+Corrective action CAR-2026-015 closes finding QA-2026-Q1-02 by syncing the internal audit schedule with the registrar's surveillance plan each January.
+Corrective action CAR-2026-016 closes finding QA-2026-Q1-03 by escalating any nonconformance past its ten-business-day containment window to the quality director within twenty-four hours.
+Each corrective action records a root-cause analysis, an assigned owner, an effectiveness check, and a closure date.
+The quality director reviews the log weekly and reports closure metrics at the monthly management review until the major findings are cleared.

@@ -1,0 +1,12 @@
+Engineering Change Request CR-2026-0142
+Submitted: 2026-04-22
+Owner: Manufacturing Engineering
+Status: Pending operations sign-off
+
+Replace fastener bracket P/N 4471-A with revised P/N 4471-B across line 3.
+The change affects approximately 240 assemblies currently in WIP and requires a tooling adjustment on station 3-B.
+Quality and operations have signed off; the supplier has confirmed availability of the revised bracket.
+Effectivity: next production batch following final approval, no earlier than 2026-05-10.
+The change request links back to nonconformance NC-2025-118 which flagged a recurring fit issue on the prior bracket.
+Risk: low — the revised geometry preserves every datum and tolerance from the prior revision.
+Validation: a first-article inspection on five units must clear before full production resumes.

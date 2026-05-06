@@ -1,0 +1,12 @@
+Supplier Onboarding Policy
+Version 3.0 — Issued 2026-04-30
+Owner: Procurement Operations
+Audience: Vendor managers, supplier success leads, and the privacy office
+
+Suppliers must complete security screening, a privacy impact assessment, AND an AI-Act self-attestation when the engagement involves automated decision-making.
+Finance approval is required before onboarding suppliers with annual spend above 25000 USD; spend categorisation now distinguishes capex from opex.
+Every supplier record must include an accountable business owner, a renewal date, a documented data classification, and a designated contractual contact.
+Tier-1 suppliers complete an annual on-site audit; Tier-2 suppliers complete a documentation-only review every eighteen months; Tier-3 (limited-risk) suppliers self-attest annually.
+Onboarding exceptions must be reviewed by Legal, Security, Privacy, AND the AI risk officer within three business days when the engagement is automated-decision-making.
+Supplier records are retained for ten years after contract termination, with a litigation-hold override that pauses any deletion request.
+Procurement runs a daily standup with supplier success during a tier-1 onboarding wave; otherwise the queue is reviewed twice weekly.

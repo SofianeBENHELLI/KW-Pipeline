@@ -1,0 +1,12 @@
+Quality Management System Handbook
+Owner: Quality Director
+Audience: Operations, engineering, and audit teams
+
+Acme operates an ISO 9001 quality management system across every engineering site.
+ISO 9001 conformance is verified through annual surveillance audits performed by an accredited registrar.
+Quality manuals capture process diagrams and ISO 9001 conformance evidence revised every quarter.
+Surveillance audits log nonconformances against published manuals with severity codes and remediation owners.
+Major nonconformances trigger a containment plan within ten business days and a root-cause corrective action.
+Internal audits cover the same scope as the registrar's plan and feed the management review meeting.
+Document control assigns every controlled record a unique identifier and a retention period of seven years.
+The quality director chairs the quarterly management review and signs every revision of this handbook.

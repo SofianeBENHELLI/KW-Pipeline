@@ -221,6 +221,35 @@ duplicate uploads simply return `DUPLICATE_DETECTED`. Pass
 `--validate-one` to also flip one document to `VALIDATED` so the
 optional knowledge-graph projection has something to render.
 
+### Full demo dataset (every feature in one pass)
+
+For a live presenter walkthrough that exercises **every user-visible
+feature** — documents, chunks, taxonomy, multi-version lineage,
+duplicate detection, topic clustering, knowledge graph, similarity,
+and the validate / reject review FSM — start the demo backend with the
+knowledge layer enabled (`./scripts/demo-backend.sh` or `make demo-api`,
+both already set `KW_KNOWLEDGE_LAYER_ENABLED=true`) and then run:
+
+```bash
+make demo-load
+# or, equivalently:
+python apps/api/scripts/load_demo_dataset.py
+# or, after `pip install -e 'apps/api[test]'`:
+.venv312/bin/kw-demo-load
+```
+
+The loader uploads a richer corpus (under `apps/api/fixtures/full_demo/`)
+grouped into four topical clusters — Quality, Suppliers, Customer
+Success, Engineering Change — and drives every fixture through
+`extract → semantic → validate`. It then re-uploads the supplier-
+onboarding policy as v2 and v3 against the same family (validating
+each in turn so v1/v2 land as `SUPERSEDED`), re-uploads v1's bytes
+under a new filename to fire `DUPLICATE_DETECTED`, rejects one
+document to demonstrate the rejection path, and prints a summary
+table with lifecycle and knowledge-graph counters. See
+`apps/api/fixtures/full_demo/README.md` for the full feature
+inventory.
+
 ## Knowledge Layer (Optional)
 
 The knowledge layer is **opt-in** and disabled by default. With no env vars

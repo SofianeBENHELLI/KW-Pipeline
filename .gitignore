@@ -38,5 +38,13 @@ coverage.xml
 htmlcov/
 pytest-junit.xml
 
+# Demo binary fixtures generated on first run by ``_demo_fixtures.py``
+# (PDFs and DOCXs embed creation timestamps so committing them produces
+# noisy diffs).
+apps/api/fixtures/demo/*.pdf
+apps/api/fixtures/demo/*.docx
+apps/api/fixtures/full_demo/*.pdf
+apps/api/fixtures/full_demo/*.docx
+
 # Local Claude Code agent worktree state — never commit.
 .claude/worktrees/

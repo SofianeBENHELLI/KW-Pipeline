@@ -1,0 +1,10 @@
+Customer Success Renewal Playbook
+Owner: Customer Success Operations
+Audience: Customer success managers and renewal owners
+
+Renewal risk is scored quarterly using usage signals, executive sponsorship, and engagement health.
+A renewal risk score below 60 escalates to the customer success leadership team within five business days.
+Every renewal cycle produces a Markdown summary with source lineage so Legal and Finance can review the same artifact.
+Customer Success leadership reviews red renewal risk scores during the weekly leadership standup until the renewal closes.
+The playbook references the procurement onboarding policy for any supplier review that blocks a renewal.
+Quarterly business reviews include the renewal risk trend, the active escalations, and the Net Revenue Retention roll-up.
