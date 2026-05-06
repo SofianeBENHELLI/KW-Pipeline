@@ -17,6 +17,7 @@ import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
+import { PurgeDialog } from "./features/purge/PurgeDialog";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
 import { SettingsLauncher, SettingsModal } from "./features/settings/SettingsModal";
@@ -374,6 +375,20 @@ function ReviewerWorkbench() {
     bumpMutation,
   } = catalog;
 
+  // #292 §5 — purge dialog target. ``null`` keeps the modal hidden;
+  // setting it to a document opens the confirmation modal.
+  const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
+
+  const handlePurgeRequest = useCallback((document: ApiDocument) => {
+    setPurgeTarget(document);
+  }, []);
+
+  const handlePurged = useCallback(async () => {
+    setPurgeTarget(null);
+    await refreshAll();
+    bumpMutation();
+  }, [bumpMutation, refreshAll]);
+
   const handleMutationCompleted = useCallback(async () => {
     await Promise.all([refreshSelected(), refreshAll()]);
     bumpMutation();
@@ -434,6 +449,20 @@ function ReviewerWorkbench() {
         onSelectDocument={selectDocument}
         filter={filter}
         onFilterChange={setFilter}
+        onPurgeRequest={handlePurgeRequest}
+      />
+      <PurgeDialog
+        document={
+          purgeTarget
+            ? {
+                id: purgeTarget.id,
+                original_filename: purgeTarget.original_filename,
+                version_count: purgeTarget.versions.length,
+              }
+            : null
+        }
+        onCancel={() => setPurgeTarget(null)}
+        onPurged={() => void handlePurged()}
       />
       {selected !== null ? (
         <ReviewWorkspace

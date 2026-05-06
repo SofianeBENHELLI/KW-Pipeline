@@ -12,6 +12,8 @@ interface PipelineWidgetProps {
   filter?: { status: string[]; q: string };
   /** Filter setter — required when ``filter`` is provided. */
   onFilterChange?: (next: { status: string[]; q: string }) => void;
+  /** #292 §5 — when set, each row shows a Purge button that opens the modal. */
+  onPurgeRequest?: (document: ApiDocument) => void;
 }
 
 /**
@@ -45,6 +47,7 @@ export function PipelineWidget({
   onSelectDocument,
   filter,
   onFilterChange,
+  onPurgeRequest,
 }: PipelineWidgetProps) {
   const activeViewId = filter
     ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
@@ -120,47 +123,63 @@ export function PipelineWidget({
 
             const totalVersions = document.versions.length;
             return (
-              <button
+              <div
                 className={selected ? "document-row selected" : "document-row"}
-                type="button"
                 key={document.id}
                 aria-current={selected ? "page" : undefined}
-                onClick={() => onSelectDocument(document.id)}
               >
-                <span>
-                  <strong>
-                    {document.original_filename}
-                    {totalVersions > 1 ? (
+                <button
+                  type="button"
+                  className="document-row-main"
+                  onClick={() => onSelectDocument(document.id)}
+                >
+                  <span>
+                    <strong>
+                      {document.original_filename}
+                      {totalVersions > 1 ? (
+                        <span
+                          className="version-count muted"
+                          data-testid="version-count"
+                        >
+                          {" "}
+                          ({totalVersions} versions)
+                        </span>
+                      ) : null}
+                    </strong>
+                    <small>
                       <span
-                        className="version-count muted"
-                        data-testid="version-count"
+                        className="version-badge"
+                        data-testid="latest-version-badge"
+                        aria-label={`Latest version v${version.version_number}`}
+                        title={`Latest version v${version.version_number}`}
                       >
-                        {" "}
-                        ({totalVersions} versions)
+                        v{version.version_number}
+                      </span>
+                      <ScopeChip scopes={documentScopes(document)} />
+                    </small>
+                  </span>
+                  <span className="document-row-meta">
+                    {isDuplicate ? (
+                      <span className="duplicate-marker" aria-label="Duplicate of an earlier version">
+                        Duplicate
                       </span>
                     ) : null}
-                  </strong>
-                  <small>
-                    <span
-                      className="version-badge"
-                      data-testid="latest-version-badge"
-                      aria-label={`Latest version v${version.version_number}`}
-                      title={`Latest version v${version.version_number}`}
-                    >
-                      v{version.version_number}
-                    </span>
-                    <ScopeChip scopes={documentScopes(document)} />
-                  </small>
-                </span>
-                <span className="document-row-meta">
-                  {isDuplicate ? (
-                    <span className="duplicate-marker" aria-label="Duplicate of an earlier version">
-                      Duplicate
-                    </span>
-                  ) : null}
-                  <StatusBadge status={version.status} />
-                </span>
-              </button>
+                    <StatusBadge status={version.status} />
+                  </span>
+                </button>
+                {onPurgeRequest && (
+                  <button
+                    type="button"
+                    className="document-row-purge"
+                    aria-label={`Purge ${document.original_filename}`}
+                    title="Purge document permanently"
+                    onClick={() => onPurgeRequest(document)}
+                    data-testid={`purge-${document.id}`}
+                  >
+                    Purge
+                  </button>
+                )}
+              </div>
             );
           })
         )}

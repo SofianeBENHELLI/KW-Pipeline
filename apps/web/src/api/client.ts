@@ -28,6 +28,7 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiOrbitalPurgeDocumentResponse,
   ApiPurgeArtifactsResponse,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
@@ -681,6 +682,32 @@ export async function purgeArtifacts(
     await http.POST("/admin/archive/purge_artifacts", {
       params: { query },
       body: { document_id: documentId },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/orbital/purge_document (#292)
+ *
+ * Admin-only. Combined archive + purge_artifacts + KG cleanup in a
+ * single audited call. ``confirmation_filename`` MUST equal the
+ * target document's ``original_filename``; the route 422s on
+ * mismatch so a misclick can't take the wrong family. Emits an
+ * ``orbital.document.purge`` audit event on success.
+ */
+export async function orbitalPurgeDocument(
+  documentId: string,
+  confirmationFilename: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiOrbitalPurgeDocumentResponse> {
+  return unwrap(
+    await http.POST("/admin/orbital/purge_document", {
+      params: { query: { confirm: true } },
+      body: {
+        document_id: documentId,
+        confirmation_filename: confirmationFilename,
+      },
       signal: options.signal,
     }),
   );

@@ -260,9 +260,54 @@ class ArchivedDocumentsResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# ─── Orbital purge (#292 — operator override) ───────────────────────
+
+
+class OrbitalPurgeDocumentRequest(BaseModel):
+    """Body for ``POST /admin/orbital/purge_document`` (#292).
+
+    Combines archive + purge_artifacts in a single audited call so an
+    Orbital operator can hard-delete an active document with one
+    confirmation. ``confirmation_filename`` MUST equal the target
+    document's ``original_filename`` — the route 422s on a mismatch
+    so a misclick can't take down the wrong family.
+    """
+
+    document_id: str = Field(
+        description="Catalog id of the document to purge.",
+    )
+    confirmation_filename: str = Field(
+        description=(
+            "Operator-typed filename — must match the target document's "
+            "``original_filename`` exactly (case-sensitive). The route "
+            "rejects with 422 ``KW_VALIDATION_ERROR`` on mismatch."
+        ),
+    )
+
+
+class OrbitalPurgeDocumentResponse(BaseModel):
+    """Response body for ``POST /admin/orbital/purge_document`` (#292).
+
+    Mirrors :class:`PurgeArtifactsResponse` (per-version tombstones)
+    and adds an ``archived_at`` field so the operator sees the moment
+    the doc was flag-archived in the same response that confirmed the
+    cascade landed. ``kg_subgraph_purged`` is ``True`` whenever at
+    least one KG subgraph deletion was attempted (best-effort — KG is
+    derived data and any failure is logged + swallowed).
+    """
+
+    document_id: str
+    original_filename: str
+    archived_at: datetime
+    versions_purged: list[VersionPurgeResult] = Field(default_factory=list)
+    kg_subgraph_purged: bool = False
+
+
 __all__ = [
     "ArchivedDocumentItem",
     "ArchivedDocumentsResponse",
+    "OrbitalPurgeDocumentRequest",
+    "OrbitalPurgeDocumentResponse",
     "PurgeArtifactsRequest",
     "PurgeArtifactsResponse",
     "PurgeBatchRequest",

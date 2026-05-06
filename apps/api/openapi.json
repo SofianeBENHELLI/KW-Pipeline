@@ -1901,6 +1901,66 @@
         "title": "NerConfig",
         "type": "object"
       },
+      "OrbitalPurgeDocumentRequest": {
+        "description": "Body for ``POST /admin/orbital/purge_document`` (#292).\n\nCombines archive + purge_artifacts in a single audited call so an\nOrbital operator can hard-delete an active document with one\nconfirmation. ``confirmation_filename`` MUST equal the target\ndocument's ``original_filename`` — the route 422s on a mismatch\nso a misclick can't take down the wrong family.",
+        "properties": {
+          "confirmation_filename": {
+            "description": "Operator-typed filename — must match the target document's ``original_filename`` exactly (case-sensitive). The route rejects with 422 ``KW_VALIDATION_ERROR`` on mismatch.",
+            "title": "Confirmation Filename",
+            "type": "string"
+          },
+          "document_id": {
+            "description": "Catalog id of the document to purge.",
+            "title": "Document Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "confirmation_filename"
+        ],
+        "title": "OrbitalPurgeDocumentRequest",
+        "type": "object"
+      },
+      "OrbitalPurgeDocumentResponse": {
+        "description": "Response body for ``POST /admin/orbital/purge_document`` (#292).\n\nMirrors :class:`PurgeArtifactsResponse` (per-version tombstones)\nand adds an ``archived_at`` field so the operator sees the moment\nthe doc was flag-archived in the same response that confirmed the\ncascade landed. ``kg_subgraph_purged`` is ``True`` whenever at\nleast one KG subgraph deletion was attempted (best-effort — KG is\nderived data and any failure is logged + swallowed).",
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "title": "Archived At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "kg_subgraph_purged": {
+            "default": false,
+            "title": "Kg Subgraph Purged",
+            "type": "boolean"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "versions_purged": {
+            "items": {
+              "$ref": "#/components/schemas/VersionPurgeResult"
+            },
+            "title": "Versions Purged",
+            "type": "array"
+          }
+        },
+        "required": [
+          "document_id",
+          "original_filename",
+          "archived_at",
+          "versions_purged",
+          "kg_subgraph_purged"
+        ],
+        "title": "OrbitalPurgeDocumentResponse",
+        "type": "object"
+      },
       "PersistenceConfig": {
         "properties": {
           "data_dir": {
@@ -3638,6 +3698,57 @@
           }
         },
         "summary": "Get Hitl State"
+      }
+    },
+    "/admin/orbital/purge_document": {
+      "post": {
+        "description": "Hard-delete an active document from Orbital (#292 — operator override).\n\nCombines archive + ``purge_artifacts`` + KG subgraph cleanup\nin one audited call. The operator types the document's\n``original_filename`` into the modal; the route 422s on a\nmismatch so a misclick can't take down the wrong family.\n\nPer the deletion-rules feedback (memory), Orbital is the only\nsanctioned hard-delete surface; every other entry point still\nflag-archives. The cascade order matches ADR-027:\n\n1. Archive the document (sets ``archived_at`` so all read\n   paths immediately stop surfacing it).\n2. Purge each version's source artifacts (storage bytes +\n   catalog ``storage_uri`` flip to a tombstone). Reuses\n   :func:`_purge_one_document` so the per-version contract\n   stays identical to the legacy admin path.\n3. Drop the KG subgraph for each version (best-effort —\n   failures are logged + swallowed because KG is derived\n   data, regenerable from the catalog).\n\nAudit emits a single ``orbital.document.purge`` event with\nthe actor, filename, archive timestamp, and version count\nper the spec in #292.",
+        "operationId": "admin_orbital_purge_document",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrbitalPurgeDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrbitalPurgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Orbital Purge Document"
       }
     },
     "/documents": {

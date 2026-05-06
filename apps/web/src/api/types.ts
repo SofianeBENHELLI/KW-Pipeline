@@ -94,6 +94,14 @@ export type ApiPurgeArtifactsResponse = Schemas["PurgeArtifactsResponse"];
 /** Per-version row inside a purge response. */
 export type ApiVersionPurgeResult = Schemas["VersionPurgeResult"];
 
+/** Body of ``POST /admin/orbital/purge_document`` (#292). */
+export type ApiOrbitalPurgeDocumentRequest =
+  Schemas["OrbitalPurgeDocumentRequest"];
+
+/** Response body of ``POST /admin/orbital/purge_document`` (#292). */
+export type ApiOrbitalPurgeDocumentResponse =
+  Schemas["OrbitalPurgeDocumentResponse"];
+
 // ─── Admin / HITL dashboard (#215, EPIC-A close-out) ───────────────────────
 
 /** Read-only HITL routing state snapshot powering the Admin HITL

@@ -63,6 +63,8 @@ from app.models.document import DocumentVersionStatus
 from app.schemas.admin_archive import (
     ArchivedDocumentItem,
     ArchivedDocumentsResponse,
+    OrbitalPurgeDocumentRequest,
+    OrbitalPurgeDocumentResponse,
     PurgeArtifactsRequest,
     PurgeArtifactsResponse,
     PurgeBatchRequest,
@@ -762,6 +764,138 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             )
 
         return PurgeBatchResponse(results=results, dry_run=dry_run)
+
+    @router.post(
+        "/admin/orbital/purge_document",
+        operation_id="admin_orbital_purge_document",
+        response_model=OrbitalPurgeDocumentResponse,
+    )
+    def orbital_purge_document(
+        body: OrbitalPurgeDocumentRequest,
+        confirm: bool = Query(False),
+        user: User = Depends(require_admin),
+    ) -> OrbitalPurgeDocumentResponse:
+        """Hard-delete an active document from Orbital (#292 — operator override).
+
+        Combines archive + ``purge_artifacts`` + KG subgraph cleanup
+        in one audited call. The operator types the document's
+        ``original_filename`` into the modal; the route 422s on a
+        mismatch so a misclick can't take down the wrong family.
+
+        Per the deletion-rules feedback (memory), Orbital is the only
+        sanctioned hard-delete surface; every other entry point still
+        flag-archives. The cascade order matches ADR-027:
+
+        1. Archive the document (sets ``archived_at`` so all read
+           paths immediately stop surfacing it).
+        2. Purge each version's source artifacts (storage bytes +
+           catalog ``storage_uri`` flip to a tombstone). Reuses
+           :func:`_purge_one_document` so the per-version contract
+           stays identical to the legacy admin path.
+        3. Drop the KG subgraph for each version (best-effort —
+           failures are logged + swallowed because KG is derived
+           data, regenerable from the catalog).
+
+        Audit emits a single ``orbital.document.purge`` event with
+        the actor, filename, archive timestamp, and version count
+        per the spec in #292.
+        """
+        if not confirm:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.UNPROCESSABLE_ENTITY,
+                message="Orbital purge requires ?confirm=true.",
+                retryable=False,
+                remediation=(
+                    "Append ?confirm=true to the request once the "
+                    "operator has acknowledged the modal."
+                ),
+            )
+
+        catalog = services.documents.catalog
+        document = catalog._get_document_including_archived(  # type: ignore[attr-defined]
+            body.document_id,
+        )
+        if document is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Document not found: {body.document_id!r}.",
+                retryable=False,
+                remediation="Verify the document id; archived rows are visible too.",
+            )
+
+        if body.confirmation_filename != document.original_filename:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=(
+                    "confirmation_filename does not match the document's "
+                    f"original_filename ({document.original_filename!r})."
+                ),
+                retryable=False,
+                remediation=(
+                    "Type the document's filename exactly into the "
+                    "Orbital purge modal — case-sensitive — to confirm."
+                ),
+            )
+
+        archived_at = document.archived_at or datetime.now(UTC)
+        if document.archived_at is None:
+            catalog.flag_document_archived(
+                body.document_id,
+                archived_at=archived_at,
+                actor=user.id,
+            )
+
+        purge_response = _purge_one_document(
+            body.document_id,
+            dry_run=False,
+            actor=user.id,
+            actor_role=user.role,
+        )
+
+        # KG cleanup — best-effort; KG is derived data, regenerable.
+        kg_purged = False
+        graph_store = getattr(services, "graph_store", None)
+        if graph_store is not None:
+            for version in document.versions:
+                try:
+                    graph_store.delete_subgraph_for_version(
+                        document_id=body.document_id,
+                        version_id=version.id,
+                    )
+                    kg_purged = True
+                except Exception as exc:  # noqa: BLE001 — best-effort.
+                    log.warning(
+                        "orbital.document.purge.kg_delete_failed",
+                        extra={
+                            "document_id": body.document_id,
+                            "version_id": version.id,
+                            "error": str(exc),
+                        },
+                    )
+
+        log.info(
+            "orbital.document.purge",
+            extra={
+                "document_id": body.document_id,
+                "original_filename": document.original_filename,
+                "archived_at": archived_at.isoformat(),
+                "versions_purged": len(purge_response.versions_purged),
+                "kg_subgraph_purged": kg_purged,
+                "actor": user.id,
+                "actor_role": user.role,
+            },
+        )
+
+        return OrbitalPurgeDocumentResponse(
+            document_id=body.document_id,
+            original_filename=document.original_filename,
+            archived_at=archived_at,
+            versions_purged=purge_response.versions_purged,
+            kg_subgraph_purged=kg_purged,
+        )
 
     @router.get(
         "/admin/archive/archived_documents",
