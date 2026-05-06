@@ -33,7 +33,6 @@ import type {
   TaxonomyResponse,
 } from "../api/types";
 import {
-  CLUSTERS,
   type ClusterMeta,
   type ExplorerDocument,
   type ExplorerSnapshot,
@@ -195,16 +194,14 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
         // the snapshot now owns its own ``clusters`` field.
         const taxonomyAdapter = adaptTaxonomy(taxonomy);
         const clusters: Record<string, ClusterMeta> = {};
-        if (Object.keys(taxonomyAdapter.clusters).length > 0) {
-          for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
-            clusters[id] = meta;
-          }
-        } else {
-          // Seed from the sample-corpus dict so familiar names + hues
-          // survive the live transition. All seeds are "computed".
-          for (const [id, meta] of Object.entries(CLUSTERS)) {
-            clusters[id] = { ...meta, source: "computed" };
-          }
+        // When the operator has authored a taxonomy, every category
+        // becomes a cluster (source flag preserved). Otherwise, the
+        // cluster catalogue is built strictly from what live documents
+        // actually classify to — no seed entries — so the rail and
+        // graph never show empty placeholder clusters like
+        // "Product"/"Engineering" against an empty corpus.
+        for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
+          clusters[id] = meta;
         }
         for (const doc of documents) {
           if (!clusters[doc.cluster]) {

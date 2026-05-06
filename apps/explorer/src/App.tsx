@@ -134,9 +134,34 @@ export default function App(): React.ReactElement {
   const [focusRoot, setFocusRoot] = useState<FocusRoot | null>(null);
   const [history, setHistory] = useState<Array<FocusRoot | null>>([]);
   const [forward, setForward] = useState<Array<FocusRoot | null>>([]);
+  // Two-stage filter state: ``draftFilters`` tracks unconfirmed
+  // checkbox toggles in the DOCUMENT TYPE rail; ``filters`` is the
+  // applied state actually consumed by the cluster rail and graph.
+  // The Apply button copies draft → applied. Selection alone never
+  // affects the visible corpus until the operator clicks Apply.
   const [filters, setFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
     () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
   );
+  const [draftFilters, setDraftFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
+    () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
+  );
+  const filtersDirty = useMemo(() => {
+    if (draftFilters.types.size !== filters.types.size) return true;
+    for (const t of draftFilters.types) if (!filters.types.has(t)) return true;
+    return false;
+  }, [draftFilters, filters]);
+  const applyFilters = useCallback(() => {
+    setFilters({
+      types: new Set(draftFilters.types),
+      sources: new Set(draftFilters.sources),
+    });
+  }, [draftFilters]);
+  const resetDraftFilters = useCallback(() => {
+    setDraftFilters({
+      types: new Set(filters.types),
+      sources: new Set(filters.sources),
+    });
+  }, [filters]);
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Version-history modal — lifted to App level so a click on any
@@ -519,7 +544,9 @@ export default function App(): React.ReactElement {
     let n = 0;
     allClusters.forEach((ck) => {
       if (expandedClusters.has(ck)) {
-        const docs = snapshot.documents.filter((d) => d.cluster === ck);
+        const docs = snapshot.documents
+          .filter((d) => d.cluster === ck)
+          .filter((d) => filters.types.has(d.type));
         n += docs.length;
         docs.forEach((d) => {
           if (expandedDocs.has(d.id)) n += chunksForDoc(snapshot, d.id).length;
@@ -765,7 +792,9 @@ export default function App(): React.ReactElement {
             <div className="kx-cluster-list">
               {allClusters.map((ck) => {
                 const isExp = expandedClusters.has(ck);
-                const docs = snapshot.documents.filter((d) => d.cluster === ck);
+                const docs = snapshot.documents
+                  .filter((d) => d.cluster === ck)
+                  .filter((d) => filters.types.has(d.type));
                 // Prefer the snapshot's runtime catalogue (which carries
                 // the live ``source`` flag from the taxonomy fetch);
                 // fall back to the seed CLUSTERS dict for label/hue if
@@ -859,13 +888,17 @@ export default function App(): React.ReactElement {
             </div>
           </Section>
 
+          <Section title="TAXONOMY">
+            <TaxonomyImporter />
+          </Section>
+
           <Section title="DOCUMENT TYPE">
             {Object.entries(DOC_TYPES).map(([k, t]) => (
               <FilterRow
                 key={k}
-                checked={filters.types.has(k)}
+                checked={draftFilters.types.has(k)}
                 onChange={() =>
-                  setFilters((f) => {
+                  setDraftFilters((f) => {
                     const ns = new Set(f.types);
                     if (ns.has(k)) ns.delete(k);
                     else ns.add(k);
@@ -877,6 +910,26 @@ export default function App(): React.ReactElement {
                 count={snapshot.documents.filter((d) => d.type === k).length}
               />
             ))}
+            <div className="kx-filter-actions">
+              <button
+                type="button"
+                className={"kx-filter-apply" + (filtersDirty ? " kx-on" : "")}
+                disabled={!filtersDirty}
+                onClick={applyFilters}
+                title={filtersDirty ? "Apply selection" : "No changes to apply"}
+              >
+                Apply Filter
+              </button>
+              <button
+                type="button"
+                className="kx-filter-reset"
+                disabled={!filtersDirty}
+                onClick={resetDraftFilters}
+                title="Revert pending changes"
+              >
+                Reset
+              </button>
+            </div>
           </Section>
 
           <Section title="LEGEND">
@@ -1197,6 +1250,80 @@ const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({ sour
     >
       {isImposed ? "imposed" : "auto"}
     </span>
+  );
+};
+
+/**
+ * Operator-facing taxonomy importer (left rail).
+ *
+ * Accepts the four format families that cover ~all knowledge-org
+ * taxonomy interchange in the wild:
+ *
+ *   * SKOS (W3C) in RDF/XML (.rdf, .xml) or Turtle (.ttl) — the
+ *     canonical web standard for thesauri / classification schemes.
+ *   * SKOS in JSON-LD (.jsonld, .json) — same data model, JSON shape.
+ *   * Plain CSV (.csv) — pragmatic fallback (id, parent_id, label).
+ *   * YAML (.yaml, .yml) — what KW-Pipeline already speaks natively
+ *     via ``KW_TAXONOMY_PATH`` (ADR-017).
+ *
+ * The backend POST endpoint is not yet wired (read-only via the YAML
+ * file today). The importer currently surfaces the parsed file's
+ * basics so the operator can sanity-check before the import endpoint
+ * lands. Once a server-side import route exists this component swaps
+ * its alert for a fetch.
+ */
+const TAXONOMY_ACCEPT = ".yaml,.yml,.csv,.ttl,.rdf,.xml,.json,.jsonld";
+
+const TaxonomyImporter: React.FC = () => {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [status, setStatus] = useState<string>("");
+
+  const onPick = useCallback(() => {
+    inputRef.current?.click();
+  }, []);
+
+  const onFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    const standard =
+      ext === "ttl" || ext === "rdf"
+        ? "SKOS / RDF"
+        : ext === "jsonld" || ext === "json"
+          ? "SKOS / JSON-LD"
+          : ext === "csv"
+            ? "CSV"
+            : ext === "yaml" || ext === "yml"
+              ? "YAML"
+              : "unknown";
+    setStatus(
+      `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KiB, ${standard}). ` +
+        `Backend import endpoint not yet wired — copy the file to KW_TAXONOMY_PATH on the API host for now.`,
+    );
+    // Reset so picking the same file twice still fires onChange.
+    if (inputRef.current) inputRef.current.value = "";
+  }, []);
+
+  return (
+    <div className="kx-tax-importer">
+      <p className="kx-tax-help">
+        Import an external taxonomy. Supported standards: SKOS (RDF/XML, Turtle, JSON-LD), CSV, YAML.
+      </p>
+      <div className="kx-tax-actions">
+        <button type="button" className="kx-tax-btn" onClick={onPick}>
+          Import taxonomy…
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={TAXONOMY_ACCEPT}
+          onChange={onFile}
+          style={{ display: "none" }}
+          aria-label="Import taxonomy file"
+        />
+      </div>
+      {status && <p className="kx-tax-status">{status}</p>}
+    </div>
   );
 };
 

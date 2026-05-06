@@ -163,7 +163,20 @@ function useLayout(props: {
     const H = 720;
     const nodes: LayoutNode[] = [];
     const edges: LayoutEdge[] = [];
-    const ALL_CLUSTERS = Object.keys(CLUSTERS);
+    // Cluster catalogue: every id the snapshot knows about (taxonomy
+    // categories or doc-derived) plus any cluster a real doc is
+    // classified to. Empty *computed* clusters are filtered out so
+    // the canvas never paints phantom seeds (Product/Engineering/...)
+    // against an empty corpus; *imposed* (operator-authored) ones
+    // are kept even when empty so the operator's tree is visible.
+    const _clusterIds = new Set<string>();
+    snapshot.documents.forEach((d) => _clusterIds.add(d.cluster));
+    Object.keys(snapshot.clusters).forEach((k) => _clusterIds.add(k));
+    const ALL_CLUSTERS = [..._clusterIds].filter((ck) => {
+      const hasDocs = snapshot.documents.some((d) => d.cluster === ck);
+      const isImposed = snapshot.clusters[ck]?.source === "imposed";
+      return hasDocs || isImposed;
+    });
 
     if (focusRoot) {
       const center = { x: W * 0.5, y: H * 0.5 };
