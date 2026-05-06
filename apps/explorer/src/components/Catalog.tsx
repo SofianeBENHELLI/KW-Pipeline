@@ -56,7 +56,7 @@ interface Props {
 
 function classifyExt(filename: string): DocTypeKey {
   const dot = filename.lastIndexOf(".");
-  if (dot < 0 || dot === filename.length - 1) return "doc";
+  if (dot < 0 || dot === filename.length - 1) return "unknown";
   const ext = filename.slice(dot + 1).toLowerCase();
   if (ext === "pdf") return "pdf";
   if (ext === "doc" || ext === "docx") return "doc";
@@ -64,7 +64,7 @@ function classifyExt(filename: string): DocTypeKey {
   if (ext === "md" || ext === "markdown") return "md";
   if (ext === "html" || ext === "htm") return "web";
   if (ext === "wiki") return "wiki";
-  return "doc";
+  return "unknown";
 }
 
 function formatRelative(iso: string): string {

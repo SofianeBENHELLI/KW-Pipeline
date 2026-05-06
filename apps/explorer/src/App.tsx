@@ -134,8 +134,55 @@ export default function App(): React.ReactElement {
   const [focusRoot, setFocusRoot] = useState<FocusRoot | null>(null);
   const [history, setHistory] = useState<Array<FocusRoot | null>>([]);
   const [forward, setForward] = useState<Array<FocusRoot | null>>([]);
+  // Two-stage filter state: ``draftFilters`` tracks unconfirmed
+  // checkbox toggles in the DOCUMENT TYPE rail; ``filters`` is the
+  // applied state actually consumed by the cluster rail and graph.
+  // The Apply button copies draft → applied. Selection alone never
+  // affects the visible corpus until the operator clicks Apply.
   const [filters, setFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
     () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
+  );
+  const [draftFilters, setDraftFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
+    () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
+  );
+  const filtersDirty = useMemo(() => {
+    if (draftFilters.types.size !== filters.types.size) return true;
+    for (const t of draftFilters.types) if (!filters.types.has(t)) return true;
+    if (draftFilters.sources.size !== filters.sources.size) return true;
+    for (const s of draftFilters.sources) if (!filters.sources.has(s)) return true;
+    return false;
+  }, [draftFilters, filters]);
+  const applyFilters = useCallback(() => {
+    setFilters({
+      types: new Set(draftFilters.types),
+      sources: new Set(draftFilters.sources),
+    });
+  }, [draftFilters]);
+  const resetDraftFilters = useCallback(() => {
+    setDraftFilters({
+      types: new Set(filters.types),
+      sources: new Set(filters.sources),
+    });
+  }, [filters]);
+  // Sources known to the corpus — derived from live data, alphabetised
+  // so the chip order is stable across refreshes. Used by the SOURCE
+  // section to render one chip per source.
+  const knownSources = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of snapshot.documents) set.add(d.source);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [snapshot]);
+  // Single source-of-truth doc filter. ``filters.sources`` empty means
+  // "no source filter" (all sources pass) — that's the convention for
+  // a dynamic chip set; ``filters.types`` is the inverse (every entry
+  // in DOC_TYPES is opt-out so the empty set means "hide everything").
+  const docPassesFilters = useCallback(
+    (d: ExplorerDocument) => {
+      if (!filters.types.has(d.type)) return false;
+      if (filters.sources.size > 0 && !filters.sources.has(d.source)) return false;
+      return true;
+    },
+    [filters],
   );
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -186,13 +233,21 @@ export default function App(): React.ReactElement {
     //      (taxonomy ids surface here even when no doc has been
     //      classified to them yet — operators want to see their
     //      categories listed even if they're empty).
-    //   3. Module-level CLUSTERS as a final fallback for the sample
-    //      corpus shape.
+    //
+    // Empty *computed* clusters are filtered out so the rail never
+    // shows phantom seeds against an empty corpus; *imposed*
+    // (operator-authored) ones are kept even when empty so the
+    // operator's tree is always visible. This is the single
+    // source-of-truth for both the rail render and the
+    // <expanded>/<total> counter in HIERARCHY.
     const set = new Set<string>();
     snapshot.documents.forEach((d) => set.add(d.cluster));
     Object.keys(snapshot.clusters).forEach((k) => set.add(k));
-    Object.keys(CLUSTERS).forEach((k) => set.add(k));
-    return [...set];
+    return [...set].filter((ck) => {
+      const hasDocs = snapshot.documents.some((d) => d.cluster === ck);
+      const isImposed = snapshot.clusters[ck]?.source === "imposed";
+      return hasDocs || isImposed;
+    });
   }, [snapshot]);
 
   const toggleCluster = useCallback((key: string) => {
@@ -519,7 +574,9 @@ export default function App(): React.ReactElement {
     let n = 0;
     allClusters.forEach((ck) => {
       if (expandedClusters.has(ck)) {
-        const docs = snapshot.documents.filter((d) => d.cluster === ck);
+        const docs = snapshot.documents
+          .filter((d) => d.cluster === ck)
+          .filter(docPassesFilters);
         n += docs.length;
         docs.forEach((d) => {
           if (expandedDocs.has(d.id)) n += chunksForDoc(snapshot, d.id).length;
@@ -734,6 +791,12 @@ export default function App(): React.ReactElement {
                 <Icon name="warn" size={11} /> Sample data — backend unreachable
               </div>
             )}
+            {data.mode === "empty" && (
+              <div className="kx-empty-banner">
+                <Icon name="info" size={11} /> No documents yet. Upload one via Orbital
+                to populate the corpus.
+              </div>
+            )}
           </Section>
 
           <Section title="HIERARCHY">
@@ -766,7 +829,9 @@ export default function App(): React.ReactElement {
             <div className="kx-cluster-list">
               {allClusters.map((ck) => {
                 const isExp = expandedClusters.has(ck);
-                const docs = snapshot.documents.filter((d) => d.cluster === ck);
+                const docs = snapshot.documents
+                  .filter((d) => d.cluster === ck)
+                  .filter(docPassesFilters);
                 // Prefer the snapshot's runtime catalogue (which carries
                 // the live ``source`` flag from the taxonomy fetch);
                 // fall back to the seed CLUSTERS dict for label/hue if
@@ -860,13 +925,17 @@ export default function App(): React.ReactElement {
             </div>
           </Section>
 
+          <Section title="TAXONOMY">
+            <TaxonomyImporter />
+          </Section>
+
           <Section title="DOCUMENT TYPE">
             {Object.entries(DOC_TYPES).map(([k, t]) => (
               <FilterRow
                 key={k}
-                checked={filters.types.has(k)}
+                checked={draftFilters.types.has(k)}
                 onChange={() =>
-                  setFilters((f) => {
+                  setDraftFilters((f) => {
                     const ns = new Set(f.types);
                     if (ns.has(k)) ns.delete(k);
                     else ns.add(k);
@@ -878,6 +947,71 @@ export default function App(): React.ReactElement {
                 count={snapshot.documents.filter((d) => d.type === k).length}
               />
             ))}
+          </Section>
+
+          <Section
+            title="SOURCE"
+            right={
+              draftFilters.sources.size > 0 ? (
+                <button
+                  type="button"
+                  className="kx-mini-btn"
+                  onClick={() => setDraftFilters((f) => ({ ...f, sources: new Set() }))}
+                  title="Clear all source filters (show every source)"
+                  aria-label="Clear source filters"
+                >
+                  ×
+                </button>
+              ) : null
+            }
+          >
+            {knownSources.length === 0 ? (
+              <p className="kx-tax-status" style={{ marginTop: 0 }}>
+                No sources known yet — they appear here once documents are uploaded.
+              </p>
+            ) : (
+              knownSources.map((src) => (
+                <FilterRow
+                  key={src}
+                  checked={draftFilters.sources.has(src)}
+                  onChange={() =>
+                    setDraftFilters((f) => {
+                      const ns = new Set(f.sources);
+                      if (ns.has(src)) ns.delete(src);
+                      else ns.add(src);
+                      return { ...f, sources: ns };
+                    })
+                  }
+                  label={src}
+                  count={snapshot.documents.filter((d) => d.source === src).length}
+                />
+              ))
+            )}
+            <div className="kx-filter-actions">
+              <button
+                type="button"
+                className={"kx-filter-apply" + (filtersDirty ? " kx-on" : "")}
+                disabled={!filtersDirty}
+                onClick={applyFilters}
+                title={filtersDirty ? "Apply selection" : "No changes to apply"}
+              >
+                Apply Filter
+              </button>
+              <button
+                type="button"
+                className="kx-filter-reset"
+                disabled={!filtersDirty}
+                onClick={resetDraftFilters}
+                title="Revert pending changes"
+              >
+                Reset
+              </button>
+            </div>
+            <p className="kx-filter-hint">
+              {draftFilters.sources.size === 0
+                ? "No source selected — every source is shown."
+                : `${draftFilters.sources.size} source${draftFilters.sources.size === 1 ? "" : "s"} selected (others hidden).`}
+            </p>
           </Section>
 
           <Section title="LEGEND">
@@ -1199,6 +1333,80 @@ const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({ sour
     >
       {isImposed ? "imposed" : "auto"}
     </span>
+  );
+};
+
+/**
+ * Operator-facing taxonomy importer (left rail).
+ *
+ * Accepts the four format families that cover ~all knowledge-org
+ * taxonomy interchange in the wild:
+ *
+ *   * SKOS (W3C) in RDF/XML (.rdf, .xml) or Turtle (.ttl) — the
+ *     canonical web standard for thesauri / classification schemes.
+ *   * SKOS in JSON-LD (.jsonld, .json) — same data model, JSON shape.
+ *   * Plain CSV (.csv) — pragmatic fallback (id, parent_id, label).
+ *   * YAML (.yaml, .yml) — what KW-Pipeline already speaks natively
+ *     via ``KW_TAXONOMY_PATH`` (ADR-017).
+ *
+ * The backend POST endpoint is not yet wired (read-only via the YAML
+ * file today). The importer currently surfaces the parsed file's
+ * basics so the operator can sanity-check before the import endpoint
+ * lands. Once a server-side import route exists this component swaps
+ * its alert for a fetch.
+ */
+const TAXONOMY_ACCEPT = ".yaml,.yml,.csv,.ttl,.rdf,.xml,.json,.jsonld";
+
+const TaxonomyImporter: React.FC = () => {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [status, setStatus] = useState<string>("");
+
+  const onPick = useCallback(() => {
+    inputRef.current?.click();
+  }, []);
+
+  const onFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    const standard =
+      ext === "ttl" || ext === "rdf"
+        ? "SKOS / RDF"
+        : ext === "jsonld" || ext === "json"
+          ? "SKOS / JSON-LD"
+          : ext === "csv"
+            ? "CSV"
+            : ext === "yaml" || ext === "yml"
+              ? "YAML"
+              : "unknown";
+    setStatus(
+      `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KiB, ${standard}). ` +
+        `Backend import endpoint not yet wired — copy the file to KW_TAXONOMY_PATH on the API host for now.`,
+    );
+    // Reset so picking the same file twice still fires onChange.
+    if (inputRef.current) inputRef.current.value = "";
+  }, []);
+
+  return (
+    <div className="kx-tax-importer">
+      <p className="kx-tax-help">
+        Import an external taxonomy. Supported standards: SKOS (RDF/XML, Turtle, JSON-LD), CSV, YAML.
+      </p>
+      <div className="kx-tax-actions">
+        <button type="button" className="kx-tax-btn" onClick={onPick}>
+          Import taxonomy…
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={TAXONOMY_ACCEPT}
+          onChange={onFile}
+          style={{ display: "none" }}
+          aria-label="Import taxonomy file"
+        />
+      </div>
+      {status && <p className="kx-tax-status">{status}</p>}
+    </div>
   );
 };
 

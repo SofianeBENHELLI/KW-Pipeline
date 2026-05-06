@@ -33,7 +33,6 @@ import type {
   TaxonomyResponse,
 } from "../api/types";
 import {
-  CLUSTERS,
   type ClusterMeta,
   type ExplorerDocument,
   type ExplorerSnapshot,
@@ -47,7 +46,27 @@ import {
 
 const CONTENT_FETCH_CONCURRENCY = 3;
 
-export type DataMode = "loading" | "live" | "sample-fallback";
+export type DataMode = "loading" | "live" | "sample-fallback" | "empty";
+
+/**
+ * A "no documents yet" snapshot for the empty-corpus path. The
+ * sample data is reserved for the unreachable-backend fallback so an
+ * operator who has just stood up the API and uploaded nothing sees
+ * a real empty state rather than the demo corpus pretending to be
+ * theirs.
+ */
+const EMPTY_SNAPSHOT: ExplorerSnapshot = {
+  documents: [],
+  docEdges: [],
+  chunks: [],
+  concepts: [],
+  chunkConcept: [],
+  conceptEdges: [],
+  docContent: {},
+  clusters: {},
+  isSample: false,
+  corpusLabel: "Empty corpus",
+};
 
 export interface ExplorerDataState {
   snapshot: ExplorerSnapshot;
@@ -83,8 +102,8 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
         if (controller.signal.aborted) return;
         if (page.items.length === 0) {
           setState({
-            snapshot: { ...SAMPLE_SNAPSHOT, corpusLabel: "Sample · backend empty" },
-            mode: "sample-fallback",
+            snapshot: EMPTY_SNAPSHOT,
+            mode: "empty",
             error: null,
             refreshing: false,
           });
@@ -195,16 +214,14 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
         // the snapshot now owns its own ``clusters`` field.
         const taxonomyAdapter = adaptTaxonomy(taxonomy);
         const clusters: Record<string, ClusterMeta> = {};
-        if (Object.keys(taxonomyAdapter.clusters).length > 0) {
-          for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
-            clusters[id] = meta;
-          }
-        } else {
-          // Seed from the sample-corpus dict so familiar names + hues
-          // survive the live transition. All seeds are "computed".
-          for (const [id, meta] of Object.entries(CLUSTERS)) {
-            clusters[id] = { ...meta, source: "computed" };
-          }
+        // When the operator has authored a taxonomy, every category
+        // becomes a cluster (source flag preserved). Otherwise, the
+        // cluster catalogue is built strictly from what live documents
+        // actually classify to — no seed entries — so the rail and
+        // graph never show empty placeholder clusters like
+        // "Product"/"Engineering" against an empty corpus.
+        for (const [id, meta] of Object.entries(taxonomyAdapter.clusters)) {
+          clusters[id] = meta;
         }
         for (const doc of documents) {
           if (!clusters[doc.cluster]) {

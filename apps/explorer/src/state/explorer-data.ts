@@ -42,6 +42,12 @@ export const DOC_TYPES: Record<string, DocTypeMeta> = {
   post: { label: "SWYM Post", color: "#3F8E60", short: "POST" },
   md: { label: "Markdown", color: "#5C6573", short: "MD" },
   web: { label: "Web Page", color: "#1F8088", short: "WEB" },
+  // ``unknown`` covers freshly-uploaded versions whose semantic
+  // enrichment hasn't run yet, plus anything ``adaptDocument`` couldn't
+  // classify by content-type or extension. Surfaced as a chip so those
+  // docs remain visible in the rail and aren't silently filtered out
+  // as soon as the operator starts using the DOCUMENT TYPE filter.
+  unknown: { label: "Other / unknown", color: "#8895A1", short: "?" },
 };
 
 export type DocTypeKey = keyof typeof DOC_TYPES;
@@ -565,7 +571,9 @@ function classifyContentType(ct: string, filename: string): DocTypeKey {
     const ext = filename.slice(dot + 1).toLowerCase();
     if (ext in FILENAME_EXT_TO_DOC_KEY) return FILENAME_EXT_TO_DOC_KEY[ext];
   }
-  return "doc";
+  // Unclassifiable — surface as ``unknown`` so the operator can see
+  // and filter these explicitly, instead of disguising them as Word.
+  return "unknown";
 }
 
 /**

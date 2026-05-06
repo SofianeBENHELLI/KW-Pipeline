@@ -193,16 +193,15 @@ describe("Knowledge Explorer — sprint additions (taxonomy + catalog + versions
     });
 
     it("falls back to topic-derived ('auto') clusters when the taxonomy endpoint 404s", async () => {
-      // The widget calls the catalog and gets an empty list — that
-      // pushes us into sample-fallback mode, which surfaces the
-      // SAMPLE_SNAPSHOT clusters. All seeds are ``"computed"`` so
-      // every visible cluster row carries the "auto" badge.
-      vi.spyOn(globalThis, "fetch").mockImplementation(
-        makeFetchStub({
-          taxonomy: { status: 404 },
-          catalog: emptyCatalog(),
-        }),
-      );
+      // Reject the catalog so ``useExplorerData`` lands in
+      // ``sample-fallback`` (the SAMPLE_SNAPSHOT) — that's the only
+      // path that still surfaces a populated rail without going through
+      // the real backend, and every sample cluster is tagged
+      // ``source: "computed"`` so the assertions below hold. Returning
+      // ``items: []`` would now resolve to the real "empty corpus"
+      // empty-state with zero cluster rows, which is the wrong fixture
+      // for this assertion.
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("catalog down"));
 
       render(<App />);
 

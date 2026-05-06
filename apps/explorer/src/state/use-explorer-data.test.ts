@@ -76,7 +76,7 @@ function makeApiDoc(id: string, filename: string) {
 describe("useExplorerData", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("falls back to the sample corpus when the backend has no documents", async () => {
+  it("returns an empty snapshot when the backend reports no documents", async () => {
     mockRoutedFetch([
       { match: /\/documents/, body: { items: [], next_cursor: null } },
     ]);
@@ -84,10 +84,12 @@ describe("useExplorerData", () => {
     const { result } = renderHook(() => useExplorerData("http://test", 0));
 
     await waitFor(() => expect(result.current.refreshing).toBe(false));
-    expect(result.current.mode).toBe("sample-fallback");
+    // The empty path no longer impersonates the demo corpus — the UI
+    // shows a real "no documents yet" empty-state instead.
+    expect(result.current.mode).toBe("empty");
     expect(result.current.snapshot.corpusLabel).toMatch(/empty/i);
-    // Sample snapshot still ships with documents so the UI never renders blank.
-    expect(result.current.snapshot.documents.length).toBeGreaterThan(0);
+    expect(result.current.snapshot.documents.length).toBe(0);
+    expect(result.current.snapshot.isSample).toBe(false);
   });
 
   it("falls back to the sample corpus when the catalog request fails", async () => {

@@ -247,6 +247,48 @@ body {
 .kx-mono { font-family: var(--mono); }
 .kx-mute { color: var(--ink-3); font-size: 11px; }
 
+/* Apply / Reset under the DOCUMENT TYPE checkboxes — selection alone
+   doesn't change the rendered corpus until Apply is clicked. */
+.kx-filter-actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.kx-filter-apply, .kx-filter-reset {
+  flex: 1; padding: 6px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--line-2);
+}
+.kx-filter-apply { background: var(--bg); color: var(--navy-2); }
+.kx-filter-apply.kx-on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.kx-filter-apply:disabled, .kx-filter-reset:disabled { opacity: 0.5; cursor: not-allowed; }
+.kx-filter-reset { background: var(--bg); color: var(--ink-2); }
+.kx-filter-reset:hover:not(:disabled) { background: var(--bg-3); color: var(--navy); }
+
+/* Taxonomy importer (left rail) */
+.kx-tax-importer { display: flex; flex-direction: column; gap: 8px; }
+.kx-tax-help { margin: 0; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.kx-tax-actions { display: flex; gap: 6px; }
+.kx-tax-btn {
+  flex: 1; padding: 7px 10px; border-radius: 3px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--navy-2); background: var(--bg); color: var(--navy);
+}
+.kx-tax-btn:hover { background: var(--navy); color: #fff; }
+.kx-tax-status { margin: 0; font-size: 11px; color: var(--ink-2); line-height: 1.4; }
+
+/* Empty-corpus banner inside the CORPUS stats card. Distinct from the
+   "sample-fallback" warning so the operator can tell apart a working
+   backend with zero docs from an unreachable backend. */
+.kx-empty-banner {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 6px 8px; border-radius: 3px;
+  background: var(--bg-3); color: var(--ink-2);
+  border: 1px dashed var(--line-2); font-size: 11px; line-height: 1.4;
+}
+
+/* Hint copy under the SOURCE filter explaining the empty-set semantic
+   (no chip ticked = every source passes). Avoids the "where did all my
+   docs go" surprise the first time someone opens the section. */
+.kx-filter-hint {
+  margin: 6px 0 0 0; font-size: 10.5px; color: var(--ink-3);
+  line-height: 1.35; font-style: italic;
+}
+
 .kx-legend { display: flex; flex-direction: column; gap: 6px; }
 .kx-leg-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
 .kx-leg-shape { width: 16px; height: 12px; border: 1px solid var(--navy); background: var(--bg-2); border-radius: 3px; }
