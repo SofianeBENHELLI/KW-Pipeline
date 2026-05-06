@@ -19,6 +19,7 @@ import {
   type DiagnosticTile,
   type SettingRow,
 } from "../../../_shared/settings-hub";
+import { DemoToggle } from "../../../_shared/demo-toggle";
 import { Icon } from "./icons";
 
 type State =
@@ -42,6 +43,18 @@ interface Props {
   apiBaseUrl: string;
   open: boolean;
   onClose: () => void;
+  /**
+   * Bump the parent's ``refreshTick`` so the next render of the
+   * explorer re-pulls the corpus / graph from the backend.
+   *
+   * Used by the transitional ``<DemoToggle>`` mounted at the bottom
+   * of the modal: after a demo dataset load finishes (or the dataset
+   * is reset) the catalog has changed under our feet and the
+   * explorer needs to re-fetch. Owning the bump in the parent keeps
+   * the modal a leaf — it never reaches into ``useExplorerData``
+   * directly.
+   */
+  bumpRefresh: () => void;
 }
 
 function InfoTip({ text }: { text: string }): React.ReactElement | null {
@@ -150,7 +163,7 @@ function SettingRowItem({ row }: { row: SettingRow }): React.ReactElement {
   );
 }
 
-export const SettingsModal: React.FC<Props> = ({ apiBaseUrl, open, onClose }) => {
+export const SettingsModal: React.FC<Props> = ({ apiBaseUrl, open, onClose, bumpRefresh }) => {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -324,6 +337,19 @@ export const SettingsModal: React.FC<Props> = ({ apiBaseUrl, open, onClose }) =>
                 ))}
               </div>
             ))}
+
+            {/*
+              Transitional Demo-dataset toggle (apps/_shared/demo-toggle).
+              Lives between Backend configuration and the schema_version
+              footer so it inherits the modal's narrow column without
+              competing for the operator's attention with the rest of
+              the read-only config rows. Designed to be ripped out as a
+              single ``git rm`` once the permanent demo workflow lands.
+            */}
+            <DemoToggle
+              apiBaseUrl={apiBaseUrl}
+              onCorpusRefreshNeeded={bumpRefresh}
+            />
 
             <div
               style={{

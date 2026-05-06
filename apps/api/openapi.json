@@ -896,6 +896,75 @@
         "title": "CorsConfig",
         "type": "object"
       },
+      "DemoLoadRequest": {
+        "description": "Body for ``POST /admin/demo/load``.\n\n``force=False`` (the default) refuses the call with ``409 Conflict``\nif the catalog already contains documents that the demo loader did\nnot produce — the conflict guard the operator agreed to in the\n\"transitional Demo toggle\" thread. ``force=True`` ignores the guard\nand proceeds (used by tests + power-user override).",
+        "properties": {
+          "force": {
+            "default": false,
+            "description": "When ``False`` (default), refuses with 409 if any non-demo document is already present in the catalog. When ``True``, ignores the conflict guard.",
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "DemoLoadRequest",
+        "type": "object"
+      },
+      "DemoStatusResponse": {
+        "description": "Snapshot of the demo dataset's lifecycle on the running backend.\n\nThe front-end's toggle component polls this every ~2 s while\n``in_progress`` is true (the loader takes 30-60 s for the 47-version\nfull corpus), then stops polling and refreshes the corpus view once\n``in_progress`` flips back to false.\n\nField semantics:\n\n* ``loaded`` — at least one demo-tagged document is currently in\n  the catalog (regardless of whether the load is still running).\n* ``in_progress`` — a load is currently executing in a background\n  thread; the toggle should render disabled with a \"Loading…\" badge.\n* ``demo_doc_count`` — number of catalog rows tagged as demo (i.e.\n  whose ``original_filename`` matches one of the bundled fixtures).\n  Capped at the fixture count (47 versions across 45 documents) so\n  the UI can render \"38 / 47\".\n* ``non_demo_doc_count`` — number of catalog rows the demo loader\n  did **not** produce. Surfaces in the conflict-guard 409 payload\n  so the operator knows why the load was refused.\n* ``last_loaded_at`` — wall clock the most recent successful load\n  finished. ``None`` until the first successful load.\n* ``last_error`` — error message from the most recent load attempt\n  that failed (or was aborted mid-run). ``None`` once a subsequent\n  load succeeds.",
+        "properties": {
+          "demo_doc_count": {
+            "minimum": 0.0,
+            "title": "Demo Doc Count",
+            "type": "integer"
+          },
+          "in_progress": {
+            "title": "In Progress",
+            "type": "boolean"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_loaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Loaded At"
+          },
+          "loaded": {
+            "title": "Loaded",
+            "type": "boolean"
+          },
+          "non_demo_doc_count": {
+            "minimum": 0.0,
+            "title": "Non Demo Doc Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "loaded",
+          "in_progress",
+          "demo_doc_count",
+          "non_demo_doc_count",
+          "last_loaded_at",
+          "last_error"
+        ],
+        "title": "DemoStatusResponse",
+        "type": "object"
+      },
       "Document": {
         "description": "Logical document family containing one or more versions.\n\n``archived_at`` is the soft-archive flag (no-delete policy, ADR-020\n§4). Set when the orphan cascade flags a document as archived\nbecause it lost its last active scope link (see\n:class:`app.services.scope_cascade_service.ScopeCascadeService`).\nDefault read paths hide rows where ``archived_at IS NOT NULL`` so\narchived documents are invisible to the standard surface while the\nbytes / extractions / semantic JSON / markdown assets stay on disk\nuntil the future Archive/Purge Admin tool acts on them.\n\n``scopes`` (EPIC-D D.5, #258) carries the workspace-scope links the\ndocument currently lives in — populated by every\n:class:`CatalogStore` read path so the frontend can render its\nscope chip on any list/detail response without a follow-up call.\nSoft-removed links (per the no-delete policy) are filtered out at\nthe store layer via ``list_scopes_for_document``. The default\n``[]`` keeps construction sites that don't care about scopes (e.g.\ninline test fixtures, ``with_first_version``) terse — those callers\nstill serialize a present-but-empty list, which the OpenAPI\ncontract marks as required (defaults required = wire-honest).",
         "properties": {
@@ -3501,6 +3570,83 @@
           }
         },
         "summary": "Admin Config"
+      }
+    },
+    "/admin/demo/load": {
+      "post": {
+        "description": "Kick off the bundled demo loader in a background thread.\n\nReturns ``202 Accepted`` with the post-start\n:class:`DemoStatusResponse` so the frontend's toggle can flip\nto \"Loading…\" without a second round-trip to ``/status``. On\nconflict (a load already running, or non-demo docs already\nin the catalog without ``force=true``) the service raises\n:class:`ApiError` with ``DEMO_CONFLICT`` and the global\nhandler maps it to ``409`` with the error envelope plus the\n:class:`DemoConflictDetail`-shaped ``detail`` payload the\nfrontend reads to render \"X non-demo documents already\npresent\".",
+        "operationId": "demo_load",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoLoadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Demo Load"
+      }
+    },
+    "/admin/demo/reset": {
+      "post": {
+        "description": "Soft-archive every demo-named document and clear the toggle state.\n\nFlips ``documents.archived_at`` on every catalog row whose\n``original_filename`` is a bundled demo fixture, then deletes\nthe JSON state file. Per the no-delete policy: bytes,\nextractions, semantic JSON, and Markdown remain on disk — an\noperator can chain ``/admin/archive/purge_artifacts`` for a\nhard purge if they want. Already-archived rows are left\nuntouched (the catalog primitive is idempotent on archive\nflag).",
+        "operationId": "demo_reset",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Demo Reset"
+      }
+    },
+    "/admin/demo/status": {
+      "get": {
+        "description": "Return the current demo-toggle snapshot.\n\nThe frontend polls this every ~2 s while ``in_progress`` is\ntrue (the loader takes 30-60 s for the full corpus) and stops\npolling once the flag flips back to false. ``demo_doc_count``\n/ ``non_demo_doc_count`` come from the catalog; the lifecycle\nflags come from the JSON state file under ``data_dir`` —\na missing or corrupt file collapses to a fresh-state response\nrather than raising.",
+        "operationId": "demo_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Demo Status"
       }
     },
     "/admin/hitl/run_auto_promote_pass": {

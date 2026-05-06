@@ -1103,6 +1103,7 @@ export default function App(): React.ReactElement {
         apiBaseUrl={apiBaseUrl}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        bumpRefresh={refresh}
       />
       {lineageDocument && (
         <LineageModal document={lineageDocument} onClose={closeLineage} />

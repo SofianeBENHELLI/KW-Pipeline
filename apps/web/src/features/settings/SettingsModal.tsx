@@ -21,6 +21,7 @@ import {
   type DiagnosticTile,
   type SettingRow,
 } from "../../../../_shared/settings-hub";
+import { DemoToggle } from "../../../../_shared/demo-toggle";
 import { getApiBaseUrl } from "../../api/client";
 
 type State =
@@ -43,6 +44,18 @@ const STATE_COLOR: Record<DiagnosticTile["state"], string> = {
 interface Props {
   open: boolean;
   onClose: () => void;
+  /**
+   * Re-fetch the document catalog after the transitional Demo-toggle
+   * mutates it (load finishes, or dataset is reset). The reviewer
+   * shell wires this to ``useDocumentCatalog().refreshAll`` so the
+   * pipeline widget, review workspace, and search panel all reflect
+   * the new corpus on the next render.
+   *
+   * Optional so existing call sites (the SettingsLauncher's modal in
+   * tests) keep type-checking without forcing a refresh wiring;
+   * production mounts always supply it.
+   */
+  onCorpusRefreshNeeded?: () => void;
 }
 
 function InfoTip({ text }: { text: string }) {
@@ -151,7 +164,7 @@ function SettingRowItem({ row }: { row: SettingRow }) {
   );
 }
 
-export function SettingsModal({ open, onClose }: Props) {
+export function SettingsModal({ open, onClose, onCorpusRefreshNeeded }: Props) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const apiBaseUrl = getApiBaseUrl();
 
@@ -326,6 +339,22 @@ export function SettingsModal({ open, onClose }: Props) {
                 ))}
               </div>
             ))}
+
+            {/*
+              Transitional Demo-dataset toggle (apps/_shared/demo-toggle).
+              Lives between Backend configuration and the schema_version
+              footer so it inherits the modal's narrow column. Designed
+              to be ripped out as a single ``git rm`` once the permanent
+              demo workflow lands. ``onCorpusRefreshNeeded`` re-fetches
+              the document catalog so the pipeline widget reflects the
+              new corpus immediately.
+            */}
+            <DemoToggle
+              apiBaseUrl={apiBaseUrl}
+              onCorpusRefreshNeeded={
+                onCorpusRefreshNeeded ?? (() => undefined)
+              }
+            />
 
             <div
               style={{
