@@ -373,35 +373,9 @@ export function SettingsModal({ open, onClose, onCorpusRefreshNeeded }: Props) {
   );
 }
 
-/**
- * Top-right gear button that opens the settings modal. The
- * modal-managing state lives in the host app so the open/close
- * lifecycle stays a leaf concern.
- */
-export function SettingsLauncher({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label="Open settings"
-      data-testid="settings-launcher"
-      style={{
-        position: "fixed",
-        top: 12,
-        right: 12,
-        zIndex: 999,
-        width: 32,
-        height: 32,
-        borderRadius: "50%",
-        border: "1px solid #C8CDD4",
-        background: "white",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-        cursor: "pointer",
-        fontSize: 14,
-      }}
-      title="Settings"
-    >
-      ⚙
-    </button>
-  );
-}
+// ``SettingsLauncher`` lives in ./SettingsLauncher.tsx so the host
+// can import the (tiny) launcher eagerly while loading this modal —
+// which pulls the shared DemoToggle, the admin-config fetch path,
+// and a non-trivial render tree — only on first open. Re-exported
+// here for a one-line backwards-compatible import path.
+export { SettingsLauncher } from "./SettingsLauncher";
