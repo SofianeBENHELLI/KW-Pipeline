@@ -225,11 +225,12 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         Builds a RAG / GraphRAG / Hybrid context from the configured
         retrieval primitives, asks the LLM for a free-text answer, and
         returns the answer alongside the citations the prompt was
-        grounded in. Requires both ``ANTHROPIC_API_KEY`` and
-        ``VOYAGE_API_KEY`` (the chat service seeds graph traversal
-        from vector hits, so the search service must be wired). When
-        either gate is off the route returns 503 with
-        ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+        grounded in. Requires an LLM key (``GEMINI_API_KEY`` or
+        ``ANTHROPIC_API_KEY`` — see ADR-013 §6) plus ``VOYAGE_API_KEY``
+        (the chat service seeds graph traversal from vector hits, so
+        the search service must be wired). When any gate is off the
+        route returns 503 with ``KW_CHAT_DISABLED`` and the
+        public-error remediation copy.
 
         D.5: the retrieval set is filtered to documents the caller can
         see before being injected into the LLM prompt — so the model
@@ -243,14 +244,16 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                 code=ErrorCode.CHAT_DISABLED,
                 message=(
                     "Grounded chat is disabled. The Phase 3 chat surface "
-                    "requires KW_KNOWLEDGE_LAYER_ENABLED=true plus both "
-                    "ANTHROPIC_API_KEY and VOYAGE_API_KEY to be configured."
+                    "requires KW_KNOWLEDGE_LAYER_ENABLED=true, an LLM "
+                    "provider key (GEMINI_API_KEY or ANTHROPIC_API_KEY), "
+                    "and VOYAGE_API_KEY to be configured."
                 ),
                 retryable=False,
                 remediation=(
-                    "Set KW_KNOWLEDGE_LAYER_ENABLED=true and provide both "
-                    "ANTHROPIC_API_KEY and VOYAGE_API_KEY (or the KW_-prefixed "
-                    "aliases) in the API environment, then restart the service."
+                    "Set KW_KNOWLEDGE_LAYER_ENABLED=true, configure at least "
+                    "one LLM key (GEMINI_API_KEY or ANTHROPIC_API_KEY), and "
+                    "provide VOYAGE_API_KEY (or the KW_-prefixed aliases) in "
+                    "the API environment, then restart the service."
                 ),
             )
         settings = Settings()

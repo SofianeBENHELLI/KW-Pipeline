@@ -216,9 +216,10 @@ class PipelineServices:
     graph_store: GraphStore = field(default_factory=InMemoryGraphStore)
     knowledge_projector: KnowledgeProjector | None = None
     # Phase 2 (ADR-013): LLM-driven entity extraction. Constructed iff
-    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND ``ANTHROPIC_API_KEY`` is
-    # set; otherwise None and the route layer treats entity extraction
-    # as disabled — Phase 1a behaviour is preserved.
+    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND an LLM key resolves
+    # (``GEMINI_API_KEY`` or ``ANTHROPIC_API_KEY``, per ADR-013 §6);
+    # otherwise None and the route layer treats entity extraction as
+    # disabled — Phase 1a behaviour is preserved.
     entity_extractor: EntityExtractor | None = None
     # Phase 3 (ADR-015, #186): vector RAG. ``embedding_client`` is
     # constructed iff ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND
@@ -229,8 +230,9 @@ class PipelineServices:
     embedding_client: EmbeddingClient | None = None
     knowledge_search: KnowledgeSearchService | None = None
     # Phase 3 chat surface. Constructed iff
-    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND ``ANTHROPIC_API_KEY`` is set
-    # AND a ``knowledge_search`` is wired (i.e. ``VOYAGE_API_KEY`` is also
+    # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND an LLM key resolves
+    # (``GEMINI_API_KEY`` or ``ANTHROPIC_API_KEY``) AND a
+    # ``knowledge_search`` is wired (i.e. ``VOYAGE_API_KEY`` is also
     # set). Otherwise ``None`` and the route returns 503 with
     # ``KW_CHAT_DISABLED``.
     knowledge_chat: KnowledgeChatService | None = None

@@ -516,7 +516,7 @@ def _services_with_chat(
 
 
 def test_chat_route_returns_503_when_disabled():
-    """Default ``build_services()`` ⇒ no Anthropic / Voyage key ⇒ chat is None."""
+    """Default ``build_services()`` ⇒ no LLM / Voyage key ⇒ chat is None."""
     client = TestClient(create_app(services=build_services()))
 
     response = client.post("/knowledge/chat", json={"question": "hi"})
@@ -524,9 +524,12 @@ def test_chat_route_returns_503_when_disabled():
     body = response.json()
     assert body["error"]["code"] == "KW_CHAT_DISABLED"
     assert body["error"]["retryable"] is False
-    # The remediation copy ships the exact env-var hint operators need.
-    assert "ANTHROPIC_API_KEY" in body["error"]["remediation"]
-    assert "VOYAGE_API_KEY" in body["error"]["remediation"]
+    # The remediation copy ships the exact env-var hint operators need:
+    # either LLM key (Gemini or Anthropic, ADR-013 §6) plus Voyage.
+    remediation = body["error"]["remediation"]
+    assert "GEMINI_API_KEY" in remediation
+    assert "ANTHROPIC_API_KEY" in remediation
+    assert "VOYAGE_API_KEY" in remediation
 
 
 def test_chat_route_returns_grounded_answer():
