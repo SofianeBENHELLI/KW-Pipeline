@@ -126,7 +126,7 @@ aws s3 sync "$EXPLORER_DIR/dist/" \
   "s3://$BUCKET/$PREFIX/$VERSION/" \
   --region "$REGION" \
   --cache-control "no-cache" \
-  "${SYNC_EXTRA[@]}" \
+  ${SYNC_EXTRA[@]+"${SYNC_EXTRA[@]}"} \
   --exclude "index.html"
 
 # 3. Force text/html on the XHTML entry.
