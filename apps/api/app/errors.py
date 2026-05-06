@@ -79,6 +79,16 @@ class ErrorCode:
     # hint pointing at the env var.
     AUDIT_DISABLED = "KW_AUDIT_DISABLED"
 
+    # ─── Transitional Demo toggle (POST /admin/demo/load) ───────────
+    # Surfaced as a 409 when the conflict guard refuses to load the
+    # bundled demo corpus on top of pre-existing non-demo documents.
+    # The full demo loader runs against the public API and can clobber
+    # operator state if blindly applied — the toggle gates that side
+    # effect behind ``force=true``. The whole feature lives in
+    # :mod:`app.services.demo_dataset` + :mod:`app.routes.demo` and is
+    # intended to be deleted once we ship a permanent demo workflow.
+    DEMO_CONFLICT = "DEMO_CONFLICT"
+
     # ─── Generic fallbacks (status-derived) ───────────────────────
     BAD_REQUEST = "KW_BAD_REQUEST"
     UNAUTHORIZED = "KW_UNAUTHORIZED"

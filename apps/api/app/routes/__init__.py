@@ -12,6 +12,9 @@ but not for routing):
 - :mod:`app.routes.upload`    — single + batch document upload.
 - :mod:`app.routes.lifecycle` — list / get / extract / semantic / review.
 - :mod:`app.routes.knowledge` — graph / search / chat / taxonomy.
+- :mod:`app.routes.demo`      — transitional Demo-toggle endpoints
+  (``/admin/demo/{load,status,reset}``). Mounted last so the OpenAPI
+  ordering for every pre-existing route stays byte-identical.
 
 Module-level helpers (idempotency cache + per-request settings) live
 in :mod:`app.routes._helpers` so each sub-router imports them without
@@ -25,6 +28,7 @@ from fastapi import APIRouter
 from app.dependencies import PipelineServices
 
 from .admin import build_admin_router
+from .demo import build_demo_router
 from .knowledge import build_knowledge_router
 from .lifecycle import build_lifecycle_router
 from .upload import build_upload_router
@@ -37,11 +41,14 @@ def build_router(services: PipelineServices) -> APIRouter:
 
     Inclusion order matches the historical ``routes.py`` so the
     OpenAPI snapshot stays byte-identical: admin (health) first,
-    then upload, lifecycle, knowledge.
+    then upload, lifecycle, knowledge. The transitional Demo-toggle
+    router is appended last so its ``/admin/demo/*`` operations
+    do not perturb the relative ordering of any pre-existing route.
     """
     router = APIRouter()
     router.include_router(build_admin_router(services))
     router.include_router(build_upload_router(services))
     router.include_router(build_lifecycle_router(services))
     router.include_router(build_knowledge_router(services))
+    router.include_router(build_demo_router(services))
     return router

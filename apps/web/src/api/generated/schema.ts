@@ -237,6 +237,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/demo/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Demo Load
+         * @description Kick off the bundled demo loader in a background thread.
+         *
+         *     Returns ``202 Accepted`` with the post-start
+         *     :class:`DemoStatusResponse` so the frontend's toggle can flip
+         *     to "Loading…" without a second round-trip to ``/status``. On
+         *     conflict (a load already running, or non-demo docs already
+         *     in the catalog without ``force=true``) the service raises
+         *     :class:`ApiError` with ``DEMO_CONFLICT`` and the global
+         *     handler maps it to ``409`` with the error envelope plus the
+         *     :class:`DemoConflictDetail`-shaped ``detail`` payload the
+         *     frontend reads to render "X non-demo documents already
+         *     present".
+         */
+        post: operations["demo_load"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/demo/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Demo Reset
+         * @description Soft-archive every demo-named document and clear the toggle state.
+         *
+         *     Flips ``documents.archived_at`` on every catalog row whose
+         *     ``original_filename`` is a bundled demo fixture, then deletes
+         *     the JSON state file. Per the no-delete policy: bytes,
+         *     extractions, semantic JSON, and Markdown remain on disk — an
+         *     operator can chain ``/admin/archive/purge_artifacts`` for a
+         *     hard purge if they want. Already-archived rows are left
+         *     untouched (the catalog primitive is idempotent on archive
+         *     flag).
+         */
+        post: operations["demo_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/demo/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Demo Status
+         * @description Return the current demo-toggle snapshot.
+         *
+         *     The frontend polls this every ~2 s while ``in_progress`` is
+         *     true (the loader takes 30-60 s for the full corpus) and stops
+         *     polling once the flag flips back to false. ``demo_doc_count``
+         *     / ``non_demo_doc_count`` come from the catalog; the lifecycle
+         *     flags come from the JSON state file under ``data_dir`` —
+         *     a missing or corrupt file collapses to a fresh-state response
+         *     rather than raising.
+         */
+        get: operations["demo_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/hitl/run_auto_promote_pass": {
         parameters: {
             query?: never;
@@ -1435,6 +1523,66 @@ export interface components {
             allowed_origin_regex: string;
             /** Allowed Origins */
             allowed_origins: string[];
+        };
+        /**
+         * DemoLoadRequest
+         * @description Body for ``POST /admin/demo/load``.
+         *
+         *     ``force=False`` (the default) refuses the call with ``409 Conflict``
+         *     if the catalog already contains documents that the demo loader did
+         *     not produce — the conflict guard the operator agreed to in the
+         *     "transitional Demo toggle" thread. ``force=True`` ignores the guard
+         *     and proceeds (used by tests + power-user override).
+         */
+        DemoLoadRequest: {
+            /**
+             * Force
+             * @description When ``False`` (default), refuses with 409 if any non-demo document is already present in the catalog. When ``True``, ignores the conflict guard.
+             * @default false
+             */
+            force: boolean;
+        };
+        /**
+         * DemoStatusResponse
+         * @description Snapshot of the demo dataset's lifecycle on the running backend.
+         *
+         *     The front-end's toggle component polls this every ~2 s while
+         *     ``in_progress`` is true (the loader takes 30-60 s for the 47-version
+         *     full corpus), then stops polling and refreshes the corpus view once
+         *     ``in_progress`` flips back to false.
+         *
+         *     Field semantics:
+         *
+         *     * ``loaded`` — at least one demo-tagged document is currently in
+         *       the catalog (regardless of whether the load is still running).
+         *     * ``in_progress`` — a load is currently executing in a background
+         *       thread; the toggle should render disabled with a "Loading…" badge.
+         *     * ``demo_doc_count`` — number of catalog rows tagged as demo (i.e.
+         *       whose ``original_filename`` matches one of the bundled fixtures).
+         *       Capped at the fixture count (47 versions across 45 documents) so
+         *       the UI can render "38 / 47".
+         *     * ``non_demo_doc_count`` — number of catalog rows the demo loader
+         *       did **not** produce. Surfaces in the conflict-guard 409 payload
+         *       so the operator knows why the load was refused.
+         *     * ``last_loaded_at`` — wall clock the most recent successful load
+         *       finished. ``None`` until the first successful load.
+         *     * ``last_error`` — error message from the most recent load attempt
+         *       that failed (or was aborted mid-run). ``None`` once a subsequent
+         *       load succeeds.
+         */
+        DemoStatusResponse: {
+            /** Demo Doc Count */
+            demo_doc_count: number;
+            /** In Progress */
+            in_progress: boolean;
+            /** Last Error */
+            last_error: string | null;
+            /** Last Loaded At */
+            last_loaded_at: string | null;
+            /** Loaded */
+            loaded: boolean;
+            /** Non Demo Doc Count */
+            non_demo_doc_count: number;
         };
         /**
          * Document
@@ -2749,6 +2897,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConfigResponse"];
+                };
+            };
+        };
+    };
+    demo_load: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoLoadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    demo_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoStatusResponse"];
+                };
+            };
+        };
+    };
+    demo_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoStatusResponse"];
                 };
             };
         };

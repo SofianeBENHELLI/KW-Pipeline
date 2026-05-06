@@ -468,6 +468,14 @@ function ReviewerWorkbench() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onCorpusRefreshNeeded={() => {
+          // Transitional Demo toggle (apps/_shared/demo-toggle): re-fetch
+          // the document list once the bundled loader finishes or the
+          // dataset is reset, so the pipeline widget / review workspace
+          // / search panel reflect the new corpus on the next render.
+          void refreshAll();
+          bumpMutation();
+        }}
       />
     </main>
   );
