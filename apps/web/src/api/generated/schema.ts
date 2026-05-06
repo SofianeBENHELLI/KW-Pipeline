@@ -837,11 +837,12 @@ export interface paths {
          *     Builds a RAG / GraphRAG / Hybrid context from the configured
          *     retrieval primitives, asks the LLM for a free-text answer, and
          *     returns the answer alongside the citations the prompt was
-         *     grounded in. Requires both ``ANTHROPIC_API_KEY`` and
-         *     ``VOYAGE_API_KEY`` (the chat service seeds graph traversal
-         *     from vector hits, so the search service must be wired). When
-         *     either gate is off the route returns 503 with
-         *     ``KW_CHAT_DISABLED`` and the public-error remediation copy.
+         *     grounded in. Requires an LLM key (``GEMINI_API_KEY`` or
+         *     ``ANTHROPIC_API_KEY`` — see ADR-013 §6) plus ``VOYAGE_API_KEY``
+         *     (the chat service seeds graph traversal from vector hits, so
+         *     the search service must be wired). When any gate is off the
+         *     route returns 503 with ``KW_CHAT_DISABLED`` and the
+         *     public-error remediation copy.
          *
          *     D.5: the retrieval set is filtered to documents the caller can
          *     see before being injected into the LLM prompt — so the model

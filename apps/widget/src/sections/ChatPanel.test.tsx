@@ -121,7 +121,7 @@ describe("ChatPanel (widget)", () => {
             status: 503,
             retryable: false,
             remediation:
-              "Set KW_KNOWLEDGE_LAYER_ENABLED=true plus ANTHROPIC_API_KEY and VOYAGE_API_KEY.",
+              "Set KW_KNOWLEDGE_LAYER_ENABLED=true, configure at least one LLM key (GEMINI_API_KEY or ANTHROPIC_API_KEY), and provide VOYAGE_API_KEY.",
           },
           detail: "Grounded chat is disabled.",
         },
@@ -134,6 +134,7 @@ describe("ChatPanel (widget)", () => {
 
     const banner = await screen.findByTestId("chat-panel-disabled");
     expect(banner).toHaveTextContent("Grounded chat is disabled");
+    expect(banner).toHaveTextContent(/GEMINI_API_KEY/);
     expect(banner).toHaveTextContent(/ANTHROPIC_API_KEY/);
     expect(banner).toHaveTextContent(/VOYAGE_API_KEY/);
     expect(screen.queryByTestId("chat-panel-error")).toBeNull();
