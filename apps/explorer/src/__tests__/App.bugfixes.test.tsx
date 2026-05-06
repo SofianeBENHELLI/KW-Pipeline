@@ -25,13 +25,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { CLUSTERS } from "../state/explorer-data";
 
-function makeJsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
   beforeEach(() => {
     // Rejecting fetch pushes ``useExplorerData`` into ``sample-fallback``
