@@ -565,7 +565,8 @@ export default function App(): React.ReactElement {
         tweaks.theme +
         " kx-density-" +
         tweaks.density +
-        (tweaks.layoutMode === "graph" ? " kx-layout-graph" : "")
+        (tweaks.layoutMode === "graph" ? " kx-layout-graph" : "") +
+        (!tweaks.showViewer ? " kx-no-viewer" : "")
       }
     >
       <SessionExpiredBanner
