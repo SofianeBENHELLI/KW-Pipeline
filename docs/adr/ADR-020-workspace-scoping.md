@@ -156,6 +156,17 @@ Reasons:
 
 ### 4. Flag-only cascade on scope removal (no-delete policy)
 
+> **Amended 2026-05-06 (issue [#292](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/292) §5).**
+> The Archive/Purge Admin tool referenced below is now realised as
+> the **Orbital workbench** itself: a per-document **Purge** button
+> on each catalog row plus a header **Purge all** button, both
+> gated by a confirmation modal and an `orbital.*.purge` audit
+> event. The flag-only rule still governs every other surface
+> (Forge widget, API consumers, automated pipelines, EPIC-D D.6/D.7
+> cascade triggers); the Orbital purge is the *only* sanctioned
+> hard-delete path. See ADR-027 §1 for the route surface and
+> §1.6 for the Orbital binding.
+
 When a 3DSwym community is deleted, every `document_scopes` row with
 `scope_kind = 'swym_community'` and `scope_ref = <community_id>` is
 **soft-removed**: a `removed_at` timestamp is stamped on the row, but
@@ -179,27 +190,31 @@ remaining row carries a non-null `removed_at` — the document is
   to the no-delete policy.
 
 The KG cleanup is operational housekeeping on a derived index, not
-deletion of source data; the Archive/Purge Admin tool's job is to
-later finalise (or reverse) the archive flag, deciding whether to
-physically purge the source bytes or rehydrate the document.
+deletion of source data; the Orbital purge surface (ADR-027 §1.6)
+is the only sanctioned path that takes the next step — physically
+purging the source bytes or, in the reverse direction, rehydrating
+the document via `unarchive`.
 - A row in the audit event store recording the archive with
   `reason = "all_scopes_removed"`, the original document id, the last
   scope that was soft-removed, and the actor that triggered the
   removal.
 
-The archive flag is **reversible**: a future Archive/Purge Admin tool
-(separate ADR, deferred) is the only path to physical deletion or
-rehydration. Until then, archived documents keep their bytes,
-extractions, semantic JSON, and Markdown asset on disk; only their
-visibility on read paths changes.
+The archive flag is **reversible**: every cascade trigger described
+in this ADR (D.6 / D.7 / scope unlink / personal-account deletion)
+flag-archives the row. The Orbital workbench (ADR-027 §1.6) is the
+only surface that can take the irreversible next step (delete bytes,
+flip versions to `PURGED`). Until an Orbital admin acts, archived
+documents keep their bytes, extractions, semantic JSON, and Markdown
+asset on disk; only their visibility on read paths changes.
 
 This shape diverges from the original "hard-delete to honour the
 data-deletion expectation of community owners" framing. The trade-off
 is intentional: an irreversible cascade scattered across services
-makes the audit + reversibility story of a dedicated Archive/Purge
-Admin tool harder to build, and risks losing data before a human has
-reviewed the archive decision. The Admin tool will close that gap
-explicitly with audit + reversibility + an explicit purge action.
+makes the audit + reversibility story of the Orbital purge surface
+harder to defend, and risks losing data before a human has reviewed
+the archive decision. The Orbital binding closes that gap explicitly
+with audit + reversibility + an explicit operator-confirmed purge
+action.
 
 The flag-only cascade also applies to `project` scopes: soft-removing
 the last `project` link archives the document. Deleting the user
