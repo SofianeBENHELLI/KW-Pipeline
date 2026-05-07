@@ -110,12 +110,8 @@ class TestDeterministicChunkIds:
         section = SemanticSection(id="s-1", heading="H", text="Hello world.")
         sem = _semantic(sections=[section])
         v = _version()
-        first = _exporter()._build(
-            document_or_filename="f.pdf", version=v, semantic=sem
-        )
-        second = _exporter()._build(
-            document_or_filename="f.pdf", version=v, semantic=sem
-        )
+        first = _exporter()._build(document_or_filename="f.pdf", version=v, semantic=sem)
+        second = _exporter()._build(document_or_filename="f.pdf", version=v, semantic=sem)
         assert first.chunks[0].chunk_id == second.chunks[0].chunk_id
 
     def test_whitespace_only_changes_yield_same_chunk_id(self) -> None:
@@ -186,23 +182,17 @@ class TestDeterministicAssetIds:
                 ),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         ids = {a.asset_id for a in out.assets}
         assert len(ids) == 2
 
     def test_asset_id_format(self) -> None:
         sem = _semantic(
             assets=[
-                SemanticAsset(
-                    type="policy_rule", text="t", confidence=0.5
-                ),
+                SemanticAsset(type="policy_rule", text="t", confidence=0.5),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         aid = out.assets[0].asset_id
         assert aid.startswith("asset_")
         assert len(aid) == len("asset_") + 16
@@ -248,9 +238,7 @@ class TestManifestCompleteness:
         sem = _semantic(
             sections=[SemanticSection(id="s-1", heading="H", text="t")],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         assert out.markdown == "# Title\n\nbody."
 
 
@@ -259,16 +247,12 @@ class TestManifestCompleteness:
 
 class TestValidationStatusLabelling:
     @pytest.mark.parametrize("status", ["needs_review", "validated", "rejected"])
-    def test_version_level_validation_status_propagates_to_chunks(
-        self, status: str
-    ) -> None:
+    def test_version_level_validation_status_propagates_to_chunks(self, status: str) -> None:
         sem = _semantic(
             sections=[SemanticSection(id="s-1", heading="H", text="t")],
             validation_status=status,
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         assert out.manifest.validation_status == status
         assert all(c.validation_status == status for c in out.chunks)
 
@@ -302,9 +286,7 @@ class TestValidationStatusLabelling:
                 ),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         statuses = {a.review_status for a in out.assets}
         assert statuses == {"needs_review", "source_backed", "validated", "rejected"}
 
@@ -323,9 +305,7 @@ class TestValidationStatusLabelling:
                 ),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         assert out.manifest.chunk_count == 1
         assert out.manifest.asset_count == 1
 
@@ -378,15 +358,12 @@ class TestPackageSha256:
         sem = _semantic(
             sections=[SemanticSection(id="s-1", heading="H", text="alpha")],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         recomputed = _package_sha256(out.chunks, out.assets)
         assert out.manifest.package_sha256 == recomputed
         # Manually reproduce to lock the algorithm.
         chunk_payload = [
-            c.model_dump(mode="json")
-            for c in sorted(out.chunks, key=lambda c: c.chunk_id)
+            c.model_dump(mode="json") for c in sorted(out.chunks, key=lambda c: c.chunk_id)
         ]
         canonical = json.dumps(
             {"chunks": chunk_payload, "assets": []},
@@ -412,9 +389,7 @@ class TestSourceReferencesPreserved:
                 ),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         assert out.chunks[0].source_reference_ids == ["src-p1-para0", "src-p1-para1"]
 
     def test_asset_source_reference_ids_carried_verbatim(self) -> None:
@@ -429,9 +404,7 @@ class TestSourceReferencesPreserved:
                 ),
             ],
         )
-        out = _exporter()._build(
-            document_or_filename="f.pdf", version=_version(), semantic=sem
-        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
         assert out.assets[0].source_reference_ids == ["src-p3-para0"]
 
 

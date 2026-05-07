@@ -138,9 +138,7 @@ def _project_asset(*, asset: SemanticAsset, version_id: str) -> ExportedAsset:
     )
 
 
-def _package_sha256(
-    chunks: list[ExportedChunk], assets: list[ExportedAsset]
-) -> str:
+def _package_sha256(chunks: list[ExportedChunk], assets: list[ExportedAsset]) -> str:
     """Canonical-JSON sha256 of the chunks/assets pair.
 
     Sorting at the top level (by ``chunk_id``, ``asset_id``) makes the
@@ -189,9 +187,7 @@ class KnowledgeExporter:
         """
         document = self.documents.get_document(document_id)
         if document is None:
-            raise KeyError(
-                f"Document {document_id!r} not found; cannot build export package."
-            )
+            raise KeyError(f"Document {document_id!r} not found; cannot build export package.")
         version: DocumentVersion = self.documents.get_version(document_id, version_id)
         semantic = self.semantic_outputs.get(document_id=document_id, version_id=version_id)
         return self._build(
