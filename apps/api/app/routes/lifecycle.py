@@ -32,7 +32,7 @@ from app.schemas.document import (
     SimilarDocumentsResponse,
 )
 from app.schemas.extraction import RawExtraction
-from app.schemas.scope import ScopeRef
+from app.schemas.scope import DocumentScopesResponse, ScopeRef
 from app.schemas.semantic_document import SemanticDocument
 from app.services.auth import (
     User,
@@ -507,6 +507,39 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 "Cache-Control": "private, max-age=300",
             },
         )
+
+    @router.get(
+        "/documents/{document_id}/scopes",
+        operation_id="list_document_scopes",
+        response_model=DocumentScopesResponse,
+    )
+    def list_document_scopes(
+        request: Request,
+        document_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Active workspace scope links for one document (#91, ADR-020 §2).
+
+        Returns the list of :class:`Scope` rows the catalog persists for
+        this document — ``(kind, ref, added_at, added_by)`` tuples
+        identifying every active personal / Swym community / project
+        link. Soft-removed rows are filtered out by
+        :meth:`CatalogStore.list_scopes_for_document`, so the response
+        reflects the **current** scope membership only.
+
+        Returns ``404`` when the document does not exist OR when the
+        caller's scope set does not include this document — D.5
+        hidden-existence rule. The dedicated read surface lets clients
+        inspect membership without inferring it from the
+        ``GET /knowledge/catalog`` side-effect or from the upload
+        response shape.
+        """
+        document = services.documents.get_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
+        scopes = services.documents.catalog.list_scopes_for_document(document_id)
+        return DocumentScopesResponse(scopes=scopes)
 
     @router.get(
         "/documents/{document_id}/lineage",

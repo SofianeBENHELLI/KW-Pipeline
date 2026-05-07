@@ -1176,6 +1176,23 @@
         "title": "DocumentProfile",
         "type": "object"
       },
+      "DocumentScopesResponse": {
+        "description": "Wire shape for ``GET /documents/{id}/scopes`` (#91).\n\nWraps the list of active scope links in an envelope so the route\ncan grow forward-compat fields (cursor for many-scope documents,\npaginated audit metadata, etc.) without breaking the typed client.",
+        "properties": {
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "title": "DocumentScopesResponse",
+        "type": "object"
+      },
       "DocumentVersion": {
         "description": "One immutable binary upload in the catalog.",
         "properties": {
@@ -4442,6 +4459,46 @@
           }
         },
         "summary": "Get Document Lineage"
+      }
+    },
+    "/documents/{document_id}/scopes": {
+      "get": {
+        "description": "Active workspace scope links for one document (#91, ADR-020 §2).\n\nReturns the list of :class:`Scope` rows the catalog persists for\nthis document — ``(kind, ref, added_at, added_by)`` tuples\nidentifying every active personal / Swym community / project\nlink. Soft-removed rows are filtered out by\n:meth:`CatalogStore.list_scopes_for_document`, so the response\nreflects the **current** scope membership only.\n\nReturns ``404`` when the document does not exist OR when the\ncaller's scope set does not include this document — D.5\nhidden-existence rule. The dedicated read surface lets clients\ninspect membership without inferring it from the\n``GET /knowledge/catalog`` side-effect or from the upload\nresponse shape.",
+        "operationId": "list_document_scopes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentScopesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Document Scopes"
       }
     },
     "/documents/{document_id}/similar": {
