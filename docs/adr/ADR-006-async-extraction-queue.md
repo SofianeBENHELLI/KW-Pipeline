@@ -117,27 +117,44 @@ final `RawExtraction`:
 
 ```jsonc
 {
-  "job_id": "ext-…",                 // opaque, scoped to (document_id, version_id)
+  "job_id": "ext-…",                       // opaque, scoped to (document_id, version_id)
   "document_id": "doc-…",
   "version_id": "ver-…",
-  "status": "QUEUED",                // matches DocumentVersionStatus
+  "status": "QUEUED_FOR_EXTRACTION",       // matches DocumentVersionStatus enum
   "submitted_at": "2026-05-07T19:31:20Z",
-  "queue_position": 3                // best-effort, "unknown" when KW_EXTRACTION_INLINE=true
+  "queue_position": 3                      // best-effort, "unknown" when KW_EXTRACTION_INLINE=true
 }
 ```
+
+`status` is the canonical `DocumentVersionStatus` enum value
+(`QUEUED_FOR_EXTRACTION`, not the abbreviated `QUEUED`) so the schema
+shipped to the typed client matches the value the FSM emits — copy
+this verbatim into `apps/api/app/schemas/extraction.py` rather than
+inventing a separate "queue status" vocabulary.
 
 When `KW_EXTRACTION_INLINE=true`, the route preserves its current
 shape: returns `200 OK` with the `RawExtraction` body. This keeps the
 route contract backward-compatible for inline-mode consumers (most
 notably the integration test suite — see §5).
 
-The existing **`GET /documents/{id}/versions/{vid}`** is the polling
-endpoint; the lifecycle status is the source of truth (`STORED →
-QUEUED → EXTRACTING → EXTRACTED|FAILED`). No new "jobs" resource is
-introduced — the version IS the job.
+The polling endpoint is **`GET /documents/{id}`** — the existing
+catalog route. The response carries the document plus every
+`DocumentVersion`, and the client selects the target version by
+`version_id` locally (the same shape `apps/web/src/api/client.ts` uses
+today; a per-version polling route is *not* in the API and the typed
+client's `getVersion` helper explicitly throws "not implemented"). The
+lifecycle status on the matched version is the source of truth
+(`STORED → QUEUED_FOR_EXTRACTION → EXTRACTING → EXTRACTED|FAILED`). No
+new "jobs" resource is introduced — the version IS the job.
 
 `GET /documents/{id}/versions/{vid}/extraction` continues to 404 until
 the version reaches `EXTRACTED`.
+
+> **PR-2 implementation note.** If the polling cadence becomes a hot
+> spot (the catalog route is heavier than a per-version probe would
+> be), PR-2 may add a thin `GET /documents/{id}/versions/{vid}` route
+> that returns just the matching `DocumentVersion`. That's a forward
+> add — the catalog-route shape stays canonical for the MVP.
 
 ### 3. New lifecycle state: `QUEUED_FOR_EXTRACTION`
 
