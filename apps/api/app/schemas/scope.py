@@ -76,4 +76,21 @@ class Scope(BaseModel):
     removed_at: datetime | None = None
 
 
-__all__ = ["SCOPE_KINDS", "Scope", "ScopeKind", "ScopeRef"]
+class DocumentScopesResponse(BaseModel):
+    """Wire shape for ``GET /documents/{id}/scopes`` (#91).
+
+    Wraps the list of active scope links in an envelope so the route
+    can grow forward-compat fields (cursor for many-scope documents,
+    paginated audit metadata, etc.) without breaking the typed client.
+    """
+
+    scopes: list[Scope]
+
+
+__all__ = [
+    "SCOPE_KINDS",
+    "DocumentScopesResponse",
+    "Scope",
+    "ScopeKind",
+    "ScopeRef",
+]

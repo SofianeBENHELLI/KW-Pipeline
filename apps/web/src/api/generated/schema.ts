@@ -681,6 +681,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Document Scopes
+         * @description Active workspace scope links for one document (#91, ADR-020 §2).
+         *
+         *     Returns the list of :class:`Scope` rows the catalog persists for
+         *     this document — ``(kind, ref, added_at, added_by)`` tuples
+         *     identifying every active personal / Swym community / project
+         *     link. Soft-removed rows are filtered out by
+         *     :meth:`CatalogStore.list_scopes_for_document`, so the response
+         *     reflects the **current** scope membership only.
+         *
+         *     Returns ``404`` when the document does not exist OR when the
+         *     caller's scope set does not include this document — D.5
+         *     hidden-existence rule. The dedicated read surface lets clients
+         *     inspect membership without inferring it from the
+         *     ``GET /knowledge/catalog`` side-effect or from the upload
+         *     response shape.
+         */
+        get: operations["list_document_scopes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/similar": {
         parameters: {
             query?: never;
@@ -1794,6 +1828,18 @@ export interface components {
             purpose: string | null;
             /** Title */
             title: string;
+        };
+        /**
+         * DocumentScopesResponse
+         * @description Wire shape for ``GET /documents/{id}/scopes`` (#91).
+         *
+         *     Wraps the list of active scope links in an envelope so the route
+         *     can grow forward-compat fields (cursor for many-scope documents,
+         *     paginated audit metadata, etc.) without breaking the typed client.
+         */
+        DocumentScopesResponse: {
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
         };
         /**
          * DocumentVersion
@@ -3547,6 +3593,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LineageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_scopes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentScopesResponse"];
                 };
             };
             /** @description Validation Error */
