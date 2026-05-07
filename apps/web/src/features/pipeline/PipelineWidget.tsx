@@ -91,20 +91,27 @@ export function PipelineWidget({
   scrollSelectedToken,
 }: PipelineWidgetProps) {
   const selectedRowRef = useRef<HTMLDivElement | null>(null);
+  const lastFiredScrollTokenRef = useRef(0);
 
   // Deep-link scroll trigger (#292 §4 follow-up). The parent bumps
-  // ``scrollSelectedToken`` once on the deep-link mount; we observe
-  // both the token AND the resolved selection (the row only renders
-  // after the catalog list arrives) so the scroll lands on the real
-  // node, not on an absent selectedRow.
+  // ``scrollSelectedToken`` once on the deep-link mount, BUT in the
+  // real flow the token + ``selectedDocumentId`` are set before the
+  // async catalog list resolves — so the matching row's DOM node
+  // doesn't exist yet on first run. We re-fire the effect every time
+  // ``documents`` changes (so the row eventually renders and the ref
+  // populates) and use a ref to remember which token we already
+  // scrolled for, so a later catalog refresh doesn't yank the viewport
+  // around a second time.
   useEffect(() => {
     if (scrollSelectedToken === undefined || scrollSelectedToken === 0) return;
+    if (lastFiredScrollTokenRef.current === scrollSelectedToken) return;
     if (!selectedDocumentId) return;
     const node = selectedRowRef.current;
-    if (!node) return;
+    if (!node) return; // try again on the next render once the row exists
     if (typeof node.scrollIntoView !== "function") return;
     node.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [scrollSelectedToken, selectedDocumentId]);
+    lastFiredScrollTokenRef.current = scrollSelectedToken;
+  }, [scrollSelectedToken, selectedDocumentId, documents]);
   const activeViewId = filter
     ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
     : null;

@@ -243,6 +243,50 @@ describe("PipelineWidget", () => {
     expect(scrollSpy).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
   });
 
+  it("defers the scroll until documents arrive (deep-link race)", () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    // Real deep-link flow: the token + selectedDocumentId are set on
+    // mount before the async catalog list resolves, so the row's ref
+    // is null on first render. The scroll must fire later, when the
+    // documents prop updates and the row renders.
+    const { rerender } = render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    rerender(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+
+    // A subsequent catalog refresh must NOT yank the viewport again.
+    rerender(
+      <PipelineWidget
+        documents={[
+          makeDoc({ id: "doc-001" }),
+          makeDoc({ id: "doc-002" }),
+          makeDoc({ id: "doc-003" }),
+        ]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("selects documents for the batch semantic pipeline and runs the selected action", () => {
     const onToggle = vi.fn();
     const onRun = vi.fn();
