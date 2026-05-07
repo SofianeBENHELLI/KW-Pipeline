@@ -463,6 +463,39 @@ export function docsForConcept(snap: ExplorerSnapshot, id: string): ExplorerDocu
   return [...docIds].map((d) => docById(snap, d)).filter((x): x is ExplorerDocument => Boolean(x));
 }
 
+/**
+ * Project a snapshot through a per-document predicate. The result drops
+ * documents that fail the predicate, plus every dependent edge / chunk /
+ * chunk-concept link whose endpoint is no longer in the kept set.
+ *
+ * Concepts, concept-edges, clusters, ``docContent``, ``isSample`` and
+ * ``corpusLabel`` are passed through unchanged — they are global context
+ * (the source-chip rail, the cluster catalogue, the document viewer)
+ * that the user expects to see regardless of the active filter.
+ *
+ * Used to wire the left-rail DOCUMENT TYPE / SOURCE filters into
+ * ``GraphCanvas`` (issue #296). The predicate is normally
+ * ``docPassesFilters`` from ``App.tsx``.
+ */
+export function filterSnapshot(
+  snap: ExplorerSnapshot,
+  predicate: (doc: ExplorerDocument) => boolean,
+): ExplorerSnapshot {
+  const documents = snap.documents.filter(predicate);
+  const keptDocIds = new Set(documents.map((d) => d.id));
+  const chunks = snap.chunks.filter((c) => keptDocIds.has(c.doc));
+  const keptChunkIds = new Set(chunks.map((c) => c.id));
+  const docEdges = snap.docEdges.filter((e) => keptDocIds.has(e.a) && keptDocIds.has(e.b));
+  const chunkConcept = snap.chunkConcept.filter(([cid]) => keptChunkIds.has(cid));
+  return {
+    ...snap,
+    documents,
+    chunks,
+    docEdges,
+    chunkConcept,
+  };
+}
+
 // ─── Live-data adapter ───────────────────────────────────────────────────────
 
 /**
