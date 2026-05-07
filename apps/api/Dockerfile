@@ -47,6 +47,7 @@ ENV KW_PERSISTENT=true \
     KW_DATA_DIR=/data \
     KW_KNOWLEDGE_LAYER_ENABLED=true \
     KW_LOG_FORMAT=json \
+    KW_ALLOWED_CONTENT_TYPES="text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8000
