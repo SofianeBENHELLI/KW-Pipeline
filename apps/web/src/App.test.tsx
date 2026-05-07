@@ -138,6 +138,54 @@ describe("App", () => {
     expect(screen.getByText("Network error")).toBeInTheDocument();
   });
 
+  it("surfaces a banner when the ?document=… deep link points at an unknown id (#292 §4)", async () => {
+    // Drop the deep-link param into ``window.location.search`` before
+    // mount so ``useDocumentCatalog``'s mount-time effect reads it.
+    const initialSearch = window.location.search;
+    window.history.replaceState({}, "", "/?document=doc-not-here");
+    try {
+      renderApp();
+
+      // Banner appears once the catalog finishes its first load and
+      // doesn't find the requested doc.
+      const banner = await screen.findByTestId("deep-link-error-banner");
+      expect(banner).toHaveTextContent(/doc-not-here/);
+
+      // The deep-link param is stripped from the URL on mount so a
+      // refresh doesn't re-trigger the auto-select / banner.
+      expect(window.location.search).not.toContain("document=");
+
+      // Dismissing the banner removes it from the DOM.
+      fireEvent.click(
+        screen.getByRole("button", { name: /Dismiss deep link error/i }),
+      );
+      expect(screen.queryByTestId("deep-link-error-banner")).toBeNull();
+    } finally {
+      window.history.replaceState({}, "", `/${initialSearch}`);
+    }
+  });
+
+  it("auto-selects the row and clears the URL when ?document=… resolves to a known doc (#292 §4)", async () => {
+    const initialSearch = window.location.search;
+    window.history.replaceState({}, "", "/?document=doc-policy-001");
+    try {
+      renderApp();
+
+      // The selected row's review pane lands on the requested doc.
+      await waitFor(() => {
+        expect(
+          screen.getByRole("heading", { name: /supplier-quality-policy\.txt/i }),
+        ).toBeInTheDocument();
+      });
+      // No 404 banner — the doc resolved.
+      expect(screen.queryByTestId("deep-link-error-banner")).toBeNull();
+      // Param has been stripped.
+      expect(window.location.search).not.toContain("document=");
+    } finally {
+      window.history.replaceState({}, "", `/${initialSearch}`);
+    }
+  });
+
   it("shows empty state when the API returns no documents", async () => {
     vi.restoreAllMocks();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
