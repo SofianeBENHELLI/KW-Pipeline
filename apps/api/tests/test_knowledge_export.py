@@ -162,6 +162,58 @@ class TestDeterministicChunkIds:
         assert len(chunk_id) == len("chunk_") + 16
         assert all(c in "0123456789abcdef" for c in chunk_id[len("chunk_") :])
 
+    def test_repeated_identical_sections_get_distinct_ids(self) -> None:
+        # Two sections in one version with identical content (e.g.
+        # boilerplate "Page 1 of N" headers): without disambiguation
+        # they would collide and consumers using the chunk_id as an
+        # upsert key would lose one of them.
+        boiler = SemanticSection(id="s-1", heading="H", text="Page footer boilerplate.")
+        repeat = SemanticSection(id="s-2", heading="H", text="Page footer boilerplate.")
+        sem = _semantic(sections=[boiler, repeat])
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
+        ids = [c.chunk_id for c in out.chunks]
+        assert len(ids) == 2
+        assert len(set(ids)) == 2, "duplicate-content sections must not collide"
+        # ``content_sha256`` stays equal because it hashes the
+        # normalized text, not the disambiguator — consumers can still
+        # spot identical-content rows via that field.
+        assert out.chunks[0].content_sha256 == out.chunks[1].content_sha256
+
+    def test_first_occurrence_is_pure_content_addressed(self) -> None:
+        # The cache-stability promise (re-extraction with same content
+        # yields same id) must hold for non-duplicated rows AND for the
+        # first occurrence of a duplicated row. Otherwise adding a new
+        # duplicate would invalidate the original cache entry.
+        sem_alone = _semantic(
+            sections=[SemanticSection(id="s-1", heading="H", text="boilerplate")],
+        )
+        sem_with_dup = _semantic(
+            sections=[
+                SemanticSection(id="s-1", heading="H", text="boilerplate"),
+                SemanticSection(id="s-2", heading="H", text="boilerplate"),
+            ],
+        )
+        out_alone = _exporter()._build(
+            document_or_filename="f.pdf", version=_version(), semantic=sem_alone
+        )
+        out_with_dup = _exporter()._build(
+            document_or_filename="f.pdf", version=_version(), semantic=sem_with_dup
+        )
+        assert out_alone.chunks[0].chunk_id == out_with_dup.chunks[0].chunk_id
+
+    def test_disambiguation_is_stable_across_re_exports(self) -> None:
+        sections = [
+            SemanticSection(id="s-1", heading="H", text="repeat"),
+            SemanticSection(id="s-2", heading="H", text="repeat"),
+            SemanticSection(id="s-3", heading="H", text="repeat"),
+        ]
+        sem = _semantic(sections=sections)
+        first = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
+        second = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
+        assert [c.chunk_id for c in first.chunks] == [c.chunk_id for c in second.chunks]
+        # All three ids are distinct.
+        assert len({c.chunk_id for c in first.chunks}) == 3
+
 
 # ── Deterministic asset IDs ───────────────────────────────────────────
 
@@ -196,6 +248,40 @@ class TestDeterministicAssetIds:
         aid = out.assets[0].asset_id
         assert aid.startswith("asset_")
         assert len(aid) == len("asset_") + 16
+
+    def test_repeated_same_type_assets_get_distinct_ids(self) -> None:
+        # Two ``policy_rule`` assets with identical text in one version
+        # (the LLM emitted the same rule twice — possible when the
+        # prompt covers two paragraphs that both restate the rule).
+        sem = _semantic(
+            assets=[
+                SemanticAsset(type="policy_rule", text="No PII in logs.", confidence=0.9),
+                SemanticAsset(type="policy_rule", text="No PII in logs.", confidence=0.5),
+            ],
+        )
+        out = _exporter()._build(document_or_filename="f.pdf", version=_version(), semantic=sem)
+        ids = [a.asset_id for a in out.assets]
+        assert len(ids) == 2
+        assert len(set(ids)) == 2, "duplicate-content same-type assets must not collide"
+        assert out.assets[0].content_sha256 == out.assets[1].content_sha256
+
+    def test_first_asset_occurrence_is_pure_content_addressed(self) -> None:
+        sem_alone = _semantic(
+            assets=[SemanticAsset(type="policy_rule", text="x", confidence=0.9)],
+        )
+        sem_with_dup = _semantic(
+            assets=[
+                SemanticAsset(type="policy_rule", text="x", confidence=0.9),
+                SemanticAsset(type="policy_rule", text="x", confidence=0.4),
+            ],
+        )
+        out_alone = _exporter()._build(
+            document_or_filename="f.pdf", version=_version(), semantic=sem_alone
+        )
+        out_with_dup = _exporter()._build(
+            document_or_filename="f.pdf", version=_version(), semantic=sem_with_dup
+        )
+        assert out_alone.assets[0].asset_id == out_with_dup.assets[0].asset_id
 
 
 # ── Manifest completeness ─────────────────────────────────────────────

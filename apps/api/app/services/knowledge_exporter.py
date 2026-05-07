@@ -68,24 +68,62 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _chunk_id_for(*, document_id: str, version_id: str, normalized_text: str) -> str:
+def _chunk_id_for(
+    *,
+    document_id: str,
+    version_id: str,
+    normalized_text: str,
+    occurrence_index: int = 0,
+) -> str:
     """Deterministic chunk handle: ``chunk_<first 16 hex of sha256>``.
 
     Salted with ``(document_id, version_id)`` so identical boilerplate
     sections across documents don't collide. The full sha256 (256 bit)
     is exposed separately on ``ExportedChunk.content_sha256`` for
     consumers that want a longer handle.
+
+    ``occurrence_index`` disambiguates repeated identical content
+    *within the same version* (e.g. boilerplate "Page 1 of N" headers
+    rendered as separate sections). The first occurrence (index 0)
+    hashes content-only — so unique-content sections keep stable ids
+    across re-extractions, which is the cache-stability property the
+    export package is built around. Subsequent occurrences fold the
+    ordinal into the payload via a sentinel separator so distinct
+    sections never upsert-collide downstream.
     """
-    payload = f"{document_id}/{version_id}/{normalized_text}".encode()
+    if occurrence_index == 0:
+        payload = f"{document_id}/{version_id}/{normalized_text}".encode()
+    else:
+        # ``\x1f`` (ASCII Unit Separator) is unreachable in the
+        # NFKC-normalized text path, so the suffix can't be forged by
+        # crafted content.
+        payload = (
+            f"{document_id}/{version_id}/{normalized_text}\x1fdup{occurrence_index}"
+        ).encode()
     return "chunk_" + _sha256_hex(payload)[:16]
 
 
-def _asset_id_for(*, version_id: str, asset_type: str, normalized_text: str) -> str:
+def _asset_id_for(
+    *,
+    version_id: str,
+    asset_type: str,
+    normalized_text: str,
+    occurrence_index: int = 0,
+) -> str:
     """Deterministic asset handle. Salted with ``version_id`` plus the
     asset type so two assets of different types extracted from the
     same paragraph get distinct ids.
+
+    ``occurrence_index`` follows the same first-occurrence-content-only
+    policy as ``_chunk_id_for``: two assets of the *same* type with
+    identical text within one version get distinct ids via an ordinal
+    suffix folded into the hash, while the first occurrence keeps the
+    pure-content key.
     """
-    payload = f"{version_id}/{asset_type}/{normalized_text}".encode()
+    if occurrence_index == 0:
+        payload = f"{version_id}/{asset_type}/{normalized_text}".encode()
+    else:
+        payload = (f"{version_id}/{asset_type}/{normalized_text}\x1fdup{occurrence_index}").encode()
     return "asset_" + _sha256_hex(payload)[:16]
 
 
@@ -95,6 +133,7 @@ def _project_chunk(
     document_id: str,
     version_id: str,
     validation_status: str,
+    occurrence_index: int = 0,
 ) -> ExportedChunk:
     text = section.text or ""
     normalized = _normalize_text(text)
@@ -104,6 +143,7 @@ def _project_chunk(
             document_id=document_id,
             version_id=version_id,
             normalized_text=normalized,
+            occurrence_index=occurrence_index,
         ),
         section_id=section.id,
         document_id=document_id,
@@ -119,7 +159,12 @@ def _project_chunk(
     )
 
 
-def _project_asset(*, asset: SemanticAsset, version_id: str) -> ExportedAsset:
+def _project_asset(
+    *,
+    asset: SemanticAsset,
+    version_id: str,
+    occurrence_index: int = 0,
+) -> ExportedAsset:
     text = asset.text or ""
     normalized = _normalize_text(text)
     content_sha256 = _sha256_hex(normalized.encode("utf-8"))
@@ -128,6 +173,7 @@ def _project_asset(*, asset: SemanticAsset, version_id: str) -> ExportedAsset:
             version_id=version_id,
             asset_type=asset.type,
             normalized_text=normalized,
+            occurrence_index=occurrence_index,
         ),
         asset_type=asset.type,
         text=text,
@@ -203,16 +249,43 @@ class KnowledgeExporter:
         version: DocumentVersion,
         semantic: SemanticDocument,
     ) -> KnowledgeExportPackage:
-        chunks = [
-            _project_chunk(
-                section=s,
-                document_id=version.document_id,
-                version_id=version.id,
-                validation_status=semantic.validation_status,
+        # Walk sections / assets in source order and assign each row an
+        # occurrence index keyed by its normalized content (and asset
+        # type, for assets). The first occurrence carries index 0 and
+        # keeps the pure-content key — that's what the package's
+        # cache-stability promise hinges on. Repeated identical content
+        # within the same version gets a deterministic ordinal suffix
+        # so distinct rows never upsert-collide downstream.
+        chunk_occurrences: dict[str, int] = {}
+        chunks: list[ExportedChunk] = []
+        for section in semantic.sections:
+            normalized = _normalize_text(section.text or "")
+            occurrence_index = chunk_occurrences.get(normalized, 0)
+            chunk_occurrences[normalized] = occurrence_index + 1
+            chunks.append(
+                _project_chunk(
+                    section=section,
+                    document_id=version.document_id,
+                    version_id=version.id,
+                    validation_status=semantic.validation_status,
+                    occurrence_index=occurrence_index,
+                )
             )
-            for s in semantic.sections
-        ]
-        assets = [_project_asset(asset=a, version_id=version.id) for a in semantic.assets]
+
+        asset_occurrences: dict[tuple[str, str], int] = {}
+        assets: list[ExportedAsset] = []
+        for asset in semantic.assets:
+            key = (asset.type, _normalize_text(asset.text or ""))
+            occurrence_index = asset_occurrences.get(key, 0)
+            asset_occurrences[key] = occurrence_index + 1
+            assets.append(
+                _project_asset(
+                    asset=asset,
+                    version_id=version.id,
+                    occurrence_index=occurrence_index,
+                )
+            )
+
         package_sha256 = _package_sha256(chunks, assets)
         # ``schema_version`` is the closed-Literal default on the model,
         # so we leave it implicit rather than re-passing the constant
