@@ -350,17 +350,85 @@ Rules:
   topic drill-down, and relation inspector do not all need to land in
   the same PR.
 
+## Cross-references with the rest of the backlog
+
+This ADR sits on top of several other tracks. The dependencies are
+explicit so the implementation issues stay linkable instead of
+re-deriving them at each iteration.
+
+### Auth + workspace chain (hard prerequisite for #315)
+
+`#315` (Explorer scope and trust defaults) is the **read-side
+application** of the workspace predicate. It cannot land cleanly until
+the predicate itself is on every list/search/graph route. Sequence:
+
+```
+#83 (auth identity, actor propagation)
+   └─→ #91 (workspace scoping predicate everywhere)
+          └─→ #315 (Explorer-side defaults: scope filter + validated/source-backed trust)
+                 └─→ #310 / #311 / #312 / #313 (each must read the actor + scope context)
+```
+
+Backend Explorer endpoints (#310 / #311 / #312 / #313) can be built
+against an empty-scope context first, but they MUST NOT ship to a
+multi-tenant deployment until #315 lands.
+
+### Archive / purge interaction (ADR-027)
+
+[ADR-027](ADR-027-archive-purge-admin-tool.md) defines the archive +
+purge admin surface and introduces the `SUPERSEDED` version status.
+Explorer's read surfaces (atlas, search, graph lens, neighborhood)
+**default to hiding `SUPERSEDED` and `ARCHIVED` versions** — those
+versions stay reachable only through the version lineage panel and
+the Orbital admin tool. The user-facing exploration surface should
+not tease items the operator has decided to remove from the working
+view.
+
+### Taxonomy fallback (EPIC-1)
+
+The atlas's "imposed taxonomy categories" tile depends on
+[EPIC-1](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/210)
+slices 1.2 / 1.3 (business taxonomy schema + persistence + LLM
+allocation per chunk). Until those land, the atlas falls back to
+**computed topics** from `topic_clustering.py`. Both code paths must
+be implemented in `#312`'s atlas summary endpoint so the surface
+ships before EPIC-1 does.
+
+### Frontend file-refactor sequencing (#229)
+
+`apps/explorer/src/App.tsx` (1093 LOC) and `GraphCanvas.tsx`
+(1320 LOC) are flagged in `#229` (Audit P0) for splitting. The atlas
++ grouped-search + graph-lens + relation-inspector rewrite touches
+the same files. **Sequence #229 before #316** — or, if calendar
+forces an inverted order, scope the new Explorer surfaces under a
+fresh `apps/explorer/src/features/atlas/` component tree that does
+not extend the existing megafiles. Either path keeps reviewer fatigue
+in check.
+
+### Review-write boundary (#306)
+
+Explorer is **read-only**. The relation inspector (#318) and
+neighborhood lens (#317) expose evidence and citations but offer no
+accept/reject controls. The reviewer write surface lives in Orbital;
+the chunk-level review pane EPIC at `#306` is the
+canonical write side. Two products, one knowledge graph, no overlap.
+
 ## Implementation Order
 
-Recommended order:
+Recommended order, with the dependency notes above folded in:
 
-1. Backend scoring and trust/scope defaults: #314, #315.
+0. **Prerequisites.** `#229` (file refactor) and the auth/workspace
+   chain (`#83 → #91`) must be far enough along that #315 has
+   somewhere real to land. Backend issues #310–#314 can begin in
+   parallel against an empty scope context.
+1. Backend scoring and trust/scope defaults: `#314`, `#315`.
 2. Backend atlas, search, neighborhood, and relation explanation:
-   #312, #313, #310, #311.
-3. Frontend atlas and grouped search: #316, #319.
-4. Frontend graph lens and relation inspector: #317, #318.
-5. Frontend ranking/filter controls and truncation states: #320, #321.
-6. Large-corpus fixtures and smoke coverage: #322.
+   `#312`, `#313`, `#310`, `#311`.
+3. Frontend atlas and grouped search: `#316`, `#319`.
+4. Frontend graph lens and relation inspector: `#317`, `#318`.
+5. Frontend ranking/filter controls and truncation states: `#320`,
+   `#321`.
+6. Large-corpus fixtures and smoke coverage: `#322`.
 
 The order is not strict, but the frontend graph lens should not depend
 on raw global graph fetches while waiting for backend neighborhood
@@ -407,5 +475,9 @@ canvas full of every possible edge.
 - [ADR-020](ADR-020-workspace-scoping.md) - Workspace scoping.
 - [ADR-025](ADR-025-document-similarity-and-supersede.md) - Document
   similarity and supersede.
+- [ADR-027](ADR-027-archive-purge-admin-tool.md) - Archive / purge
+  admin tool. Explorer hides `SUPERSEDED` and `ARCHIVED` versions
+  from default views; the admin surface is where they remain
+  reachable.
 - [Knowledge graph payload contract](../architecture/knowledge_graph_payload.md).
 - [Knowledge layer architecture](../architecture/knowledge_layer.md).
