@@ -16,26 +16,34 @@ interface PipelineWidgetProps {
   onPurgeRequest?: (document: ApiDocument) => void;
   /** #292 §5 — when set, a "Purge all" button appears in the header. */
   onPurgeAllRequest?: () => void;
+  /** Selected documents for the batch semantic pipeline. */
+  selectedBatchIds?: ReadonlySet<string>;
+  batchBusy?: boolean;
+  batchMessage?: string | null;
+  batchError?: string | null;
+  onToggleBatchDocument?: (id: string, checked: boolean) => void;
+  onRunBatchPipeline?: () => void;
+  onClearBatchSelection?: () => void;
 }
 
 /**
  * Saved-view definitions for the segmented filter bar (#86 / #292).
  *
- * Stored (#292) groups every "raw bytes are present, processing in
- * progress or paused" status so an operator can pick out documents
- * still moving through the pipeline. Review/Validated/Failed remain
- * the canonical terminal lenses.
+ * Recent (#292) groups newly-imported and in-progress statuses so an
+ * operator lands on the documents that are ready to split, extract, or
+ * semantically generate. Review/Validated/Failed remain the canonical
+ * terminal lenses.
  */
 const SAVED_VIEWS: ReadonlyArray<{ id: string; label: string; statuses: string[] }> = [
   {
     id: "stored",
-    label: "Stored",
+    label: "Recent",
     statuses: [
       "STORED",
-      "QUEUED_FOR_EXTRACTION",
       "EXTRACTING",
       "EXTRACTED",
-      "ENRICHED",
+      "SEMANTIC_READY",
+      "NEEDS_REVIEW",
     ],
   },
   { id: "review", label: "Review", statuses: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"] },
@@ -51,6 +59,13 @@ export function PipelineWidget({
   onFilterChange,
   onPurgeRequest,
   onPurgeAllRequest,
+  selectedBatchIds,
+  batchBusy = false,
+  batchMessage = null,
+  batchError = null,
+  onToggleBatchDocument,
+  onRunBatchPipeline,
+  onClearBatchSelection,
 }: PipelineWidgetProps) {
   const activeViewId = filter
     ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
@@ -77,6 +92,11 @@ export function PipelineWidget({
   const duplicates = sortedDocuments.filter(
     (document) => latestVersion(document).status === "DUPLICATE_DETECTED",
   ).length;
+  const batchSelectionCount = selectedBatchIds?.size ?? 0;
+  const canShowBatchBar =
+    selectedBatchIds !== undefined &&
+    onToggleBatchDocument !== undefined &&
+    onRunBatchPipeline !== undefined;
 
   return (
     <section className="widget-panel" aria-labelledby="pipeline-widget-title">
@@ -120,6 +140,47 @@ export function PipelineWidget({
         />
       ) : null}
 
+      {canShowBatchBar ? (
+        <div className="batch-pipeline-bar" aria-label="Batch semantic pipeline">
+          <div>
+            <strong>{batchSelectionCount}</strong>{" "}
+            <span className="muted">selected for extraction + semantic generation</span>
+          </div>
+          <div className="batch-pipeline-actions">
+            {batchSelectionCount > 0 && onClearBatchSelection ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onClearBatchSelection}
+                disabled={batchBusy}
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="primary-button"
+              onClick={onRunBatchPipeline}
+              disabled={batchSelectionCount === 0 || batchBusy}
+              aria-busy={batchBusy}
+            >
+              {batchBusy ? "Running…" : "Run selected pipeline"}
+            </button>
+          </div>
+          {batchMessage ? (
+            <div className="notice success" role="status">
+              <span>{batchMessage}</span>
+            </div>
+          ) : null}
+          {batchError ? (
+            <div className="notice danger" role="alert">
+              <strong>Some documents failed</strong>
+              <span>{batchError}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="document-list">
         {sortedDocuments.length === 0 ? (
           <p className="muted">
@@ -131,6 +192,7 @@ export function PipelineWidget({
           sortedDocuments.map((document) => {
             const version = latestVersion(document);
             const selected = document.id === selectedDocumentId;
+            const checked = selectedBatchIds?.has(document.id) ?? false;
             const isDuplicate =
               version.status === "DUPLICATE_DETECTED" ||
               version.duplicate_of_version_id !== null;
@@ -142,6 +204,22 @@ export function PipelineWidget({
                 key={document.id}
                 aria-current={selected ? "page" : undefined}
               >
+                {canShowBatchBar ? (
+                  <label
+                    className="document-row-check"
+                    title="Select for batch pipeline"
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${document.original_filename} for batch pipeline`}
+                      checked={checked}
+                      disabled={isDuplicate || batchBusy}
+                      onChange={(event) =>
+                        onToggleBatchDocument?.(document.id, event.target.checked)
+                      }
+                    />
+                  </label>
+                ) : null}
                 <button
                   type="button"
                   className="document-row-main"
@@ -241,27 +319,29 @@ function CatalogFilterBar({ filter, activeViewId, onFilterChange }: CatalogFilte
         value={filter.q}
         onChange={(event) => onFilterChange({ ...filter, q: event.target.value })}
       />
-      <div className="catalog-filter-views" role="tablist" aria-label="Saved views">
-        {SAVED_VIEWS.map((view) => {
-          const isActive = activeViewId === view.id;
-          return (
-            <button
-              key={view.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              className={isActive ? "catalog-filter-chip active" : "catalog-filter-chip"}
-              onClick={() =>
-                onFilterChange({
-                  ...filter,
-                  status: isActive ? [] : [...view.statuses],
-                })
-              }
-            >
-              {view.label}
-            </button>
-          );
-        })}
+      <div className="catalog-filter-views">
+        <div role="tablist" aria-label="Saved views">
+          {SAVED_VIEWS.map((view) => {
+            const isActive = activeViewId === view.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                className={isActive ? "catalog-filter-chip active" : "catalog-filter-chip"}
+                onClick={() =>
+                  onFilterChange({
+                    ...filter,
+                    status: isActive ? [] : [...view.statuses],
+                  })
+                }
+              >
+                {view.label}
+              </button>
+            );
+          })}
+        </div>
         {(activeViewId !== null || filter.q.length > 0) && (
           <button
             type="button"

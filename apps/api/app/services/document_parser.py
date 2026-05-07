@@ -53,12 +53,13 @@ class PlainTextParser:
 
     It treats each non-empty text line as a reviewable source reference while
     preserving original line numbers for traceability. Registered for
-    ``text/plain`` via ``supported_content_types`` so the registry picks it up.
+    ``text/plain`` and ``text/markdown`` via ``supported_content_types`` so
+    the registry picks it up for TXT and MD uploads.
     """
 
     name = "plain_text"
     version = "0.1"
-    supported_content_types: frozenset[str] = frozenset({"text/plain"})
+    supported_content_types: frozenset[str] = frozenset({"text/plain", "text/markdown"})
 
     def parse(self, version: DocumentVersion, storage: StorageService) -> RawExtraction:
         """Parse stored bytes into inspectable raw extraction JSON."""

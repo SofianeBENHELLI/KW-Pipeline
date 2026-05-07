@@ -68,9 +68,10 @@ class TestContentTypeAllowlist:
         )
 
         assert response.status_code == 415
-        assert response.json()["detail"] == (
-            "Content type 'application/octet-stream' is not allowed. Allowed: text/plain"
-        )
+        detail = response.json()["detail"]
+        assert "Content type 'application/octet-stream' is not allowed." in detail
+        assert "text/plain" in detail
+        assert "application/pdf" in detail
 
     def test_allowlist_accepts_parameterised_content_type(self):
         """`text/plain; charset=utf-8` must be accepted when `text/plain` is

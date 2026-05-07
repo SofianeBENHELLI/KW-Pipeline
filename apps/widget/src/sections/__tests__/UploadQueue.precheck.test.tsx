@@ -3,9 +3,9 @@
  *
  * Forge hashes a picked file locally and asks
  * ``GET /documents/by-hash/{sha256}`` whether the digest is already
- * known. On a hit the row pauses at ``DUPLICATE_DETECTED`` so the
- * operator can pick Skip or Upload-anyway; on a miss the row drops
- * into the regular queue. These tests stub the client module so the
+ * known. On a hit the row is flagged ``DUPLICATE_DETECTED`` and the
+ * bytes are not imported; on a miss the row drops into the regular queue.
+ * These tests stub the client module so the
  * UI flow is exercised hermetically — no real fetch, no Web Crypto.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -65,19 +65,19 @@ describe("UploadQueue — pre-import duplicate check (#292)", () => {
     render(<UploadQueue apiBaseUrl="http://test.local" onUploaded={() => {}} />);
     pick(new File(["body"], "doc.txt", { type: "text/plain" }));
 
-    // The row surfaces the duplicate banner with Skip / Upload-anyway.
+    // The row surfaces the duplicate banner and does not offer a bypass.
     expect(
       await screen.findByTestId("kw-queue-duplicate"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^skip$/i })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /upload anyway/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /upload anyway/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Duplicate flagged; not imported/i)).toBeInTheDocument();
     // Critically: no upload was started.
     expect(mockedUpload).not.toHaveBeenCalled();
   });
 
-  it("Skip leaves the bytes in the browser — no upload call ever", async () => {
+  it("leaves duplicate bytes in the browser — no upload call ever", async () => {
     const digest = "b".repeat(64);
     mockedHashFile.mockResolvedValue(digest);
     mockedHashCheck.mockResolvedValue({
@@ -93,50 +93,7 @@ describe("UploadQueue — pre-import duplicate check (#292)", () => {
     pick(new File(["body"], "doc.txt", { type: "text/plain" }));
 
     await screen.findByTestId("kw-queue-duplicate");
-    fireEvent.click(screen.getByRole("button", { name: /^skip$/i }));
-
-    // Banner gone; row marked SKIPPED; upload still untouched.
-    await waitFor(() =>
-      expect(screen.queryByTestId("kw-queue-duplicate")).not.toBeInTheDocument(),
-    );
     expect(mockedUpload).not.toHaveBeenCalled();
-  });
-
-  it("Upload-anyway proceeds with the upload (preserves traceability)", async () => {
-    const digest = "c".repeat(64);
-    mockedHashFile.mockResolvedValue(digest);
-    mockedHashCheck.mockResolvedValue({
-      exists: true,
-      sha256: digest,
-      document_id: "doc-1",
-      version_id: "ver-1",
-      version_number: 2,
-      original_filename: "x.txt",
-    });
-    mockedUpload.mockResolvedValue({
-      id: "ver-2",
-      document_id: "doc-1",
-      version_number: 3,
-      filename: "doc.txt",
-      content_type: "text/plain",
-      file_size: 4,
-      sha256: digest,
-      storage_uri: "file://x",
-      status: "DUPLICATE_DETECTED",
-      duplicate_of_version_id: "ver-1",
-      failure_reason: null,
-      reviewer_note: null,
-      reviewed_at: null,
-      created_at: "2026-05-01T00:00:00Z",
-    });
-
-    render(<UploadQueue apiBaseUrl="http://test.local" onUploaded={() => {}} />);
-    pick(new File(["body"], "doc.txt", { type: "text/plain" }));
-
-    await screen.findByTestId("kw-queue-duplicate");
-    fireEvent.click(screen.getByRole("button", { name: /upload anyway/i }));
-
-    await waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(1));
   });
 
   it("non-duplicate file goes straight through to upload", async () => {

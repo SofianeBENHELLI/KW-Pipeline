@@ -56,7 +56,11 @@ class Settings(BaseSettings):
         description="Hard ceiling on a single upload, in bytes. Default 50 MiB.",
     )
     allowed_content_types_csv: str = Field(
-        default="text/plain",
+        default=(
+            "text/plain,text/markdown,application/pdf,"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
         validation_alias=AliasChoices(
             "KW_ALLOWED_CONTENT_TYPES",
             "ALLOWED_CONTENT_TYPES",

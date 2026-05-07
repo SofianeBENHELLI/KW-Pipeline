@@ -8,6 +8,8 @@ import {
 import {
   ApiError,
   clearSessionTrigger,
+  extractVersion,
+  generateSemantic,
   getApiBaseUrl,
   getDocument,
   listDocuments,
@@ -26,7 +28,11 @@ import { SettingsLauncher } from "./features/settings/SettingsLauncher";
 // config form, which is only needed when the user clicks the gear.
 // Lazy-load it so the initial chunk stays under its bundle budget
 // (#125). The Suspense boundary lives on the modal mount-point below.
-const SettingsModal = lazy(() => import("./features/settings/SettingsModal").then((m) => ({ default: m.SettingsModal })));
+const SettingsModal = lazy(() =>
+  import("./features/settings/SettingsModal").then((m) => ({
+    default: m.SettingsModal,
+  })),
+);
 import { ForceAutoCorpusBanner } from "./ui/ForceAutoCorpusBanner";
 
 /**
@@ -51,7 +57,18 @@ export interface CatalogFilter {
   q: string;
 }
 
-export const EMPTY_CATALOG_FILTER: CatalogFilter = { status: [], q: "" };
+export const RECENT_IMPORT_STATUSES = [
+  "STORED",
+  "EXTRACTING",
+  "EXTRACTED",
+  "SEMANTIC_READY",
+  "NEEDS_REVIEW",
+] as const;
+
+export const EMPTY_CATALOG_FILTER: CatalogFilter = {
+  status: [...RECENT_IMPORT_STATUSES],
+  q: "",
+};
 
 export interface DocumentCatalog {
   documents: ApiDocument[];
@@ -204,6 +221,13 @@ export function useDocumentCatalog(): DocumentCatalog {
       cancelled = true;
     };
   }, [filter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const documentId = params.get("document");
+    if (documentId) setSelectedId(documentId);
+  }, []);
 
   const selected = documents.find((d) => d.id === selectedId) ?? null;
 
@@ -385,6 +409,10 @@ function ReviewerWorkbench() {
   // hidden; the bulk modal toggles via its own boolean.
   const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
   const [purgeAllOpen, setPurgeAllOpen] = useState(false);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const handlePurgeRequest = useCallback((document: ApiDocument) => {
     setPurgeTarget(document);
@@ -410,6 +438,77 @@ function ReviewerWorkbench() {
     await Promise.all([refreshSelected(), refreshAll()]);
     bumpMutation();
   }, [refreshAll, refreshSelected, bumpMutation]);
+
+  const handleToggleBatchDocument = useCallback((documentId: string, checked: boolean) => {
+    setSelectedBatchIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(documentId);
+      else next.delete(documentId);
+      return next;
+    });
+  }, []);
+
+  const handleClearBatchSelection = useCallback(() => {
+    setSelectedBatchIds(new Set());
+    setBatchMessage(null);
+    setBatchError(null);
+  }, []);
+
+  const handleRunBatchPipeline = useCallback(async () => {
+    const targets = documents.filter((doc) => selectedBatchIds.has(doc.id));
+    if (targets.length === 0 || batchBusy) return;
+    setBatchBusy(true);
+    setBatchMessage(null);
+    setBatchError(null);
+    let completed = 0;
+    const failures: string[] = [];
+
+    try {
+      for (const doc of targets) {
+        const version =
+          doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
+        if (!version) continue;
+        try {
+          if (version.status === "STORED") {
+            await extractVersion(doc.id, version.id);
+            await generateSemantic(doc.id, version.id);
+            completed += 1;
+          } else if (
+            version.status === "EXTRACTED" ||
+            version.status === "SEMANTIC_READY" ||
+            version.status === "NEEDS_REVIEW"
+          ) {
+            await generateSemantic(doc.id, version.id);
+            completed += 1;
+          }
+        } catch (err: unknown) {
+          const message =
+            err instanceof ApiError
+              ? err.detail
+              : err instanceof Error
+                ? err.message
+                : "Pipeline step failed.";
+          failures.push(`${doc.original_filename}: ${message}`);
+        }
+      }
+      await Promise.all([refreshSelected(), refreshAll()]);
+      bumpMutation();
+      setSelectedBatchIds(new Set());
+      setBatchMessage(
+        `Semantic pipeline completed for ${completed} document${completed === 1 ? "" : "s"}.`,
+      );
+      setBatchError(failures.length > 0 ? failures.join(" ") : null);
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [
+    batchBusy,
+    bumpMutation,
+    documents,
+    refreshAll,
+    refreshSelected,
+    selectedBatchIds,
+  ]);
 
   // Banners sit at the top of every shell return — loading, error,
   // and ready states all need to surface a 401 the same way.
@@ -468,6 +567,13 @@ function ReviewerWorkbench() {
         onFilterChange={setFilter}
         onPurgeRequest={handlePurgeRequest}
         onPurgeAllRequest={handlePurgeAllRequest}
+        selectedBatchIds={selectedBatchIds}
+        batchBusy={batchBusy}
+        batchMessage={batchMessage}
+        batchError={batchError}
+        onToggleBatchDocument={handleToggleBatchDocument}
+        onRunBatchPipeline={() => void handleRunBatchPipeline()}
+        onClearBatchSelection={handleClearBatchSelection}
       />
       <PurgeDialog
         document={

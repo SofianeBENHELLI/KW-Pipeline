@@ -100,7 +100,7 @@ describe("PipelineWidget", () => {
     expect(oldIdx).toBeGreaterThan(midIdx);
   });
 
-  it("renders the Stored saved-view chip and toggles its statuses (#292)", () => {
+  it("renders the Recent saved-view chip and toggles its statuses", () => {
     const onFilterChange = vi.fn();
     render(
       <PipelineWidget
@@ -112,21 +112,21 @@ describe("PipelineWidget", () => {
       />,
     );
     const tablist = screen.getByRole("tablist", { name: /Saved views/i });
-    const stored = within(tablist).getByRole("tab", { name: /^Stored$/i });
+    const stored = within(tablist).getByRole("tab", { name: /^Recent$/i });
     fireEvent.click(stored);
     expect(onFilterChange).toHaveBeenCalledWith({
       status: [
         "STORED",
-        "QUEUED_FOR_EXTRACTION",
         "EXTRACTING",
         "EXTRACTED",
-        "ENRICHED",
+        "SEMANTIC_READY",
+        "NEEDS_REVIEW",
       ],
       q: "",
     });
   });
 
-  it("renders Review / Validated / Failed chips alongside Stored", () => {
+  it("renders Review / Validated / Failed chips alongside Recent", () => {
     render(
       <PipelineWidget
         documents={[]}
@@ -137,10 +137,40 @@ describe("PipelineWidget", () => {
       />,
     );
     const tablist = screen.getByRole("tablist", { name: /Saved views/i });
-    expect(within(tablist).getByRole("tab", { name: /^Stored$/i })).toBeInTheDocument();
+    expect(within(tablist).getByRole("tab", { name: /^Recent$/i })).toBeInTheDocument();
     expect(within(tablist).getByRole("tab", { name: /^Review$/i })).toBeInTheDocument();
     expect(within(tablist).getByRole("tab", { name: /^Validated$/i })).toBeInTheDocument();
     expect(within(tablist).getByRole("tab", { name: /^Failed$/i })).toBeInTheDocument();
+  });
+
+  it("selects documents for the batch semantic pipeline and runs the selected action", () => {
+    const onToggle = vi.fn();
+    const onRun = vi.fn();
+    render(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        selectedBatchIds={new Set(["doc-001"])}
+        onToggleBatchDocument={onToggle}
+        onRunBatchPipeline={onRun}
+        onClearBatchSelection={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("checkbox", {
+        name: /Select doc-001\.txt for batch pipeline/i,
+      }),
+    ).toBeChecked();
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Select doc-002\.txt for batch pipeline/i,
+      }),
+    );
+    expect(onToggle).toHaveBeenCalledWith("doc-002", true);
+    fireEvent.click(screen.getByRole("button", { name: /Run selected pipeline/i }));
+    expect(onRun).toHaveBeenCalledTimes(1);
   });
 
   it("calls onSelectDocument when a document row is clicked", () => {

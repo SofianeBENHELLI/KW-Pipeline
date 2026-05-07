@@ -52,8 +52,7 @@ interface Props {
 
 type ItemStatus =
   | "checking" // #292 — hashing locally + asking the catalog if the digest exists
-  | "duplicate_pending" // #292 — precheck hit; row is paused until the user picks Skip / Upload anyway
-  | "skipped" // #292 — user chose to skip a duplicate so the bytes never leave the browser
+  | "duplicate_skipped" // #292 — precheck hit; duplicate flagged and bytes never leave the browser
   | "queued"
   | "uploading"
   | "done"
@@ -78,7 +77,7 @@ interface QueueItem {
   error?: string;
   /** SHA-256 hex digest computed locally before upload (#292). */
   sha256?: string;
-  /** Set when ``status === "duplicate_pending"`` (#292). */
+  /** Set when ``status === "duplicate_skipped"`` (#292). */
   duplicate?: DuplicateMatch;
 }
 
@@ -181,25 +180,19 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
 
   // #292 — pre-import duplicate check. Hash the file in the browser
   // and ask the catalog whether the digest is already on file. On a
-  // hit, the row pauses at ``duplicate_pending`` so the operator can
-  // pick Skip or Upload-anyway; on a miss, the row drops into the
-  // normal upload queue.
+  // hit, the row is flagged as a duplicate and never uploaded; on a
+  // miss, the row drops into the normal upload queue.
   const runPrecheck = useCallback(
     async (id: string, file: File) => {
       try {
         const sha256 = await hashFileSha256(file);
         const result = await checkDocumentHash(sha256, { baseUrl: apiBaseUrl });
-        if (
-          result.exists &&
-          result.document_id !== null &&
-          result.version_id !== null &&
-          result.version_number !== null
-        ) {
+        if (result.exists && result.version_id !== null && result.version_number !== null) {
           updateItem(id, {
-            status: "duplicate_pending",
+            status: "duplicate_skipped",
             sha256,
             duplicate: {
-              document_id: result.document_id,
+              document_id: result.document_id ?? "",
               version_id: result.version_id,
               version_number: result.version_number,
               original_filename: result.original_filename,
@@ -241,30 +234,10 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
       setItems((prev) => [...prev, ...additions]);
       // Kick off precheck for each row outside the setState; each
       // promise transitions its own row to ``queued`` or
-      // ``duplicate_pending`` and re-enters drain on miss.
+      // ``duplicate_skipped`` and re-enters drain on miss.
       for (const it of additions) void runPrecheck(it.id, it.file);
     },
     [runPrecheck],
-  );
-
-  // Operator chose to keep the duplicate (preserves traceability per
-  // ADR-002 — the new version still gets created with status
-  // ``DUPLICATE_DETECTED``, the backend prevents it from feeding the
-  // KG via ``ExtractionJobService``).
-  const confirmDuplicate = useCallback(
-    (id: string) => {
-      updateItem(id, { status: "queued" });
-      setTimeout(drain, 0);
-    },
-    [drain, updateItem],
-  );
-
-  // Operator skipped the duplicate — bytes never leave the browser.
-  const skipDuplicate = useCallback(
-    (id: string) => {
-      updateItem(id, { status: "skipped" });
-    },
-    [updateItem],
   );
 
   const enqueueDataTransfer = useCallback(
@@ -448,6 +421,7 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
       <input
         ref={fileInputRef}
         type="file"
+        accept=".pdf,.docx,.pptx,.txt,.md,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
         className="kw-upload__file-input"
         onChange={(e) => {
           enqueue(e.target.files);
@@ -458,6 +432,7 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
         ref={multiInputRef}
         type="file"
         multiple
+        accept=".pdf,.docx,.pptx,.txt,.md,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
         className="kw-upload__file-input"
         onChange={(e) => {
           enqueue(e.target.files);
@@ -474,6 +449,7 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
         /* eslint-disable @typescript-eslint/no-explicit-any */
         {...({ webkitdirectory: "", directory: "", mozdirectory: "" } as any)}
         /* eslint-enable @typescript-eslint/no-explicit-any */
+        accept=".pdf,.docx,.pptx,.txt,.md,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
         className="kw-upload__file-input"
         onChange={(e) => {
           enqueue(e.target.files);
@@ -497,11 +473,8 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
               {it.status === "checking" && (
                 <StatusBadge status="HASHED" label="CHECKING" />
               )}
-              {it.status === "duplicate_pending" && (
+              {it.status === "duplicate_skipped" && (
                 <StatusBadge status="DUPLICATE_DETECTED" />
-              )}
-              {it.status === "skipped" && (
-                <StatusBadge status="REJECTED" label="SKIPPED" />
               )}
               {it.status === "queued" && <StatusBadge status="INGESTED" label="QUEUED" />}
               {it.status === "uploading" && (
@@ -514,30 +487,14 @@ export const UploadQueue: React.FC<Props> = ({ apiBaseUrl, onUploaded, onInFligh
               )}
               {it.status === "done" && <StatusBadge status="VALIDATED" label="DONE" />}
               {it.status === "failed" && <StatusBadge status="FAILED" />}
-              {it.status === "duplicate_pending" && it.duplicate && (
+              {it.status === "duplicate_skipped" && it.duplicate && (
                 <div className="kw-queue__duplicate" data-testid="kw-queue-duplicate">
                   <div className="kw-queue__duplicate-msg">
                     Already in catalog as{" "}
                     <code>
                       {it.duplicate.original_filename ?? it.duplicate.document_id}
                     </code>{" "}
-                    v{it.duplicate.version_number}. Won&apos;t reach Orbital.
-                  </div>
-                  <div className="kw-queue__duplicate-actions">
-                    <button
-                      type="button"
-                      className="kw-btn"
-                      onClick={() => skipDuplicate(it.id)}
-                    >
-                      Skip
-                    </button>
-                    <button
-                      type="button"
-                      className="kw-btn kw-btn--ghost"
-                      onClick={() => confirmDuplicate(it.id)}
-                    >
-                      Upload anyway
-                    </button>
+                    v{it.duplicate.version_number}. Duplicate flagged; not imported.
                   </div>
                 </div>
               )}

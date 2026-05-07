@@ -194,6 +194,7 @@ body {
   border-radius: var(--ds-radius);
   cursor: pointer;
   padding: 0;
+  text-decoration: none;
 }
 .kw-iconbtn:hover { background: var(--ds-ink-100); color: var(--ds-ink-900); }
 .kw-iconbtn:focus-visible {

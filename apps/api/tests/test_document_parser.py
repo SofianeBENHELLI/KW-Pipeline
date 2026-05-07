@@ -80,15 +80,15 @@ def test_plain_text_parser_conforms_to_parser_protocol():
     # ``Parser`` is runtime-checkable so registries and tests can assert
     # conformance without importing concrete types.
     assert isinstance(parser, Parser)
-    assert parser.supported_content_types == frozenset({"text/plain"})
+    assert parser.supported_content_types == frozenset({"text/plain", "text/markdown"})
 
 
-class _StubMarkdownParser:
-    """Tiny parser stub registered for ``text/markdown`` only."""
+class _StubCustomParser:
+    """Tiny parser stub registered for an arbitrary custom content type."""
 
-    name = "stub_markdown"
+    name = "stub_custom"
     version = "0.0"
-    supported_content_types = frozenset({"text/markdown"})
+    supported_content_types = frozenset({"text/x-custom"})
 
     def parse(self, version, storage):  # pragma: no cover - never invoked here
         raise NotImplementedError
@@ -97,11 +97,12 @@ class _StubMarkdownParser:
 class TestParserRegistry:
     def test_resolves_parser_by_content_type(self):
         plain = PlainTextParser()
-        markdown = _StubMarkdownParser()
-        registry = ParserRegistry([plain, markdown])
+        custom = _StubCustomParser()
+        registry = ParserRegistry([plain, custom])
 
         assert registry.for_content_type("text/plain") is plain
-        assert registry.for_content_type("text/markdown") is markdown
+        assert registry.for_content_type("text/markdown") is plain
+        assert registry.for_content_type("text/x-custom") is custom
 
     def test_unknown_content_type_raises_keyerror_with_helpful_message(self):
         registry = ParserRegistry([PlainTextParser()])

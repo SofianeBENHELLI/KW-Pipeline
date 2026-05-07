@@ -62,11 +62,16 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestDefaults:
     def test_defaults_match_legacy_fallbacks(self) -> None:
         s = Settings()
-        # Upload guardrails — the same numbers the old hard-coded
-        # ``DEFAULT_MAX_UPLOAD_BYTES`` / ``DEFAULT_ALLOWED_CONTENT_TYPES``
-        # carried in routes.py.
+        # Upload guardrails — the default MVP demo accepts the five
+        # operator-facing document types without extra env wiring.
         assert s.max_upload_bytes == 50 * 1024 * 1024
-        assert s.allowed_content_types == {"text/plain"}
+        assert s.allowed_content_types == {
+            "text/plain",
+            "text/markdown",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }
         # Empty CORS allowlist by default — the legacy helper returned
         # ``[]`` which made the API reject every cross-origin request
         # until an operator opted in.

@@ -8,6 +8,7 @@ import {
   clearSessionTrigger,
   getApiBaseUrl,
   getHealth,
+  getOrbitalUrl,
   setApiBaseUrl as persistApiBaseUrl,
   setSessionTrigger,
 } from "./api/client";
@@ -31,6 +32,7 @@ interface HealthSnapshot {
 
 const App: React.FC = () => {
   const [apiBaseUrl, setApiBaseUrl] = useState<string>(() => getApiBaseUrl());
+  const [orbitalUrl] = useState<string>(() => getOrbitalUrl());
   const [activeMode, setActiveMode] = useState<ActiveMode>("docs");
   const [refreshTick, setRefreshTick] = useState<number>(0);
   const [uploadInFlight, setUploadInFlight] = useState<number>(0);
@@ -138,6 +140,7 @@ const App: React.FC = () => {
       <Header
         health={health}
         settingsOpen={activeMode === "settings"}
+        orbitalUrl={orbitalUrl}
         onToggleSettings={toggleSettings}
         onRefresh={handleRefresh}
       />
@@ -165,6 +168,13 @@ const App: React.FC = () => {
               apiBaseUrl={apiBaseUrl}
               refreshTick={refreshTick}
               highlightDocumentId={highlightDocId}
+              onOpenDocument={(doc) => {
+                window.open(
+                  `${orbitalUrl.replace(/\/$/, "")}/?document=${encodeURIComponent(doc.id)}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
             />
           )}
           {activeMode === "search" && (

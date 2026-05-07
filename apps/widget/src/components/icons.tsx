@@ -20,6 +20,7 @@ export type IconName =
   | "cog"
   | "cross"
   | "docs"
+  | "external-link"
   | "files"
   | "folder"
   | "graph"
@@ -86,6 +87,14 @@ export const Icon: React.FC<IconProps> = ({ name, size = 14, label, className })
         <svg {...common}>
           <path d="M6 3h9l4 4v14H6z" />
           <path d="M15 3v4h4" />
+        </svg>
+      );
+    case "external-link":
+      return (
+        <svg {...common}>
+          <path d="M14 4h6v6" />
+          <path d="M20 4 11 13" />
+          <path d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
         </svg>
       );
     case "graph":

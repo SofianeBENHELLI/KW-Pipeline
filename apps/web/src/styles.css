@@ -179,6 +179,22 @@ h3 {
   text-align: left;
 }
 
+.document-row-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 34px;
+  padding-left: 8px;
+}
+
+.document-row-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--action);
+}
+
 .document-row.selected,
 .document-row:hover {
   border-color: var(--border);
@@ -786,6 +802,11 @@ pre {
   color: var(--warning);
 }
 
+.notice.success {
+  background: #e8f6ef;
+  color: var(--success);
+}
+
 .workspace-header-meta {
   display: inline-flex;
   align-items: center;
@@ -877,6 +898,26 @@ pre {
 
 .catalog-filter-chip-clear {
   margin-left: auto;
+}
+
+.batch-pipeline-bar {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-muted);
+}
+
+.batch-pipeline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batch-pipeline-bar .notice {
+  margin-bottom: 0;
 }
 
 @media (max-width: 900px) {

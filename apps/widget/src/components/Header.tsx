@@ -24,6 +24,7 @@ interface Props {
   /** Current health state — drives the live pill. */
   health: HealthSnapshot;
   settingsOpen: boolean;
+  orbitalUrl: string;
   onToggleSettings: () => void;
   onRefresh: () => void;
 }
@@ -31,6 +32,7 @@ interface Props {
 export const Header: React.FC<Props> = ({
   health,
   settingsOpen,
+  orbitalUrl,
   onToggleSettings,
   onRefresh,
 }) => {
@@ -50,6 +52,16 @@ export const Header: React.FC<Props> = ({
       </div>
       <div className="kw-hdr__actions">
         <span className={pillClass}>{pillText}</span>
+        <a
+          className="kw-iconbtn"
+          href={orbitalUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open Orbital review workspace"
+          title="Open Orbital"
+        >
+          <Icon name="external-link" />
+        </a>
         <button
           type="button"
           className="kw-iconbtn"

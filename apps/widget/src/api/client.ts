@@ -47,11 +47,17 @@ export {
 } from "../../../_shared/api-core";
 
 const SETTINGS_KEY = "apiBaseUrl";
+const ORBITAL_URL_SETTINGS_KEY = "orbitalUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";
+const FALLBACK_ORBITAL_URL = "http://localhost:5173";
 
 const buildTimeBaseUrl: string | undefined =
   typeof process !== "undefined" && process.env
     ? process.env.KW_API_BASE_URL
+    : undefined;
+const buildTimeOrbitalUrl: string | undefined =
+  typeof process !== "undefined" && process.env
+    ? process.env.KW_ORBITAL_URL
     : undefined;
 
 function safeGetWidgetValue(key: string): string | null {
@@ -84,6 +90,15 @@ export function getApiBaseUrl(): string {
 
 export function setApiBaseUrl(value: string): void {
   safeSetWidgetValue(SETTINGS_KEY, value);
+}
+
+export function getOrbitalUrl(): string {
+  return (
+    safeGetWidgetValue(ORBITAL_URL_SETTINGS_KEY) ??
+    (buildTimeOrbitalUrl && buildTimeOrbitalUrl.length > 0
+      ? buildTimeOrbitalUrl
+      : FALLBACK_ORBITAL_URL)
+  );
 }
 
 // ─── Core request helper ─────────────────────────────────────────────────────
