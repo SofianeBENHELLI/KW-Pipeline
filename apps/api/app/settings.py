@@ -117,6 +117,47 @@ class Settings(BaseSettings):
             "``False`` so the test suite keeps booting in-memory."
         ),
     )
+
+    # ------------------------------------------------------------------
+    # Async extraction queue (ADR-006, #40 PR-1).
+    # ------------------------------------------------------------------
+    extraction_inline: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("KW_EXTRACTION_INLINE"),
+        description=(
+            "When truthy (the default), ``POST /documents/.../extract`` "
+            "runs the parser synchronously on the request thread — the "
+            "pre-ADR-006 behaviour. When falsy, the route hands the job "
+            "to :class:`ExtractionWorker` and returns 202 (PR-2). PR-1 "
+            "ships the worker harness behind ``true`` so the existing "
+            "test posture is preserved; the flag flips to ``false`` in "
+            "PR-3 once polling UX is verified."
+        ),
+    )
+    extraction_queue_size: int = Field(
+        default=16,
+        validation_alias=AliasChoices("KW_EXTRACTION_QUEUE_SIZE"),
+        description=(
+            "Bounded :class:`asyncio.Queue` capacity for the in-process "
+            "extraction worker (ADR-006 §1). When full, the route "
+            "returns 503 with ``Retry-After``. Ignored when "
+            "``extraction_inline`` is ``true``."
+        ),
+        ge=1,
+    )
+    extraction_workers: int = Field(
+        default=1,
+        validation_alias=AliasChoices("KW_EXTRACTION_WORKERS"),
+        description=(
+            "Number of asyncio worker tasks pulling from the extraction "
+            "queue (ADR-006 §1). Default 1 keeps lifecycle FSM "
+            "transitions linearizable without per-version locking. "
+            "Operators can dial up after they verify their parser pool "
+            "is concurrency-safe. Ignored when ``extraction_inline`` "
+            "is ``true``."
+        ),
+        ge=1,
+    )
     data_dir: str = Field(
         default=".kw-pipeline",
         validation_alias=AliasChoices("KW_DATA_DIR"),

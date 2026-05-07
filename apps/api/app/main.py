@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,11 @@ from app.dependencies import PipelineServices, build_persistent_services, build_
 from app.errors import install_error_handlers
 from app.logging_config import configure_logging, install_audit_handler
 from app.routes import build_router
+from app.services.extraction_recovery import recover_stuck_extractions
+from app.services.extraction_worker import (
+    ExtractionWorker,
+    InMemoryExtractionQueue,
+)
 from app.services.knowledge.graph_store import VECTOR_INDEX_NAME
 from app.settings import Settings
 
@@ -39,6 +46,66 @@ def _allowed_origin_regex() -> str | None:
     return raw or None
 
 
+@asynccontextmanager
+async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Async-mode startup/shutdown for the extraction queue (ADR-006).
+
+    On startup:
+    - Run the boot-time stuck-state scan (always, but a no-op when
+      ``extraction_inline=True`` so the inline default pays nothing).
+    - When ``extraction_inline=False``, build the in-process queue and
+      spawn ``extraction_workers`` worker tasks attached to the running
+      event loop.
+
+    On shutdown: cancel every worker task and await its exit so the
+    process stops cleanly.
+
+    The harness is dormant under ``extraction_inline=True`` (PR-1
+    default): no queue, no tasks, no behavior change for the existing
+    test suite or demo posture.
+    """
+    services: PipelineServices = app.state.services
+    settings: Settings = services.settings
+
+    # Boot-time recovery — runs unconditionally (helper short-circuits
+    # under inline mode internally so we don't double-gate it here).
+    recover_stuck_extractions(services)
+
+    workers: list[ExtractionWorker] = []
+    if not settings.extraction_inline:
+        queue = InMemoryExtractionQueue(maxsize=settings.extraction_queue_size)
+        for i in range(settings.extraction_workers):
+            worker = ExtractionWorker(
+                queue=queue,
+                jobs=services.extraction_jobs,
+                name=f"extraction-worker-{i}",
+            )
+            await worker.start()
+            workers.append(worker)
+        app.state.extraction_queue = queue
+        app.state.extraction_workers = workers
+        log.info(
+            "extraction.worker_pool.started",
+            extra={
+                "worker_count": len(workers),
+                "queue_size": settings.extraction_queue_size,
+            },
+        )
+    else:
+        # Inline mode: leave the attributes unset so callers that try
+        # to enqueue receive an explicit ``AttributeError`` rather than
+        # silently dropping jobs into the void. PR-2's route shim will
+        # check ``settings.extraction_inline`` first and route accordingly.
+        app.state.extraction_queue = None
+        app.state.extraction_workers = []
+
+    try:
+        yield
+    finally:
+        for worker in workers:
+            await worker.stop()
+
+
 def create_app(
     services: PipelineServices | None = None,
     *,
@@ -67,6 +134,7 @@ def create_app(
             "name": "Proprietary — all rights reserved",
             "url": "https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/LICENSE",
         },
+        lifespan=_extraction_worker_lifespan,
     )
     if services is None:
         services = build_persistent_services(data_dir) if persistent else build_services()
