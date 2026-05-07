@@ -49,6 +49,12 @@ export type ApiScope = Schemas["Scope"];
 // the call site stays pinned to the regenerated OpenAPI contract.
 export type ApiUploadResponse = Schemas["UploadDocumentResponse"];
 
+// ─── Hash precheck (#292) ──────────────────────────────────────────────────
+// Response of ``GET /documents/by-hash/{sha256}``. ``exists=true`` means
+// the catalog already has this digest and the upload will be flagged
+// as DUPLICATE_DETECTED — Forge surfaces this before sending bytes.
+export type ApiDocumentHashCheck = Schemas["DocumentHashCheckResponse"];
+
 // ─── Knowledge graph ─────────────────────────────────────────────────────────
 
 export type ApiGraphNode = Schemas["GraphNode"];
@@ -87,6 +93,25 @@ export type ApiPurgeArtifactsResponse = Schemas["PurgeArtifactsResponse"];
 
 /** Per-version row inside a purge response. */
 export type ApiVersionPurgeResult = Schemas["VersionPurgeResult"];
+
+/** Body of ``POST /admin/orbital/purge_document`` (#292). */
+export type ApiOrbitalPurgeDocumentRequest =
+  Schemas["OrbitalPurgeDocumentRequest"];
+
+/** Response body of ``POST /admin/orbital/purge_document`` (#292). */
+export type ApiOrbitalPurgeDocumentResponse =
+  Schemas["OrbitalPurgeDocumentResponse"];
+
+/** Response body of ``POST /admin/orbital/purge_all`` (#292 — bulk override). */
+export type ApiOrbitalPurgeAllResponse =
+  Schemas["OrbitalPurgeAllResponse"];
+
+/**
+ * Operator-typed phrase the bulk-purge route demands as a second
+ * confirmation. Mirrors ``ORBITAL_PURGE_ALL_PHRASE`` in
+ * ``app/schemas/admin_archive.py``.
+ */
+export const ORBITAL_PURGE_ALL_PHRASE = "PURGE ALL DOCUMENTS";
 
 // ─── Admin / HITL dashboard (#215, EPIC-A close-out) ───────────────────────
 

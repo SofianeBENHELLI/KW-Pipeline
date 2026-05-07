@@ -29,8 +29,9 @@
  * (validate, edit, …) lands. Changes to it re-issue the fetch; an in-flight
  * request from a previous `refreshKey` is dropped via the cancel flag.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { InteractiveNvlWrapper } from "@neo4j-nvl/react";
+import type { NVL } from "@neo4j-nvl/base";
 
 import { ApiError, getDocumentGraph } from "../../api/client";
 import type {
@@ -81,6 +82,8 @@ export default function KnowledgeGraphView({
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [filter, setFilter] = useState<FilterMode>("all");
   const [selected, setSelected] = useState<Selection>(null);
+  const [search, setSearch] = useState("");
+  const nvlRef = useRef<NVL | null>(null);
 
   useEffect(() => {
     if (documentId === null) {
@@ -161,6 +164,42 @@ export default function KnowledgeGraphView({
     [selected, filtered],
   );
 
+  // #292 — fit-to-node when an inspector item is picked. NVL's fit
+  // method tweens pan + zoom; the ref is only populated once the
+  // canvas mounts, so guard against the loading branches.
+  useEffect(() => {
+    if (selectedNode === null) return;
+    nvlRef.current?.fit([selectedNode.id]);
+  }, [selectedNode]);
+
+  function zoomBy(factor: number) {
+    const nvl = nvlRef.current;
+    if (!nvl) return;
+    const current = nvl.getScale();
+    nvl.setZoom(current * factor);
+  }
+  function resetView() {
+    nvlRef.current?.resetZoom();
+  }
+  function fitAll() {
+    const ids = filtered.nodes.map((n) => n.id);
+    if (ids.length === 0) return;
+    nvlRef.current?.fit(ids);
+  }
+  function applySearch(term: string) {
+    setSearch(term);
+    if (term.trim().length === 0) return;
+    const needle = term.toLowerCase();
+    const hit = filtered.nodes.find(
+      (n) =>
+        n.label.toLowerCase().includes(needle) ||
+        n.id.toLowerCase().includes(needle),
+    );
+    if (hit) {
+      setSelected({ kind: "node", id: hit.id });
+    }
+  }
+
   return (
     <article className="panel graph-panel" aria-labelledby="graph-panel-title">
       <div className="panel-heading">
@@ -215,15 +254,35 @@ export default function KnowledgeGraphView({
             visibleEdgeCount={filtered.edges.length}
           />
 
+          <NavigationToolbar
+            search={search}
+            onSearchChange={applySearch}
+            onZoomIn={() => zoomBy(1.25)}
+            onZoomOut={() => zoomBy(0.8)}
+            onReset={resetView}
+            onFit={fitAll}
+          />
+
           <div
             className="graph-canvas"
             data-testid="knowledge-graph-canvas"
             style={{ height: 480, width: "100%" }}
           >
             <InteractiveNvlWrapper
+              ref={nvlRef}
               nodes={nvlNodes}
               rels={nvlRels}
-              nvlOptions={{ initialZoom: 0.75, allowDynamicMinZoom: true }}
+              nvlOptions={{
+                initialZoom: 0.75,
+                allowDynamicMinZoom: true,
+                minZoom: 0.05,
+                maxZoom: 4,
+              }}
+              mouseEventCallbacks={{
+                onZoom: true,
+                onPan: true,
+                onDrag: true,
+              }}
             />
           </div>
 
@@ -295,6 +354,85 @@ function FilterToolbar({
       <span className="graph-filter-count" aria-live="polite">
         {visibleNodeCount} nodes · {visibleEdgeCount} edges
       </span>
+    </div>
+  );
+}
+
+// ─── Navigation toolbar (#292) ───────────────────────────────────────────────
+
+interface NavigationToolbarProps {
+  search: string;
+  onSearchChange: (value: string) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onReset: () => void;
+  onFit: () => void;
+}
+
+/**
+ * Pan/zoom helper bar. Mouse-wheel and drag work natively via the
+ * NVL InteractiveNvlWrapper; these buttons are the keyboard- and
+ * touch-accessible fallbacks asked for in #292. The search field
+ * matches by label or id and selects the first hit, which causes the
+ * canvas to fit-to-node via the existing selection effect.
+ */
+function NavigationToolbar({
+  search,
+  onSearchChange,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+  onFit,
+}: NavigationToolbarProps) {
+  return (
+    <div
+      className="graph-navigation-toolbar"
+      role="toolbar"
+      aria-label="Knowledge graph navigation"
+      data-testid="graph-navigation-toolbar"
+    >
+      <input
+        type="search"
+        className="graph-search-input"
+        placeholder="Find a node…"
+        aria-label="Search graph nodes"
+        value={search}
+        onChange={(event) => onSearchChange(event.target.value)}
+      />
+      <div className="graph-zoom-controls" aria-label="Zoom and fit controls">
+        <button
+          type="button"
+          className="button"
+          aria-label="Zoom in"
+          onClick={onZoomIn}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className="button"
+          aria-label="Zoom out"
+          onClick={onZoomOut}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="button"
+          aria-label="Fit graph to viewport"
+          onClick={onFit}
+        >
+          Fit
+        </button>
+        <button
+          type="button"
+          className="button"
+          aria-label="Reset zoom and pan"
+          onClick={onReset}
+        >
+          Reset
+        </button>
+      </div>
     </div>
   );
 }

@@ -119,7 +119,10 @@ describe("App", () => {
       expect(screen.getAllByText("Needs review").length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByRole("button", { name: /Upload document/i })).toBeInTheDocument();
+    // #292 — Orbital is read-only for ingestion; upload UI lives in Forge now.
+    expect(
+      screen.queryByRole("button", { name: /Upload document/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an error message when the API call fails", async () => {

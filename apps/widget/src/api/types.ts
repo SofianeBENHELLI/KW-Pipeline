@@ -27,6 +27,15 @@ export type DocumentVersionStatus =
   | "REJECTED"
   | "FAILED";
 
+export interface DocumentHashCheck {
+  exists: boolean;
+  document_id: string | null;
+  version_id: string | null;
+  version_number: number | null;
+  original_filename: string | null;
+  sha256: string;
+}
+
 export interface DocumentVersion {
   id: string;
   document_id: string;

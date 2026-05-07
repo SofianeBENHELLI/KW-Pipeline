@@ -47,6 +47,25 @@ services:
       # talks to it via the docker network ("api" hostname) but local
       # access from the host stays handy for poking the Swagger UI.
       - "8000:8000"
+    # Bulk of operator-tunable env (API keys, feature flags, ITEROP
+    # config, audit, NER, log levels, …) lives in ``docker/.env`` —
+    # see ``docker/.env.example`` for the documented set. Pydantic
+    # settings ignores unknown env, so adding a new var to the file
+    # only requires the operator to set it; no compose change.
+    #
+    # ``env_file`` values are LOWER priority than ``environment:``
+    # below, so the container-network-specific overrides (Neo4j URI,
+    # the 3DEXPERIENCE CORS regex, the Phase-1 enable flag) always
+    # win — the operator can't accidentally point the API at a
+    # different Neo4j by editing their local ``.env``.
+    env_file:
+      # ``required: false`` keeps the dev profile usable without a
+      # ``docker/.env`` (compose ≥ 2.24, January 2024). The deploy
+      # profile expects the operator to copy ``.env.example`` first
+      # so the optional flag won't silently swallow a missing-secrets
+      # incident. See docs/runbook/workstation-deploy.md.
+      - path: .env
+        required: false
     environment:
       KW_KNOWLEDGE_LAYER_ENABLED: "true"
       KW_NEO4J_URI: bolt://neo4j:7687
@@ -62,16 +81,6 @@ services:
       # Override per-deployment if your tenant lives outside this
       # pattern.
       KW_CORS_ALLOWED_ORIGIN_REGEX: "^https://.*\\.3dexperience\\.3ds\\.com$$"
-      # Optional API keys passed through from the host's ``.env`` file
-      # so the workstation deploy can use the real Gemini / Anthropic /
-      # Voyage paths without baking secrets into the image.
-      # Provider selection follows KW_LLM_PROVIDER (default ``auto``,
-      # which prefers Gemini when its key is set; see ADR-013 §6).
-      KW_LLM_PROVIDER: "${KW_LLM_PROVIDER:-auto}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      KW_GEMINI_MODEL: "${KW_GEMINI_MODEL:-}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      VOYAGE_API_KEY: "${VOYAGE_API_KEY:-}"
     volumes:
       # Persist SQLite catalog + raw uploads across container restarts.
       # The Dockerfile defaults ``KW_DATA_DIR=/data`` so this matches.

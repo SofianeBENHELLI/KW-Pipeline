@@ -405,6 +405,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/orbital/purge_all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Orbital Purge All
+         * @description Hard-delete every active document in the catalog (#292 §5 — bulk override).
+         *
+         *     The user picked option 3 in #292 (Orbital is the sanctioned
+         *     hard-delete surface) and explicitly asked for a bulk button.
+         *     Two independent gates protect this path:
+         *
+         *     1. ``?confirm=true`` query flag (matches the per-doc route).
+         *     2. ``confirmation_phrase`` body field — must equal
+         *        :data:`ORBITAL_PURGE_ALL_PHRASE` exactly (case-sensitive).
+         *        A misclick stops at the modal; a malformed request stops
+         *        at the server.
+         *
+         *     Iterates every active document (``archived_at IS NULL``),
+         *     cascades the same archive + purge_artifacts + KG cleanup as
+         *     the per-doc route, and emits one ``orbital.document.purge``
+         *     audit event per row plus a single
+         *     ``orbital.knowledge_space.purge`` summary event with the total
+         *     count + actor.
+         *
+         *     Best-effort: a per-document failure is logged + recorded in
+         *     ``failures`` but doesn't abort the batch.
+         */
+        post: operations["admin_orbital_purge_all"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orbital/purge_document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Orbital Purge Document
+         * @description Hard-delete an active document from Orbital (#292 — operator override).
+         *
+         *     Combines archive + ``purge_artifacts`` + KG subgraph cleanup
+         *     in one audited call. The operator types the document's
+         *     ``original_filename`` into the modal; the route 422s on a
+         *     mismatch so a misclick can't take down the wrong family.
+         *
+         *     Per the deletion-rules feedback (memory), Orbital is the only
+         *     sanctioned hard-delete surface; every other entry point still
+         *     flag-archives. The cascade order matches ADR-027:
+         *
+         *     1. Archive the document (sets ``archived_at`` so all read
+         *        paths immediately stop surfacing it).
+         *     2. Purge each version's source artifacts (storage bytes +
+         *        catalog ``storage_uri`` flip to a tombstone). Reuses
+         *        :func:`_purge_one_document` so the per-version contract
+         *        stays identical to the legacy admin path.
+         *     3. Drop the KG subgraph for each version (best-effort —
+         *        failures are logged + swallowed because KG is derived
+         *        data, regenerable from the catalog).
+         *
+         *     Audit emits a single ``orbital.document.purge`` event with
+         *     the actor, filename, archive timestamp, and version count
+         *     per the spec in #292.
+         */
+        post: operations["admin_orbital_purge_document"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -432,6 +515,33 @@ export interface paths {
          *     skips the predicate for back-compat.
          */
         get: operations["list_documents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/by-hash/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check Document Hash
+         * @description Pre-import duplicate check (#292).
+         *
+         *     Returns whether ``sha256`` already exists in the catalog so the
+         *     Forge widget can flag duplicates *before* streaming bytes
+         *     across the wire. The check is read-only — it never mutates the
+         *     catalog and never spawns a new version. Always 200; absence is
+         *     signalled by ``exists=False`` (no 404) so the client skips a
+         *     status-branch.
+         */
+        get: operations["check_document_hash"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1629,6 +1739,34 @@ export interface components {
             versions: components["schemas"]["DocumentVersion"][];
         };
         /**
+         * DocumentHashCheckResponse
+         * @description Response body for ``GET /documents/by-hash/{sha256}`` (#292).
+         *
+         *     Lets a client decide *before* streaming bytes whether a SHA-256
+         *     digest already exists in the catalog. When ``exists`` is ``True``,
+         *     the remaining fields point to the canonical version the new upload
+         *     would be flagged as a duplicate of. When ``False``, every other
+         *     field is ``None`` and the client is free to proceed with the
+         *     upload — the bytes haven't been seen before.
+         *
+         *     Always 200; absence is signalled by ``exists=False`` rather than
+         *     404 so the frontend doesn't have to branch on HTTP status.
+         */
+        DocumentHashCheckResponse: {
+            /** Document Id */
+            document_id: string | null;
+            /** Exists */
+            exists: boolean;
+            /** Original Filename */
+            original_filename: string | null;
+            /** Sha256 */
+            sha256: string;
+            /** Version Id */
+            version_id: string | null;
+            /** Version Number */
+            version_number: number | null;
+        };
+        /**
          * DocumentListResponse
          * @description Cursor-paginated page of documents returned by ``GET /documents``.
          */
@@ -2015,6 +2153,97 @@ export interface components {
             enabled: boolean;
             /** Spacy Model */
             spacy_model: string;
+        };
+        /**
+         * OrbitalPurgeAllRequest
+         * @description Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).
+         *
+         *     The operator types :data:`ORBITAL_PURGE_ALL_PHRASE` verbatim into
+         *     the modal — the route 422s on any other value so a misclick can't
+         *     nuke the catalog. Combined with ``?confirm=true`` this gives the
+         *     bulk path two independent gates.
+         */
+        OrbitalPurgeAllRequest: {
+            /**
+             * Confirmation Phrase
+             * @description Operator-typed phrase — must equal 'PURGE ALL DOCUMENTS' exactly (case-sensitive). The route 422s with ``KW_VALIDATION_ERROR`` on mismatch.
+             */
+            confirmation_phrase: string;
+        };
+        /**
+         * OrbitalPurgeAllResponse
+         * @description Response body for ``POST /admin/orbital/purge_all`` (#292).
+         *
+         *     Carries one :class:`OrbitalPurgeDocumentResponse` per active
+         *     document the route processed. ``documents_purged`` is the count
+         *     of fully-cascaded rows (matches the audit row's payload).
+         *     Best-effort: a per-document failure surfaces as ``failed`` but
+         *     doesn't abort the batch — same shape as :class:`PurgeBatchResponse`
+         *     in spirit.
+         */
+        OrbitalPurgeAllResponse: {
+            /** Documents Purged */
+            documents_purged: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /** Failures */
+            failures: string[];
+            /** Results */
+            results: components["schemas"]["OrbitalPurgeDocumentResponse"][];
+        };
+        /**
+         * OrbitalPurgeDocumentRequest
+         * @description Body for ``POST /admin/orbital/purge_document`` (#292).
+         *
+         *     Combines archive + purge_artifacts in a single audited call so an
+         *     Orbital operator can hard-delete an active document with one
+         *     confirmation. ``confirmation_filename`` MUST equal the target
+         *     document's ``original_filename`` — the route 422s on a mismatch
+         *     so a misclick can't take down the wrong family.
+         */
+        OrbitalPurgeDocumentRequest: {
+            /**
+             * Confirmation Filename
+             * @description Operator-typed filename — must match the target document's ``original_filename`` exactly (case-sensitive). The route rejects with 422 ``KW_VALIDATION_ERROR`` on mismatch.
+             */
+            confirmation_filename: string;
+            /**
+             * Document Id
+             * @description Catalog id of the document to purge.
+             */
+            document_id: string;
+        };
+        /**
+         * OrbitalPurgeDocumentResponse
+         * @description Response body for ``POST /admin/orbital/purge_document`` (#292).
+         *
+         *     Mirrors :class:`PurgeArtifactsResponse` (per-version tombstones)
+         *     and adds an ``archived_at`` field so the operator sees the moment
+         *     the doc was flag-archived in the same response that confirmed the
+         *     cascade landed. ``kg_subgraph_purged`` is ``True`` whenever at
+         *     least one KG subgraph deletion was attempted (best-effort — KG is
+         *     derived data and any failure is logged + swallowed).
+         */
+        OrbitalPurgeDocumentResponse: {
+            /**
+             * Archived At
+             * Format: date-time
+             */
+            archived_at: string;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Kg Subgraph Purged
+             * @default false
+             */
+            kg_subgraph_purged: boolean;
+            /** Original Filename */
+            original_filename: string;
+            /** Versions Purged */
+            versions_purged: components["schemas"]["VersionPurgeResult"][];
         };
         /** PersistenceConfig */
         PersistenceConfig: {
@@ -3027,6 +3256,76 @@ export interface operations {
             };
         };
     };
+    admin_orbital_purge_all: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrbitalPurgeAllRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrbitalPurgeAllResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_orbital_purge_document: {
+        parameters: {
+            query?: {
+                confirm?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrbitalPurgeDocumentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrbitalPurgeDocumentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_documents: {
         parameters: {
             query?: {
@@ -3050,6 +3349,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_document_hash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentHashCheckResponse"];
                 };
             };
             /** @description Validation Error */

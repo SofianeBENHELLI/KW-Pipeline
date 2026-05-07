@@ -148,15 +148,26 @@ docker compose -f docker/docker-compose.yml --profile deploy down
 docker volume rm kw-pipeline_api_data kw-pipeline_neo4j_data
 ```
 
-### API keys (Anthropic / Voyage)
-The `api` container reads `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` from the host's environment (or a `docker/.env` file Docker Compose loads automatically). Drop them in there once and `docker compose up -d api` to pick them up — no image rebuild needed.
+### Operator-tunable env (`docker/.env`)
+Every API key, feature flag, ITEROP setting, audit toggle, NER toggle and log-level lives in `docker/.env`. The compose stack loads that file via `env_file:` (with `required: false` so the dev profile keeps working without it), and Pydantic ignores unknown vars so adding a new entry doesn't need a compose change.
+
+Bootstrap once:
 
 ```bash
-# docker/.env  (gitignored — covered by docker/cloudflared/.gitignore's
-# parent-folder pattern + the repo's existing top-level .gitignore)
-ANTHROPIC_API_KEY=sk-ant-...
-VOYAGE_API_KEY=pa-...
+cp docker/.env.example docker/.env
+${EDITOR:-vim} docker/.env
+docker compose -f docker/docker-compose.yml --profile deploy up -d --force-recreate api
 ```
+
+The full documented list is in [`docker/.env.example`](../../docker/.env.example) — it's the authoritative reference. Highlights:
+
+- `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `VOYAGE_API_KEY` — Phase 2/3 providers.
+- `KW_AUDIT_ENABLED=true` — required for the Orbital purge audit trail (`orbital.document.purge` events).
+- `KW_NER_ENABLED=true` — opts into the spaCy fallback.
+- `KW_ITEROP_ENABLED=true` + `KW_ITEROP_BASE_URL` / `KW_ITEROP_AUTH_TOKEN` / `KW_ITEROP_WORKFLOW_REF` — external review workflow.
+- `KW_AUTH_MODE=bearer` + `KW_AUTH_SECRET=<32+ bytes>` — production auth.
+
+The Settings widget in the Forge dashboard (`KnowledgeForge — Settings`) reads `/admin/config` and reflects whatever the container actually sees, so it's the fastest way to confirm a fresh `.env` made it through. Container-network-specific overrides (Neo4j URI, the 3DEXPERIENCE CORS regex, Phase-1 enable flag) are hard-coded in `docker/docker-compose.yml` and override anything in `.env` — that's intentional.
 
 ## What this runbook deliberately doesn't cover
 

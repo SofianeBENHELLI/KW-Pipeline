@@ -17,6 +17,8 @@ import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
+import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
+import { PurgeDialog } from "./features/purge/PurgeDialog";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
 import { SearchPanel } from "./features/search";
 import { SettingsLauncher } from "./features/settings/SettingsLauncher";
@@ -379,14 +381,30 @@ function ReviewerWorkbench() {
     bumpMutation,
   } = catalog;
 
-  const handleUploaded = useCallback(
-    async (newDocumentId: string) => {
-      await refreshAll();
-      selectDocument(newDocumentId);
-      bumpMutation();
-    },
-    [refreshAll, selectDocument, bumpMutation],
-  );
+  // #292 §5 — purge dialog targets. ``null`` keeps the per-row modal
+  // hidden; the bulk modal toggles via its own boolean.
+  const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
+  const [purgeAllOpen, setPurgeAllOpen] = useState(false);
+
+  const handlePurgeRequest = useCallback((document: ApiDocument) => {
+    setPurgeTarget(document);
+  }, []);
+
+  const handlePurgeAllRequest = useCallback(() => {
+    setPurgeAllOpen(true);
+  }, []);
+
+  const handlePurged = useCallback(async () => {
+    setPurgeTarget(null);
+    await refreshAll();
+    bumpMutation();
+  }, [bumpMutation, refreshAll]);
+
+  const handlePurgedAll = useCallback(async () => {
+    setPurgeAllOpen(false);
+    await refreshAll();
+    bumpMutation();
+  }, [bumpMutation, refreshAll]);
 
   const handleMutationCompleted = useCallback(async () => {
     await Promise.all([refreshSelected(), refreshAll()]);
@@ -446,9 +464,29 @@ function ReviewerWorkbench() {
         documents={documents}
         selectedDocumentId={selectedId ?? ""}
         onSelectDocument={selectDocument}
-        onUploaded={handleUploaded}
         filter={filter}
         onFilterChange={setFilter}
+        onPurgeRequest={handlePurgeRequest}
+        onPurgeAllRequest={handlePurgeAllRequest}
+      />
+      <PurgeDialog
+        document={
+          purgeTarget
+            ? {
+                id: purgeTarget.id,
+                original_filename: purgeTarget.original_filename,
+                version_count: purgeTarget.versions.length,
+              }
+            : null
+        }
+        onCancel={() => setPurgeTarget(null)}
+        onPurged={() => void handlePurged()}
+      />
+      <PurgeAllDialog
+        open={purgeAllOpen}
+        documentCount={documents.length}
+        onCancel={() => setPurgeAllOpen(false)}
+        onPurged={() => void handlePurgedAll()}
       />
       {selected !== null ? (
         <ReviewWorkspace
@@ -460,7 +498,7 @@ function ReviewerWorkbench() {
         />
       ) : (
         <section className="workspace">
-          <p className="muted">No documents found. Upload a document to get started.</p>
+          <p className="muted">No documents found. Import documents from the Forge widget to get started.</p>
         </section>
       )}
       <SearchPanel

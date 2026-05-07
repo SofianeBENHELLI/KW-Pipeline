@@ -260,9 +260,97 @@ class ArchivedDocumentsResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# ─── Orbital purge (#292 — operator override) ───────────────────────
+
+
+class OrbitalPurgeDocumentRequest(BaseModel):
+    """Body for ``POST /admin/orbital/purge_document`` (#292).
+
+    Combines archive + purge_artifacts in a single audited call so an
+    Orbital operator can hard-delete an active document with one
+    confirmation. ``confirmation_filename`` MUST equal the target
+    document's ``original_filename`` — the route 422s on a mismatch
+    so a misclick can't take down the wrong family.
+    """
+
+    document_id: str = Field(
+        description="Catalog id of the document to purge.",
+    )
+    confirmation_filename: str = Field(
+        description=(
+            "Operator-typed filename — must match the target document's "
+            "``original_filename`` exactly (case-sensitive). The route "
+            "rejects with 422 ``KW_VALIDATION_ERROR`` on mismatch."
+        ),
+    )
+
+
+class OrbitalPurgeDocumentResponse(BaseModel):
+    """Response body for ``POST /admin/orbital/purge_document`` (#292).
+
+    Mirrors :class:`PurgeArtifactsResponse` (per-version tombstones)
+    and adds an ``archived_at`` field so the operator sees the moment
+    the doc was flag-archived in the same response that confirmed the
+    cascade landed. ``kg_subgraph_purged`` is ``True`` whenever at
+    least one KG subgraph deletion was attempted (best-effort — KG is
+    derived data and any failure is logged + swallowed).
+    """
+
+    document_id: str
+    original_filename: str
+    archived_at: datetime
+    versions_purged: list[VersionPurgeResult] = Field(default_factory=list)
+    kg_subgraph_purged: bool = False
+
+
+# Operator-typed phrase the bulk-purge route demands as a second
+# confirmation (defence-in-depth on top of ``?confirm=true``).
+ORBITAL_PURGE_ALL_PHRASE = "PURGE ALL DOCUMENTS"
+
+
+class OrbitalPurgeAllRequest(BaseModel):
+    """Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).
+
+    The operator types :data:`ORBITAL_PURGE_ALL_PHRASE` verbatim into
+    the modal — the route 422s on any other value so a misclick can't
+    nuke the catalog. Combined with ``?confirm=true`` this gives the
+    bulk path two independent gates.
+    """
+
+    confirmation_phrase: str = Field(
+        description=(
+            "Operator-typed phrase — must equal "
+            f"{ORBITAL_PURGE_ALL_PHRASE!r} exactly (case-sensitive). "
+            "The route 422s with ``KW_VALIDATION_ERROR`` on mismatch."
+        ),
+    )
+
+
+class OrbitalPurgeAllResponse(BaseModel):
+    """Response body for ``POST /admin/orbital/purge_all`` (#292).
+
+    Carries one :class:`OrbitalPurgeDocumentResponse` per active
+    document the route processed. ``documents_purged`` is the count
+    of fully-cascaded rows (matches the audit row's payload).
+    Best-effort: a per-document failure surfaces as ``failed`` but
+    doesn't abort the batch — same shape as :class:`PurgeBatchResponse`
+    in spirit.
+    """
+
+    documents_purged: int
+    failed: int = 0
+    results: list[OrbitalPurgeDocumentResponse] = Field(default_factory=list)
+    failures: list[str] = Field(default_factory=list)
+
+
 __all__ = [
+    "ORBITAL_PURGE_ALL_PHRASE",
     "ArchivedDocumentItem",
     "ArchivedDocumentsResponse",
+    "OrbitalPurgeAllRequest",
+    "OrbitalPurgeAllResponse",
+    "OrbitalPurgeDocumentRequest",
+    "OrbitalPurgeDocumentResponse",
     "PurgeArtifactsRequest",
     "PurgeArtifactsResponse",
     "PurgeBatchRequest",

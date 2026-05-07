@@ -24,9 +24,12 @@ import type {
   ApiChatResponse,
   ApiChunkSearchResponse,
   ApiDocument,
+  ApiDocumentHashCheck,
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiOrbitalPurgeAllResponse,
+  ApiOrbitalPurgeDocumentResponse,
   ApiPurgeArtifactsResponse,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
@@ -305,6 +308,24 @@ export async function getDocument(
  * bodies cleanly, so we drop down to native fetch here. Path and response
  * shape stay pinned via the imported response type.
  */
+/**
+ * GET /documents/by-hash/{sha256} (#292)
+ *
+ * Pre-import duplicate check. The Forge widget hashes the picked file
+ * locally and calls this before posting bytes — when ``exists=true``
+ * we surface a duplicate banner and let the operator decide whether
+ * to skip or proceed.
+ */
+export async function checkDocumentHash(
+  sha256: string,
+): Promise<ApiDocumentHashCheck> {
+  const { data, error, response } = await http.GET("/documents/by-hash/{sha256}", {
+    params: { path: { sha256 } },
+  });
+  if (error !== undefined || data === undefined) throw await asApiError(response);
+  return data;
+}
+
 export async function uploadDocument(
   file: File,
   documentId?: string,
@@ -662,6 +683,55 @@ export async function purgeArtifacts(
     await http.POST("/admin/archive/purge_artifacts", {
       params: { query },
       body: { document_id: documentId },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/orbital/purge_document (#292)
+ *
+ * Admin-only. Combined archive + purge_artifacts + KG cleanup in a
+ * single audited call. ``confirmation_filename`` MUST equal the
+ * target document's ``original_filename``; the route 422s on
+ * mismatch so a misclick can't take the wrong family. Emits an
+ * ``orbital.document.purge`` audit event on success.
+ */
+export async function orbitalPurgeDocument(
+  documentId: string,
+  confirmationFilename: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiOrbitalPurgeDocumentResponse> {
+  return unwrap(
+    await http.POST("/admin/orbital/purge_document", {
+      params: { query: { confirm: true } },
+      body: {
+        document_id: documentId,
+        confirmation_filename: confirmationFilename,
+      },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/orbital/purge_all (#292 — bulk override)
+ *
+ * Admin-only. Hard-deletes every active document in the catalog in
+ * one audited cascade. Two gates: ``?confirm=true`` and a
+ * ``confirmation_phrase`` body field that must equal
+ * ``ORBITAL_PURGE_ALL_PHRASE`` (case-sensitive). Emits
+ * ``orbital.knowledge_space.purge`` plus one
+ * ``orbital.document.purge`` per purged row.
+ */
+export async function orbitalPurgeAll(
+  confirmationPhrase: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiOrbitalPurgeAllResponse> {
+  return unwrap(
+    await http.POST("/admin/orbital/purge_all", {
+      params: { query: { confirm: true } },
+      body: { confirmation_phrase: confirmationPhrase },
       signal: options.signal,
     }),
   );

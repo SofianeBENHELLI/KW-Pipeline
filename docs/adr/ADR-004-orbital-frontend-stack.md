@@ -2,16 +2,26 @@
 
 ## Status
 
-Accepted
+Accepted. **Amended 2026-05-06** ([#292](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/292)) —
+ingestion moved out of Orbital into the Forge widget; Orbital is
+now read-only for ingestion *and* the sanctioned hard-delete admin
+surface (ADR-027 §1.6). Catalog list now sorts `created_at DESC`,
+the saved-view bar gained a `Stored` filter, and the knowledge-graph
+view is navigable (pan/zoom/fit/search) with topic nodes rendered
+larger so they stand out.
 
 ## Context
 
 Orbital is the internal reviewer-facing tool that lets a human inspect uploaded
 documents, the raw extraction, the schema-validated semantic JSON, and the
-generated Markdown, then validate or reject the extraction. It is not a public
-product surface. It must run on PC and macOS workstations used by the team
-without per-OS installers, and it has to talk to the FastAPI backend in
-`apps/api/`.
+generated Markdown, then validate or reject the extraction. **Ingestion is
+not Orbital's job** — operators import documents from the Forge widget,
+which runs the pre-import duplicate check (ADR-002 amendment) and posts to
+`/documents/upload`. Orbital is also the sole surface for hard-deleting
+catalog rows (ADR-027 §1.6 — Purge button per row + Purge-all in the
+header). It is not a public product surface. It must run on PC and macOS
+workstations used by the team without per-OS installers, and it has to talk
+to the FastAPI backend in `apps/api/`.
 
 Orbital should also be designed so it can later run as a compact widget inside
 a 3DEXPERIENCE dashboard. The MVP may ship as a standalone Vite app first, but

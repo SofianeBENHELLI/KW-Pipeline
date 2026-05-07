@@ -25,6 +25,7 @@ import type {
   ChatResponse,
   ChunkSearchResponse,
   Document,
+  DocumentHashCheck,
   DocumentListResponse,
   DocumentVersion,
   Health,
@@ -216,6 +217,38 @@ export function getKnowledgeGraph(
     baseUrl: opts.baseUrl,
     signal: opts.signal,
   });
+}
+
+/**
+ * GET /documents/by-hash/{sha256} (#292)
+ *
+ * Pre-import duplicate check. Hash the file locally with
+ * ``hashFileSha256`` and call this before posting bytes — when
+ * ``exists=true``, surface a banner so the operator can decide whether
+ * to keep the upload (the backend will tag it ``DUPLICATE_DETECTED``)
+ * or skip it entirely without burning bandwidth.
+ */
+export function checkDocumentHash(
+  sha256: string,
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<DocumentHashCheck> {
+  return request<DocumentHashCheck>(
+    `/documents/by-hash/${encodeURIComponent(sha256)}`,
+    opts,
+  );
+}
+
+/**
+ * Compute the SHA-256 hex digest of a File using the Web Crypto API.
+ * Streams via ``arrayBuffer()`` so peak memory matches the file size,
+ * which is acceptable for the widget's drag-and-drop limit (50 MB).
+ */
+export async function hashFileSha256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export async function uploadDocument(

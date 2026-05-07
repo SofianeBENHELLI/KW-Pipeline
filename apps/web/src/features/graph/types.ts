@@ -163,10 +163,24 @@ export function isSourceBackedEdge(edge: ApiGraphEdge): boolean {
 
 // ─── NVL adapter ─────────────────────────────────────────────────────────────
 
+// #292 — topics get the largest radius so they stand out against the
+// chunk swarm; documents/versions sit just below (structural anchors);
+// chunks/entities/sections render compact so a dense graph stays
+// readable.
+export const NODE_KIND_SIZES: Record<ApiGraphNode["kind"], number> = {
+  topic: 80,
+  document: 60,
+  version: 50,
+  entity: 40,
+  chunk: 30,
+  section: 30,
+};
+
 export interface NvlNode {
   id: string;
   captions: { value: string }[];
   color: string;
+  size: number;
 }
 
 export interface NvlRelationship {
@@ -176,11 +190,27 @@ export interface NvlRelationship {
   captions: { value: string }[];
 }
 
+/**
+ * Build the visible caption for a topic node — show the human label
+ * plus a compact "(N chunks)" hint when ``chunk_count`` is available
+ * (#292 — make topics ressort clearly).
+ */
+function topicCaption(node: ApiGraphNode): string {
+  const count = node.properties["chunk_count"];
+  if (typeof count === "number" && count > 0) {
+    return `${node.label} (${count})`;
+  }
+  return node.label;
+}
+
 export function toNvlNodes(nodes: ApiGraphNode[]): NvlNode[] {
   return nodes.map((node) => ({
     id: node.id,
-    captions: [{ value: node.label }],
+    captions: [
+      { value: node.kind === "topic" ? topicCaption(node) : node.label },
+    ],
     color: NODE_KIND_COLORS[node.kind] ?? "#627085",
+    size: NODE_KIND_SIZES[node.kind] ?? 30,
   }));
 }
 

@@ -1024,6 +1024,73 @@
         "title": "Document",
         "type": "object"
       },
+      "DocumentHashCheckResponse": {
+        "description": "Response body for ``GET /documents/by-hash/{sha256}`` (#292).\n\nLets a client decide *before* streaming bytes whether a SHA-256\ndigest already exists in the catalog. When ``exists`` is ``True``,\nthe remaining fields point to the canonical version the new upload\nwould be flagged as a duplicate of. When ``False``, every other\nfield is ``None`` and the client is free to proceed with the\nupload — the bytes haven't been seen before.\n\nAlways 200; absence is signalled by ``exists=False`` rather than\n404 so the frontend doesn't have to branch on HTTP status.",
+        "properties": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "version_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Number"
+          }
+        },
+        "required": [
+          "exists",
+          "document_id",
+          "version_id",
+          "version_number",
+          "original_filename",
+          "sha256"
+        ],
+        "title": "DocumentHashCheckResponse",
+        "type": "object"
+      },
       "DocumentListResponse": {
         "description": "Cursor-paginated page of documents returned by ``GET /documents``.",
         "properties": {
@@ -1901,6 +1968,117 @@
           "spacy_model"
         ],
         "title": "NerConfig",
+        "type": "object"
+      },
+      "OrbitalPurgeAllRequest": {
+        "description": "Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).\n\nThe operator types :data:`ORBITAL_PURGE_ALL_PHRASE` verbatim into\nthe modal — the route 422s on any other value so a misclick can't\nnuke the catalog. Combined with ``?confirm=true`` this gives the\nbulk path two independent gates.",
+        "properties": {
+          "confirmation_phrase": {
+            "description": "Operator-typed phrase — must equal 'PURGE ALL DOCUMENTS' exactly (case-sensitive). The route 422s with ``KW_VALIDATION_ERROR`` on mismatch.",
+            "title": "Confirmation Phrase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_phrase"
+        ],
+        "title": "OrbitalPurgeAllRequest",
+        "type": "object"
+      },
+      "OrbitalPurgeAllResponse": {
+        "description": "Response body for ``POST /admin/orbital/purge_all`` (#292).\n\nCarries one :class:`OrbitalPurgeDocumentResponse` per active\ndocument the route processed. ``documents_purged`` is the count\nof fully-cascaded rows (matches the audit row's payload).\nBest-effort: a per-document failure surfaces as ``failed`` but\ndoesn't abort the batch — same shape as :class:`PurgeBatchResponse`\nin spirit.",
+        "properties": {
+          "documents_purged": {
+            "title": "Documents Purged",
+            "type": "integer"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/OrbitalPurgeDocumentResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents_purged",
+          "failed",
+          "results",
+          "failures"
+        ],
+        "title": "OrbitalPurgeAllResponse",
+        "type": "object"
+      },
+      "OrbitalPurgeDocumentRequest": {
+        "description": "Body for ``POST /admin/orbital/purge_document`` (#292).\n\nCombines archive + purge_artifacts in a single audited call so an\nOrbital operator can hard-delete an active document with one\nconfirmation. ``confirmation_filename`` MUST equal the target\ndocument's ``original_filename`` — the route 422s on a mismatch\nso a misclick can't take down the wrong family.",
+        "properties": {
+          "confirmation_filename": {
+            "description": "Operator-typed filename — must match the target document's ``original_filename`` exactly (case-sensitive). The route rejects with 422 ``KW_VALIDATION_ERROR`` on mismatch.",
+            "title": "Confirmation Filename",
+            "type": "string"
+          },
+          "document_id": {
+            "description": "Catalog id of the document to purge.",
+            "title": "Document Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "confirmation_filename"
+        ],
+        "title": "OrbitalPurgeDocumentRequest",
+        "type": "object"
+      },
+      "OrbitalPurgeDocumentResponse": {
+        "description": "Response body for ``POST /admin/orbital/purge_document`` (#292).\n\nMirrors :class:`PurgeArtifactsResponse` (per-version tombstones)\nand adds an ``archived_at`` field so the operator sees the moment\nthe doc was flag-archived in the same response that confirmed the\ncascade landed. ``kg_subgraph_purged`` is ``True`` whenever at\nleast one KG subgraph deletion was attempted (best-effort — KG is\nderived data and any failure is logged + swallowed).",
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "title": "Archived At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "kg_subgraph_purged": {
+            "default": false,
+            "title": "Kg Subgraph Purged",
+            "type": "boolean"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "versions_purged": {
+            "items": {
+              "$ref": "#/components/schemas/VersionPurgeResult"
+            },
+            "title": "Versions Purged",
+            "type": "array"
+          }
+        },
+        "required": [
+          "document_id",
+          "original_filename",
+          "archived_at",
+          "versions_purged",
+          "kg_subgraph_purged"
+        ],
+        "title": "OrbitalPurgeDocumentResponse",
         "type": "object"
       },
       "PersistenceConfig": {
@@ -3719,6 +3897,108 @@
         "summary": "Get Hitl State"
       }
     },
+    "/admin/orbital/purge_all": {
+      "post": {
+        "description": "Hard-delete every active document in the catalog (#292 §5 — bulk override).\n\nThe user picked option 3 in #292 (Orbital is the sanctioned\nhard-delete surface) and explicitly asked for a bulk button.\nTwo independent gates protect this path:\n\n1. ``?confirm=true`` query flag (matches the per-doc route).\n2. ``confirmation_phrase`` body field — must equal\n   :data:`ORBITAL_PURGE_ALL_PHRASE` exactly (case-sensitive).\n   A misclick stops at the modal; a malformed request stops\n   at the server.\n\nIterates every active document (``archived_at IS NULL``),\ncascades the same archive + purge_artifacts + KG cleanup as\nthe per-doc route, and emits one ``orbital.document.purge``\naudit event per row plus a single\n``orbital.knowledge_space.purge`` summary event with the total\ncount + actor.\n\nBest-effort: a per-document failure is logged + recorded in\n``failures`` but doesn't abort the batch.",
+        "operationId": "admin_orbital_purge_all",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrbitalPurgeAllRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrbitalPurgeAllResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Orbital Purge All"
+      }
+    },
+    "/admin/orbital/purge_document": {
+      "post": {
+        "description": "Hard-delete an active document from Orbital (#292 — operator override).\n\nCombines archive + ``purge_artifacts`` + KG subgraph cleanup\nin one audited call. The operator types the document's\n``original_filename`` into the modal; the route 422s on a\nmismatch so a misclick can't take down the wrong family.\n\nPer the deletion-rules feedback (memory), Orbital is the only\nsanctioned hard-delete surface; every other entry point still\nflag-archives. The cascade order matches ADR-027:\n\n1. Archive the document (sets ``archived_at`` so all read\n   paths immediately stop surfacing it).\n2. Purge each version's source artifacts (storage bytes +\n   catalog ``storage_uri`` flip to a tombstone). Reuses\n   :func:`_purge_one_document` so the per-version contract\n   stays identical to the legacy admin path.\n3. Drop the KG subgraph for each version (best-effort —\n   failures are logged + swallowed because KG is derived\n   data, regenerable from the catalog).\n\nAudit emits a single ``orbital.document.purge`` event with\nthe actor, filename, archive timestamp, and version count\nper the spec in #292.",
+        "operationId": "admin_orbital_purge_document",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrbitalPurgeDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrbitalPurgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Orbital Purge Document"
+      }
+    },
     "/documents": {
       "get": {
         "description": "List document families with optional status / filename filters (#86).\n\n- ``status`` is repeatable. ``?status=VALIDATED&status=NEEDS_REVIEW``\n  returns only documents whose latest version is in either state.\n  Unknown status names yield 400 with a clear allowed-set message\n  rather than a silent 0-result page.\n- ``q`` is a case-insensitive substring match against the\n  document's ``original_filename``. Trims whitespace; an empty\n  string after trim is treated as \"no filter\".\n- Filters apply before pagination. Re-walking with a different\n  filter requires dropping the cursor.\n\nScope filter (EPIC-D D.5, ADR-020 §2): the response is filtered\nto documents linked to the caller's allowed scopes (default\n``personal:<current_user.id>``). ``KW_AUTH_MODE=disabled``\nskips the predicate for back-compat.",
@@ -3842,6 +4122,46 @@
           }
         },
         "summary": "List Documents"
+      }
+    },
+    "/documents/by-hash/{sha256}": {
+      "get": {
+        "description": "Pre-import duplicate check (#292).\n\nReturns whether ``sha256`` already exists in the catalog so the\nForge widget can flag duplicates *before* streaming bytes\nacross the wire. The check is read-only — it never mutates the\ncatalog and never spawns a new version. Always 200; absence is\nsignalled by ``exists=False`` (no 404) so the client skips a\nstatus-branch.",
+        "operationId": "check_document_hash",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHashCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Document Hash"
       }
     },
     "/documents/upload": {

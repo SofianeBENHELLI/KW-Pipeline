@@ -2,12 +2,40 @@
 
 ## Status
 
-**Proposed**, 2026-05-05. Codifies the design of the dedicated admin
-tool that ADR-020 §4 (rewritten in
+**Proposed**, 2026-05-05. **Amended 2026-05-06** — the admin tool
+is now realised as the **Orbital workbench** (`apps/web`) instead
+of a separate surface; see §1.6. Codifies the design of the
+dedicated admin tool that ADR-020 §4 (rewritten in
 [#262](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/262))
 deferred. Closes the EPIC-D
 ([#218](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/218))
 D.9 design slot for the no-delete policy's pressure-release valve.
+
+### Amendment 2026-05-06 — Orbital surface binding
+
+Issue [#292](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/292)
+collapsed the deferred Archive/Purge Admin tool into Orbital. The
+operator picked option 3 (override the flag-only-everywhere stance)
+and asked for a per-document **Purge** button plus a header **Purge
+all** button inside Orbital, both gated by a confirmation modal and
+audit-logged. Two new HTTP routes implement that surface:
+
+- `POST /admin/orbital/purge_document` — combined archive +
+  `purge_artifacts` + KG cleanup in a single audited call. Demands
+  `?confirm=true` *and* a body field `confirmation_filename` that
+  must equal the document's `original_filename` (case-sensitive).
+  Emits `orbital.document.purge`.
+- `POST /admin/orbital/purge_all` — bulk wrapper. Demands
+  `?confirm=true` *and* a body field `confirmation_phrase` equal to
+  the literal `"PURGE ALL DOCUMENTS"`. Emits one
+  `orbital.document.purge` per row plus an
+  `orbital.knowledge_space.purge` summary event.
+
+The flag-only rule still governs every other surface (Forge widget,
+API consumers, automated pipelines, EPIC-D D.6/D.7 cascade
+triggers). Orbital is the single sanctioned hard-delete code path.
+See §1.6 for the route contract and §5 for the confirmation
+defence-in-depth.
 
 ## Context
 
@@ -151,6 +179,63 @@ Content-Type: application/json
   This forces archive-then-purge as the ordered ritual and gives
   operators a chance to reverse via `unarchive` before bytes go.
 
+#### 1.6 Orbital binding — `purge_document` / `purge_all` (#292 amendment)
+
+The Orbital workbench is the operator-facing surface for the routes
+above. Two convenience routes wrap the archive + `purge_artifacts`
++ KG cleanup sequence into a single audited call so a misclick can't
+land halfway through the cascade. Both demand the document is
+**not** already archived (the bundle handles archiving itself); for
+already-archived rows, operators still use the §1.3
+`purge_artifacts` route directly.
+
+**`POST /admin/orbital/purge_document?confirm=true`**
+
+```json
+{"document_id": "doc-abc-123",
+ "confirmation_filename": "policy.pdf"}
+```
+
+`confirmation_filename` must equal the target document's
+`original_filename` (case-sensitive). The route 422s with
+`KW_VALIDATION_ERROR` on mismatch — the operator typed the wrong
+name into the modal, so the catalog stays untouched. On success the
+response shape is `OrbitalPurgeDocumentResponse` (per-version
+tombstone URIs + the moment the row was archived + a
+`kg_subgraph_purged` boolean). Audit event:
+`orbital.document.purge` with `{document_id, original_filename,
+archived_at, versions_purged, kg_subgraph_purged, actor,
+actor_role}`.
+
+**`POST /admin/orbital/purge_all?confirm=true`**
+
+```json
+{"confirmation_phrase": "PURGE ALL DOCUMENTS"}
+```
+
+`confirmation_phrase` must equal the literal
+`"PURGE ALL DOCUMENTS"` (case-sensitive). Best-effort over every
+active document; per-doc failures land in the response's `failures`
+list and the batch continues. Audit events:
+- One `orbital.document.purge` per row processed (same payload as
+  the single-doc variant).
+- One `orbital.knowledge_space.purge` summary event with
+  `{documents_purged, failed, actor, actor_role}`.
+
+**KG cleanup is best-effort.** The KG is derived data
+(regenerable from the catalog per ADR-012); failures during
+`delete_subgraph_for_version` are logged
+(`orbital.document.purge.kg_delete_failed`) and swallowed so a Neo4j
+hiccup doesn't strand the catalog mid-cascade.
+
+**Why not reuse `/admin/archive/purge_artifacts`?** That route
+demands archive-then-purge as two separate operator gestures. The
+Orbital binding collapses both into one modal click + one typed
+confirmation because the surface itself is the audit record — the
+operator pressed Purge, typed the filename, and confirmed; that
+trail is the same shape as archive-then-purge but without the
+accidental "I archived but forgot to purge" half-state.
+
 ### 2. Dry-run on every mutating route
 
 Every mutating route accepts `?dry_run=true`. A dry-run returns
@@ -293,6 +378,13 @@ Content-Type: application/json
 - The bulk route exists only for `purge_artifacts`. Bulk
   `unarchive` and bulk `relink_scope` are deferred until a
   concrete operator workflow asks for them.
+- The Orbital `/admin/orbital/purge_all` route (§1.6, #292) is
+  **not** capped — it operates on the full active set in one
+  cascade because the operator-typed `"PURGE ALL DOCUMENTS"`
+  phrase is itself the cap (a misclick stops at the modal). For
+  catalogs large enough that the in-process cascade becomes a
+  problem, the route should be backed by a job queue in a future
+  amendment.
 
 ### 5. Auth, role gating, and `?confirm=true`
 
@@ -317,7 +409,8 @@ state.
 
 ### 6. Reversibility envelope
 
-Every action except `purge_artifacts` is fully reversible. The
+Every action except `purge_artifacts` (and its Orbital wrappers
+`purge_document` / `purge_all`, §1.6) is fully reversible. The
 audit trail records the pre-action state in enough detail to
 reconstruct it (`archived_at_before`, `removed_at_before`).
 
@@ -330,6 +423,14 @@ return. Keeping the audit row's shape rich enough (storage URI,
 version id, document id) preserves the option of a future
 bytes-recovery slice if a deployment adds an off-system snapshot
 adapter; this ADR does not specify that recovery slice.
+
+The Orbital binding (§1.6) is also irreversible from the surface
+itself. Combining archive + purge + KG cleanup into one button
+removes the `unarchive` escape hatch from the operator's flow —
+that is intentional, the audit trail (`orbital.document.purge` /
+`orbital.knowledge_space.purge`) is the only recovery path.
+Operators who need an undo step should drive the legacy two-step
+ritual (`flag_document_archived` → `purge_artifacts`) directly.
 
 ### 7. Storage layer contract — `StorageService.delete()`
 
@@ -450,10 +551,18 @@ reviewable PR:
   partial-failure case and the 100-cap).
 - **Slice 6** — Tombstone storage URI shape + 410 Gone read
   response on the document and version fetch endpoints + tests.
+- **Slice 7 (#292)** — Orbital binding (§1.6): the
+  `/admin/orbital/purge_document` and `/admin/orbital/purge_all`
+  routes, the `orbital.document.purge` /
+  `orbital.knowledge_space.purge` audit events, plus the
+  `PurgeDialog` and `PurgeAllDialog` frontend modals + per-row
+  Purge button + header Purge-all button in `apps/web`. Depends
+  on slice 4 (reuses `_purge_one_document`).
 
 Slices 1–3 can land in any order; slice 4 depends on slice 3;
 slice 5 depends on slice 4; slice 6 can land in parallel with
-slice 4.
+slice 4. Slice 7 depends on slice 4 and is the surface that
+operators actually click.
 
 ## References
 
@@ -479,3 +588,7 @@ slice 4.
 - [`docs/roadmap/2026-05-04-hitl-and-extensions.md`](../roadmap/2026-05-04-hitl-and-extensions.md)
   §4.6 — `flag_archive()` pseudocode. Source of the archive
   shape this ADR finalises.
+- [#292](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/292) —
+  Orbital UX overhaul. §5 collapsed the deferred Archive/Purge
+  Admin tool into Orbital itself; §1.6 of this ADR is the
+  resulting route surface.
