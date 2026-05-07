@@ -85,6 +85,42 @@ export interface DocumentCatalog {
   refreshSelected: () => Promise<void>;
   selectDocument: (id: string | null) => void;
   bumpMutation: () => void;
+  /**
+   * Document id supplied via the ``?document=…`` deep link from Forge
+   * (#292 §4) that did not resolve to any row in the loaded catalog.
+   * Surfaced as a dismissible banner so the operator gets a clear "we
+   * couldn't open the doc you asked for" signal instead of silently
+   * landing on the empty workspace.
+   */
+  deepLinkError: string | null;
+  /** Dismiss the deep-link error banner. */
+  clearDeepLinkError: () => void;
+  /**
+   * One-shot trigger for the catalog list to scroll the selected row
+   * into view. Bumped when the deep link auto-selects on mount; the
+   * widget consumes the value via ``useEffect`` and resets locally.
+   */
+  scrollSelectedToken: number;
+}
+
+/** Per-document batch pipeline progress (#292 §3 follow-up). */
+export type BatchItemStatus =
+  | "queued"
+  | "extracting"
+  | "semantic"
+  | "done"
+  | "failed";
+
+export interface BatchItemState {
+  status: BatchItemStatus;
+  /** Populated when ``status === "failed"``. */
+  reason?: string;
+}
+
+export interface BatchFailure {
+  document_id: string;
+  filename: string;
+  reason: string;
 }
 
 export function useDocumentCatalog(): DocumentCatalog {
@@ -222,11 +258,55 @@ export function useDocumentCatalog(): DocumentCatalog {
     };
   }, [filter]);
 
+  // #292 §4 / b7c5898 — Forge ships an ``Open in Orbital`` button that
+  // redirects to ``/?document=doc-…``. We capture the param once on
+  // mount (so a subsequent refresh doesn't re-trigger the auto-select),
+  // strip it from the URL via ``history.replaceState``, and remember
+  // the requested id in a ref so we can surface a 404 banner if the
+  // doc isn't in the catalog after the first list load completes.
+  const [deepLinkError, setDeepLinkError] = useState<string | null>(null);
+  const [scrollSelectedToken, setScrollSelectedToken] = useState(0);
+  const deepLinkRequestIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const documentId = params.get("document");
-    if (documentId) setSelectedId(documentId);
+    if (!documentId) return;
+    deepLinkRequestIdRef.current = documentId;
+    setSelectedId(documentId);
+    setScrollSelectedToken((token) => token + 1);
+    // Drop the query param so a refresh after navigation doesn't
+    // reopen this same row, and the URL stays clean for sharing.
+    params.delete("document");
+    const next = `${window.location.pathname}${
+      params.toString() ? `?${params.toString()}` : ""
+    }${window.location.hash}`;
+    window.history.replaceState(window.history.state, "", next);
+  }, []);
+
+  // After the catalog finishes its first load, validate that the
+  // deep-link id (if any) actually resolved. If not, surface a
+  // dismissible banner — silently landing on the empty workspace was
+  // the half-done shape b7c5898 left behind.
+  useEffect(() => {
+    if (loadingDocuments) return;
+    const requested = deepLinkRequestIdRef.current;
+    if (!requested) return;
+    deepLinkRequestIdRef.current = null;
+    const found = documents.some((d) => d.id === requested);
+    if (!found) {
+      setDeepLinkError(
+        `Document ${requested} could not be found in the catalog.`,
+      );
+      // Clear the dangling selection so ReviewWorkspace doesn't render
+      // a half-empty pane.
+      setSelectedId(null);
+    }
+  }, [documents, loadingDocuments]);
+
+  const clearDeepLinkError = useCallback(() => {
+    setDeepLinkError(null);
   }, []);
 
   const selected = documents.find((d) => d.id === selectedId) ?? null;
@@ -246,6 +326,9 @@ export function useDocumentCatalog(): DocumentCatalog {
     refreshSelected,
     selectDocument,
     bumpMutation,
+    deepLinkError,
+    clearDeepLinkError,
+    scrollSelectedToken,
   };
 }
 
@@ -403,6 +486,9 @@ function ReviewerWorkbench() {
     refreshSelected,
     selectDocument,
     bumpMutation,
+    deepLinkError,
+    clearDeepLinkError,
+    scrollSelectedToken,
   } = catalog;
 
   // #292 §5 — purge dialog targets. ``null`` keeps the per-row modal
@@ -412,7 +498,10 @@ function ReviewerWorkbench() {
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
-  const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<ReadonlyMap<string, BatchItemState>>(
+    () => new Map(),
+  );
+  const [batchFailures, setBatchFailures] = useState<ReadonlyArray<BatchFailure>>([]);
 
   const handlePurgeRequest = useCallback((document: ApiDocument) => {
     setPurgeTarget(document);
@@ -451,7 +540,8 @@ function ReviewerWorkbench() {
   const handleClearBatchSelection = useCallback(() => {
     setSelectedBatchIds(new Set());
     setBatchMessage(null);
-    setBatchError(null);
+    setBatchProgress(new Map());
+    setBatchFailures([]);
   }, []);
 
   const handleRunBatchPipeline = useCallback(async () => {
@@ -459,27 +549,72 @@ function ReviewerWorkbench() {
     if (targets.length === 0 || batchBusy) return;
     setBatchBusy(true);
     setBatchMessage(null);
-    setBatchError(null);
+    setBatchFailures([]);
+
+    // Seed the progress map with every selected doc as ``queued`` so
+    // the operator sees the full intent before the loop starts.
+    const progress = new Map<string, BatchItemState>(
+      targets.map((doc) => [doc.id, { status: "queued" }]),
+    );
+    setBatchProgress(new Map(progress));
+
+    const setItem = (id: string, state: BatchItemState) => {
+      progress.set(id, state);
+      setBatchProgress(new Map(progress));
+    };
+
     let completed = 0;
-    const failures: string[] = [];
+    const failures: BatchFailure[] = [];
+    const failedIds = new Set<string>();
 
     try {
       for (const doc of targets) {
         const version =
           doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
-        if (!version) continue;
+        if (!version) {
+          setItem(doc.id, {
+            status: "failed",
+            reason: "No version available on this document.",
+          });
+          failures.push({
+            document_id: doc.id,
+            filename: doc.original_filename,
+            reason: "No version available on this document.",
+          });
+          failedIds.add(doc.id);
+          continue;
+        }
         try {
           if (version.status === "STORED") {
+            setItem(doc.id, { status: "extracting" });
             await extractVersion(doc.id, version.id);
+            setItem(doc.id, { status: "semantic" });
             await generateSemantic(doc.id, version.id);
             completed += 1;
+            setItem(doc.id, { status: "done" });
           } else if (
             version.status === "EXTRACTED" ||
             version.status === "SEMANTIC_READY" ||
             version.status === "NEEDS_REVIEW"
           ) {
+            setItem(doc.id, { status: "semantic" });
             await generateSemantic(doc.id, version.id);
             completed += 1;
+            setItem(doc.id, { status: "done" });
+          } else {
+            // Status that the pipeline can't operate on (e.g. FAILED,
+            // VALIDATED, REJECTED, DUPLICATE_DETECTED). Mark explicitly
+            // so the row pill shows "skipped" instead of "queued".
+            setItem(doc.id, {
+              status: "failed",
+              reason: `Cannot run pipeline from status "${version.status}".`,
+            });
+            failures.push({
+              document_id: doc.id,
+              filename: doc.original_filename,
+              reason: `Cannot run pipeline from status "${version.status}".`,
+            });
+            failedIds.add(doc.id);
           }
         } catch (err: unknown) {
           const message =
@@ -488,16 +623,25 @@ function ReviewerWorkbench() {
               : err instanceof Error
                 ? err.message
                 : "Pipeline step failed.";
-          failures.push(`${doc.original_filename}: ${message}`);
+          setItem(doc.id, { status: "failed", reason: message });
+          failures.push({
+            document_id: doc.id,
+            filename: doc.original_filename,
+            reason: message,
+          });
+          failedIds.add(doc.id);
         }
       }
       await Promise.all([refreshSelected(), refreshAll()]);
       bumpMutation();
-      setSelectedBatchIds(new Set());
+      // Keep failed rows checked so the operator can hit "Run selected
+      // pipeline" again to retry them in one click. Succeeded rows
+      // drop out of the selection.
+      setSelectedBatchIds(new Set(failedIds));
       setBatchMessage(
         `Semantic pipeline completed for ${completed} document${completed === 1 ? "" : "s"}.`,
       );
-      setBatchError(failures.length > 0 ? failures.join(" ") : null);
+      setBatchFailures(failures);
     } finally {
       setBatchBusy(false);
     }
@@ -559,6 +703,7 @@ function ReviewerWorkbench() {
   return (
     <main className="app-shell" aria-label="Orbital document review workbench">
       {banner}
+      <DeepLinkErrorBanner message={deepLinkError} onDismiss={clearDeepLinkError} />
       <PipelineWidget
         documents={documents}
         selectedDocumentId={selectedId ?? ""}
@@ -570,10 +715,12 @@ function ReviewerWorkbench() {
         selectedBatchIds={selectedBatchIds}
         batchBusy={batchBusy}
         batchMessage={batchMessage}
-        batchError={batchError}
+        batchProgress={batchProgress}
+        batchFailures={batchFailures}
         onToggleBatchDocument={handleToggleBatchDocument}
         onRunBatchPipeline={() => void handleRunBatchPipeline()}
         onClearBatchSelection={handleClearBatchSelection}
+        scrollSelectedToken={scrollSelectedToken}
       />
       <PurgeDialog
         document={
@@ -635,5 +782,31 @@ function ReviewerWorkbench() {
         </Suspense>
       )}
     </main>
+  );
+}
+
+interface DeepLinkErrorBannerProps {
+  message: string | null;
+  onDismiss: () => void;
+}
+
+function DeepLinkErrorBanner({ message, onDismiss }: DeepLinkErrorBannerProps) {
+  if (!message) return null;
+  return (
+    <div
+      className="deep-link-error-banner"
+      role="alert"
+      data-testid="deep-link-error-banner"
+    >
+      <span>{message}</span>
+      <button
+        type="button"
+        className="deep-link-error-dismiss"
+        onClick={onDismiss}
+        aria-label="Dismiss deep link error"
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }

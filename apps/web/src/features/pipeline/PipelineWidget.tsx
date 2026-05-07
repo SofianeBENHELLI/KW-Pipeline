@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ApiDocument } from "../../api/types";
+import type { BatchFailure, BatchItemState } from "../../App";
 import { documentScopes, latestVersion } from "../../domain/document";
 import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
@@ -20,10 +21,30 @@ interface PipelineWidgetProps {
   selectedBatchIds?: ReadonlySet<string>;
   batchBusy?: boolean;
   batchMessage?: string | null;
-  batchError?: string | null;
+  /**
+   * Per-document batch progress map keyed by ``document_id`` (#292 §3
+   * follow-up). Each entry's ``status`` drives the per-row pill so the
+   * operator sees the loop's progress instead of just a global busy
+   * spinner. ``undefined`` (or a doc not in the map) means the row is
+   * inactive and the pill is hidden.
+   */
+  batchProgress?: ReadonlyMap<string, BatchItemState>;
+  /**
+   * Structured per-document failure list rendered after a batch run.
+   * Replaces the previous joined-string ``batchError`` so the operator
+   * sees one bullet per failed doc with its filename and reason.
+   */
+  batchFailures?: ReadonlyArray<BatchFailure>;
   onToggleBatchDocument?: (id: string, checked: boolean) => void;
   onRunBatchPipeline?: () => void;
   onClearBatchSelection?: () => void;
+  /**
+   * One-shot trigger from the deep-link mount path: when this token
+   * changes, the widget scrolls the currently-selected row into view.
+   * Kept as a number (not a boolean) so the parent can fire the same
+   * intent twice without having to flip-and-reset a flag.
+   */
+  scrollSelectedToken?: number;
 }
 
 /**
@@ -62,11 +83,35 @@ export function PipelineWidget({
   selectedBatchIds,
   batchBusy = false,
   batchMessage = null,
-  batchError = null,
+  batchProgress,
+  batchFailures,
   onToggleBatchDocument,
   onRunBatchPipeline,
   onClearBatchSelection,
+  scrollSelectedToken,
 }: PipelineWidgetProps) {
+  const selectedRowRef = useRef<HTMLDivElement | null>(null);
+  const lastFiredScrollTokenRef = useRef(0);
+
+  // Deep-link scroll trigger (#292 §4 follow-up). The parent bumps
+  // ``scrollSelectedToken`` once on the deep-link mount, BUT in the
+  // real flow the token + ``selectedDocumentId`` are set before the
+  // async catalog list resolves — so the matching row's DOM node
+  // doesn't exist yet on first run. We re-fire the effect every time
+  // ``documents`` changes (so the row eventually renders and the ref
+  // populates) and use a ref to remember which token we already
+  // scrolled for, so a later catalog refresh doesn't yank the viewport
+  // around a second time.
+  useEffect(() => {
+    if (scrollSelectedToken === undefined || scrollSelectedToken === 0) return;
+    if (lastFiredScrollTokenRef.current === scrollSelectedToken) return;
+    if (!selectedDocumentId) return;
+    const node = selectedRowRef.current;
+    if (!node) return; // try again on the next render once the row exists
+    if (typeof node.scrollIntoView !== "function") return;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+    lastFiredScrollTokenRef.current = scrollSelectedToken;
+  }, [scrollSelectedToken, selectedDocumentId, documents]);
   const activeViewId = filter
     ? SAVED_VIEWS.find((view) => sameStatusSet(view.statuses, filter.status))?.id
     : null;
@@ -172,10 +217,27 @@ export function PipelineWidget({
               <span>{batchMessage}</span>
             </div>
           ) : null}
-          {batchError ? (
+          {batchFailures && batchFailures.length > 0 ? (
             <div className="notice danger" role="alert">
-              <strong>Some documents failed</strong>
-              <span>{batchError}</span>
+              <strong>
+                {batchFailures.length === 1
+                  ? "1 document failed"
+                  : `${batchFailures.length} documents failed`}
+              </strong>
+              <ul
+                className="batch-failure-list"
+                data-testid="batch-failure-list"
+              >
+                {batchFailures.map((failure) => (
+                  <li key={failure.document_id}>
+                    <strong>{failure.filename}</strong>
+                    <span className="muted"> — {failure.reason}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="muted batch-failure-hint">
+                Failed documents stay selected so you can retry in one click.
+              </p>
             </div>
           ) : null}
         </div>
@@ -198,11 +260,13 @@ export function PipelineWidget({
               version.duplicate_of_version_id !== null;
 
             const totalVersions = document.versions.length;
+            const batchState = batchProgress?.get(document.id);
             return (
               <div
                 className={selected ? "document-row selected" : "document-row"}
                 key={document.id}
                 aria-current={selected ? "page" : undefined}
+                ref={selected ? selectedRowRef : undefined}
               >
                 {canShowBatchBar ? (
                   <label
@@ -255,6 +319,9 @@ export function PipelineWidget({
                       <span className="duplicate-marker" aria-label="Duplicate of an earlier version">
                         Duplicate
                       </span>
+                    ) : null}
+                    {batchState ? (
+                      <BatchStatusPill state={batchState} />
                     ) : null}
                     <StatusBadge status={version.status} />
                   </span>
@@ -361,4 +428,33 @@ function sameStatusSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): bool
   if (a.length !== b.length) return false;
   const setB = new Set(b);
   return a.every((value) => setB.has(value));
+}
+
+const BATCH_PILL_LABEL: Record<BatchItemState["status"], string> = {
+  queued: "Queued",
+  extracting: "Extracting…",
+  semantic: "Generating semantic…",
+  done: "Done",
+  failed: "Failed",
+};
+
+interface BatchStatusPillProps {
+  state: BatchItemState;
+}
+
+function BatchStatusPill({ state }: BatchStatusPillProps) {
+  const label = BATCH_PILL_LABEL[state.status];
+  const title =
+    state.status === "failed" && state.reason ? state.reason : undefined;
+  return (
+    <span
+      className={`batch-row-pill batch-row-pill-${state.status}`}
+      data-testid="batch-row-pill"
+      data-status={state.status}
+      title={title}
+      aria-live="polite"
+    >
+      {label}
+    </span>
+  );
 }

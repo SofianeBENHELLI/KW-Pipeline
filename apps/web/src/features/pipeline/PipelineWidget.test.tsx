@@ -143,6 +143,150 @@ describe("PipelineWidget", () => {
     expect(within(tablist).getByRole("tab", { name: /^Failed$/i })).toBeInTheDocument();
   });
 
+  it("renders a per-row batch progress pill for each entry in batchProgress", () => {
+    render(
+      <PipelineWidget
+        documents={[
+          makeDoc({ id: "doc-001" }),
+          makeDoc({ id: "doc-002" }),
+          makeDoc({ id: "doc-003" }),
+        ]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        selectedBatchIds={new Set(["doc-001", "doc-002", "doc-003"])}
+        onToggleBatchDocument={() => {}}
+        onRunBatchPipeline={() => {}}
+        onClearBatchSelection={() => {}}
+        batchProgress={
+          new Map([
+            ["doc-001", { status: "extracting" }],
+            ["doc-002", { status: "done" }],
+            ["doc-003", { status: "failed", reason: "boom" }],
+          ])
+        }
+      />,
+    );
+
+    const pills = screen.getAllByTestId("batch-row-pill");
+    expect(pills).toHaveLength(3);
+    const statuses = pills.map((pill) => pill.getAttribute("data-status"));
+    expect(statuses).toEqual(
+      expect.arrayContaining(["extracting", "done", "failed"]),
+    );
+    // Failure reason rides as a tooltip on the pill.
+    const failed = pills.find((p) => p.getAttribute("data-status") === "failed");
+    expect(failed).toHaveAttribute("title", "boom");
+  });
+
+  it("renders a structured failure list when batchFailures is non-empty", () => {
+    render(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId=""
+        onSelectDocument={() => {}}
+        selectedBatchIds={new Set()}
+        onToggleBatchDocument={() => {}}
+        onRunBatchPipeline={() => {}}
+        onClearBatchSelection={() => {}}
+        batchFailures={[
+          {
+            document_id: "doc-001",
+            filename: "doc-001.txt",
+            reason: "Parser crashed",
+          },
+          {
+            document_id: "doc-002",
+            filename: "doc-002.txt",
+            reason: "Voyage rate limit",
+          },
+        ]}
+      />,
+    );
+
+    const list = screen.getByTestId("batch-failure-list");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("doc-001.txt");
+    expect(items[0]).toHaveTextContent("Parser crashed");
+    expect(items[1]).toHaveTextContent("doc-002.txt");
+    expect(items[1]).toHaveTextContent("Voyage rate limit");
+    expect(screen.getByText(/2 documents failed/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Failed documents stay selected/i),
+    ).toBeInTheDocument();
+  });
+
+  it("scrolls the selected row into view when scrollSelectedToken changes", () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    const { rerender } = render(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={0}
+      />,
+    );
+    // Token=0 is the "no scroll yet" sentinel; nothing should fire.
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    rerender(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
+  });
+
+  it("defers the scroll until documents arrive (deep-link race)", () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    // Real deep-link flow: the token + selectedDocumentId are set on
+    // mount before the async catalog list resolves, so the row's ref
+    // is null on first render. The scroll must fire later, when the
+    // documents prop updates and the row renders.
+    const { rerender } = render(
+      <PipelineWidget
+        documents={[]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    rerender(
+      <PipelineWidget
+        documents={[makeDoc({ id: "doc-001" }), makeDoc({ id: "doc-002" })]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+
+    // A subsequent catalog refresh must NOT yank the viewport again.
+    rerender(
+      <PipelineWidget
+        documents={[
+          makeDoc({ id: "doc-001" }),
+          makeDoc({ id: "doc-002" }),
+          makeDoc({ id: "doc-003" }),
+        ]}
+        selectedDocumentId="doc-002"
+        onSelectDocument={() => {}}
+        scrollSelectedToken={1}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("selects documents for the batch semantic pipeline and runs the selected action", () => {
     const onToggle = vi.fn();
     const onRun = vi.fn();
