@@ -39,8 +39,14 @@ import { LineageModal } from "./components/LineageModal";
 import {
   clearSessionTrigger,
   getApiBaseUrl,
+  getKnowledgeTaxonomy,
   setSessionTrigger,
 } from "./api/client";
+import {
+  taxonomyExportFilename,
+  taxonomyResponseToYaml,
+  triggerYamlDownload,
+} from "./state/taxonomy-export";
 import type { Document as ApiDocument } from "./api/types";
 import {
   CLUSTERS,
@@ -50,6 +56,7 @@ import {
   chunksForDoc,
   conceptById,
   docById,
+  filterSnapshot,
   type ExplorerDocument,
 } from "./state/explorer-data";
 import { useExplorerData } from "./state/use-explorer-data";
@@ -183,6 +190,15 @@ export default function App(): React.ReactElement {
       return true;
     },
     [filters],
+  );
+  // Snapshot projected through the active filter — fed to ``GraphCanvas``
+  // so the graph view honours the DOCUMENT TYPE / SOURCE checkboxes
+  // (issue #296). Raw ``snapshot`` is kept for the side panels (DocViewer,
+  // DetailPanel), the source-chip rail, and lookup helpers — they need
+  // the full corpus context to resolve a selected node by id.
+  const filteredSnapshot = useMemo(
+    () => filterSnapshot(snapshot, docPassesFilters),
+    [snapshot, docPassesFilters],
   );
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -926,7 +942,7 @@ export default function App(): React.ReactElement {
           </Section>
 
           <Section title="TAXONOMY">
-            <TaxonomyImporter />
+            <TaxonomyImporter apiBaseUrl={apiBaseUrl} />
           </Section>
 
           <Section title="DOCUMENT TYPE">
@@ -1179,7 +1195,7 @@ export default function App(): React.ReactElement {
               />
             ) : (
               <GraphCanvas
-                snapshot={snapshot}
+                snapshot={filteredSnapshot}
                 view={view === "corpus" ? "corpus" : "concepts"}
                 selectedId={selected?.id ?? null}
                 conceptFocus={conceptFocus}
@@ -1357,9 +1373,14 @@ const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({ sour
  */
 const TAXONOMY_ACCEPT = ".yaml,.yml,.csv,.ttl,.rdf,.xml,.json,.jsonld";
 
-const TaxonomyImporter: React.FC = () => {
+interface TaxonomyImporterProps {
+  apiBaseUrl: string;
+}
+
+const TaxonomyImporter: React.FC<TaxonomyImporterProps> = ({ apiBaseUrl }) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [status, setStatus] = useState<string>("");
+  const [exporting, setExporting] = useState<boolean>(false);
 
   const onPick = useCallback(() => {
     inputRef.current?.click();
@@ -1387,14 +1408,47 @@ const TaxonomyImporter: React.FC = () => {
     if (inputRef.current) inputRef.current.value = "";
   }, []);
 
+  // Export the merged hybrid taxonomy (imposed + computed) as YAML
+  // matching the loader's accepted format. Issue #298 (scope a) — no
+  // backend changes; reads ``GET /knowledge/taxonomy``, serializes to
+  // YAML, and triggers a browser download. The ``source`` field on
+  // each category is preserved so the operator can see at-a-glance
+  // which entries were operator-authored vs auto-deduced.
+  const onExport = useCallback(async () => {
+    setExporting(true);
+    setStatus("");
+    try {
+      const response = await getKnowledgeTaxonomy({ baseUrl: apiBaseUrl });
+      const yamlText = taxonomyResponseToYaml(response);
+      triggerYamlDownload(yamlText, taxonomyExportFilename());
+      setStatus(`Exported ${response.categories.length} top-level categories to YAML.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatus(`Export failed: ${message}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [apiBaseUrl]);
+
   return (
     <div className="kx-tax-importer">
       <p className="kx-tax-help">
         Import an external taxonomy. Supported standards: SKOS (RDF/XML, Turtle, JSON-LD), CSV, YAML.
+        Export rounds the current merged taxonomy back to YAML for offline editing.
       </p>
       <div className="kx-tax-actions">
         <button type="button" className="kx-tax-btn" onClick={onPick}>
           Import taxonomy…
+        </button>
+        <button
+          type="button"
+          className="kx-tax-btn"
+          onClick={onExport}
+          disabled={exporting}
+          aria-label="Export taxonomy as YAML"
+          data-testid="kx-tax-export-btn"
+        >
+          {exporting ? "Exporting…" : "Export taxonomy"}
         </button>
         <input
           ref={inputRef}

@@ -20,6 +20,7 @@ import {
   chunksForDoc,
   conceptById,
   docById,
+  filterSnapshot,
 } from "./explorer-data";
 
 describe("explorer-data lookup helpers", () => {
@@ -68,6 +69,56 @@ describe("explorer-data lookup helpers", () => {
     // UI silently in production.
     expect(chunksForDoc(SAMPLE_SNAPSHOT, "nope")).toEqual([]);
     expect(chunksForConcept(SAMPLE_SNAPSHOT, "nope")).toEqual([]);
+  });
+});
+
+describe("filterSnapshot — projects through a doc predicate (#296)", () => {
+  it("drops documents that fail the predicate and every dependent edge/chunk", () => {
+    const keepType = SAMPLE_SNAPSHOT.documents[0].type;
+    const projected = filterSnapshot(SAMPLE_SNAPSHOT, (d) => d.type === keepType);
+    const keptIds = new Set(projected.documents.map((d) => d.id));
+
+    // Documents: only the predicate-passing ones survive.
+    expect(projected.documents.length).toBeGreaterThan(0);
+    expect(projected.documents.length).toBeLessThanOrEqual(SAMPLE_SNAPSHOT.documents.length);
+    for (const d of projected.documents) expect(d.type).toBe(keepType);
+
+    // Chunks: every kept chunk's parent doc must be in the kept set.
+    for (const c of projected.chunks) expect(keptIds.has(c.doc)).toBe(true);
+
+    // Doc-edges: both endpoints must be in the kept set.
+    for (const e of projected.docEdges) {
+      expect(keptIds.has(e.a)).toBe(true);
+      expect(keptIds.has(e.b)).toBe(true);
+    }
+
+    // Chunk-concept links: every kept link's chunk must still exist.
+    const keptChunkIds = new Set(projected.chunks.map((c) => c.id));
+    for (const [cid] of projected.chunkConcept) expect(keptChunkIds.has(cid)).toBe(true);
+  });
+
+  it("passes context (concepts, conceptEdges, clusters, docContent) through unchanged", () => {
+    // An "include nothing" predicate is the strongest assertion that
+    // global context is decoupled from the per-document filter.
+    const projected = filterSnapshot(SAMPLE_SNAPSHOT, () => false);
+    expect(projected.documents).toEqual([]);
+    expect(projected.chunks).toEqual([]);
+    expect(projected.docEdges).toEqual([]);
+    expect(projected.chunkConcept).toEqual([]);
+    expect(projected.concepts).toBe(SAMPLE_SNAPSHOT.concepts);
+    expect(projected.conceptEdges).toBe(SAMPLE_SNAPSHOT.conceptEdges);
+    expect(projected.clusters).toBe(SAMPLE_SNAPSHOT.clusters);
+    expect(projected.docContent).toBe(SAMPLE_SNAPSHOT.docContent);
+    expect(projected.isSample).toBe(SAMPLE_SNAPSHOT.isSample);
+    expect(projected.corpusLabel).toBe(SAMPLE_SNAPSHOT.corpusLabel);
+  });
+
+  it("is a no-op when the predicate keeps every document", () => {
+    const projected = filterSnapshot(SAMPLE_SNAPSHOT, () => true);
+    expect(projected.documents).toEqual(SAMPLE_SNAPSHOT.documents);
+    expect(projected.chunks).toEqual(SAMPLE_SNAPSHOT.chunks);
+    expect(projected.docEdges).toEqual(SAMPLE_SNAPSHOT.docEdges);
+    expect(projected.chunkConcept).toEqual(SAMPLE_SNAPSHOT.chunkConcept);
   });
 });
 
