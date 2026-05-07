@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from pydantic import Field
 
+from app.models.document import DocumentVersionStatus
 from app.schemas import APISchemaModel as BaseModel
 
 
@@ -53,3 +54,38 @@ class RawExtraction(BaseModel):
     source_references: list[SourceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class ExtractionJobSnapshot(BaseModel):
+    """Receipt for an enqueued async extraction job (ADR-006, #40 PR-2).
+
+    Returned with HTTP 202 from ``POST /documents/{document_id}/versions/
+    {version_id}/extract`` (and the equivalent retry-extraction route)
+    when ``KW_EXTRACTION_INLINE=false``. Inline mode keeps returning
+    :class:`RawExtraction` with HTTP 200 — the union response model on
+    the route documents both shapes.
+
+    The ``job_id`` is opaque to clients and scoped to
+    ``(document_id, version_id)``. The MVP value is ``f"ext-{version_id}"``;
+    a future durable queue (ADR-022 trajectory) can swap in a UUID
+    without rotating the field name.
+
+    ``status`` always carries the canonical
+    :class:`DocumentVersionStatus.QUEUED_FOR_EXTRACTION` value at
+    submission time — clients poll ``GET /documents/{id}`` to observe
+    the version's progression through ``QUEUED_FOR_EXTRACTION →
+    EXTRACTING → EXTRACTED|FAILED``.
+
+    ``queue_position`` is best-effort — an in-memory ``asyncio.Queue``
+    has no atomic "position" primitive, so the value reported is the
+    queue depth right after the put. ``None`` when inline mode is on
+    (no queue exists) for forward-compatibility with the same shape
+    being reused as a synchronous receipt by future tooling.
+    """
+
+    job_id: str
+    document_id: str
+    version_id: str
+    status: DocumentVersionStatus
+    submitted_at: datetime = Field(default_factory=utc_now)
+    queue_position: int | None = None

@@ -31,7 +31,7 @@ from app.schemas.document import (
     SimilarDocument,
     SimilarDocumentsResponse,
 )
-from app.schemas.extraction import RawExtraction
+from app.schemas.extraction import ExtractionJobSnapshot, RawExtraction
 from app.schemas.scope import DocumentScopesResponse, ScopeRef
 from app.schemas.semantic_document import SemanticDocument
 from app.services.auth import (
@@ -46,6 +46,7 @@ from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
 from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed
+from app.services.extraction_worker import ExtractionRequest, QueueFull
 from app.services.idempotency_store import hash_json_body
 from app.settings import Settings
 
@@ -175,7 +176,29 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
     @router.post(
         "/documents/{document_id}/versions/{version_id}/extract",
         operation_id="extract_version",
-        response_model=RawExtraction,
+        response_model=RawExtraction | ExtractionJobSnapshot,
+        responses={
+            200: {
+                "model": RawExtraction,
+                "description": (
+                    "Inline extraction completed (``KW_EXTRACTION_INLINE=true``, the default)."
+                ),
+            },
+            202: {
+                "model": ExtractionJobSnapshot,
+                "description": (
+                    "Async extraction enqueued (``KW_EXTRACTION_INLINE=false``). "
+                    "Poll ``GET /documents/{document_id}`` for the version's "
+                    "lifecycle progression."
+                ),
+            },
+            503: {
+                "description": (
+                    "Async extraction queue is at capacity. Includes "
+                    "``Retry-After: 5`` and ``KW_QUEUE_FULL`` envelope."
+                ),
+            },
+        },
     )
     def extract_document(
         request: Request,
@@ -201,42 +224,61 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         )
         if cached is not None:
             return cached
-        try:
-            result = services.extraction_jobs.extract(
-                document_id=document_id, version_id=version_id
-            )
-            _store_idempotency(
-                store=services.idempotency,
+        if services.settings.extraction_inline:
+            return _run_inline_extract(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
                 idempotency_key=idempotency_key,
                 route=_route,
                 request_hash=_req_hash,
-                result=result.model_dump(mode="json"),
             )
-            return result
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ExtractionFailed as exc:
-            raise HTTPException(status_code=422, detail=exc.reason) from exc
+        return _enqueue_extract(
+            request=request,
+            services=services,
+            document_id=document_id,
+            version_id=version_id,
+        )
 
     @router.post(
         "/documents/{document_id}/versions/{version_id}/retry-extraction",
         operation_id="retry_extraction",
-        response_model=RawExtraction,
+        response_model=RawExtraction | ExtractionJobSnapshot,
+        responses={
+            200: {
+                "model": RawExtraction,
+                "description": ("Inline retry completed (``KW_EXTRACTION_INLINE=true``)."),
+            },
+            202: {
+                "model": ExtractionJobSnapshot,
+                "description": (
+                    "Async retry enqueued (``KW_EXTRACTION_INLINE=false``). "
+                    "The version transitions ``FAILED → QUEUED_FOR_EXTRACTION``."
+                ),
+            },
+            503: {
+                "description": (
+                    "Async extraction queue is at capacity. Includes "
+                    "``Retry-After: 5`` and ``KW_QUEUE_FULL`` envelope."
+                ),
+            },
+        },
     )
     def retry_extraction(
+        request: Request,
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         _user: User = Depends(require_contributor),
     ) -> Any:
-        """Retry extraction for a previously-FAILED version (#87).
+        """Retry extraction for a previously-FAILED version (#87, ADR-006 PR-2).
 
-        Returns the fresh ``RawExtraction`` on success, ``422`` with the
-        new failure reason on a re-fail, ``404`` if the version doesn't
-        exist, or ``409`` if the version isn't in ``FAILED`` (review
-        states stay frozen — retry never bypasses the gate).
+        Returns the fresh ``RawExtraction`` (200) on success in inline
+        mode, an :class:`ExtractionJobSnapshot` (202) in async mode, or
+        ``422`` with the new failure reason on an inline re-fail. ``404``
+        if the version doesn't exist, ``409`` if the version isn't in
+        ``FAILED`` (review states stay frozen — retry never bypasses the
+        gate), ``503`` if the async queue is full.
         """
         _route = "/documents/{document_id}/versions/{version_id}/retry-extraction"
         _req_hash = hash_json_body(
@@ -251,24 +293,21 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         )
         if cached is not None:
             return cached
-        try:
-            result = services.extraction_jobs.retry_extract(
-                document_id=document_id, version_id=version_id
-            )
-            _store_idempotency(
-                store=services.idempotency,
+        if services.settings.extraction_inline:
+            return _run_inline_retry(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
                 idempotency_key=idempotency_key,
                 route=_route,
                 request_hash=_req_hash,
-                result=result.model_dump(mode="json"),
             )
-            return result
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ExtractionFailed as exc:
-            raise HTTPException(status_code=422, detail=exc.reason) from exc
+        return _enqueue_retry(
+            request=request,
+            services=services,
+            document_id=document_id,
+            version_id=version_id,
+        )
 
     @router.get(
         "/documents/{document_id}/versions/{version_id}/extraction",
@@ -994,6 +1033,235 @@ def _filter_scoped_page_in_memory(
                     break
 
     return matches[:limit]
+
+
+def _job_id_for(version_id: str) -> str:
+    """Opaque job-id derivation for the async extraction queue.
+
+    Scoped to ``(document_id, version_id)`` per the ADR-006 PR-2
+    contract; the version_id is already globally unique inside the
+    catalog so prefixing with ``ext-`` is enough to give clients a
+    stable string they can log without colliding with raw version
+    UUIDs.
+    """
+    return f"ext-{version_id}"
+
+
+def _queue_full_error() -> ApiError:
+    """Build the ADR-006 PR-2 503 envelope for ``QueueFull``.
+
+    ``Retry-After: 5`` matches the queue-size bound (16 jobs, single
+    worker by default — at typical pdfplumber wall-time the head-of-line
+    drains within seconds). ``retryable=True`` so frontends can render
+    a "try again" hint instead of a hard error banner.
+    """
+    return ApiError(
+        status_code=503,
+        code=ErrorCode.QUEUE_FULL,
+        message="Extraction queue is at capacity. Please retry shortly.",
+        retryable=True,
+        remediation=(
+            "Wait a few seconds and resubmit. If the queue stays full "
+            "for more than a minute, your operator may need to raise "
+            "KW_EXTRACTION_QUEUE_SIZE or KW_EXTRACTION_WORKERS."
+        ),
+        headers={"Retry-After": "5"},
+    )
+
+
+def _run_inline_extract(
+    *,
+    services: PipelineServices,
+    document_id: str,
+    version_id: str,
+    idempotency_key: str | None,
+    route: str,
+    request_hash: str,
+) -> Any:
+    """Inline (synchronous) extract — the pre-ADR-006 behaviour.
+
+    Runs the parser on the request thread and returns the persisted
+    :class:`RawExtraction`. Idempotency cache is populated on success
+    so a replay of the same key returns the same payload.
+    """
+    try:
+        result = services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+        _store_idempotency(
+            store=services.idempotency,
+            idempotency_key=idempotency_key,
+            route=route,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+        )
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExtractionFailed as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+
+def _run_inline_retry(
+    *,
+    services: PipelineServices,
+    document_id: str,
+    version_id: str,
+    idempotency_key: str | None,
+    route: str,
+    request_hash: str,
+) -> Any:
+    """Inline (synchronous) retry — mirrors :func:`_run_inline_extract`."""
+    try:
+        result = services.extraction_jobs.retry_extract(
+            document_id=document_id, version_id=version_id
+        )
+        _store_idempotency(
+            store=services.idempotency,
+            idempotency_key=idempotency_key,
+            route=route,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+        )
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExtractionFailed as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+
+def _enqueue_extract(
+    *,
+    request: Request,
+    services: PipelineServices,
+    document_id: str,
+    version_id: str,
+) -> Response:
+    """Async-mode extract: ``STORED → QUEUED_FOR_EXTRACTION`` then enqueue.
+
+    The FSM transition runs first so a concurrent caller racing two
+    extract submissions doesn't enqueue twice — the second
+    ``update_status`` call raises ``IllegalTransition`` (translated to
+    409) because the predecessor predicate no longer matches. The
+    queue ``put`` is awaited synchronously: ``InMemoryExtractionQueue``
+    raises :class:`QueueFull` immediately without blocking, so the
+    request thread isn't held hostage when the worker is overloaded.
+    """
+    queue = request.app.state.extraction_queue
+    if queue is None:  # defence-in-depth — lifespan invariant violated
+        raise HTTPException(status_code=503, detail="Extraction queue not initialised.")
+    try:
+        services.documents.update_status(
+            document_id, version_id, DocumentVersionStatus.QUEUED_FOR_EXTRACTION
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _put_and_build_snapshot(
+        queue=queue,
+        document_id=document_id,
+        version_id=version_id,
+    )
+
+
+def _enqueue_retry(
+    *,
+    request: Request,
+    services: PipelineServices,
+    document_id: str,
+    version_id: str,
+) -> Response:
+    """Async-mode retry: ``FAILED → QUEUED_FOR_EXTRACTION`` then enqueue.
+
+    Mirrors :class:`ExtractionJobService.retry_extract` semantics —
+    refuses with 409 from anything other than ``FAILED`` so the review
+    gate stays intact. The actual ``extraction.retried`` audit event
+    is emitted by the worker when it dequeues, not here, because the
+    audit timestamp should reflect the retry attempt's *start* of work,
+    not its enqueue.
+    """
+    queue = request.app.state.extraction_queue
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Extraction queue not initialised.")
+    try:
+        version = services.documents.get_version(document_id=document_id, version_id=version_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if version.status is not DocumentVersionStatus.FAILED:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Retry only allowed from FAILED; version is currently {version.status.value}."
+            ),
+        )
+    try:
+        services.documents.update_status(
+            document_id, version_id, DocumentVersionStatus.QUEUED_FOR_EXTRACTION
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _put_and_build_snapshot(
+        queue=queue,
+        document_id=document_id,
+        version_id=version_id,
+    )
+
+
+def _put_and_build_snapshot(
+    *,
+    queue: Any,
+    document_id: str,
+    version_id: str,
+) -> Response:
+    """Enqueue an :class:`ExtractionRequest` and return the 202 receipt.
+
+    ``put`` is a coroutine on the queue protocol; the
+    :class:`InMemoryExtractionQueue` impl never actually awaits — it
+    calls ``put_nowait`` and raises :class:`QueueFull` when the bound
+    is hit. We still ``async``-call it through ``asyncio.run`` to keep
+    the route handler synchronous. Wrapping in a fresh event-loop call
+    would deadlock under FastAPI's running loop, so we instead use the
+    queue's underlying non-blocking put through ``_queue.put_nowait``
+    when available; the protocol's ``put`` raises immediately so we
+    can call it directly via the synchronous helper.
+    """
+    extraction_request = ExtractionRequest(
+        document_id=document_id,
+        version_id=version_id,
+    )
+    try:
+        # ``InMemoryExtractionQueue.put`` is declared ``async`` but its
+        # body is synchronous (``put_nowait`` either succeeds or raises
+        # ``QueueFull``). Reach through to the underlying ``asyncio.Queue``
+        # via ``put_nowait`` so this synchronous route doesn't need a
+        # running event loop to enqueue.
+        queue._queue.put_nowait(extraction_request)
+    except Exception as exc:  # noqa: BLE001 — translate every failure mode
+        # asyncio.QueueFull is the only documented failure; bubble up
+        # via a 503 with retry guidance regardless of the concrete type
+        # so a future durable queue can swap in without route changes.
+        from asyncio import QueueFull as _AsyncQueueFull
+
+        if isinstance(exc, (QueueFull, _AsyncQueueFull)):
+            raise _queue_full_error() from exc
+        raise
+    snapshot = ExtractionJobSnapshot(
+        job_id=_job_id_for(version_id),
+        document_id=document_id,
+        version_id=version_id,
+        status=DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+        queue_position=queue.qsize(),
+    )
+    return Response(
+        status_code=202,
+        content=snapshot.model_dump_json(),
+        media_type="application/json",
+    )
 
 
 def _dispatch_review(

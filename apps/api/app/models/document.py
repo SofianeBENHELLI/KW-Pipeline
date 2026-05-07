@@ -6,6 +6,15 @@ class DocumentVersionStatus(StrEnum):
     HASHED = "HASHED"
     DUPLICATE_DETECTED = "DUPLICATE_DETECTED"
     STORED = "STORED"
+    # ADR-006 / #40 PR-2: a STORED version that has been handed to the
+    # async extraction queue but not yet picked up by a worker. Reachable
+    # only when ``KW_EXTRACTION_INLINE=false`` — inline mode goes
+    # ``STORED → EXTRACTING`` directly inside the request handler.
+    # Stuck-state recovery on boot (see :mod:`extraction_recovery`)
+    # treats this state the same way it treats ``EXTRACTING``: the
+    # in-process queue is non-persistent, so a restart between enqueue
+    # and dequeue strands the version with no worker attached.
+    QUEUED_FOR_EXTRACTION = "QUEUED_FOR_EXTRACTION"
     EXTRACTING = "EXTRACTING"
     EXTRACTED = "EXTRACTED"
     SEMANTIC_READY = "SEMANTIC_READY"
@@ -63,6 +72,16 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
         {DocumentVersionStatus.STORED, DocumentVersionStatus.FAILED}
     ),
     DocumentVersionStatus.STORED: frozenset(
+        {
+            DocumentVersionStatus.EXTRACTING,
+            DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+            DocumentVersionStatus.FAILED,
+        }
+    ),
+    # ADR-006 PR-2: dequeue → EXTRACTING is the worker's path; the boot-time
+    # stuck-state recovery scan flips abandoned QUEUED rows to FAILED so
+    # an operator can retry via the existing ``retry-extraction`` route.
+    DocumentVersionStatus.QUEUED_FOR_EXTRACTION: frozenset(
         {DocumentVersionStatus.EXTRACTING, DocumentVersionStatus.FAILED}
     ),
     DocumentVersionStatus.EXTRACTING: frozenset(
@@ -97,8 +116,16 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
     ),
     DocumentVersionStatus.REJECTED: frozenset({DocumentVersionStatus.PURGED}),
     DocumentVersionStatus.SUPERSEDED: frozenset({DocumentVersionStatus.PURGED}),
+    # ADR-006 PR-2: a FAILED version can be re-queued (async retry) in
+    # addition to the original direct ``FAILED → EXTRACTING`` retry path.
+    # The retry-extraction route picks the edge based on
+    # ``settings.extraction_inline``.
     DocumentVersionStatus.FAILED: frozenset(
-        {DocumentVersionStatus.EXTRACTING, DocumentVersionStatus.PURGED}
+        {
+            DocumentVersionStatus.EXTRACTING,
+            DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+            DocumentVersionStatus.PURGED,
+        }
     ),
     # PURGED → PURGED is admitted as a no-op so the catalog method can
     # treat re-purge as idempotent (returns the existing tombstone

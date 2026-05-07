@@ -2,10 +2,11 @@
 
 The MVP queue is in-process and non-persistent: a ``docker restart``
 between FSM-flip and worker dequeue leaves the affected version stuck
-in ``EXTRACTING`` (and, once PR-2 lands, ``QUEUED_FOR_EXTRACTION``)
-with no worker attached. This helper runs once on app boot, scans for
-those stuck versions, flips them to ``FAILED`` with a clear reason,
-and lets the operator recover via the existing
+in ``QUEUED_FOR_EXTRACTION`` (PR-2's enqueue-side state) or
+``EXTRACTING`` (the worker has dequeued it but the parser hadn't yet
+finished) with no worker attached. This helper runs once on app boot,
+scans for those stuck versions, flips them to ``FAILED`` with a clear
+reason, and lets the operator recover via the existing
 ``POST /documents/.../retry-extraction`` route.
 
 The scan is fail-soft: any exception is logged and swallowed so a
@@ -29,12 +30,23 @@ log = logging.getLogger(__name__)
 _STUCK_REASON = "Extraction interrupted by process restart."
 
 
-def recover_stuck_extractions(services: PipelineServices) -> int:
-    """Flip every ``EXTRACTING`` version to ``FAILED`` with a clear reason.
+_STUCK_STATES: frozenset[DocumentVersionStatus] = frozenset(
+    {
+        DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+        DocumentVersionStatus.EXTRACTING,
+    }
+)
 
-    Returns the number of versions recovered. The MVP scope handles
-    ``EXTRACTING`` only — PR-2 will widen the scan to also cover the
-    new ``QUEUED_FOR_EXTRACTION`` state once that FSM transition lands.
+
+def recover_stuck_extractions(services: PipelineServices) -> int:
+    """Flip every stuck-extraction version to ``FAILED`` with a clear reason.
+
+    Returns the number of versions recovered. PR-2 widens the scan to
+    cover both ``QUEUED_FOR_EXTRACTION`` (the enqueue-side state) and
+    ``EXTRACTING`` (the worker has dequeued the request but the parser
+    hadn't yet finished when the process died). Both transitions are
+    legal under the FSM: ``QUEUED_FOR_EXTRACTION → FAILED`` and
+    ``EXTRACTING → FAILED`` are wired in :data:`ALLOWED_TRANSITIONS`.
 
     Skipped (and ``0`` returned) when ``settings.extraction_inline`` is
     ``True``: inline mode never enqueues, so a stuck-state recovery is
@@ -47,9 +59,8 @@ def recover_stuck_extractions(services: PipelineServices) -> int:
         return 0
 
     catalog = services.documents.catalog
-    stuck_states = frozenset({DocumentVersionStatus.EXTRACTING})
     try:
-        documents = catalog.list_documents(status_filter=stuck_states)
+        documents = catalog.list_documents(status_filter=_STUCK_STATES)
     except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
         log.warning(
             "extraction.recovery.scan_failed",
@@ -60,7 +71,7 @@ def recover_stuck_extractions(services: PipelineServices) -> int:
     recovered = 0
     for document in documents:
         for version in document.versions:
-            if version.status is not DocumentVersionStatus.EXTRACTING:
+            if version.status not in _STUCK_STATES:
                 continue
             try:
                 services.documents.mark_failed(
@@ -99,4 +110,4 @@ def recover_stuck_extractions(services: PipelineServices) -> int:
     return recovered
 
 
-__all__ = ["recover_stuck_extractions"]
+__all__ = ["recover_stuck_extractions", "_STUCK_STATES"]

@@ -27,6 +27,15 @@ export type ApiSourceReference = Schemas["SourceReference"];
 export type ApiRawSection = Schemas["RawSection"];
 export type ApiRawExtraction = Schemas["RawExtraction"];
 
+/**
+ * 202 Accepted body returned by ``POST /documents/.../extract`` when
+ * ``KW_EXTRACTION_INLINE=false`` (ADR-006 PR-2). Inline mode keeps
+ * returning ``ApiRawExtraction``. Clients that need to distinguish
+ * 200 from 202 can branch on the presence of ``job_id`` /
+ * ``parser_name``.
+ */
+export type ApiExtractionJobSnapshot = Schemas["ExtractionJobSnapshot"];
+
 // ─── Semantic Document ──────────────────────────────────────────────────────
 
 export type ApiDocumentProfile = Schemas["DocumentProfile"];

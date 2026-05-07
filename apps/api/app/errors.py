@@ -68,6 +68,14 @@ class ErrorCode:
     # timestamp instead of a generic "not found" message.
     PURGED = "KW_PURGED"
 
+    # ─── Async extraction queue (ADR-006, #40 PR-2) ────────────────
+    # Surfaced as a 503 with ``Retry-After: 5`` when ``POST
+    # /documents/.../extract`` is enqueued under ``KW_EXTRACTION_INLINE=
+    # false`` and the bounded :class:`asyncio.Queue` is at capacity.
+    # ``retryable=True`` in the envelope so frontends know a retry has
+    # a real chance of succeeding once the worker drains a slot.
+    QUEUE_FULL = "KW_QUEUE_FULL"
+
     # ─── HITL auto-promotion (POST /admin/hitl/run_auto_promote_pass) ─
     HITL_DISABLED = "KW_HITL_DISABLED"
 
