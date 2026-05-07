@@ -275,7 +275,12 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         operation_id="get_extraction",
         response_model=RawExtraction,
     )
-    def get_extraction(document_id: str, version_id: str) -> Any:
+    def get_extraction(
+        request: Request,
+        document_id: str,
+        version_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
         # ADR-027 §3 / slice 6: 410 Gone for purged versions. Check
         # the version's status before reading the extraction so a
         # tombstoned version surfaces the same 410 envelope as the
@@ -289,7 +294,16 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if version.status is DocumentVersionStatus.PURGED:
+            # ADR-027 §3 / slice 6: purge tombstones are operator-visible
+            # by design (cascade flows + audit consumers). The 410
+            # surface beats hidden-existence here; the actual content
+            # fetch below is still gated by the scope check.
             raise _purged_version_error(document_id=document_id, version=version)
+        # #83 slice 3 (D.5 hidden-existence): scope check after PURGED
+        # so the actual extraction payload stays hidden from callers
+        # without scope — they get the same 404 envelope ``GET
+        # /documents/{id}`` returns.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         try:
             return services.extraction_jobs.get_raw_extraction(
                 document_id=document_id,
@@ -345,7 +359,12 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         operation_id="get_semantic",
         response_model=SemanticDocument,
     )
-    def get_semantic_document(document_id: str, version_id: str) -> Any:
+    def get_semantic_document(
+        request: Request,
+        document_id: str,
+        version_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
         # ADR-027 §3 / slice 6: 410 Gone for purged versions.
         try:
             version = _get_version_including_archived(
@@ -356,7 +375,10 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if version.status is DocumentVersionStatus.PURGED:
+            # ADR-027 §3 / slice 6: purge tombstones are operator-visible.
             raise _purged_version_error(document_id=document_id, version=version)
+        # #83 slice 3 (D.5 hidden-existence): scope check after PURGED.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         try:
             return services.semantic_outputs.get(document_id=document_id, version_id=version_id)
         except KeyError as exc:
@@ -373,7 +395,12 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             410: {"description": "Version artifacts were purged (ADR-027 §3)."},
         },
     )
-    def get_markdown(document_id: str, version_id: str) -> Response:
+    def get_markdown(
+        request: Request,
+        document_id: str,
+        version_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Response:
         # ADR-027 §3 / slice 6: 410 Gone for purged versions.
         try:
             version = _get_version_including_archived(
@@ -384,7 +411,18 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if version.status is DocumentVersionStatus.PURGED:
+            # ADR-027 §3 / slice 6: a purged version surfaces 410 to
+            # every actor that asks for it — the tombstone is
+            # operator-visible by design so audit / cascade flows can
+            # see the purge. The 410 leak is intentional and bounded;
+            # IDs are random UUIDs, so an attacker who can't already
+            # see the catalog can't enumerate this surface.
             raise _purged_version_error(document_id=document_id, version=version)
+        # #83 slice 3 (D.5 hidden-existence): scope check after PURGED
+        # so operators still see tombstones, but the actual content
+        # fetch is hidden from callers without scope — they get the
+        # same 404 envelope ``GET /documents/{id}`` returns.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         try:
             markdown = services.semantic_outputs.get_markdown(
                 document_id=document_id,
@@ -406,7 +444,12 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             410: {"description": "Version artifacts were purged (ADR-027 §3)."},
         },
     )
-    def get_raw_file(document_id: str, version_id: str) -> Response:
+    def get_raw_file(
+        request: Request,
+        document_id: str,
+        version_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Response:
         """Stream the originally-uploaded binary back to the caller.
 
         Powers the Knowledge Explorer's per-type viewers (PDF/DOCX/PPTX/
@@ -430,7 +473,18 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if version.status is DocumentVersionStatus.PURGED:
+            # ADR-027 §3 / slice 6: a purged version surfaces 410 to
+            # every actor that asks for it — the tombstone is
+            # operator-visible by design so audit / cascade flows can
+            # see the purge. The 410 leak is intentional and bounded;
+            # IDs are random UUIDs, so an attacker who can't already
+            # see the catalog can't enumerate this surface.
             raise _purged_version_error(document_id=document_id, version=version)
+        # #83 slice 3 (D.5 hidden-existence): scope check after PURGED
+        # so operators still see tombstones, but the actual content
+        # fetch is hidden from callers without scope — they get the
+        # same 404 envelope ``GET /documents/{id}`` returns.
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
         try:
             payload = services.documents.storage.get(version.storage_uri)
         except (KeyError, FileNotFoundError, ValueError) as exc:
