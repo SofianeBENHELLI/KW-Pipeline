@@ -52,6 +52,11 @@ services:
       KW_NEO4J_URI: bolt://neo4j:7687
       KW_NEO4J_USER: neo4j
       KW_NEO4J_PASSWORD: test_password_change_me
+      # Mirror the kw-demo allowlist so the deployed widget accepts the
+      # full demo dataset (text + PDF + DOCX + PPTX). The Dockerfile
+      # carries the same default, but pinning it in compose makes the
+      # deploy contract explicit and easy to override per-tenant.
+      KW_ALLOWED_CONTENT_TYPES: "text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
       # Accept any 3DEXPERIENCE on-cloud tenant origin so the deployed
       # widget can reach the API without enumerating every subdomain.
       # Override per-deployment if your tenant lives outside this
