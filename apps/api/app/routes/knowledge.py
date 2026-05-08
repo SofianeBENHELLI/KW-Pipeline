@@ -84,6 +84,68 @@ _CATALOG_MIN_PAGE_LIMIT = 1
 _CATALOG_MAX_PAGE_LIMIT = 200
 
 
+def _filter_graph_page_by_scope(
+    *,
+    page: KnowledgeGraphPage,
+    user: User,
+    catalog: Any,
+    settings: Settings,
+) -> KnowledgeGraphPage:
+    """Apply the workspace scope predicate to a catalog-wide graph page
+    (#326, ADR-020 §2).
+
+    Drops nodes whose ``document_id`` property points at a document
+    the caller cannot access, plus any edge incident on a dropped
+    node. Caches the per-document accessibility decision so a page
+    referencing the same document many times pays the catalog hit
+    once.
+
+    Nodes without a ``document_id`` property are retained — entity
+    nodes (Phase 2 ``has_entity`` targets) are doc-agnostic by
+    construction and an entity-level filter would need to consider
+    every source document the entity is mentioned in. That belongs
+    to a future design pass; the conservative MVP keeps them
+    visible.
+    """
+    access_cache: dict[str, bool] = {}
+
+    def _can_see(document_id: str) -> bool:
+        cached = access_cache.get(document_id)
+        if cached is not None:
+            return cached
+        verdict = user_can_access(
+            user=user,
+            document_id=document_id,
+            catalog=catalog,
+            settings=settings,
+        )
+        access_cache[document_id] = verdict
+        return verdict
+
+    visible_nodes = []
+    omitted_node_ids: set[str] = set()
+    for node in page.nodes:
+        document_id = node.properties.get("document_id")
+        if isinstance(document_id, str) and document_id and not _can_see(document_id):
+            omitted_node_ids.add(node.id)
+            continue
+        visible_nodes.append(node)
+
+    visible_edges = [
+        edge
+        for edge in page.edges
+        if edge.source_id not in omitted_node_ids and edge.target_id not in omitted_node_ids
+    ]
+
+    return KnowledgeGraphPage(
+        schema_version=page.schema_version,
+        nodes=visible_nodes,
+        edges=visible_edges,
+        next_cursor=page.next_cursor,
+        omitted_by_scope_count=len(omitted_node_ids),
+    )
+
+
 def build_knowledge_router(services: PipelineServices) -> APIRouter:
     """Register the knowledge-layer routes."""
     router = APIRouter()
@@ -121,22 +183,27 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
     def get_knowledge_graph(
         limit: int = Query(default=DEFAULT_GRAPH_PAGE_LIMIT, ge=MIN_GRAPH_PAGE_LIMIT),
         cursor: str | None = None,
-        _user: User = Depends(require_viewer),
+        current_user: User = Depends(require_viewer),
     ) -> Any:
         """Cursor-paginated walk of the catalog-wide projection (ADR-012).
 
-        D.5 note: this route returns aggregated graph nodes/edges
-        (sections, chunks, entities) — not document rows. The graph
-        store's projection doesn't carry a per-node ``document_id``
-        filter today, so a fully-correct scope filter would require a
-        new GraphStore method (or a per-page join against
-        ``document_scopes``). Deferred until D.6 / a follow-up — the
-        document-list endpoints (``GET /documents``,
-        ``/knowledge/catalog``) and the per-document graph
-        (``GET /documents/{id}/graph``) ARE filtered, so a caller who
-        does the obvious "list docs → fetch each graph" loop sees the
-        correct restricted set. Direct hits to the catalog-wide graph
-        page see the unfiltered projection — operator/audit shape.
+        Scope filter (#326, ADR-020 §2): nodes whose owning
+        ``document_id`` the caller cannot access are dropped from
+        the page, along with edges incident on those dropped nodes.
+        ``omitted_by_scope_count`` on the response carries the
+        per-page count so the frontend can surface a "+ N hidden by
+        scope" indicator distinct from the cursor-budget pagination.
+
+        Nodes that don't carry a ``document_id`` property (cross-doc
+        entity nodes — Phase 2 ``has_entity`` targets) are always
+        retained: entities are doc-agnostic, and dropping them would
+        hide every entity even when the caller can see at least one
+        of its source documents. Entity-level scope is a separate
+        design item (see #310 deferrals).
+
+        Disabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter
+        — :func:`user_can_access` returns ``True`` for every doc, so
+        ``omitted_by_scope_count`` is always ``0`` in that mode.
         """
         if limit > MAX_GRAPH_PAGE_LIMIT:
             raise HTTPException(
@@ -147,9 +214,15 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                 ),
             )
         try:
-            return services.graph_store.find_subgraph(limit=limit, cursor=cursor)
+            page = services.graph_store.find_subgraph(limit=limit, cursor=cursor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _filter_graph_page_by_scope(
+            page=page,
+            user=current_user,
+            catalog=services.documents.catalog,
+            settings=Settings(),
+        )
 
     @router.get(
         "/knowledge/neighborhood",

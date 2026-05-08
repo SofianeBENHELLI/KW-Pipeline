@@ -1882,7 +1882,7 @@
         "type": "object"
       },
       "KnowledgeGraphPage": {
-        "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.",
+        "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.\n\n``omitted_by_scope_count`` (#326, ADR-020 §2): number of nodes the\ncaller's scope filter dropped from this page. Edges incident on\ndropped nodes are also dropped but counted in this single value\nrather than split out — the frontend uses it to render a\n\"+ N hidden by scope\" indicator without conflating the count\nwith the cursor-budget truncation. Always ``0`` under\n``KW_AUTH_MODE=disabled``.",
         "properties": {
           "edges": {
             "items": {
@@ -1909,6 +1909,11 @@
             "title": "Nodes",
             "type": "array"
           },
+          "omitted_by_scope_count": {
+            "default": 0,
+            "title": "Omitted By Scope Count",
+            "type": "integer"
+          },
           "schema_version": {
             "default": "v0.2",
             "enum": [
@@ -1923,7 +1928,8 @@
           "schema_version",
           "nodes",
           "edges",
-          "next_cursor"
+          "next_cursor",
+          "omitted_by_scope_count"
         ],
         "title": "KnowledgeGraphPage",
         "type": "object"
@@ -5855,7 +5861,7 @@
     },
     "/knowledge/graph": {
       "get": {
-        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).\n\nD.5 note: this route returns aggregated graph nodes/edges\n(sections, chunks, entities) — not document rows. The graph\nstore's projection doesn't carry a per-node ``document_id``\nfilter today, so a fully-correct scope filter would require a\nnew GraphStore method (or a per-page join against\n``document_scopes``). Deferred until D.6 / a follow-up — the\ndocument-list endpoints (``GET /documents``,\n``/knowledge/catalog``) and the per-document graph\n(``GET /documents/{id}/graph``) ARE filtered, so a caller who\ndoes the obvious \"list docs → fetch each graph\" loop sees the\ncorrect restricted set. Direct hits to the catalog-wide graph\npage see the unfiltered projection — operator/audit shape.",
+        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).\n\nScope filter (#326, ADR-020 §2): nodes whose owning\n``document_id`` the caller cannot access are dropped from\nthe page, along with edges incident on those dropped nodes.\n``omitted_by_scope_count`` on the response carries the\nper-page count so the frontend can surface a \"+ N hidden by\nscope\" indicator distinct from the cursor-budget pagination.\n\nNodes that don't carry a ``document_id`` property (cross-doc\nentity nodes — Phase 2 ``has_entity`` targets) are always\nretained: entities are doc-agnostic, and dropping them would\nhide every entity even when the caller can see at least one\nof its source documents. Entity-level scope is a separate\ndesign item (see #310 deferrals).\n\nDisabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter\n— :func:`user_can_access` returns ``True`` for every doc, so\n``omitted_by_scope_count`` is always ``0`` in that mode.",
         "operationId": "get_knowledge_graph",
         "parameters": [
           {

@@ -1014,18 +1014,23 @@ export interface paths {
          * Get Knowledge Graph
          * @description Cursor-paginated walk of the catalog-wide projection (ADR-012).
          *
-         *     D.5 note: this route returns aggregated graph nodes/edges
-         *     (sections, chunks, entities) — not document rows. The graph
-         *     store's projection doesn't carry a per-node ``document_id``
-         *     filter today, so a fully-correct scope filter would require a
-         *     new GraphStore method (or a per-page join against
-         *     ``document_scopes``). Deferred until D.6 / a follow-up — the
-         *     document-list endpoints (``GET /documents``,
-         *     ``/knowledge/catalog``) and the per-document graph
-         *     (``GET /documents/{id}/graph``) ARE filtered, so a caller who
-         *     does the obvious "list docs → fetch each graph" loop sees the
-         *     correct restricted set. Direct hits to the catalog-wide graph
-         *     page see the unfiltered projection — operator/audit shape.
+         *     Scope filter (#326, ADR-020 §2): nodes whose owning
+         *     ``document_id`` the caller cannot access are dropped from
+         *     the page, along with edges incident on those dropped nodes.
+         *     ``omitted_by_scope_count`` on the response carries the
+         *     per-page count so the frontend can surface a "+ N hidden by
+         *     scope" indicator distinct from the cursor-budget pagination.
+         *
+         *     Nodes that don't carry a ``document_id`` property (cross-doc
+         *     entity nodes — Phase 2 ``has_entity`` targets) are always
+         *     retained: entities are doc-agnostic, and dropping them would
+         *     hide every entity even when the caller can see at least one
+         *     of its source documents. Entity-level scope is a separate
+         *     design item (see #310 deferrals).
+         *
+         *     Disabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter
+         *     — :func:`user_can_access` returns ``True`` for every doc, so
+         *     ``omitted_by_scope_count`` is always ``0`` in that mode.
          */
         get: operations["get_knowledge_graph"];
         put?: never;
@@ -2322,6 +2327,14 @@ export interface components {
          *     in deterministic order. ``next_cursor`` follows the same opaque
          *     convention as :class:`DocumentListResponse` — clients pass it
          *     back verbatim to advance.
+         *
+         *     ``omitted_by_scope_count`` (#326, ADR-020 §2): number of nodes the
+         *     caller's scope filter dropped from this page. Edges incident on
+         *     dropped nodes are also dropped but counted in this single value
+         *     rather than split out — the frontend uses it to render a
+         *     "+ N hidden by scope" indicator without conflating the count
+         *     with the cursor-budget truncation. Always ``0`` under
+         *     ``KW_AUTH_MODE=disabled``.
          */
         KnowledgeGraphPage: {
             /** Edges */
@@ -2330,6 +2343,11 @@ export interface components {
             next_cursor: string | null;
             /** Nodes */
             nodes: components["schemas"]["GraphNode"][];
+            /**
+             * Omitted By Scope Count
+             * @default 0
+             */
+            omitted_by_scope_count: number;
             /**
              * Schema Version
              * @default v0.2
