@@ -173,6 +173,24 @@ class GraphStore(Protocol):
         translates an empty list into a 404 ``KW_NOT_FOUND``.
         """
 
+    def find_node_by_id(self, node_id: str) -> GraphNode | None:
+        """Return one node by its stable id, or ``None`` if missing.
+
+        Used by the neighborhood API (#310) to validate the focus root
+        before walking. Returns ``None`` (not an exception) for
+        unknown ids — the route layer translates that to a 404.
+        """
+
+    def find_edges_incident_to_node(self, node_id: str) -> list[GraphEdge]:
+        """Return every edge with ``node_id`` on either endpoint.
+
+        Used by the neighborhood API (#310) to expand a BFS frontier
+        by one hop. Empty result means the node has no edges (or
+        doesn't exist) — both render the same way: a single-node
+        focused neighborhood. Sorted by edge id for deterministic
+        ordering across calls.
+        """
+
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
 
     def ensure_vector_index(self, *, name: str, dim: int) -> None:
@@ -413,6 +431,19 @@ class InMemoryGraphStore:
                 for edge in self._edges.values()
                 if (edge.source_id in source_chunks and edge.target_id in target_chunks)
                 or (edge.source_id in target_chunks and edge.target_id in source_chunks)
+            ]
+            return sorted(edges, key=lambda e: e.id)
+
+    def find_node_by_id(self, node_id: str) -> GraphNode | None:
+        with self._lock:
+            return self._nodes.get(node_id)
+
+    def find_edges_incident_to_node(self, node_id: str) -> list[GraphEdge]:
+        with self._lock:
+            edges = [
+                edge
+                for edge in self._edges.values()
+                if edge.source_id == node_id or edge.target_id == node_id
             ]
             return sorted(edges, key=lambda e: e.id)
 
@@ -775,6 +806,37 @@ class Neo4jGraphStore:
             ORDER BY r.id
             """,
             {"src": source_document_id, "tgt": target_document_id},
+        )
+        return [_edge_dict_to_edge(row) for row in rows]
+
+    def find_node_by_id(  # pragma: no cover - exercised behind pytest -m integration
+        self, node_id: str
+    ) -> GraphNode | None:
+        rows = self._read(
+            """
+            MATCH (n:KnowledgeNode {id: $node_id})
+            RETURN n
+            LIMIT 1
+            """,
+            {"node_id": node_id},
+        )
+        if not rows:
+            return None
+        return _row_to_node(rows[0]["n"])
+
+    def find_edges_incident_to_node(  # pragma: no cover - exercised behind pytest -m integration
+        self, node_id: str
+    ) -> list[GraphEdge]:
+        rows = self._read(
+            """
+            MATCH (n:KnowledgeNode {id: $node_id})-[r:KNOWLEDGE_EDGE]-(other:KnowledgeNode)
+            WITH r, startNode(r) AS s, endNode(r) AS t
+            RETURN DISTINCT r.id AS id, r.kind AS kind,
+                   s.id AS source_id, t.id AS target_id,
+                   properties(r) AS flat
+            ORDER BY r.id
+            """,
+            {"node_id": node_id},
         )
         return [_edge_dict_to_edge(row) for row in rows]
 

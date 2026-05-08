@@ -1036,6 +1036,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/neighborhood": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Neighborhood
+         * @description Bounded subgraph around one focus root (#310, ADR-028).
+         *
+         *     Replaces the corpus-scale "fetch the whole graph and rank
+         *     client-side" pattern with a server-side BFS that respects an
+         *     edge budget and a strength threshold. Each visible edge
+         *     carries its #314 score / strength_class / is_bridge /
+         *     is_outlier inline so the canvas can rank without re-running
+         *     the policy.
+         *
+         *     D.5 hidden-existence: when the root node carries a
+         *     ``document_id`` property (chunks, topics, or the document
+         *     node itself), the scope filter applies — a caller without
+         *     scope on that document sees a 404 indistinguishable from
+         *     "no such root."
+         *
+         *     Truncation metadata (``hidden_node_count`` /
+         *     ``hidden_edge_count`` / ``truncated``) is always populated;
+         *     clients render a "+ N more" indicator on the canvas without
+         *     re-querying.
+         */
+        get: operations["get_knowledge_neighborhood"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/relations/aggregate": {
         parameters: {
             query?: never;
@@ -2083,6 +2121,64 @@ export interface components {
             version_id: string;
         };
         /**
+         * FocusedNeighborhood
+         * @description Wire shape for ``GET /knowledge/neighborhood``.
+         *
+         *     ``schema_version`` is pinned to ``"v0.1"`` for now; bumping it
+         *     is a breaking change that requires the typed client to re-read
+         *     the OpenAPI snapshot. See ADR-028's "Information Architecture"
+         *     section for the contract this satisfies.
+         *
+         *     The ``edges`` list is deterministically ordered: combined-score
+         *     descending, then ``edge_id`` ascending — paginated walks across
+         *     the same neighborhood land edges in the same canvas position.
+         *
+         *     Truncation metadata exists so the frontend can render a "+ N
+         *     more" indicator on the canvas without re-querying:
+         *
+         *     - ``hidden_node_count`` — nodes the BFS reached but the visible
+         *       edge set doesn't connect (or that the limit clipped off).
+         *     - ``hidden_edge_count`` — edges dropped by the strength filter or
+         *       the budget. Sum of both contributors.
+         *     - ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.
+         */
+        FocusedNeighborhood: {
+            /** Depth */
+            depth: number;
+            /** Edges */
+            edges: components["schemas"]["NeighborhoodEdge"][];
+            /**
+             * Hidden Edge Count
+             * @default 0
+             */
+            hidden_edge_count: number;
+            /**
+             * Hidden Node Count
+             * @default 0
+             */
+            hidden_node_count: number;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Root Id */
+            root_id: string;
+            /**
+             * Root Kind
+             * @enum {string}
+             */
+            root_kind: "document" | "topic" | "chunk";
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
          * GraphEdge
          * @description One directed edge in the knowledge graph projection.
          *
@@ -2369,6 +2465,41 @@ export interface components {
             format: "json" | "text";
             /** Level */
             level: string;
+        };
+        /**
+         * NeighborhoodEdge
+         * @description One edge in a focused neighborhood, carrying its #314 score.
+         *
+         *     Mirrors the public :class:`GraphEdge` shape (id / kind / endpoints
+         *     / properties) and adds the per-edge scoring fields the canvas
+         *     consumes. Score-related fields stay ``None`` for non-deterministic
+         *     edges (structural / topic-membership / has_entity) since the
+         *     scoring policy doesn't apply.
+         */
+        NeighborhoodEdge: {
+            /** Id */
+            id: string;
+            /** Is Bridge */
+            is_bridge: boolean | null;
+            /** Is Outlier */
+            is_outlier: boolean | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "part_of" | "has_version" | "has_chunk" | "belongs_to" | "related_to" | "shares_keyword" | "same_topic_as" | "has_entity";
+            /** Properties */
+            properties: {
+                [key: string]: string | number | boolean | string[] | null;
+            };
+            /** Score */
+            score: number | null;
+            /** Source Id */
+            source_id: string;
+            /** Strength Class */
+            strength_class: ("strong" | "medium" | "weak") | null;
+            /** Target Id */
+            target_id: string;
         };
         /** NerConfig */
         NerConfig: {
@@ -4390,6 +4521,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeGraphPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_neighborhood: {
+        parameters: {
+            query: {
+                /** @description Kind of the root node — document, topic, or chunk. */
+                root_kind: "document" | "topic" | "chunk";
+                /** @description Stable id of the root node. */
+                root_id: string;
+                /** @description BFS expansion depth from the root. */
+                depth?: number;
+                /** @description Maximum number of visible edges in the response. Edges past the budget land in ``hidden_edge_count``. */
+                edge_limit?: number;
+                /** @description Filter out deterministic edges whose combined #314 score is below this threshold. Non-deterministic edges (structural / has_entity / belongs_to) are not affected. */
+                min_strength?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FocusedNeighborhood"];
                 };
             };
             /** @description Validation Error */

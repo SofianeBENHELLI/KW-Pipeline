@@ -28,6 +28,16 @@ from app.schemas.knowledge import (
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
 )
+from app.schemas.knowledge_neighborhood import (
+    NEIGHBORHOOD_DEFAULT_DEPTH,
+    NEIGHBORHOOD_DEFAULT_LIMIT,
+    NEIGHBORHOOD_MAX_DEPTH,
+    NEIGHBORHOOD_MAX_LIMIT,
+    NEIGHBORHOOD_MIN_DEPTH,
+    NEIGHBORHOOD_MIN_LIMIT,
+    FocusedNeighborhood,
+    NeighborhoodRootKind,
+)
 from app.schemas.knowledge_relations import (
     AggregatedRelationEvidence,
     RelationEvidence,
@@ -49,6 +59,7 @@ from app.services.knowledge.graph_store import (
     MAX_GRAPH_PAGE_LIMIT,
     MAX_VECTOR_SEARCH_LIMIT,
 )
+from app.services.knowledge.neighborhood import NeighborhoodNotFound
 from app.services.knowledge.relations import RelationNotFound
 from app.settings import Settings
 
@@ -139,6 +150,96 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             return services.graph_store.find_subgraph(limit=limit, cursor=cursor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/neighborhood",
+        operation_id="get_knowledge_neighborhood",
+        response_model=FocusedNeighborhood,
+    )
+    def get_knowledge_neighborhood(
+        request: Request,
+        root_kind: NeighborhoodRootKind = Query(
+            description="Kind of the root node — document, topic, or chunk.",
+        ),
+        root_id: str = Query(min_length=1, description="Stable id of the root node."),
+        depth: int = Query(
+            default=NEIGHBORHOOD_DEFAULT_DEPTH,
+            ge=NEIGHBORHOOD_MIN_DEPTH,
+            le=NEIGHBORHOOD_MAX_DEPTH,
+            description="BFS expansion depth from the root.",
+        ),
+        edge_limit: int = Query(
+            default=NEIGHBORHOOD_DEFAULT_LIMIT,
+            ge=NEIGHBORHOOD_MIN_LIMIT,
+            le=NEIGHBORHOOD_MAX_LIMIT,
+            description=(
+                "Maximum number of visible edges in the response. "
+                "Edges past the budget land in ``hidden_edge_count``."
+            ),
+        ),
+        min_strength: float = Query(
+            default=0.0,
+            ge=0.0,
+            le=1.0,
+            description=(
+                "Filter out deterministic edges whose combined #314 "
+                "score is below this threshold. Non-deterministic edges "
+                "(structural / has_entity / belongs_to) are not affected."
+            ),
+        ),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Bounded subgraph around one focus root (#310, ADR-028).
+
+        Replaces the corpus-scale "fetch the whole graph and rank
+        client-side" pattern with a server-side BFS that respects an
+        edge budget and a strength threshold. Each visible edge
+        carries its #314 score / strength_class / is_bridge /
+        is_outlier inline so the canvas can rank without re-running
+        the policy.
+
+        D.5 hidden-existence: when the root node carries a
+        ``document_id`` property (chunks, topics, or the document
+        node itself), the scope filter applies — a caller without
+        scope on that document sees a 404 indistinguishable from
+        "no such root."
+
+        Truncation metadata (``hidden_node_count`` /
+        ``hidden_edge_count`` / ``truncated``) is always populated;
+        clients render a "+ N more" indicator on the canvas without
+        re-querying.
+        """
+        assert services.knowledge_neighborhood is not None
+        # Pre-fetch the root so we can apply the scope check before
+        # exposing any structural details. ``find_node_by_id``
+        # returning ``None`` becomes the same 404 envelope as a
+        # scope-hidden root.
+        root_node = services.graph_store.find_node_by_id(root_id)
+        if root_node is None or root_node.kind != root_kind:
+            raise HTTPException(status_code=404, detail="Root node not found.")
+        root_document_id: str | None = None
+        if root_node.kind == "document":
+            root_document_id = root_node.id
+        else:
+            doc_id_property = root_node.properties.get("document_id")
+            if isinstance(doc_id_property, str) and doc_id_property:
+                root_document_id = doc_id_property
+        if root_document_id is not None:
+            assert_can_access_document(
+                request=request,
+                document_id=root_document_id,
+                user=current_user,
+            )
+        try:
+            return services.knowledge_neighborhood.neighborhood(
+                root_kind=root_kind,
+                root_id=root_id,
+                depth=depth,
+                edge_limit=edge_limit,
+                min_strength=min_strength,
+            )
+        except NeighborhoodNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get(
         "/knowledge/relations/aggregate",

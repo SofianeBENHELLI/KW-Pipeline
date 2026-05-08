@@ -1523,6 +1523,76 @@
         "title": "FailedVersion",
         "type": "object"
       },
+      "FocusedNeighborhood": {
+        "description": "Wire shape for ``GET /knowledge/neighborhood``.\n\n``schema_version`` is pinned to ``\"v0.1\"`` for now; bumping it\nis a breaking change that requires the typed client to re-read\nthe OpenAPI snapshot. See ADR-028's \"Information Architecture\"\nsection for the contract this satisfies.\n\nThe ``edges`` list is deterministically ordered: combined-score\ndescending, then ``edge_id`` ascending — paginated walks across\nthe same neighborhood land edges in the same canvas position.\n\nTruncation metadata exists so the frontend can render a \"+ N\nmore\" indicator on the canvas without re-querying:\n\n- ``hidden_node_count`` — nodes the BFS reached but the visible\n  edge set doesn't connect (or that the limit clipped off).\n- ``hidden_edge_count`` — edges dropped by the strength filter or\n  the budget. Sum of both contributors.\n- ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.",
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/NeighborhoodEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "hidden_edge_count": {
+            "default": 0,
+            "title": "Hidden Edge Count",
+            "type": "integer"
+          },
+          "hidden_node_count": {
+            "default": 0,
+            "title": "Hidden Node Count",
+            "type": "integer"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "root_id": {
+            "title": "Root Id",
+            "type": "string"
+          },
+          "root_kind": {
+            "enum": [
+              "document",
+              "topic",
+              "chunk"
+            ],
+            "title": "Root Kind",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema_version",
+          "root_kind",
+          "root_id",
+          "depth",
+          "nodes",
+          "edges",
+          "hidden_node_count",
+          "hidden_edge_count",
+          "truncated"
+        ],
+        "title": "FocusedNeighborhood",
+        "type": "object"
+      },
       "GraphEdge": {
         "description": "One directed edge in the knowledge graph projection.\n\n``source_id`` and ``target_id`` reference :class:`GraphNode.id`\nvalues. Provenance requirements depend on ``kind``:\n\n- **structural** (``part_of``, ``has_version``, ``has_chunk``,\n  ``belongs_to``) — no citation required; the edge itself is the\n  provenance.\n- **deterministic semantic** (``related_to``, ``shares_keyword``,\n  ``same_topic_as``) — must carry ``source_chunk_ids`` (the two\n  chunks that produced the relation), ``reason`` (human-readable\n  explanation), and ``shared_keywords`` in ``properties``. See\n  :class:`ChunkRelationEdgeProperties`.\n- **LLM** (``has_entity``) — must carry ``source_reference_id``\n  pointing at a row in the catalog's ``source_references`` table\n  (ADR-012 §4). Triples missing citations are dropped by the\n  extractor before edges are constructed.",
         "properties": {
@@ -2128,6 +2198,128 @@
           "level"
         ],
         "title": "LoggingConfig",
+        "type": "object"
+      },
+      "NeighborhoodEdge": {
+        "description": "One edge in a focused neighborhood, carrying its #314 score.\n\nMirrors the public :class:`GraphEdge` shape (id / kind / endpoints\n/ properties) and adds the per-edge scoring fields the canvas\nconsumes. Score-related fields stay ``None`` for non-deterministic\nedges (structural / topic-membership / has_entity) since the\nscoring policy doesn't apply.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_bridge": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Bridge"
+          },
+          "is_outlier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Outlier"
+          },
+          "kind": {
+            "enum": [
+              "part_of",
+              "has_version",
+              "has_chunk",
+              "belongs_to",
+              "related_to",
+              "shares_keyword",
+              "same_topic_as",
+              "has_entity"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "strength_class": {
+            "anyOf": [
+              {
+                "enum": [
+                  "strong",
+                  "medium",
+                  "weak"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength Class"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source_id",
+          "target_id",
+          "properties",
+          "score",
+          "strength_class",
+          "is_bridge",
+          "is_outlier"
+        ],
+        "title": "NeighborhoodEdge",
         "type": "object"
       },
       "NerConfig": {
@@ -5717,6 +5909,107 @@
           }
         },
         "summary": "Get Knowledge Graph"
+      }
+    },
+    "/knowledge/neighborhood": {
+      "get": {
+        "description": "Bounded subgraph around one focus root (#310, ADR-028).\n\nReplaces the corpus-scale \"fetch the whole graph and rank\nclient-side\" pattern with a server-side BFS that respects an\nedge budget and a strength threshold. Each visible edge\ncarries its #314 score / strength_class / is_bridge /\nis_outlier inline so the canvas can rank without re-running\nthe policy.\n\nD.5 hidden-existence: when the root node carries a\n``document_id`` property (chunks, topics, or the document\nnode itself), the scope filter applies — a caller without\nscope on that document sees a 404 indistinguishable from\n\"no such root.\"\n\nTruncation metadata (``hidden_node_count`` /\n``hidden_edge_count`` / ``truncated``) is always populated;\nclients render a \"+ N more\" indicator on the canvas without\nre-querying.",
+        "operationId": "get_knowledge_neighborhood",
+        "parameters": [
+          {
+            "description": "Kind of the root node — document, topic, or chunk.",
+            "in": "query",
+            "name": "root_kind",
+            "required": true,
+            "schema": {
+              "description": "Kind of the root node — document, topic, or chunk.",
+              "enum": [
+                "document",
+                "topic",
+                "chunk"
+              ],
+              "title": "Root Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable id of the root node.",
+            "in": "query",
+            "name": "root_id",
+            "required": true,
+            "schema": {
+              "description": "Stable id of the root node.",
+              "minLength": 1,
+              "title": "Root Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "BFS expansion depth from the root.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "BFS expansion depth from the root.",
+              "maximum": 3,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of visible edges in the response. Edges past the budget land in ``hidden_edge_count``.",
+            "in": "query",
+            "name": "edge_limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of visible edges in the response. Edges past the budget land in ``hidden_edge_count``.",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Edge Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter out deterministic edges whose combined #314 score is below this threshold. Non-deterministic edges (structural / has_entity / belongs_to) are not affected.",
+            "in": "query",
+            "name": "min_strength",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "description": "Filter out deterministic edges whose combined #314 score is below this threshold. Non-deterministic edges (structural / has_entity / belongs_to) are not affected.",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Min Strength",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FocusedNeighborhood"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Neighborhood"
       }
     },
     "/knowledge/relations/aggregate": {
