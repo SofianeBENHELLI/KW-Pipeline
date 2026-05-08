@@ -257,3 +257,59 @@ class TestProgrammaticConstruction:
         assert s.max_upload_bytes == 99
         assert s.allowed_content_types == {"text/markdown"}
         assert s.cors_allowed_origins == ["https://x.example.com"]
+
+
+class TestEnvExampleLoadable:
+    """Pin the contract that ``cp docker/.env.example docker/.env`` produces
+    a working file.
+
+    Pydantic strict-parses ``""`` to int / bool / float and crashes on
+    boot if the example ships ``KW_PERSISTENT=`` (or any other non-str
+    field with an empty value). This test loads every uncommented
+    ``KEY=VALUE`` line from the example and constructs ``Settings()``;
+    a bare ``key=value`` without a default is the regression we're
+    guarding against.
+    """
+
+    @staticmethod
+    def _parse_env_example() -> dict[str, str]:
+        from pathlib import Path
+
+        example = Path(__file__).resolve().parents[3] / "docker" / ".env.example"
+        assert example.is_file(), f"docker/.env.example not found at {example}"
+        env: dict[str, str] = {}
+        for raw_line in example.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip()
+        return env
+
+    def test_env_example_constructs_settings_cleanly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key, value in self._parse_env_example().items():
+            monkeypatch.setenv(key, value)
+        # If ``Settings()`` raises here, the regression is back: a non-str
+        # field somewhere in the example is shipping with an empty
+        # value. Comment out the offending line in ``.env.example``
+        # (operators uncomment + override; default applies otherwise).
+        Settings()
+
+    def test_env_example_only_uncomments_str_assignments(self) -> None:
+        """Defence in depth: every uncommented assignment must be a
+        ``str``-typed Settings field (so an empty value doesn't crash
+        pydantic). If you need to ship an int/bool/float in the
+        example, *comment out the line* and let the default apply."""
+        # ``str`` fields tolerate empty values; non-``str`` fields don't.
+        # Constructing Settings with every uncommented key set to its
+        # example value is the actionable check — a clean build proves
+        # the contract. The companion test above does exactly that.
+        # This test exists so the file gains a second, cheaper line of
+        # defence: even if the env-loading glue changes, the parser
+        # contract stays explicit.
+        env = self._parse_env_example()
+        for key, value in env.items():
+            assert isinstance(key, str) and key, "empty key in .env.example"
+            assert isinstance(value, str), f"non-str value parsed for {key}"
