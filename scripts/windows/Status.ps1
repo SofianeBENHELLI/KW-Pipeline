@@ -9,7 +9,7 @@
       1. ``docker compose ps`` for the three containers (with health).
       2. /health from inside the workstation (loopback).
       3. Resolved LLM provider posture from /admin/config.
-      4. Cloudflare tunnel readiness — primary signal is a HEAD on
+      4. Cloudflare tunnel readiness — primary signal is a GET on
          ``https://<public-hostname>/health``; the log-line heuristic
          (registered-connections count) is a secondary informational
          signal because it lags the real handshake.
@@ -152,7 +152,12 @@ if ($publicHostname) {
         if ($r.StatusCode -eq 200) {
             $publicHealthOk = $true
         }
-    } catch {}
+    } catch {
+        # Surface the failure reason under -Verbose without changing
+        # the steady-state output: when the probe fails we still fall
+        # through to the log-grep + remediation hints below.
+        Write-Verbose "Public-URL probe to https://$publicHostname/health failed: $($_.Exception.Message)"
+    }
 }
 
 if ($publicHealthOk) {
