@@ -10,11 +10,25 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import build_services
 from app.main import create_app
+from app.services.auth import DevModeAuthService
 
 
 def _client_and_services():
     services = build_services()
     return TestClient(create_app(services=services)), services
+
+
+def _swap_user(services, user_id: str) -> None:
+    object.__setattr__(services, "auth", DevModeAuthService(user_id=user_id))
+
+
+def _upload_owned_document(client: TestClient, filename: str = "policy.txt") -> str:
+    response = client.post(
+        "/documents/upload",
+        files={"file": (filename, b"hello world", "text/plain")},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["document_id"]
 
 
 # ── 200 on empty corpus ──────────────────────────────────────────────
@@ -56,3 +70,36 @@ class TestQueryValidation:
         client, _ = _client_and_services()
         response = client.get("/knowledge/atlas", params={"recent_documents_limit": -3})
         assert response.status_code == 422
+
+
+# ── D.5 hidden-existence on the route ────────────────────────────────
+
+
+class TestScopeFilterRoute:
+    def test_other_user_does_not_see_owners_documents(self, monkeypatch) -> None:
+        # Dev uploads a document; switch identity to alice → her atlas
+        # response excludes dev's document from every block (validation
+        # coverage, recent imports). The closure-cache contract is
+        # exercised end-to-end via the route's per-request predicate.
+        monkeypatch.delenv("KW_AUTH_MODE", raising=False)
+        client, services = _client_and_services()
+        _upload_owned_document(client, filename="dev.txt")
+
+        _swap_user(services, "alice")
+        response = client.get("/knowledge/atlas")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["validation_coverage"]["total_documents"] == 0
+        assert body["recent_documents"] == []
+
+    def test_owner_sees_their_own_documents(self, monkeypatch) -> None:
+        monkeypatch.delenv("KW_AUTH_MODE", raising=False)
+        client, _ = _client_and_services()
+        doc_id = _upload_owned_document(client, filename="dev.txt")
+
+        response = client.get("/knowledge/atlas")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["validation_coverage"]["total_documents"] == 1
+        recent_ids = {row["document_id"] for row in body["recent_documents"]}
+        assert doc_id in recent_ids

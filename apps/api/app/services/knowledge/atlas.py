@@ -30,6 +30,7 @@ from app.schemas.knowledge_atlas import (
     AtlasValidationCoverage,
 )
 from app.services.knowledge.scoring import (
+    BRIDGE_TOPIC_DISTANCE_THRESHOLD,
     bridge_document_score,
     is_outlier,
     relation_strength_score,
@@ -326,7 +327,7 @@ class KnowledgeAtlasService:
                 source_keywords = topic_keyword_index.get(source_topic, []) if source_topic else []
                 target_keywords = topic_keyword_index.get(target_topic, []) if target_topic else []
                 distance = topic_distance(source_keywords, target_keywords)
-                bridge = distance >= 0.60  # mirrors BRIDGE_TOPIC_DISTANCE_THRESHOLD
+                bridge = distance >= BRIDGE_TOPIC_DISTANCE_THRESHOLD
                 if not is_outlier(score=score, is_bridge=bridge):
                     continue
                 candidates.append(
