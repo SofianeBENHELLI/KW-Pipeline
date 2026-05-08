@@ -298,12 +298,22 @@ class KnowledgeGraphPage(BaseModel):
     in deterministic order. ``next_cursor`` follows the same opaque
     convention as :class:`DocumentListResponse` — clients pass it
     back verbatim to advance.
+
+    ``omitted_by_scope_count`` (#326, ADR-020 §2): number of **nodes**
+    the caller's scope filter dropped from this page. Edges incident
+    on dropped nodes are also dropped but **not separately counted**;
+    consumers can derive the dropped-edge count by taking the
+    pre-filter edge count if needed. The frontend uses this single
+    value to render a "+ N hidden by scope" indicator without
+    conflating it with the cursor-budget truncation. Always ``0``
+    under ``KW_AUTH_MODE=disabled``.
     """
 
     schema_version: Literal["v0.1", "v0.2"] = "v0.2"
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     next_cursor: str | None = None
+    omitted_by_scope_count: int = 0
 
 
 class ChunkSearchResult(BaseModel):
