@@ -57,6 +57,7 @@ def run_customer_demo(
     _prepare_output_dirs(data_dir=data_dir, artifact_dir=artifact_dir, reset=reset)
     previous_allowlist = _ensure_demo_content_types()
     previous_kg = _ensure_knowledge_layer_enabled()
+    previous_inline = _ensure_inline_extraction()
 
     summary: dict[str, Any] = {
         "fixture_dir": str(fixture_dir),
@@ -76,6 +77,7 @@ def run_customer_demo(
     finally:
         _restore_content_types(previous_allowlist)
         _restore_env("KW_KNOWLEDGE_LAYER_ENABLED", previous_kg)
+        _restore_env("KW_EXTRACTION_INLINE", previous_inline)
 
 
 def _run_demo_inside_client(
@@ -471,6 +473,22 @@ def _restore_content_types(previous: str | None) -> None:
         os.environ.pop("ALLOWED_CONTENT_TYPES", None)
     else:
         os.environ["ALLOWED_CONTENT_TYPES"] = previous
+
+
+def _ensure_inline_extraction() -> str | None:
+    """Pin the smoke run to inline extraction (ADR-006 / PR-3 fallback).
+
+    The smoke runner asserts ``POST /documents/.../extract`` returns
+    HTTP 200 with a :class:`RawExtraction` body. PR-3 flipped the
+    production default to async (202 + ``ExtractionJobSnapshot``), so
+    we explicitly re-enable the legacy synchronous path here. Same
+    caller-pair pattern as :func:`_ensure_knowledge_layer_enabled` so
+    we don't leak into sibling tests that expect the new async
+    default.
+    """
+    previous = os.environ.get("KW_EXTRACTION_INLINE")
+    os.environ["KW_EXTRACTION_INLINE"] = "true"
+    return previous
 
 
 def _ensure_knowledge_layer_enabled() -> str | None:

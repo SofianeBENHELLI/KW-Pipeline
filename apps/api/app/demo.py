@@ -22,6 +22,16 @@ needs for a one-paste local demo:
   semantic relations against the in-memory ``GraphStore``. No Neo4j
   required for the live presenter path; setting ``KW_NEO4J_URI``
   separately switches to the Neo4j-backed store.
+* ``KW_EXTRACTION_INLINE=true`` — keep the demo on the synchronous
+  ``POST /…/extract → 200 RawExtraction`` shape. ADR-006 / PR-3 flips
+  the production default to ``false`` (202 + async worker), but the
+  demo's UX promises sub-second feedback on the small text fixtures
+  shipped under ``apps/api/fixtures``, and an async path would make
+  that look broken to a presenter watching the catalog. The
+  ``kw-demo-load`` and ``seed_demo`` clients also assert HTTP 200 on
+  ``/extract``, so the inline path keeps those green without a
+  rewrite. Operators who want to exercise the production async shape
+  can still export ``KW_EXTRACTION_INLINE=false`` before launching.
 
 Each value is set via ``os.environ.setdefault`` so a caller who
 already exported one of these is *not* overridden — useful when
@@ -56,4 +66,9 @@ def main() -> None:
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
     os.environ.setdefault("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    # Pin the demo to inline extraction so the synchronous
+    # ``RawExtraction`` body still flows back to ``kw-demo-load`` /
+    # ``seed_demo``. ADR-006 / PR-3 flipped the production default to
+    # async; the demo opts out explicitly. See the module docstring.
+    os.environ.setdefault("KW_EXTRACTION_INLINE", "true")
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

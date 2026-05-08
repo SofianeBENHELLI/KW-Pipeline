@@ -122,16 +122,20 @@ class Settings(BaseSettings):
     # Async extraction queue (ADR-006, #40 PR-1).
     # ------------------------------------------------------------------
     extraction_inline: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices("KW_EXTRACTION_INLINE"),
         description=(
-            "When truthy (the default), ``POST /documents/.../extract`` "
-            "runs the parser synchronously on the request thread — the "
-            "pre-ADR-006 behaviour. When falsy, the route hands the job "
-            "to :class:`ExtractionWorker` and returns 202 (PR-2). PR-1 "
-            "ships the worker harness behind ``true`` so the existing "
-            "test posture is preserved; the flag flips to ``false`` in "
-            "PR-3 once polling UX is verified."
+            "When falsy (the new default after PR-3), "
+            "``POST /documents/.../extract`` hands the job to "
+            ":class:`ExtractionWorker` and returns 202 with an "
+            ":class:`ExtractionJobSnapshot` body — the production-shape "
+            "async path described in ADR-006. When truthy, the legacy "
+            "synchronous behaviour kicks in: the route runs the parser "
+            "on the request thread and returns 200 with a "
+            ":class:`RawExtraction` body. The legacy path remains "
+            "available as an explicit escape hatch (used by the "
+            "in-process demo and the existing test suite) and is the "
+            "shape every test wired before PR-2 still expects."
         ),
     )
     extraction_queue_size: int = Field(
