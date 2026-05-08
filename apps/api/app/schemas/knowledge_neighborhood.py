@@ -78,7 +78,12 @@ class FocusedNeighborhood(BaseModel):
     more" indicator on the canvas without re-querying:
 
     - ``hidden_node_count`` — nodes the BFS reached but the visible
-      edge set doesn't connect (or that the limit clipped off).
+      edge set doesn't connect. Note: this *includes* nodes whose
+      only paths to the root went through edges dropped by the
+      ``min_strength`` filter or the ``edge_limit`` budget — so a
+      caller who lowers the threshold or raises the budget may see
+      ``hidden_node_count`` shrink as previously-hidden nodes light
+      up.
     - ``hidden_edge_count`` — edges dropped by the strength filter or
       the budget. Sum of both contributors.
     - ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.

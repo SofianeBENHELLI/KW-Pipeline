@@ -110,6 +110,87 @@ class TestHappyPath:
         assert body["edges"][0]["score"] is not None
         assert body["edges"][0]["strength_class"] in ("strong", "medium", "weak")
 
+    def test_topic_rooted_neighborhood_returns_chunks(self, monkeypatch) -> None:
+        # Reviewer ask: topic root_kind needs HTTP-level coverage too.
+        # Seed a topic node owned by an uploaded document, link two
+        # chunks to it via ``belongs_to`` (structural), and confirm
+        # the route returns the topic + its member chunks.
+        monkeypatch.delenv("KW_AUTH_MODE", raising=False)
+        client, services = _client_and_services()
+        upload = client.post(
+            "/documents/upload",
+            files={"file": ("topic.txt", b"hello topic", "text/plain")},
+        )
+        body = upload.json()
+        doc_id = body["document_id"]
+        ver_id = body["id"]
+        services.graph_store.upsert_nodes(
+            [
+                GraphNode(
+                    id="t-1",
+                    kind="topic",
+                    label="Topic 1",
+                    properties={
+                        "document_id": doc_id,
+                        "version_id": ver_id,
+                        "topic_id": "t-1",
+                    },
+                ),
+                GraphNode(
+                    id="ch-a",
+                    kind="chunk",
+                    label="ch-a",
+                    properties={
+                        "document_id": doc_id,
+                        "version_id": ver_id,
+                        "chunk_id": "ch-a",
+                    },
+                ),
+                GraphNode(
+                    id="ch-b",
+                    kind="chunk",
+                    label="ch-b",
+                    properties={
+                        "document_id": doc_id,
+                        "version_id": ver_id,
+                        "chunk_id": "ch-b",
+                    },
+                ),
+            ]
+        )
+        services.graph_store.upsert_edges(
+            [
+                GraphEdge(
+                    id="ch-a->belongs_to->t-1",
+                    kind="belongs_to",
+                    source_id="ch-a",
+                    target_id="t-1",
+                    properties={"document_id": doc_id, "version_id": ver_id},
+                ),
+                GraphEdge(
+                    id="ch-b->belongs_to->t-1",
+                    kind="belongs_to",
+                    source_id="ch-b",
+                    target_id="t-1",
+                    properties={"document_id": doc_id, "version_id": ver_id},
+                ),
+            ]
+        )
+        response = client.get(
+            "/knowledge/neighborhood",
+            params={"root_kind": "topic", "root_id": "t-1", "depth": 1, "edge_limit": 10},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["root_kind"] == "topic"
+        assert body["root_id"] == "t-1"
+        node_ids = {node["id"] for node in body["nodes"]}
+        assert {"t-1", "ch-a", "ch-b"} <= node_ids
+        # Belongs-to edges are structural — score stays None.
+        for edge in body["edges"]:
+            assert edge["score"] is None
+            assert edge["strength_class"] is None
+
 
 # ─── Unknown / mismatched root → 404 ──────────────────────────────────
 

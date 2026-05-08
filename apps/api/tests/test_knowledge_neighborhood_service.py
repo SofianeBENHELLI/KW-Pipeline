@@ -185,6 +185,47 @@ class TestDepthExpansion:
         # All three chunks should be visible.
         assert {"c1", "c2", "c3"} <= node_ids
 
+    def test_depth_three_reaches_three_hops(self) -> None:
+        # depth=3 is the documented max — confirm the BFS frontier
+        # actually expands that far without the early-stop.
+        service, store = _service()
+        for cid in ("c1", "c2", "c3", "c4"):
+            _seed_chunk(store, cid)
+        _seed_related(store, src="c1", tgt="c2", score=0.85)
+        _seed_related(store, src="c2", tgt="c3", score=0.75)
+        _seed_related(store, src="c3", tgt="c4", score=0.65)
+
+        out = service.neighborhood(root_kind="chunk", root_id="c1", depth=3, edge_limit=10)
+        node_ids = {n.id for n in out.nodes}
+        # All four hops should be visible at depth=3.
+        assert {"c1", "c2", "c3", "c4"} <= node_ids
+        # All three edges visible too.
+        assert len(out.edges) == 3
+        assert out.hidden_edge_count == 0
+        assert out.truncated is False
+
+    def test_depth_two_with_budget_cap_truncates(self) -> None:
+        # Combined-pressure case the reviewer flagged: BFS expands two
+        # hops, the strength filter passes everything, but the
+        # ``edge_limit`` budget clips. ``hidden_edge_count`` should
+        # equal the budget-dropped count and ``hidden_node_count``
+        # should reflect the un-reached nodes.
+        service, store = _service()
+        _seed_chunk(store, "c0")
+        # Five direct neighbors so depth=1 alone would saturate; each
+        # of those neighbors has a second-hop neighbor — total 10
+        # candidate edges, budget cuts to 3.
+        for i in range(1, 6):
+            _seed_chunk(store, f"a{i}")
+            _seed_related(store, src="c0", tgt=f"a{i}", score=0.5 + i * 0.05)
+            _seed_chunk(store, f"b{i}")
+            _seed_related(store, src=f"a{i}", tgt=f"b{i}", score=0.4 + i * 0.05)
+
+        out = service.neighborhood(root_kind="chunk", root_id="c0", depth=2, edge_limit=3)
+        assert out.truncated is True
+        assert len(out.edges) == 3
+        assert out.hidden_edge_count == 7  # 10 candidates - 3 visible
+
 
 # ── Edge budget + truncation ──────────────────────────────────────────
 
