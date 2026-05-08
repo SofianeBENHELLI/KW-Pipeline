@@ -106,7 +106,14 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: kw-pipeline-cloudflared
-    command: ["tunnel", "--no-autoupdate", "run"]
+    # ``--config`` is explicit to remove ambiguity around the official
+    # ``cloudflare/cloudflared`` image's entrypoint and config-search
+    # behaviour. Without the flag, the connector errors out with
+    # "tunnel run requires the ID or name of the tunnel" even though
+    # the bind mount below puts the file at
+    # ``/etc/cloudflared/config.yml`` (one of cloudflared's default
+    # search paths). Passing the flag is the documented, robust form.
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "--no-autoupdate", "run"]
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
     depends_on:
