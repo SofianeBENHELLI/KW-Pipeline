@@ -28,6 +28,7 @@ from app.schemas.knowledge import (
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
 )
+from app.schemas.knowledge_explore_search import ExploreSearchResponse
 from app.schemas.knowledge_neighborhood import (
     NEIGHBORHOOD_DEFAULT_DEPTH,
     NEIGHBORHOOD_DEFAULT_LIMIT,
@@ -53,6 +54,14 @@ from app.services.auth import (
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
+from app.services.knowledge.explore_search import (
+    DEFAULT_CONTRIBUTING_CHUNKS,
+    DEFAULT_DOCUMENT_LIMIT,
+    DEFAULT_TOPIC_LIMIT,
+    MAX_CONTRIBUTING_CHUNKS,
+    MAX_DOCUMENT_LIMIT,
+    MAX_TOPIC_LIMIT,
+)
 from app.services.knowledge.graph_store import (
     DEFAULT_GRAPH_PAGE_LIMIT,
     DEFAULT_VECTOR_SEARCH_LIMIT,
@@ -488,6 +497,90 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             query_embedding_dim=response.query_embedding_dim,
             results=filtered,
         )
+
+    @router.get(
+        "/knowledge/explore/search",
+        operation_id="explore_search_knowledge",
+        response_model=ExploreSearchResponse,
+    )
+    def explore_search_knowledge(
+        q: str = Query(min_length=1, max_length=2000),
+        chunk_limit: int = Query(default=10, ge=1, le=MAX_VECTOR_SEARCH_LIMIT),
+        document_limit: int = Query(default=DEFAULT_DOCUMENT_LIMIT, ge=1, le=MAX_DOCUMENT_LIMIT),
+        topic_limit: int = Query(default=DEFAULT_TOPIC_LIMIT, ge=1, le=MAX_TOPIC_LIMIT),
+        contributing_chunks_per_document: int = Query(
+            default=DEFAULT_CONTRIBUTING_CHUNKS,
+            ge=1,
+            le=MAX_CONTRIBUTING_CHUNKS,
+        ),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Multi-kind grouped search for the Explorer (#313, ADR-028).
+
+        Returns chunks / documents / topics / entities / relations
+        groups in a single response shape so the Explorer search bar
+        can render section-by-section. Today only the first three
+        groups are populated; entities and relations ride through as
+        empty lists (placeholder for v0.2 of the wire shape).
+
+        Requires the same gates as ``GET /knowledge/search`` —
+        ``KW_KNOWLEDGE_LAYER_ENABLED=true`` plus
+        ``VOYAGE_API_KEY``. When either is missing the route returns
+        503 with ``KW_VECTOR_SEARCH_DISABLED``.
+
+        D.5: chunk hits are filtered to the caller's accessible
+        documents before aggregation. Documents and topics are
+        aggregated only over the visible chunks, so a hidden doc
+        never bubbles up via either group.
+        """
+        if services.knowledge_explore_search is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.VECTOR_SEARCH_DISABLED,
+                message=(
+                    "Multi-kind Explorer search is disabled. "
+                    "Phase 3 requires KW_KNOWLEDGE_LAYER_ENABLED=true "
+                    "and VOYAGE_API_KEY to be configured."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set both KW_KNOWLEDGE_LAYER_ENABLED=true and a "
+                    "non-empty VOYAGE_API_KEY (or KW_VOYAGE_API_KEY) "
+                    "in the API environment, then restart the service."
+                ),
+            )
+
+        # Build the per-request scope predicate. The cache lives in
+        # this closure so a chunk_limit hit referencing the same
+        # document multiple times pays the catalog roundtrip once.
+        settings = Settings()
+        catalog = services.documents.catalog
+        access_cache: dict[str, bool] = {}
+
+        def _can_see(document_id: str) -> bool:
+            cached = access_cache.get(document_id)
+            if cached is not None:
+                return cached
+            verdict = user_can_access(
+                user=current_user,
+                document_id=document_id,
+                catalog=catalog,
+                settings=settings,
+            )
+            access_cache[document_id] = verdict
+            return verdict
+
+        try:
+            return services.knowledge_explore_search.search(
+                query=q,
+                chunk_limit=chunk_limit,
+                document_limit=document_limit,
+                topic_limit=topic_limit,
+                contributing_chunks_per_document=contributing_chunks_per_document,
+                can_see_document=_can_see,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post(
         "/knowledge/chat",

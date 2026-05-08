@@ -39,6 +39,7 @@ from app.services.knowledge import (
     GraphStore,
     InMemoryGraphStore,
     KnowledgeChatService,
+    KnowledgeExploreSearchService,
     KnowledgeNeighborhoodService,
     KnowledgeProjector,
     KnowledgeRelationsService,
@@ -248,6 +249,10 @@ class PipelineServices:
     # in ``build_services``; depends only on ``graph_store`` so the
     # field is Optional only for partial-construction back-compat.
     knowledge_neighborhood: KnowledgeNeighborhoodService | None = None
+    # Multi-kind Explorer search (#313, ADR-028). Wired only when the
+    # underlying ``knowledge_search`` is wired (Phase 3 + Voyage); the
+    # route returns 503 with ``KW_VECTOR_SEARCH_DISABLED`` otherwise.
+    knowledge_explore_search: KnowledgeExploreSearchService | None = None
     # Audit event store (#26 residual). Always present so the
     # logging-handler wiring is unconditional; the in-memory fake is
     # the test-suite default and the SQLite store lights up only when
@@ -806,6 +811,15 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         ),
         knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
         knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
+        knowledge_explore_search=(
+            KnowledgeExploreSearchService(
+                search=knowledge_search,
+                graph_store=graph_store,
+                documents=documents,
+            )
+            if knowledge_search is not None
+            else None
+        ),
         audit_events=_build_audit_store(settings),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
@@ -910,6 +924,15 @@ def build_persistent_services(
         ),
         knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
         knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
+        knowledge_explore_search=(
+            KnowledgeExploreSearchService(
+                search=knowledge_search,
+                graph_store=graph_store,
+                documents=documents,
+            )
+            if knowledge_search is not None
+            else None
+        ),
         audit_events=_build_audit_store(settings, default_dir=root),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
