@@ -17,6 +17,8 @@ from app.services.knowledge.graph_store import InMemoryGraphStore
 from app.services.knowledge.relations import (
     KnowledgeRelationsService,
     RelationNotFound,
+    _coerce_float,
+    _coerce_str_list,
 )
 from app.services.knowledge.scoring import StrengthClass
 
@@ -325,3 +327,83 @@ class TestAggregate:
         service, _ = _service()
         with pytest.raises(ValueError):
             service.explain_aggregate(source_document_id="x", target_document_id="y", top_n=0)
+
+    def test_aggregates_has_entity_cross_edge(self) -> None:
+        # Cross-doc has_entity edges aggregate via confidence-as-score.
+        # The frontend branches on ``kind == "has_entity"`` to render
+        # the LLM-provenance variant of the relation card.
+        service, store = _service()
+        # Anchor doc-level + chunk-level nodes on each side.
+        store.upsert_nodes(
+            [
+                GraphNode(
+                    id="doc-a", kind="document", label="A", properties={"document_id": "doc-a"}
+                ),
+                GraphNode(
+                    id="doc-b", kind="document", label="B", properties={"document_id": "doc-b"}
+                ),
+            ]
+        )
+        for cid in ("ca1",):
+            _seed_chunk(store, chunk_id=cid, document_id="doc-a", version_id="ver-a")
+        for cid in ("cb1",):
+            _seed_chunk(store, chunk_id=cid, document_id="doc-b", version_id="ver-b")
+        store.upsert_edges(
+            [
+                GraphEdge(
+                    id="ent-edge",
+                    kind="has_entity",
+                    source_id="ca1",
+                    target_id="cb1",
+                    properties={
+                        "document_id": "doc-a",
+                        "version_id": "ver-a",
+                        "section_id": "sec-1",
+                        "predicate": "RELATES_TO",
+                        "confidence": 0.7,
+                        "source_reference_id": "ref-1",
+                    },
+                )
+            ]
+        )
+        agg = service.explain_aggregate(source_document_id="doc-a", target_document_id="doc-b")
+        assert agg.pair_count == 1
+        pair = agg.top_contributing_pairs[0]
+        assert pair.kind == "has_entity"
+        # Confidence becomes the score for has_entity contributors.
+        assert pair.score == 0.7
+        assert pair.reason == "RELATES_TO"
+
+
+# ── helpers ───────────────────────────────────────────────────────────
+
+
+class TestCoerceHelpers:
+    """Pure-function coverage for the union-typed property coercers."""
+
+    def test_coerce_float_passes_numeric_values(self) -> None:
+        assert _coerce_float(0.5) == 0.5
+        assert _coerce_float(2) == 2.0
+
+    def test_coerce_float_returns_default_for_none_or_list(self) -> None:
+        assert _coerce_float(None, default=0.42) == 0.42
+        assert _coerce_float(["a", "b"], default=0.42) == 0.42
+
+    def test_coerce_float_skips_bool(self) -> None:
+        # bool is an int subclass; we don't want ``True`` masquerading
+        # as ``1.0``.
+        assert _coerce_float(True, default=0.0) == 0.0
+
+    def test_coerce_float_parses_numeric_string(self) -> None:
+        assert _coerce_float("3.5") == 3.5
+
+    def test_coerce_float_falls_back_on_unparseable_string(self) -> None:
+        assert _coerce_float("not a number", default=0.5) == 0.5
+
+    def test_coerce_str_list_passes_list_through(self) -> None:
+        assert _coerce_str_list(["a", "b"]) == ["a", "b"]
+
+    def test_coerce_str_list_returns_empty_on_non_list(self) -> None:
+        assert _coerce_str_list(None) == []
+        assert _coerce_str_list("a, b") == []
+        assert _coerce_str_list(42) == []

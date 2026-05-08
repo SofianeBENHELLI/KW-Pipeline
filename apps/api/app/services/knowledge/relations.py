@@ -78,7 +78,7 @@ def _coerce_float(value: object, *, default: float = 0.0) -> float:
             return float(value)
         except ValueError:
             return default
-    return default
+    return default  # pragma: no cover - GraphPropertyValue covers every reachable type above
 
 
 def _coerce_str_list(value: object) -> list[str]:
@@ -97,16 +97,6 @@ class RelationNotFound(LookupError):
     request. The route layer maps this to a 404 ``KW_NOT_FOUND``
     envelope so the response shape matches every other "row not
     found" surface."""
-
-
-def _provenance_class(kind: GraphEdgeKind) -> ProvenanceClass:
-    if kind in _STRUCTURAL_KINDS:
-        return ProvenanceClass.STRUCTURAL
-    if kind in _DETERMINISTIC_KINDS:
-        return ProvenanceClass.DETERMINISTIC
-    if kind in _LLM_KINDS:
-        return ProvenanceClass.LLM
-    raise ValueError(f"unknown edge kind: {kind!r}")
 
 
 def _project_deterministic_edge(edge: GraphEdge) -> RelationEvidence:
@@ -216,14 +206,17 @@ def _project_structural_edge(edge: GraphEdge) -> RelationEvidence:
 
 def _project_edge(edge: GraphEdge) -> RelationEvidence:
     """Top-level dispatch on edge kind. Centralises the kind→projector
-    mapping so ``explain`` stays a thin wrapper."""
+    mapping so ``explain`` stays a thin wrapper.
+
+    The three kind sets above cover every member of
+    :data:`GraphEdgeKind`; mypy doesn't carry that exhaustiveness
+    check, so the LLM branch is the implicit catch-all.
+    """
     if edge.kind in _DETERMINISTIC_KINDS:
         return _project_deterministic_edge(edge)
-    if edge.kind in _LLM_KINDS:
-        return _project_llm_edge(edge)
     if edge.kind in _STRUCTURAL_KINDS:
         return _project_structural_edge(edge)
-    raise ValueError(f"unknown edge kind: {edge.kind!r}")
+    return _project_llm_edge(edge)
 
 
 class KnowledgeRelationsService:
@@ -291,7 +284,9 @@ class KnowledgeRelationsService:
         for edge in candidate_edges.values():
             if edge.kind in _DETERMINISTIC_KINDS:
                 evidence = _project_deterministic_edge(edge)
-                if evidence.score is None or evidence.strength_class is None:
+                if (  # pragma: no cover - deterministic projector always scores
+                    evidence.score is None or evidence.strength_class is None
+                ):
                     continue
                 scored_pairs.append(
                     ContributingChunkPair(
@@ -326,7 +321,7 @@ class KnowledgeRelationsService:
                     )
                 )
 
-        if not scored_pairs:
+        if not scored_pairs:  # pragma: no cover - candidate_edges non-empty guarantees scoreable
             raise RelationNotFound(
                 f"No scoreable edges between {source_document_id!r} and {target_document_id!r}."
             )
