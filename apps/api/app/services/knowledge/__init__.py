@@ -54,6 +54,10 @@ from app.services.knowledge.reconciliation import (
     ReconciliationOutcome,
     ReconciliationService,
 )
+from app.services.knowledge.neighborhood import (
+    KnowledgeNeighborhoodService,
+    NeighborhoodNotFound,
+)
 from app.services.knowledge.relations import (
     KnowledgeRelationsService,
     RelationNotFound,
@@ -84,9 +88,11 @@ __all__ = [
     "InMemoryGraphStore",
     "KnowledgeChatService",
     "KnowledgeLayerDisabled",
+    "KnowledgeNeighborhoodService",
     "KnowledgeProjector",
     "KnowledgeRelationsService",
     "KnowledgeSearchService",
+    "NeighborhoodNotFound",
     "RelationNotFound",
     "LLMClient",
     "Neo4jGraphStore",

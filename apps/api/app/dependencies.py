@@ -39,6 +39,7 @@ from app.services.knowledge import (
     GraphStore,
     InMemoryGraphStore,
     KnowledgeChatService,
+    KnowledgeNeighborhoodService,
     KnowledgeProjector,
     KnowledgeRelationsService,
     KnowledgeSearchService,
@@ -243,6 +244,10 @@ class PipelineServices:
     # routes return empty / 404 when the graph store has no matching
     # edges, mirroring the rest of the knowledge-layer read surface.
     knowledge_relations: KnowledgeRelationsService | None = None
+    # Focused neighborhood read service (#310, ADR-028). Always wired
+    # in ``build_services``; depends only on ``graph_store`` so the
+    # field is Optional only for partial-construction back-compat.
+    knowledge_neighborhood: KnowledgeNeighborhoodService | None = None
     # Audit event store (#26 residual). Always present so the
     # logging-handler wiring is unconditional; the in-memory fake is
     # the test-suite default and the SQLite store lights up only when
@@ -800,6 +805,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
             graph_store=graph_store,
         ),
         knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
+        knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
         audit_events=_build_audit_store(settings),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
@@ -903,6 +909,7 @@ def build_persistent_services(
             graph_store=graph_store,
         ),
         knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
+        knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
         audit_events=_build_audit_store(settings, default_dir=root),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
