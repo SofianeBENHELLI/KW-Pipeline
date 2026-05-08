@@ -28,6 +28,10 @@ from app.schemas.knowledge import (
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
 )
+from app.schemas.knowledge_relations import (
+    AggregatedRelationEvidence,
+    RelationEvidence,
+)
 from app.schemas.scope import ScopeRef
 from app.schemas.taxonomy import TaxonomyCategory, TaxonomyResponse
 from app.services.auth import (
@@ -45,6 +49,7 @@ from app.services.knowledge.graph_store import (
     MAX_GRAPH_PAGE_LIMIT,
     MAX_VECTOR_SEARCH_LIMIT,
 )
+from app.services.knowledge.relations import RelationNotFound
 from app.settings import Settings
 
 from ._helpers import MIN_GRAPH_PAGE_LIMIT
@@ -134,6 +139,97 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             return services.graph_store.find_subgraph(limit=limit, cursor=cursor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/relations/aggregate",
+        operation_id="explain_aggregate_relation",
+        response_model=AggregatedRelationEvidence,
+    )
+    def explain_aggregate_relation(
+        request: Request,
+        source_document_id: str = Query(min_length=1),
+        target_document_id: str = Query(min_length=1),
+        top_n: int = Query(default=10, ge=1, le=100),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Synthesised doc-doc relation evidence (#311, ADR-028).
+
+        Walks the chunk-level edges that cross the boundary between
+        ``source_document_id`` and ``target_document_id``, scores each
+        via the #314 policy, and returns the top contributing pairs
+        sorted by combined score.
+
+        D.5: both endpoints must be visible to the caller. Either side
+        hidden by the scope filter → 404 (hidden-existence) before the
+        graph walk runs.
+
+        Returns 404 with a ``KW_NOT_FOUND`` envelope when the documents
+        have no detectable cross-boundary edges. ``pair_count`` on the
+        response is the un-truncated total so the frontend can render
+        a "+ N more contributing pairs" indicator.
+        """
+        # Hidden-existence: enforce on both endpoints before any
+        # graph-store work.
+        assert_can_access_document(
+            request=request, document_id=source_document_id, user=current_user
+        )
+        assert_can_access_document(
+            request=request, document_id=target_document_id, user=current_user
+        )
+        # ``knowledge_relations`` is always wired in ``build_services``
+        # (graph_store is always-on) — the field is Optional only so
+        # back-compat tests that build ``PipelineServices`` partially
+        # don't break. If we ever land here with ``None``, that's a
+        # construction bug, not a runtime gate.
+        assert services.knowledge_relations is not None
+        try:
+            return services.knowledge_relations.explain_aggregate(
+                source_document_id=source_document_id,
+                target_document_id=target_document_id,
+                top_n=top_n,
+            )
+        except RelationNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/relations/{relation_id}",
+        operation_id="explain_relation",
+        response_model=RelationEvidence,
+    )
+    def explain_relation(
+        request: Request,
+        relation_id: str,
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Single-edge relation evidence (#311, ADR-028).
+
+        Resolves the ``relation_id`` to its stored ``GraphEdge`` and
+        projects it onto :class:`RelationEvidence` — kind, provenance
+        class, score (deterministic) or confidence (LLM), reason,
+        shared keywords, source chunks, citations.
+
+        D.5: when the edge carries a ``document_id`` property the
+        scope filter applies — a caller without scope on that document
+        sees 404 (hidden-existence), same envelope as missing-edge.
+        Edges that don't carry a document_id (rare; structural-only
+        catalog-wide edges) are visible to any authenticated viewer.
+
+        URL note: edge ids contain ``:`` and ``->`` separators per the
+        projector's id pattern. Clients must URL-encode the
+        ``relation_id`` path segment; FastAPI decodes transparently.
+        """
+        assert services.knowledge_relations is not None
+        try:
+            evidence = services.knowledge_relations.explain(relation_id)
+        except RelationNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if evidence.document_id is not None:
+            assert_can_access_document(
+                request=request,
+                document_id=evidence.document_id,
+                user=current_user,
+            )
+        return evidence
 
     @router.get(
         "/knowledge/search",

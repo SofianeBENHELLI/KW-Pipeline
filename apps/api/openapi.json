@@ -166,6 +166,53 @@
         "title": "AdminHITLStateResponse",
         "type": "object"
       },
+      "AggregatedRelationEvidence": {
+        "description": "Wire shape for ``GET /knowledge/relations/aggregate``.\n\nSynthesises a doc-doc relation from the chunk-level edges that\ncross the (source, target) document boundary. ``aggregate_score``\nis the **maximum** combined-pair score (the strongest single\npair) — interpretation: \"at least one of these chunk pairs is this\nstrong.\" Mean would dilute the surfacing of high-strength bridges\nin documents with many weak overlaps.\n\n``is_bridge`` / ``is_outlier`` are ``True`` when at least one\ncontributing pair carries those flags, so the frontend can label\nthe aggregated edge accordingly.",
+        "properties": {
+          "aggregate_score": {
+            "title": "Aggregate Score",
+            "type": "number"
+          },
+          "is_bridge": {
+            "title": "Is Bridge",
+            "type": "boolean"
+          },
+          "is_outlier": {
+            "title": "Is Outlier",
+            "type": "boolean"
+          },
+          "pair_count": {
+            "title": "Pair Count",
+            "type": "integer"
+          },
+          "source_document_id": {
+            "title": "Source Document Id",
+            "type": "string"
+          },
+          "target_document_id": {
+            "title": "Target Document Id",
+            "type": "string"
+          },
+          "top_contributing_pairs": {
+            "items": {
+              "$ref": "#/components/schemas/ContributingChunkPair"
+            },
+            "title": "Top Contributing Pairs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_document_id",
+          "target_document_id",
+          "aggregate_score",
+          "pair_count",
+          "top_contributing_pairs",
+          "is_bridge",
+          "is_outlier"
+        ],
+        "title": "AggregatedRelationEvidence",
+        "type": "object"
+      },
       "ArchivedDocumentItem": {
         "description": "One row of :class:`ArchivedDocumentsResponse` — a flag-archived document.\n\nSurface fields the admin UI needs to render an Archive view row\nwithout a per-doc detail fetch:\n\n- ``document_id`` / ``original_filename`` identify the row.\n- ``archived_at`` is the wall clock the orphan cascade (or a\n  future explicit-archive route) stamped on the document; the UI\n  renders it as a relative date.\n- ``last_active_scope_kind`` / ``last_active_scope_ref`` describe\n  the scope that was last removed before the cascade flagged the\n  document — so the admin can see *why* it ended up archived. Both\n  fall back to ``None`` when no scope-link history is recoverable\n  (e.g. a never-scoped document was archived directly).\n- ``versions_purged`` / ``versions_remaining`` split the version\n  family by :data:`DocumentVersionStatus.PURGED` so the operator\n  sees how much bytes-recovery surface is still on disk vs already\n  tombstone'd. The standard ``X / Y`` UI string is\n  ``versions_remaining / (versions_remaining + versions_purged)``.",
         "properties": {
@@ -873,6 +920,73 @@
           "score"
         ],
         "title": "ChunkSearchResult",
+        "type": "object"
+      },
+      "ContributingChunkPair": {
+        "description": "One chunk-level edge contributing to an aggregated doc-doc relation.\n\nThe pair carries the edge's evidence (``reason``, ``shared_keywords``)\nplus the combined #314 score so the frontend can rank pairs without\nre-running the scoring policy.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "part_of",
+              "has_version",
+              "has_chunk",
+              "belongs_to",
+              "related_to",
+              "shares_keyword",
+              "same_topic_as",
+              "has_entity"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "relation_id": {
+            "title": "Relation Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "shared_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Keywords",
+            "type": "array"
+          },
+          "source_chunk_id": {
+            "title": "Source Chunk Id",
+            "type": "string"
+          },
+          "strength_class": {
+            "enum": [
+              "strong",
+              "medium",
+              "weak"
+            ],
+            "title": "Strength Class",
+            "type": "string"
+          },
+          "target_chunk_id": {
+            "title": "Target Chunk Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation_id",
+          "kind",
+          "source_chunk_id",
+          "target_chunk_id",
+          "score",
+          "strength_class",
+          "reason",
+          "shared_keywords"
+        ],
+        "title": "ContributingChunkPair",
         "type": "object"
       },
       "CorsConfig": {
@@ -2187,6 +2301,16 @@
         "title": "PromotedVersion",
         "type": "object"
       },
+      "ProvenanceClass": {
+        "description": "Three-bucket classification of an edge's provenance type.\n\nMirrors the ADR-012 §4 / `knowledge_graph_payload.md` distinction:\n\n- ``structural`` — ``part_of`` / ``has_version`` / ``has_chunk`` /\n  ``belongs_to``. No citation needed; the parent-child relation\n  itself is the provenance.\n- ``deterministic`` — ``related_to`` / ``shares_keyword`` /\n  ``same_topic_as``. Carries ``source_chunk_ids`` + ``reason`` +\n  ``shared_keywords`` (chunk pair as provenance).\n- ``llm`` — ``has_entity``. Must carry a ``source_reference_id``\n  from the catalog's ``source_references`` table.",
+        "enum": [
+          "structural",
+          "deterministic",
+          "llm"
+        ],
+        "title": "ProvenanceClass",
+        "type": "string"
+      },
       "PurgeArtifactsRequest": {
         "description": "Body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).",
         "properties": {
@@ -2468,6 +2592,206 @@
           "parser_metadata"
         ],
         "title": "RawSection",
+        "type": "object"
+      },
+      "RelationEvidence": {
+        "description": "Wire shape for ``GET /knowledge/relations/{relation_id}``.\n\nAll fields are optional except the routing-bones (``relation_id``,\n``kind``, ``provenance_class``, ``source_id``, ``target_id``) so\none model covers every edge kind. Unused fields stay at their\nPydantic defaults — the typed client on the frontend pattern-matches\non ``provenance_class`` to know which evidence fields to read.\n\nScoring fields (``score`` / ``strength_class`` / ``is_bridge`` /\n``is_outlier``) are populated for ``DETERMINISTIC`` edges via\n:func:`app.services.knowledge.scoring.score_edge`. They stay\n``None`` for ``STRUCTURAL`` (a structural parent-child edge has no\nnotion of \"strength\") and for ``LLM`` (the confidence field is the\ncloser analogue there — see ``confidence`` below).",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "contributing_factors": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Contributing Factors",
+            "type": "object"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "is_bridge": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Bridge"
+          },
+          "is_outlier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Outlier"
+          },
+          "kind": {
+            "enum": [
+              "part_of",
+              "has_version",
+              "has_chunk",
+              "belongs_to",
+              "related_to",
+              "shares_keyword",
+              "same_topic_as",
+              "has_entity"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "predicate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predicate"
+          },
+          "provenance_class": {
+            "$ref": "#/components/schemas/ProvenanceClass"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relation_id": {
+            "title": "Relation Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "shared_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Keywords",
+            "type": "array"
+          },
+          "source_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Chunk Ids",
+            "type": "array"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_reference_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Reference Ids",
+            "type": "array"
+          },
+          "source_section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Section Id"
+          },
+          "strength_class": {
+            "anyOf": [
+              {
+                "enum": [
+                  "strong",
+                  "medium",
+                  "weak"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength Class"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "relation_id",
+          "kind",
+          "provenance_class",
+          "source_id",
+          "target_id",
+          "score",
+          "strength_class",
+          "is_bridge",
+          "is_outlier",
+          "contributing_factors",
+          "reason",
+          "shared_keywords",
+          "source_chunk_ids",
+          "confidence",
+          "predicate",
+          "source_section_id",
+          "source_reference_ids",
+          "document_id",
+          "version_id"
+        ],
+        "title": "RelationEvidence",
         "type": "object"
       },
       "RelinkScopeRequest": {
@@ -5393,6 +5717,109 @@
           }
         },
         "summary": "Get Knowledge Graph"
+      }
+    },
+    "/knowledge/relations/aggregate": {
+      "get": {
+        "description": "Synthesised doc-doc relation evidence (#311, ADR-028).\n\nWalks the chunk-level edges that cross the boundary between\n``source_document_id`` and ``target_document_id``, scores each\nvia the #314 policy, and returns the top contributing pairs\nsorted by combined score.\n\nD.5: both endpoints must be visible to the caller. Either side\nhidden by the scope filter → 404 (hidden-existence) before the\ngraph walk runs.\n\nReturns 404 with a ``KW_NOT_FOUND`` envelope when the documents\nhave no detectable cross-boundary edges. ``pair_count`` on the\nresponse is the un-truncated total so the frontend can render\na \"+ N more contributing pairs\" indicator.",
+        "operationId": "explain_aggregate_relation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_document_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Source Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_document_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Target Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top_n",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Top N",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregatedRelationEvidence"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Aggregate Relation"
+      }
+    },
+    "/knowledge/relations/{relation_id}": {
+      "get": {
+        "description": "Single-edge relation evidence (#311, ADR-028).\n\nResolves the ``relation_id`` to its stored ``GraphEdge`` and\nprojects it onto :class:`RelationEvidence` — kind, provenance\nclass, score (deterministic) or confidence (LLM), reason,\nshared keywords, source chunks, citations.\n\nD.5: when the edge carries a ``document_id`` property the\nscope filter applies — a caller without scope on that document\nsees 404 (hidden-existence), same envelope as missing-edge.\nEdges that don't carry a document_id (rare; structural-only\ncatalog-wide edges) are visible to any authenticated viewer.\n\nURL note: edge ids contain ``:`` and ``->`` separators per the\nprojector's id pattern. Clients must URL-encode the\n``relation_id`` path segment; FastAPI decodes transparently.",
+        "operationId": "explain_relation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "relation_id",
+            "required": true,
+            "schema": {
+              "title": "Relation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationEvidence"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Relation"
       }
     },
     "/knowledge/search": {

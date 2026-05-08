@@ -1036,6 +1036,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/relations/aggregate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain Aggregate Relation
+         * @description Synthesised doc-doc relation evidence (#311, ADR-028).
+         *
+         *     Walks the chunk-level edges that cross the boundary between
+         *     ``source_document_id`` and ``target_document_id``, scores each
+         *     via the #314 policy, and returns the top contributing pairs
+         *     sorted by combined score.
+         *
+         *     D.5: both endpoints must be visible to the caller. Either side
+         *     hidden by the scope filter → 404 (hidden-existence) before the
+         *     graph walk runs.
+         *
+         *     Returns 404 with a ``KW_NOT_FOUND`` envelope when the documents
+         *     have no detectable cross-boundary edges. ``pair_count`` on the
+         *     response is the un-truncated total so the frontend can render
+         *     a "+ N more contributing pairs" indicator.
+         */
+        get: operations["explain_aggregate_relation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/relations/{relation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain Relation
+         * @description Single-edge relation evidence (#311, ADR-028).
+         *
+         *     Resolves the ``relation_id`` to its stored ``GraphEdge`` and
+         *     projects it onto :class:`RelationEvidence` — kind, provenance
+         *     class, score (deterministic) or confidence (LLM), reason,
+         *     shared keywords, source chunks, citations.
+         *
+         *     D.5: when the edge carries a ``document_id`` property the
+         *     scope filter applies — a caller without scope on that document
+         *     sees 404 (hidden-existence), same envelope as missing-edge.
+         *     Edges that don't carry a document_id (rare; structural-only
+         *     catalog-wide edges) are visible to any authenticated viewer.
+         *
+         *     URL note: edge ids contain ``:`` and ``->`` separators per the
+         *     projector's id pattern. Clients must URL-encode the
+         *     ``relation_id`` path segment; FastAPI decodes transparently.
+         */
+        get: operations["explain_relation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/search": {
         parameters: {
             query?: never;
@@ -1223,6 +1292,37 @@ export interface components {
              * @description Mirrors ``KW_HITL_AUTO_VALIDATE_THRESHOLD`` — versions with confidence ≥ this value are routed to the auto path.
              */
             threshold: number;
+        };
+        /**
+         * AggregatedRelationEvidence
+         * @description Wire shape for ``GET /knowledge/relations/aggregate``.
+         *
+         *     Synthesises a doc-doc relation from the chunk-level edges that
+         *     cross the (source, target) document boundary. ``aggregate_score``
+         *     is the **maximum** combined-pair score (the strongest single
+         *     pair) — interpretation: "at least one of these chunk pairs is this
+         *     strong." Mean would dilute the surfacing of high-strength bridges
+         *     in documents with many weak overlaps.
+         *
+         *     ``is_bridge`` / ``is_outlier`` are ``True`` when at least one
+         *     contributing pair carries those flags, so the frontend can label
+         *     the aggregated edge accordingly.
+         */
+        AggregatedRelationEvidence: {
+            /** Aggregate Score */
+            aggregate_score: number;
+            /** Is Bridge */
+            is_bridge: boolean;
+            /** Is Outlier */
+            is_outlier: boolean;
+            /** Pair Count */
+            pair_count: number;
+            /** Source Document Id */
+            source_document_id: string;
+            /** Target Document Id */
+            target_document_id: string;
+            /** Top Contributing Pairs */
+            top_contributing_pairs: components["schemas"]["ContributingChunkPair"][];
         };
         /**
          * ArchivedDocumentItem
@@ -1663,6 +1763,38 @@ export interface components {
             snippet: string | null;
             /** Version Id */
             version_id: string;
+        };
+        /**
+         * ContributingChunkPair
+         * @description One chunk-level edge contributing to an aggregated doc-doc relation.
+         *
+         *     The pair carries the edge's evidence (``reason``, ``shared_keywords``)
+         *     plus the combined #314 score so the frontend can rank pairs without
+         *     re-running the scoring policy.
+         */
+        ContributingChunkPair: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "part_of" | "has_version" | "has_chunk" | "belongs_to" | "related_to" | "shares_keyword" | "same_topic_as" | "has_entity";
+            /** Reason */
+            reason: string;
+            /** Relation Id */
+            relation_id: string;
+            /** Score */
+            score: number;
+            /** Shared Keywords */
+            shared_keywords: string[];
+            /** Source Chunk Id */
+            source_chunk_id: string;
+            /**
+             * Strength Class
+             * @enum {string}
+             */
+            strength_class: "strong" | "medium" | "weak";
+            /** Target Chunk Id */
+            target_chunk_id: string;
         };
         /** CorsConfig */
         CorsConfig: {
@@ -2360,6 +2492,23 @@ export interface components {
             version_id: string;
         };
         /**
+         * ProvenanceClass
+         * @description Three-bucket classification of an edge's provenance type.
+         *
+         *     Mirrors the ADR-012 §4 / `knowledge_graph_payload.md` distinction:
+         *
+         *     - ``structural`` — ``part_of`` / ``has_version`` / ``has_chunk`` /
+         *       ``belongs_to``. No citation needed; the parent-child relation
+         *       itself is the provenance.
+         *     - ``deterministic`` — ``related_to`` / ``shares_keyword`` /
+         *       ``same_topic_as``. Carries ``source_chunk_ids`` + ``reason`` +
+         *       ``shared_keywords`` (chunk pair as provenance).
+         *     - ``llm`` — ``has_entity``. Must carry a ``source_reference_id``
+         *       from the catalog's ``source_references`` table.
+         * @enum {string}
+         */
+        ProvenanceClass: "structural" | "deterministic" | "llm";
+        /**
          * PurgeArtifactsRequest
          * @description Body for ``POST /admin/archive/purge_artifacts`` (ADR-027 §1.3).
          */
@@ -2512,6 +2661,67 @@ export interface components {
             source_reference_ids: string[];
             /** Text */
             text: string;
+        };
+        /**
+         * RelationEvidence
+         * @description Wire shape for ``GET /knowledge/relations/{relation_id}``.
+         *
+         *     All fields are optional except the routing-bones (``relation_id``,
+         *     ``kind``, ``provenance_class``, ``source_id``, ``target_id``) so
+         *     one model covers every edge kind. Unused fields stay at their
+         *     Pydantic defaults — the typed client on the frontend pattern-matches
+         *     on ``provenance_class`` to know which evidence fields to read.
+         *
+         *     Scoring fields (``score`` / ``strength_class`` / ``is_bridge`` /
+         *     ``is_outlier``) are populated for ``DETERMINISTIC`` edges via
+         *     :func:`app.services.knowledge.scoring.score_edge`. They stay
+         *     ``None`` for ``STRUCTURAL`` (a structural parent-child edge has no
+         *     notion of "strength") and for ``LLM`` (the confidence field is the
+         *     closer analogue there — see ``confidence`` below).
+         */
+        RelationEvidence: {
+            /** Confidence */
+            confidence: number | null;
+            /** Contributing Factors */
+            contributing_factors: {
+                [key: string]: number;
+            };
+            /** Document Id */
+            document_id: string | null;
+            /** Is Bridge */
+            is_bridge: boolean | null;
+            /** Is Outlier */
+            is_outlier: boolean | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "part_of" | "has_version" | "has_chunk" | "belongs_to" | "related_to" | "shares_keyword" | "same_topic_as" | "has_entity";
+            /** Predicate */
+            predicate: string | null;
+            provenance_class: components["schemas"]["ProvenanceClass"];
+            /** Reason */
+            reason: string | null;
+            /** Relation Id */
+            relation_id: string;
+            /** Score */
+            score: number | null;
+            /** Shared Keywords */
+            shared_keywords: string[];
+            /** Source Chunk Ids */
+            source_chunk_ids: string[];
+            /** Source Id */
+            source_id: string;
+            /** Source Reference Ids */
+            source_reference_ids: string[];
+            /** Source Section Id */
+            source_section_id: string | null;
+            /** Strength Class */
+            strength_class: ("strong" | "medium" | "weak") | null;
+            /** Target Id */
+            target_id: string;
+            /** Version Id */
+            version_id: string | null;
         };
         /**
          * RelinkScopeRequest
@@ -4180,6 +4390,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeGraphPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_aggregate_relation: {
+        parameters: {
+            query: {
+                source_document_id: string;
+                target_document_id: string;
+                top_n?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AggregatedRelationEvidence"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_relation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelationEvidence"];
                 };
             };
             /** @description Validation Error */

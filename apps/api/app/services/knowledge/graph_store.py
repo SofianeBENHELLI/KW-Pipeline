@@ -137,6 +137,42 @@ class GraphStore(Protocol):
         exception.
         """
 
+    def find_edge_by_id(self, edge_id: str) -> GraphEdge | None:
+        """Return one edge by its stable id, or ``None`` if missing.
+
+        Used by the relation evidence API (#311) to resolve a single
+        stored edge to its full evidence shape. Edge ids are stable
+        across re-projections — see the projector for the patterns
+        each kind uses (e.g.
+        ``{version_id}:{source_chunk_id}->{kind}->{target_chunk_id}``
+        for deterministic chunk relations).
+
+        Returns ``None`` (not an exception) when the id doesn't
+        match any stored edge — the route layer translates that to
+        a 404 envelope.
+        """
+
+    def find_edges_between_documents(
+        self,
+        *,
+        source_document_id: str,
+        target_document_id: str,
+    ) -> list[GraphEdge]:
+        """Return every edge connecting a chunk owned by
+        ``source_document_id`` to a chunk owned by ``target_document_id``.
+
+        Used by the relation aggregation API (#311) to synthesise a
+        doc-doc evidence payload from chunk-level edges. The edge's
+        chunk endpoints carry their owning ``document_id`` in
+        ``properties``; this method's contract is "give me every
+        edge that bridges these two documents at the chunk granularity."
+        Sorted by edge id for deterministic ordering.
+
+        Empty result is a valid response: the documents have no
+        detectable cross-boundary relations (yet). The route layer
+        translates an empty list into a 404 ``KW_NOT_FOUND``.
+        """
+
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
 
     def ensure_vector_index(self, *, name: str, dim: int) -> None:
@@ -348,6 +384,37 @@ class InMemoryGraphStore:
                 (n for n in self._nodes.values() if n.kind == kind),
                 key=lambda n: n.id,
             )
+
+    def find_edge_by_id(self, edge_id: str) -> GraphEdge | None:
+        with self._lock:
+            return self._edges.get(edge_id)
+
+    def find_edges_between_documents(
+        self,
+        *,
+        source_document_id: str,
+        target_document_id: str,
+    ) -> list[GraphEdge]:
+        with self._lock:
+            source_chunks = {
+                node.id
+                for node in self._nodes.values()
+                if node.kind == "chunk"
+                and _document_id_from_properties(node.properties) == source_document_id
+            }
+            target_chunks = {
+                node.id
+                for node in self._nodes.values()
+                if node.kind == "chunk"
+                and _document_id_from_properties(node.properties) == target_document_id
+            }
+            edges = [
+                edge
+                for edge in self._edges.values()
+                if (edge.source_id in source_chunks and edge.target_id in target_chunks)
+                or (edge.source_id in target_chunks and edge.target_id in source_chunks)
+            ]
+            return sorted(edges, key=lambda e: e.id)
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
 
@@ -675,6 +742,41 @@ class Neo4jGraphStore:
             {"kind": kind},
         )
         return [_row_to_node(row["n"]) for row in rows]
+
+    def find_edge_by_id(  # pragma: no cover - exercised behind pytest -m integration
+        self, edge_id: str
+    ) -> GraphEdge | None:
+        rows = self._read(
+            """
+            MATCH (s:KnowledgeNode)-[r:KNOWLEDGE_EDGE {id: $edge_id}]->(t:KnowledgeNode)
+            RETURN r.id AS id, r.kind AS kind, s.id AS source_id, t.id AS target_id,
+                   properties(r) AS flat
+            LIMIT 1
+            """,
+            {"edge_id": edge_id},
+        )
+        if not rows:
+            return None
+        return _edge_dict_to_edge(rows[0])
+
+    def find_edges_between_documents(  # pragma: no cover - exercised behind pytest -m integration
+        self,
+        *,
+        source_document_id: str,
+        target_document_id: str,
+    ) -> list[GraphEdge]:
+        rows = self._read(
+            """
+            MATCH (s:KnowledgeNode {kind: 'chunk', document_id: $src})
+                  -[r:KNOWLEDGE_EDGE]-
+                  (t:KnowledgeNode {kind: 'chunk', document_id: $tgt})
+            RETURN r.id AS id, r.kind AS kind, s.id AS source_id, t.id AS target_id,
+                   properties(r) AS flat
+            ORDER BY r.id
+            """,
+            {"src": source_document_id, "tgt": target_document_id},
+        )
+        return [_edge_dict_to_edge(row) for row in rows]
 
     # ─── Phase 3 vector primitives (ADR-015) ──────────────────────────
     # Each method below is exercised end-to-end by
