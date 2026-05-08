@@ -106,7 +106,13 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: kw-pipeline-cloudflared
-    command: ["tunnel", "--no-autoupdate", "run"]
+    # ``--config`` is explicit because the official cloudflared image's
+    # runtime user has ``$HOME != /etc/cloudflared``; without the flag
+    # the connector skips ``/etc/cloudflared/config.yml`` and errors
+    # with "tunnel run requires the ID or name of the tunnel". The
+    # bind mount below puts the config + credentials JSON at
+    # ``/etc/cloudflared/`` inside the container.
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "--no-autoupdate", "run"]
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
     depends_on:
