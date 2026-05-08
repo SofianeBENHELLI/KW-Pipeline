@@ -929,6 +929,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/atlas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Atlas
+         * @description Corpus atlas summary for the Explorer's default home (#312, #316).
+         *
+         *     Returns five summary blocks bounded for single-page rendering:
+         *     top topics, validation coverage, recent imports, bridge
+         *     documents, and candidate outlier relations.
+         *
+         *     D.5: every block is filtered to the caller's accessible
+         *     documents. Counts only ever cover documents the caller can
+         *     see — coverage totals, topic chunk counts, bridge documents,
+         *     and outlier relations all respect the workspace predicate.
+         */
+        get: operations["get_knowledge_atlas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/catalog": {
         parameters: {
             query?: never;
@@ -1067,6 +1096,14 @@ export interface paths {
          *     Disabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter
          *     — :func:`user_can_access` returns ``True`` for every doc, so
          *     ``omitted_by_scope_count`` is always ``0`` in that mode.
+         *
+         *     Pagination note: the filter runs **after** the graph store
+         *     pages by ``cursor`` / ``limit``. A caller with restrictive
+         *     scope may therefore see pages **smaller than ``limit``** even
+         *     when more results exist; the ``next_cursor`` still advances
+         *     the underlying budget so paging the full corpus eventually
+         *     surfaces every accessible row. A future store-side scope
+         *     index (deferred) will close the thin-page surface entirely.
          */
         get: operations["get_knowledge_graph"];
         put?: never;
@@ -1468,6 +1505,159 @@ export interface components {
             items: components["schemas"]["ArchivedDocumentItem"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /**
+         * AtlasBridgeDocument
+         * @description One bridge document — a doc whose chunks span topics that are
+         *     mutually distant per #314's :func:`bridge_document_score`.
+         *
+         *     ``score`` is the mean pairwise topic distance over the doc's
+         *     topics; higher = more bridge-y.
+         */
+        AtlasBridgeDocument: {
+            /** Document Id */
+            document_id: string;
+            /** Score */
+            score: number;
+            /** Title */
+            title: string;
+            /**
+             * Topic Count
+             * @default 0
+             */
+            topic_count: number;
+        };
+        /**
+         * AtlasOutlierRelation
+         * @description One candidate-outlier relation — an edge that's strong AND
+         *     crosses a wide topic gap per #314's outlier classification.
+         *
+         *     The label "candidate" is deliberate (#314 notes): the policy
+         *     surfaces these as suggestions, never as facts.
+         */
+        AtlasOutlierRelation: {
+            /** Kind */
+            kind: string;
+            /** Reason */
+            reason: string | null;
+            /** Relation Id */
+            relation_id: string;
+            /** Score */
+            score: number;
+            /** Shared Keywords */
+            shared_keywords: string[];
+            /** Source Id */
+            source_id: string;
+            /** Target Id */
+            target_id: string;
+        };
+        /**
+         * AtlasRecentDocument
+         * @description One document on the "recent imports" tile.
+         *
+         *     Sorted by ``created_at`` descending in the response. The
+         *     ``validation_status`` is the latest version's status so the UI
+         *     can colour-code the row.
+         */
+        AtlasRecentDocument: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Document Id */
+            document_id: string;
+            /** Title */
+            title: string;
+            /** Validation Status */
+            validation_status: string | null;
+        };
+        /**
+         * AtlasResponse
+         * @description Wire shape for ``GET /knowledge/atlas``.
+         *
+         *     Schema-versioned for forward compatibility — bumping ``v0.1`` is a
+         *     breaking change requiring the typed client to re-read the OpenAPI
+         *     snapshot. All five blocks ride together; an empty corpus simply
+         *     returns empty lists with zero counts.
+         */
+        AtlasResponse: {
+            /** Bridge Documents */
+            bridge_documents: components["schemas"]["AtlasBridgeDocument"][];
+            /** Outlier Relations */
+            outlier_relations: components["schemas"]["AtlasOutlierRelation"][];
+            /** Recent Documents */
+            recent_documents: components["schemas"]["AtlasRecentDocument"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Top Topics */
+            top_topics: components["schemas"]["AtlasTopicSummary"][];
+            validation_coverage: components["schemas"]["AtlasValidationCoverage"];
+        };
+        /**
+         * AtlasTopicSummary
+         * @description One topic on the atlas's "top topics" tile.
+         *
+         *     ``document_count`` and ``chunk_count`` are the coverage stats
+         *     used to rank topics; ``keywords`` give the UI a quick label
+         *     when the topic's own ``label`` is sparse.
+         */
+        AtlasTopicSummary: {
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /**
+             * Document Count
+             * @default 0
+             */
+            document_count: number;
+            /** Keywords */
+            keywords: string[];
+            /** Label */
+            label: string;
+            /** Topic Id */
+            topic_id: string;
+        };
+        /**
+         * AtlasValidationCoverage
+         * @description Catalog-wide coverage by document validation state.
+         *
+         *     All counts are filtered to documents the caller can access (D.5
+         *     hidden-existence applies). The Explorer surfaces these as a
+         *     summary card on the atlas home.
+         */
+        AtlasValidationCoverage: {
+            /**
+             * Needs Review Count
+             * @default 0
+             */
+            needs_review_count: number;
+            /**
+             * Other Count
+             * @default 0
+             */
+            other_count: number;
+            /**
+             * Rejected Count
+             * @default 0
+             */
+            rejected_count: number;
+            /**
+             * Total Documents
+             * @default 0
+             */
+            total_documents: number;
+            /**
+             * Validated Count
+             * @default 0
+             */
+            validated_count: number;
         };
         /** AuditConfig */
         AuditConfig: {
@@ -2509,13 +2699,14 @@ export interface components {
          *     convention as :class:`DocumentListResponse` — clients pass it
          *     back verbatim to advance.
          *
-         *     ``omitted_by_scope_count`` (#326, ADR-020 §2): number of nodes the
-         *     caller's scope filter dropped from this page. Edges incident on
-         *     dropped nodes are also dropped but counted in this single value
-         *     rather than split out — the frontend uses it to render a
-         *     "+ N hidden by scope" indicator without conflating the count
-         *     with the cursor-budget truncation. Always ``0`` under
-         *     ``KW_AUTH_MODE=disabled``.
+         *     ``omitted_by_scope_count`` (#326, ADR-020 §2): number of **nodes**
+         *     the caller's scope filter dropped from this page. Edges incident
+         *     on dropped nodes are also dropped but **not separately counted**;
+         *     consumers can derive the dropped-edge count by taking the
+         *     pre-filter edge count if needed. The frontend uses this single
+         *     value to render a "+ N hidden by scope" indicator without
+         *     conflating it with the cursor-budget truncation. Always ``0``
+         *     under ``KW_AUTH_MODE=disabled``.
          */
         KnowledgeGraphPage: {
             /** Edges */
@@ -4628,6 +4819,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_knowledge_atlas: {
+        parameters: {
+            query?: {
+                top_topics_limit?: number;
+                recent_documents_limit?: number;
+                bridge_documents_limit?: number;
+                outlier_relations_limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AtlasResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

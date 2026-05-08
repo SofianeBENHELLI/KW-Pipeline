@@ -255,8 +255,8 @@ class TestPerDocumentCacheHit:
         # and seed multiple chunks on the SAME document — the spy
         # should be called exactly ONCE per request even though the
         # filter walks 5 chunks.
-        from app.services.auth import scope_filter as _scope_filter
         from app.routes import knowledge as _knowledge_routes
+        from app.services.auth import scope_filter as _scope_filter
 
         monkeypatch.delenv("KW_AUTH_MODE", raising=False)
         client, services = _client_and_services()

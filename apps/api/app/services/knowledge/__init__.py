@@ -17,6 +17,7 @@ Public surface (intentionally small):
   and edges and upserts them through a :class:`GraphStore`.
 """
 
+from app.services.knowledge.atlas import KnowledgeAtlasService
 from app.services.knowledge.chat_service import (
     DEFAULT_MAX_OUTPUT_TOKENS as DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "GeminiLLMClient",
     "GraphStore",
     "InMemoryGraphStore",
+    "KnowledgeAtlasService",
     "KnowledgeChatService",
     "KnowledgeExploreSearchService",
     "KnowledgeLayerDisabled",

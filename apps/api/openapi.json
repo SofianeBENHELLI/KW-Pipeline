@@ -303,6 +303,257 @@
         "title": "ArchivedDocumentsResponse",
         "type": "object"
       },
+      "AtlasBridgeDocument": {
+        "description": "One bridge document — a doc whose chunks span topics that are\nmutually distant per #314's :func:`bridge_document_score`.\n\n``score`` is the mean pairwise topic distance over the doc's\ntopics; higher = more bridge-y.",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topic_count": {
+            "default": 0,
+            "title": "Topic Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "title",
+          "score",
+          "topic_count"
+        ],
+        "title": "AtlasBridgeDocument",
+        "type": "object"
+      },
+      "AtlasOutlierRelation": {
+        "description": "One candidate-outlier relation — an edge that's strong AND\ncrosses a wide topic gap per #314's outlier classification.\n\nThe label \"candidate\" is deliberate (#314 notes): the policy\nsurfaces these as suggestions, never as facts.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relation_id": {
+            "title": "Relation Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "shared_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Keywords",
+            "type": "array"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation_id",
+          "kind",
+          "source_id",
+          "target_id",
+          "score",
+          "reason",
+          "shared_keywords"
+        ],
+        "title": "AtlasOutlierRelation",
+        "type": "object"
+      },
+      "AtlasRecentDocument": {
+        "description": "One document on the \"recent imports\" tile.\n\nSorted by ``created_at`` descending in the response. The\n``validation_status`` is the latest version's status so the UI\ncan colour-code the row.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Status"
+          }
+        },
+        "required": [
+          "document_id",
+          "title",
+          "created_at",
+          "validation_status"
+        ],
+        "title": "AtlasRecentDocument",
+        "type": "object"
+      },
+      "AtlasResponse": {
+        "description": "Wire shape for ``GET /knowledge/atlas``.\n\nSchema-versioned for forward compatibility — bumping ``v0.1`` is a\nbreaking change requiring the typed client to re-read the OpenAPI\nsnapshot. All five blocks ride together; an empty corpus simply\nreturns empty lists with zero counts.",
+        "properties": {
+          "bridge_documents": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasBridgeDocument"
+            },
+            "title": "Bridge Documents",
+            "type": "array"
+          },
+          "outlier_relations": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasOutlierRelation"
+            },
+            "title": "Outlier Relations",
+            "type": "array"
+          },
+          "recent_documents": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasRecentDocument"
+            },
+            "title": "Recent Documents",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "top_topics": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasTopicSummary"
+            },
+            "title": "Top Topics",
+            "type": "array"
+          },
+          "validation_coverage": {
+            "$ref": "#/components/schemas/AtlasValidationCoverage"
+          }
+        },
+        "required": [
+          "schema_version",
+          "top_topics",
+          "validation_coverage",
+          "recent_documents",
+          "bridge_documents",
+          "outlier_relations"
+        ],
+        "title": "AtlasResponse",
+        "type": "object"
+      },
+      "AtlasTopicSummary": {
+        "description": "One topic on the atlas's \"top topics\" tile.\n\n``document_count`` and ``chunk_count`` are the coverage stats\nused to rank topics; ``keywords`` give the UI a quick label\nwhen the topic's own ``label`` is sparse.",
+        "properties": {
+          "chunk_count": {
+            "default": 0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "document_count": {
+            "default": 0,
+            "title": "Document Count",
+            "type": "integer"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "topic_id": {
+            "title": "Topic Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id",
+          "label",
+          "keywords",
+          "document_count",
+          "chunk_count"
+        ],
+        "title": "AtlasTopicSummary",
+        "type": "object"
+      },
+      "AtlasValidationCoverage": {
+        "description": "Catalog-wide coverage by document validation state.\n\nAll counts are filtered to documents the caller can access (D.5\nhidden-existence applies). The Explorer surfaces these as a\nsummary card on the atlas home.",
+        "properties": {
+          "needs_review_count": {
+            "default": 0,
+            "title": "Needs Review Count",
+            "type": "integer"
+          },
+          "other_count": {
+            "default": 0,
+            "title": "Other Count",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "default": 0,
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "total_documents": {
+            "default": 0,
+            "title": "Total Documents",
+            "type": "integer"
+          },
+          "validated_count": {
+            "default": 0,
+            "title": "Validated Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_documents",
+          "validated_count",
+          "needs_review_count",
+          "rejected_count",
+          "other_count"
+        ],
+        "title": "AtlasValidationCoverage",
+        "type": "object"
+      },
       "AuditConfig": {
         "properties": {
           "db_path": {
@@ -2178,7 +2429,7 @@
         "type": "object"
       },
       "KnowledgeGraphPage": {
-        "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.\n\n``omitted_by_scope_count`` (#326, ADR-020 §2): number of nodes the\ncaller's scope filter dropped from this page. Edges incident on\ndropped nodes are also dropped but counted in this single value\nrather than split out — the frontend uses it to render a\n\"+ N hidden by scope\" indicator without conflating the count\nwith the cursor-budget truncation. Always ``0`` under\n``KW_AUTH_MODE=disabled``.",
+        "description": "Cursor-paginated page across all projected documents.\n\nUsed by ``GET /knowledge/graph`` to walk the catalog's projection\nin deterministic order. ``next_cursor`` follows the same opaque\nconvention as :class:`DocumentListResponse` — clients pass it\nback verbatim to advance.\n\n``omitted_by_scope_count`` (#326, ADR-020 §2): number of **nodes**\nthe caller's scope filter dropped from this page. Edges incident\non dropped nodes are also dropped but **not separately counted**;\nconsumers can derive the dropped-edge count by taking the\npre-filter edge count if needed. The frontend uses this single\nvalue to render a \"+ N hidden by scope\" indicator without\nconflating it with the cursor-budget truncation. Always ``0``\nunder ``KW_AUTH_MODE=disabled``.",
         "properties": {
           "edges": {
             "items": {
@@ -5989,6 +6240,85 @@
         "summary": "Health"
       }
     },
+    "/knowledge/atlas": {
+      "get": {
+        "description": "Corpus atlas summary for the Explorer's default home (#312, #316).\n\nReturns five summary blocks bounded for single-page rendering:\ntop topics, validation coverage, recent imports, bridge\ndocuments, and candidate outlier relations.\n\nD.5: every block is filtered to the caller's accessible\ndocuments. Counts only ever cover documents the caller can\nsee — coverage totals, topic chunk counts, bridge documents,\nand outlier relations all respect the workspace predicate.",
+        "operationId": "get_knowledge_atlas",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "top_topics_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Top Topics Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recent_documents_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Recent Documents Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bridge_documents_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Bridge Documents Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outlier_relations_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Outlier Relations Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Atlas"
+      }
+    },
     "/knowledge/catalog": {
       "get": {
         "description": "Paginated catalog view filtered for the EPIC-C surface (ADR-025).\n\nDifferences from ``GET /documents``:\n\n- **SUPERSEDED-aware \"latest\"**: ``latest_status`` is the highest\n  version-numbered version whose status is NOT ``SUPERSEDED``.\n  A document whose only versions are ``SUPERSEDED`` is hidden\n  entirely — there's nothing to review.\n- **Default visibility**: ``VALIDATED`` and ``NEEDS_REVIEW`` are\n  the only statuses shown by default. ``REJECTED``, ``FAILED``,\n  and ``SUPERSEDED`` are hidden unless the explicit ``status=``\n  filter requests them (admin/audit use case).\n- **Scope params (``scope_kind`` / ``scope_ref``) are accepted but\n  not yet enforced** — D.5 wires the predicate. The frontend can\n  start sending them today without any backend behaviour change.\n\nCursor encoding is shared with ``GET /documents`` (the\ncatalog's ``(created_at, id)`` codec) so a future change to the\ncodec only happens once.",
@@ -6247,7 +6577,7 @@
     },
     "/knowledge/graph": {
       "get": {
-        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).\n\nScope filter (#326, ADR-020 §2): nodes whose owning\n``document_id`` the caller cannot access are dropped from\nthe page, along with edges incident on those dropped nodes.\n``omitted_by_scope_count`` on the response carries the\nper-page count so the frontend can surface a \"+ N hidden by\nscope\" indicator distinct from the cursor-budget pagination.\n\nNodes that don't carry a ``document_id`` property (cross-doc\nentity nodes — Phase 2 ``has_entity`` targets) are always\nretained: entities are doc-agnostic, and dropping them would\nhide every entity even when the caller can see at least one\nof its source documents. Entity-level scope is a separate\ndesign item (see #310 deferrals).\n\nDisabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter\n— :func:`user_can_access` returns ``True`` for every doc, so\n``omitted_by_scope_count`` is always ``0`` in that mode.",
+        "description": "Cursor-paginated walk of the catalog-wide projection (ADR-012).\n\nScope filter (#326, ADR-020 §2): nodes whose owning\n``document_id`` the caller cannot access are dropped from\nthe page, along with edges incident on those dropped nodes.\n``omitted_by_scope_count`` on the response carries the\nper-page count so the frontend can surface a \"+ N hidden by\nscope\" indicator distinct from the cursor-budget pagination.\n\nNodes that don't carry a ``document_id`` property (cross-doc\nentity nodes — Phase 2 ``has_entity`` targets) are always\nretained: entities are doc-agnostic, and dropping them would\nhide every entity even when the caller can see at least one\nof its source documents. Entity-level scope is a separate\ndesign item (see #310 deferrals).\n\nDisabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter\n— :func:`user_can_access` returns ``True`` for every doc, so\n``omitted_by_scope_count`` is always ``0`` in that mode.\n\nPagination note: the filter runs **after** the graph store\npages by ``cursor`` / ``limit``. A caller with restrictive\nscope may therefore see pages **smaller than ``limit``** even\nwhen more results exist; the ``next_cursor`` still advances\nthe underlying budget so paging the full corpus eventually\nsurfaces every accessible row. A future store-side scope\nindex (deferred) will close the thin-page surface entirely.",
         "operationId": "get_knowledge_graph",
         "parameters": [
           {
