@@ -1454,7 +1454,7 @@
         "type": "object"
       },
       "ExploreSearchChunk": {
-        "description": "One chunk hit. Mirrors :class:`ChunkSearchResult` plus the trust\nflags the Explorer surfaces (validated / source-backed) so the UI\ncan default to high-trust results without a second probe.",
+        "description": "One chunk hit. Mirrors :class:`ChunkSearchResult` plus the trust\nflags the Explorer surfaces (validated / source-backed) so the UI\ncan default to high-trust results without a second probe.\n\n**v0.1 trust fields are not populated.** ``validation_status``\nis always ``None`` and ``is_source_backed`` is always ``False``\nat the chunk level — the schema reserves the wire shape for\nv0.2's chunk-level trust signal. Document-level trust (on\n:class:`ExploreSearchDocument`) IS populated from the latest\nversion's status.",
         "properties": {
           "chunk_id": {
             "title": "Chunk Id",

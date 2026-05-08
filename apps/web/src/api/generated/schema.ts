@@ -2102,6 +2102,13 @@ export interface components {
          * @description One chunk hit. Mirrors :class:`ChunkSearchResult` plus the trust
          *     flags the Explorer surfaces (validated / source-backed) so the UI
          *     can default to high-trust results without a second probe.
+         *
+         *     **v0.1 trust fields are not populated.** ``validation_status``
+         *     is always ``None`` and ``is_source_backed`` is always ``False``
+         *     at the chunk level — the schema reserves the wire shape for
+         *     v0.2's chunk-level trust signal. Document-level trust (on
+         *     :class:`ExploreSearchDocument`) IS populated from the latest
+         *     version's status.
          */
         ExploreSearchChunk: {
             /** Chunk Id */

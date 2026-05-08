@@ -286,6 +286,78 @@ class TestScopeFilter:
         out = service.search(query="hello", chunk_limit=5, can_see_document=None)
         assert {c.chunk_id for c in out.chunks} == {"a1", "b1"}
 
+    def test_all_chunks_filtered_out_yields_empty_groups(self) -> None:
+        # Reviewer ask: protect the all-filtered-out path. When the
+        # callback rejects every hit, every group must be empty —
+        # no crashes, no stale documents, no stale topics.
+        service = _service(
+            hits=[
+                _hit(chunk_id="a1", document_id="doc-A", score=0.9),
+                _hit(chunk_id="b1", document_id="doc-B", score=0.8),
+            ]
+        )
+        out = service.search(
+            query="hello",
+            chunk_limit=5,
+            can_see_document=lambda _doc_id: False,
+        )
+        assert out.chunks == []
+        assert out.documents == []
+        assert out.topics == []
+
+
+# ── Topic with multiple evidence chunks (cap test) ───────────────────
+
+
+class TestTopicEvidenceCap:
+    def test_topic_evidence_chunks_capped_per_topic(self) -> None:
+        # Reviewer ask: cover the ``[:contributing_chunks_per_document]``
+        # slice on the topic side. Five chunks all on the same topic;
+        # cap=2 → topic shows top 2 chunks by score.
+        nodes = [
+            GraphNode(
+                id=f"c{i}",
+                kind="chunk",
+                label=f"c{i}",
+                properties={
+                    "document_id": "doc-A",
+                    "version_id": "ver-doc-A",
+                    "chunk_id": f"c{i}",
+                    "topic_id": "topic-1",
+                },
+            )
+            for i in range(5)
+        ] + [
+            GraphNode(
+                id="topic-1",
+                kind="topic",
+                label="Safety",
+                properties={
+                    "document_id": "doc-A",
+                    "version_id": "ver-doc-A",
+                    "topic_id": "topic-1",
+                    "label": "Safety",
+                    "keywords": ["safety"],
+                },
+            )
+        ]
+        service = _service(
+            hits=[
+                _hit(chunk_id=f"c{i}", document_id="doc-A", score=0.1 * (10 - i)) for i in range(5)
+            ],
+            nodes=nodes,
+        )
+        out = service.search(
+            query="hello",
+            chunk_limit=10,
+            contributing_chunks_per_document=2,
+        )
+        assert len(out.topics) == 1
+        evidence = out.topics[0].evidence_chunks
+        assert len(evidence) == 2
+        # Top scores 1.0, 0.9 (i=0, i=1).
+        assert evidence[0].score >= evidence[1].score
+
 
 # ── Determinism ──────────────────────────────────────────────────────
 
