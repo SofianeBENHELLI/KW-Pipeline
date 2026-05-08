@@ -54,6 +54,10 @@ from app.services.knowledge.reconciliation import (
     ReconciliationOutcome,
     ReconciliationService,
 )
+from app.services.knowledge.relations import (
+    KnowledgeRelationsService,
+    RelationNotFound,
+)
 from app.services.knowledge.search import KnowledgeSearchService
 from app.services.knowledge.topic_clustering import (
     Topic,
@@ -81,7 +85,9 @@ __all__ = [
     "KnowledgeChatService",
     "KnowledgeLayerDisabled",
     "KnowledgeProjector",
+    "KnowledgeRelationsService",
     "KnowledgeSearchService",
+    "RelationNotFound",
     "LLMClient",
     "Neo4jGraphStore",
     "ReconciliationOutcome",

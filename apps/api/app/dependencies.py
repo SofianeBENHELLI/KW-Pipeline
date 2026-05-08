@@ -40,6 +40,7 @@ from app.services.knowledge import (
     InMemoryGraphStore,
     KnowledgeChatService,
     KnowledgeProjector,
+    KnowledgeRelationsService,
     KnowledgeSearchService,
     LLMClient,
     Neo4jGraphStore,
@@ -236,6 +237,12 @@ class PipelineServices:
     # set). Otherwise ``None`` and the route returns 503 with
     # ``KW_CHAT_DISABLED``.
     knowledge_chat: KnowledgeChatService | None = None
+    # Relation evidence service (#311, ADR-028). Always wired — it's a
+    # thin read-only adapter over ``graph_store.find_edge_by_id`` so it
+    # has no external dependency to gate on. The ``GET /knowledge/relations/...``
+    # routes return empty / 404 when the graph store has no matching
+    # edges, mirroring the rest of the knowledge-layer read surface.
+    knowledge_relations: KnowledgeRelationsService | None = None
     # Audit event store (#26 residual). Always present so the
     # logging-handler wiring is unconditional; the in-memory fake is
     # the test-suite default and the SQLite store lights up only when
@@ -792,6 +799,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
             knowledge_search=knowledge_search,
             graph_store=graph_store,
         ),
+        knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
         audit_events=_build_audit_store(settings),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
@@ -894,6 +902,7 @@ def build_persistent_services(
             knowledge_search=knowledge_search,
             graph_store=graph_store,
         ),
+        knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
         audit_events=_build_audit_store(settings, default_dir=root),
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
