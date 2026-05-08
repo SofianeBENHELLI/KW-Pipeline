@@ -35,6 +35,9 @@ from app.services.knowledge.embedding_client import (
     VoyageEmbeddingClient,
 )
 from app.services.knowledge.entity_extractor import EntityExtractor
+from app.services.knowledge.explore_search import (
+    KnowledgeExploreSearchService,
+)
 from app.services.knowledge.graph_store import (
     ChunkSearchHit,
     GraphStore,
@@ -47,16 +50,16 @@ from app.services.knowledge.llm_client import (
     GeminiLLMClient,
     LLMClient,
 )
+from app.services.knowledge.neighborhood import (
+    KnowledgeNeighborhoodService,
+    NeighborhoodNotFound,
+)
 from app.services.knowledge.projector import KnowledgeProjector
 from app.services.knowledge.reconciliation import (
     DriftedVersion,
     KnowledgeLayerDisabled,
     ReconciliationOutcome,
     ReconciliationService,
-)
-from app.services.knowledge.neighborhood import (
-    KnowledgeNeighborhoodService,
-    NeighborhoodNotFound,
 )
 from app.services.knowledge.relations import (
     KnowledgeRelationsService,
@@ -87,6 +90,7 @@ __all__ = [
     "GraphStore",
     "InMemoryGraphStore",
     "KnowledgeChatService",
+    "KnowledgeExploreSearchService",
     "KnowledgeLayerDisabled",
     "KnowledgeNeighborhoodService",
     "KnowledgeProjector",

@@ -1453,6 +1453,302 @@
         "title": "EmbeddingsConfig",
         "type": "object"
       },
+      "ExploreSearchChunk": {
+        "description": "One chunk hit. Mirrors :class:`ChunkSearchResult` plus the trust\nflags the Explorer surfaces (validated / source-backed) so the UI\ncan default to high-trust results without a second probe.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "is_source_backed": {
+            "default": false,
+            "title": "Is Source Backed",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Status"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "version_id",
+          "section_id",
+          "snippet",
+          "score",
+          "validation_status",
+          "is_source_backed"
+        ],
+        "title": "ExploreSearchChunk",
+        "type": "object"
+      },
+      "ExploreSearchDocument": {
+        "description": "One document hit aggregated from its contributing chunks.\n\n``score`` is the maximum of the contributing-chunks' similarity —\nthe doc's \"best matching chunk\" score. ``contributing_chunks`` is\na deterministic list (top-N at the document level) for the UI to\nsurface as evidence.",
+        "properties": {
+          "contributing_chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchChunk"
+            },
+            "title": "Contributing Chunks",
+            "type": "array"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "is_source_backed": {
+            "default": false,
+            "title": "Is Source Backed",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Status"
+          }
+        },
+        "required": [
+          "document_id",
+          "title",
+          "score",
+          "validation_status",
+          "is_source_backed",
+          "contributing_chunks"
+        ],
+        "title": "ExploreSearchDocument",
+        "type": "object"
+      },
+      "ExploreSearchEntity": {
+        "description": "One entity hit. Reserved for v0.2 — the v0.1 service returns an\nempty list so the wire shape can extend without breaking\nconsumers.",
+        "properties": {
+          "entity_id": {
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "mention_chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchChunk"
+            },
+            "title": "Mention Chunks",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entity_id",
+          "label",
+          "score",
+          "mention_chunks"
+        ],
+        "title": "ExploreSearchEntity",
+        "type": "object"
+      },
+      "ExploreSearchRelation": {
+        "description": "One relation hit. Reserved for v0.2.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relation_id": {
+            "title": "Relation Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "shared_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Keywords",
+            "type": "array"
+          }
+        },
+        "required": [
+          "relation_id",
+          "kind",
+          "score",
+          "reason",
+          "shared_keywords"
+        ],
+        "title": "ExploreSearchRelation",
+        "type": "object"
+      },
+      "ExploreSearchResponse": {
+        "description": "Wire shape for ``GET /knowledge/explore/search``.\n\nAll five groups ride together — empty lists for the deferred\ngroups (entities, relations) so consumers can render the shell\nimmediately and light up new groups when they arrive in v0.2.",
+        "properties": {
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchChunk"
+            },
+            "title": "Chunks",
+            "type": "array"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchDocument"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchEntity"
+            },
+            "title": "Entities",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchRelation"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchTopic"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "query",
+          "embedding_model",
+          "chunks",
+          "documents",
+          "topics",
+          "entities",
+          "relations"
+        ],
+        "title": "ExploreSearchResponse",
+        "type": "object"
+      },
+      "ExploreSearchTopic": {
+        "description": "One topic hit. Topics are deterministic clusters of chunks; this\ngroup surfaces topics that contain at least one matching chunk\nplus the matching evidence chunks.",
+        "properties": {
+          "evidence_chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExploreSearchChunk"
+            },
+            "title": "Evidence Chunks",
+            "type": "array"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "topic_id": {
+            "title": "Topic Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id",
+          "label",
+          "keywords",
+          "score",
+          "evidence_chunks"
+        ],
+        "title": "ExploreSearchTopic",
+        "type": "object"
+      },
       "ExtractionJobSnapshot": {
         "description": "Receipt for an enqueued async extraction job (ADR-006, #40 PR-2).\n\nReturned with HTTP 202 from ``POST /documents/{document_id}/versions/\n{version_id}/extract`` (and the equivalent retry-extraction route)\nwhen ``KW_EXTRACTION_INLINE=false``. Inline mode keeps returning\n:class:`RawExtraction` with HTTP 200 — the union response model on\nthe route documents both shapes.\n\nThe ``job_id`` is opaque to clients and scoped to\n``(document_id, version_id)``. The MVP value is ``f\"ext-{version_id}\"``;\na future durable queue (ADR-022 trajectory) can swap in a UUID\nwithout rotating the field name.\n\n``status`` always carries the canonical\n:class:`DocumentVersionStatus.QUEUED_FOR_EXTRACTION` value at\nsubmission time — clients poll ``GET /documents/{id}`` to observe\nthe version's progression through ``QUEUED_FOR_EXTRACTION →\nEXTRACTING → EXTRACTED|FAILED``.\n\n``queue_position`` is best-effort — an in-memory ``asyncio.Queue``\nhas no atomic \"position\" primitive, so the value reported is the\nqueue depth right after the put. ``None`` when inline mode is on\n(no queue exists) for forward-compatibility with the same shape\nbeing reused as a synchronous receipt by future tooling.",
         "properties": {
@@ -1524,7 +1820,7 @@
         "type": "object"
       },
       "FocusedNeighborhood": {
-        "description": "Wire shape for ``GET /knowledge/neighborhood``.\n\n``schema_version`` is pinned to ``\"v0.1\"`` for now; bumping it\nis a breaking change that requires the typed client to re-read\nthe OpenAPI snapshot. See ADR-028's \"Information Architecture\"\nsection for the contract this satisfies.\n\nThe ``edges`` list is deterministically ordered: combined-score\ndescending, then ``edge_id`` ascending — paginated walks across\nthe same neighborhood land edges in the same canvas position.\n\nTruncation metadata exists so the frontend can render a \"+ N\nmore\" indicator on the canvas without re-querying:\n\n- ``hidden_node_count`` — nodes the BFS reached but the visible\n  edge set doesn't connect (or that the limit clipped off).\n- ``hidden_edge_count`` — edges dropped by the strength filter or\n  the budget. Sum of both contributors.\n- ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.",
+        "description": "Wire shape for ``GET /knowledge/neighborhood``.\n\n``schema_version`` is pinned to ``\"v0.1\"`` for now; bumping it\nis a breaking change that requires the typed client to re-read\nthe OpenAPI snapshot. See ADR-028's \"Information Architecture\"\nsection for the contract this satisfies.\n\nThe ``edges`` list is deterministically ordered: combined-score\ndescending, then ``edge_id`` ascending — paginated walks across\nthe same neighborhood land edges in the same canvas position.\n\nTruncation metadata exists so the frontend can render a \"+ N\nmore\" indicator on the canvas without re-querying:\n\n- ``hidden_node_count`` — nodes the BFS reached but the visible\n  edge set doesn't connect. Note: this *includes* nodes whose\n  only paths to the root went through edges dropped by the\n  ``min_strength`` filter or the ``edge_limit`` budget — so a\n  caller who lowers the threshold or raises the budget may see\n  ``hidden_node_count`` shrink as previously-hidden nodes light\n  up.\n- ``hidden_edge_count`` — edges dropped by the strength filter or\n  the budget. Sum of both contributors.\n- ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.",
         "properties": {
           "depth": {
             "title": "Depth",
@@ -5851,6 +6147,96 @@
           }
         },
         "summary": "Chat With Knowledge"
+      }
+    },
+    "/knowledge/explore/search": {
+      "get": {
+        "description": "Multi-kind grouped search for the Explorer (#313, ADR-028).\n\nReturns chunks / documents / topics / entities / relations\ngroups in a single response shape so the Explorer search bar\ncan render section-by-section. Today only the first three\ngroups are populated; entities and relations ride through as\nempty lists (placeholder for v0.2 of the wire shape).\n\nRequires the same gates as ``GET /knowledge/search`` —\n``KW_KNOWLEDGE_LAYER_ENABLED=true`` plus\n``VOYAGE_API_KEY``. When either is missing the route returns\n503 with ``KW_VECTOR_SEARCH_DISABLED``.\n\nD.5: chunk hits are filtered to the caller's accessible\ndocuments before aggregation. Documents and topics are\naggregated only over the visible chunks, so a hidden doc\nnever bubbles up via either group.",
+        "operationId": "explore_search_knowledge",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chunk_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Chunk Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Document Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "topic_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Topic Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "contributing_chunks_per_document",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "maximum": 5,
+              "minimum": 1,
+              "title": "Contributing Chunks Per Document",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explore Search Knowledge"
       }
     },
     "/knowledge/graph": {

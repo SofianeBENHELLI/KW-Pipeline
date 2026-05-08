@@ -1003,6 +1003,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/explore/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explore Search Knowledge
+         * @description Multi-kind grouped search for the Explorer (#313, ADR-028).
+         *
+         *     Returns chunks / documents / topics / entities / relations
+         *     groups in a single response shape so the Explorer search bar
+         *     can render section-by-section. Today only the first three
+         *     groups are populated; entities and relations ride through as
+         *     empty lists (placeholder for v0.2 of the wire shape).
+         *
+         *     Requires the same gates as ``GET /knowledge/search`` —
+         *     ``KW_KNOWLEDGE_LAYER_ENABLED=true`` plus
+         *     ``VOYAGE_API_KEY``. When either is missing the route returns
+         *     503 with ``KW_VECTOR_SEARCH_DISABLED``.
+         *
+         *     D.5: chunk hits are filtered to the caller's accessible
+         *     documents before aggregation. Documents and topics are
+         *     aggregated only over the visible chunks, so a hidden doc
+         *     never bubbles up via either group.
+         */
+        get: operations["explore_search_knowledge"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/graph": {
         parameters: {
             query?: never;
@@ -2062,6 +2098,139 @@ export interface components {
             model: string;
         };
         /**
+         * ExploreSearchChunk
+         * @description One chunk hit. Mirrors :class:`ChunkSearchResult` plus the trust
+         *     flags the Explorer surfaces (validated / source-backed) so the UI
+         *     can default to high-trust results without a second probe.
+         */
+        ExploreSearchChunk: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Is Source Backed
+             * @default false
+             */
+            is_source_backed: boolean;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string;
+            /** Snippet */
+            snippet: string | null;
+            /** Validation Status */
+            validation_status: string | null;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ExploreSearchDocument
+         * @description One document hit aggregated from its contributing chunks.
+         *
+         *     ``score`` is the maximum of the contributing-chunks' similarity —
+         *     the doc's "best matching chunk" score. ``contributing_chunks`` is
+         *     a deterministic list (top-N at the document level) for the UI to
+         *     surface as evidence.
+         */
+        ExploreSearchDocument: {
+            /** Contributing Chunks */
+            contributing_chunks: components["schemas"]["ExploreSearchChunk"][];
+            /** Document Id */
+            document_id: string;
+            /**
+             * Is Source Backed
+             * @default false
+             */
+            is_source_backed: boolean;
+            /** Score */
+            score: number;
+            /** Title */
+            title: string;
+            /** Validation Status */
+            validation_status: string | null;
+        };
+        /**
+         * ExploreSearchEntity
+         * @description One entity hit. Reserved for v0.2 — the v0.1 service returns an
+         *     empty list so the wire shape can extend without breaking
+         *     consumers.
+         */
+        ExploreSearchEntity: {
+            /** Entity Id */
+            entity_id: string;
+            /** Label */
+            label: string;
+            /** Mention Chunks */
+            mention_chunks: components["schemas"]["ExploreSearchChunk"][];
+            /** Score */
+            score: number;
+        };
+        /**
+         * ExploreSearchRelation
+         * @description One relation hit. Reserved for v0.2.
+         */
+        ExploreSearchRelation: {
+            /** Kind */
+            kind: string;
+            /** Reason */
+            reason: string | null;
+            /** Relation Id */
+            relation_id: string;
+            /** Score */
+            score: number;
+            /** Shared Keywords */
+            shared_keywords: string[];
+        };
+        /**
+         * ExploreSearchResponse
+         * @description Wire shape for ``GET /knowledge/explore/search``.
+         *
+         *     All five groups ride together — empty lists for the deferred
+         *     groups (entities, relations) so consumers can render the shell
+         *     immediately and light up new groups when they arrive in v0.2.
+         */
+        ExploreSearchResponse: {
+            /** Chunks */
+            chunks: components["schemas"]["ExploreSearchChunk"][];
+            /** Documents */
+            documents: components["schemas"]["ExploreSearchDocument"][];
+            /** Embedding Model */
+            embedding_model: string;
+            /** Entities */
+            entities: components["schemas"]["ExploreSearchEntity"][];
+            /** Query */
+            query: string;
+            /** Relations */
+            relations: components["schemas"]["ExploreSearchRelation"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Topics */
+            topics: components["schemas"]["ExploreSearchTopic"][];
+        };
+        /**
+         * ExploreSearchTopic
+         * @description One topic hit. Topics are deterministic clusters of chunks; this
+         *     group surfaces topics that contain at least one matching chunk
+         *     plus the matching evidence chunks.
+         */
+        ExploreSearchTopic: {
+            /** Evidence Chunks */
+            evidence_chunks: components["schemas"]["ExploreSearchChunk"][];
+            /** Keywords */
+            keywords: string[];
+            /** Label */
+            label: string;
+            /** Score */
+            score: number;
+            /** Topic Id */
+            topic_id: string;
+        };
+        /**
          * ExtractionJobSnapshot
          * @description Receipt for an enqueued async extraction job (ADR-006, #40 PR-2).
          *
@@ -2137,7 +2306,12 @@ export interface components {
          *     more" indicator on the canvas without re-querying:
          *
          *     - ``hidden_node_count`` — nodes the BFS reached but the visible
-         *       edge set doesn't connect (or that the limit clipped off).
+         *       edge set doesn't connect. Note: this *includes* nodes whose
+         *       only paths to the root went through edges dropped by the
+         *       ``min_strength`` filter or the ``edge_limit`` budget — so a
+         *       caller who lowers the threshold or raises the budget may see
+         *       ``hidden_node_count`` shrink as previously-hidden nodes light
+         *       up.
          *     - ``hidden_edge_count`` — edges dropped by the strength filter or
          *       the budget. Sum of both contributors.
          *     - ``truncated`` — convenience boolean: ``hidden_edge_count > 0``.
@@ -4489,6 +4663,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explore_search_knowledge: {
+        parameters: {
+            query: {
+                q: string;
+                chunk_limit?: number;
+                document_limit?: number;
+                topic_limit?: number;
+                contributing_chunks_per_document?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExploreSearchResponse"];
                 };
             };
             /** @description Validation Error */
