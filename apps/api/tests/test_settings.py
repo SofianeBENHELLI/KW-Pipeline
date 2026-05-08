@@ -297,19 +297,49 @@ class TestEnvExampleLoadable:
         # (operators uncomment + override; default applies otherwise).
         Settings()
 
-    def test_env_example_only_uncomments_str_assignments(self) -> None:
-        """Defence in depth: every uncommented assignment must be a
-        ``str``-typed Settings field (so an empty value doesn't crash
-        pydantic). If you need to ship an int/bool/float in the
-        example, *comment out the line* and let the default apply."""
-        # ``str`` fields tolerate empty values; non-``str`` fields don't.
-        # Constructing Settings with every uncommented key set to its
-        # example value is the actionable check — a clean build proves
-        # the contract. The companion test above does exactly that.
-        # This test exists so the file gains a second, cheaper line of
-        # defence: even if the env-loading glue changes, the parser
-        # contract stays explicit.
+    def test_uncommented_keys_with_blank_values_are_str_fields(self) -> None:
+        """Pin the convention: every uncommented ``KEY=`` line in
+        ``.env.example`` whose value is empty must map to a ``str``-typed
+        Settings field. Non-``str`` annotations (int / bool / float /
+        Literal) reject the empty string and crash pydantic on boot —
+        the very class of bug this test guards.
+
+        Lookup is via the field's ``validation_alias`` (``KW_…`` keys
+        are resolved through ``AliasChoices`` rather than the field
+        name). A key that doesn't resolve to any field is reported as
+        an unknown env var so a reviewer notices stale entries."""
+        from pydantic.fields import AliasChoices
+
         env = self._parse_env_example()
+
+        # Build alias → annotation lookup once.
+        alias_to_annotation: dict[str, object] = {}
+        for field_name, field in Settings.model_fields.items():
+            annotation = field.annotation
+            aliases: list[str] = [field_name]
+            choices = field.validation_alias
+            if isinstance(choices, AliasChoices):
+                aliases.extend(str(c) for c in choices.choices)
+            elif isinstance(choices, str):
+                aliases.append(choices)
+            for alias in aliases:
+                alias_to_annotation[alias] = annotation
+
         for key, value in env.items():
-            assert isinstance(key, str) and key, "empty key in .env.example"
-            assert isinstance(value, str), f"non-str value parsed for {key}"
+            if value != "":
+                # Non-empty values are validated by the companion test
+                # via Settings() construction — only blank values are
+                # at risk of the strict-parse crash.
+                continue
+            annotation = alias_to_annotation.get(key)
+            assert annotation is not None, (
+                f"{key} is uncommented in .env.example but doesn't "
+                "match any Settings field — drop the line or rename it"
+            )
+            assert annotation is str, (
+                f"{key} is uncommented with a blank value but its "
+                f"Settings annotation is {annotation!r}, not str. "
+                "Pydantic will crash on boot. Comment the line out "
+                "(see the convention note at the top of "
+                ".env.example)."
+            )
