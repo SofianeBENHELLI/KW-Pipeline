@@ -9,7 +9,10 @@
       1. ``docker compose ps`` for the three containers (with health).
       2. /health from inside the workstation (loopback).
       3. Resolved LLM provider posture from /admin/config.
-      4. Cloudflare tunnel registration count (4 PoPs == healthy).
+      4. Cloudflare tunnel readiness — primary signal is a HEAD on
+         ``https://<public-hostname>/health``; the log-line heuristic
+         (registered-connections count) is a secondary informational
+         signal because it lags the real handshake.
       5. The public hostname configured in cloudflared/config.yml.
 
 .EXAMPLE
@@ -104,6 +107,19 @@ if (-not (Test-Path $cloudflaredConfig)) {
     }
 }
 
+# Resolve the public hostname up-front so we can probe it as the
+# ground-truth signal. The log-line heuristic ("Registered tunnel
+# connection") races with the connector handshake and can lag the
+# real readiness by 10-30 s — a hostname that already serves
+# /health is the authoritative answer regardless.
+$publicHostname = $null
+if ($tunnelConfigOk -and (Test-Path $cloudflaredConfig)) {
+    $match = Get-Content $cloudflaredConfig | Select-String -Pattern '^\s*-\s*hostname:\s*(.+)\s*$' | Select-Object -First 1
+    if ($match) {
+        $publicHostname = $match.Matches[0].Groups[1].Value.Trim()
+    }
+}
+
 # ``docker logs ... 2>&1`` yields stderr lines as PowerShell error
 # records under StrictMode; suppress that so an unstarted /
 # misconfigured container doesn't surface as a PowerShell parsing
@@ -124,13 +140,38 @@ try {
 # Wrap the result in ``@(...)`` so an empty pipeline still gives us
 # a 0-length array we can ``.Count`` safely.
 $registered = @(@($cloudflaredLogs) | Select-String "Registered tunnel connection").Count
-if ($registered -ge 4) {
+
+# Public-URL probe: the authoritative readiness check. If /health
+# returns 200 over HTTPS, the entire chain (Cloudflare ->
+# cloudflared -> api) is up regardless of what the log heuristic
+# says.
+$publicHealthOk = $false
+if ($publicHostname) {
+    try {
+        $r = Invoke-WebRequest -Uri "https://$publicHostname/health" -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop
+        if ($r.StatusCode -eq 200) {
+            $publicHealthOk = $true
+        }
+    } catch {}
+}
+
+if ($publicHealthOk) {
+    if ($registered -ge 4) {
+        Write-Done "Public URL up — https://$publicHostname/health = 200 ($registered registered connections)"
+    } elseif ($registered -gt 0) {
+        Write-Done "Public URL up — https://$publicHostname/health = 200 ($registered registered connections; expected 4 once steady)"
+    } else {
+        Write-Done "Public URL up — https://$publicHostname/health = 200 (log-grep hasn't caught a 'Registered tunnel connection' line yet — ignore the lag)"
+    }
+} elseif ($registered -ge 4) {
     Write-Done "$registered registered connections (>=4 means healthy across PoPs)"
 } elseif ($registered -gt 0) {
     Write-Warn2 "$registered registered connections (expected >=4)"
 } else {
     Write-Warn2 "No 'Registered tunnel connection' lines yet."
-    if ($tunnelConfigOk) {
+    if ($publicHostname) {
+        Write-Host "  Probed https://$publicHostname/health — not 200 either, so the tunnel really is down."
+    } elseif ($tunnelConfigOk) {
         Write-Host "  If you just ran Start.ps1, give it 10 s and re-run Status. Otherwise check the tail of 'docker logs kw-pipeline-cloudflared' below."
     }
     # Surface the last few container log lines so an operator sees the
@@ -148,10 +189,4 @@ if ($registered -ge 4) {
     }
 }
 
-if ($tunnelConfigOk -and (Test-Path $cloudflaredConfig)) {
-    $match = Get-Content $cloudflaredConfig | Select-String -Pattern '^\s*-\s*hostname:\s*(.+)\s*$' | Select-Object -First 1
-    if ($match) {
-        $hostname = $match.Matches[0].Groups[1].Value.Trim()
-        if ($hostname) { Write-Host "  Public URL: https://$hostname" }
-    }
-}
+if ($publicHostname) { Write-Host "  Public URL: https://$publicHostname" }
