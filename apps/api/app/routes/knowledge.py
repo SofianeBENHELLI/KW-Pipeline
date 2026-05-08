@@ -28,6 +28,7 @@ from app.schemas.knowledge import (
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
 )
+from app.schemas.knowledge_atlas import AtlasResponse
 from app.schemas.knowledge_explore_search import ExploreSearchResponse
 from app.schemas.knowledge_neighborhood import (
     NEIGHBORHOOD_DEFAULT_DEPTH,
@@ -54,6 +55,15 @@ from app.services.auth import (
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
+from app.services.knowledge.atlas import (
+    DEFAULT_BRIDGE_DOCUMENTS,
+    DEFAULT_OUTLIER_RELATIONS,
+    DEFAULT_RECENT_DOCUMENTS,
+    DEFAULT_TOP_TOPICS,
+)
+from app.services.knowledge.atlas import (
+    MAX_BLOCK_LIMIT as ATLAS_MAX_BLOCK_LIMIT,
+)
 from app.services.knowledge.explore_search import (
     DEFAULT_CONTRIBUTING_CHUNKS,
     DEFAULT_DOCUMENT_LIMIT,
@@ -577,6 +587,65 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                 document_limit=document_limit,
                 topic_limit=topic_limit,
                 contributing_chunks_per_document=contributing_chunks_per_document,
+                can_see_document=_can_see,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get(
+        "/knowledge/atlas",
+        operation_id="get_knowledge_atlas",
+        response_model=AtlasResponse,
+    )
+    def get_knowledge_atlas(
+        top_topics_limit: int = Query(default=DEFAULT_TOP_TOPICS, ge=1, le=ATLAS_MAX_BLOCK_LIMIT),
+        recent_documents_limit: int = Query(
+            default=DEFAULT_RECENT_DOCUMENTS, ge=1, le=ATLAS_MAX_BLOCK_LIMIT
+        ),
+        bridge_documents_limit: int = Query(
+            default=DEFAULT_BRIDGE_DOCUMENTS, ge=1, le=ATLAS_MAX_BLOCK_LIMIT
+        ),
+        outlier_relations_limit: int = Query(
+            default=DEFAULT_OUTLIER_RELATIONS, ge=1, le=ATLAS_MAX_BLOCK_LIMIT
+        ),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Corpus atlas summary for the Explorer's default home (#312, #316).
+
+        Returns five summary blocks bounded for single-page rendering:
+        top topics, validation coverage, recent imports, bridge
+        documents, and candidate outlier relations.
+
+        D.5: every block is filtered to the caller's accessible
+        documents. Counts only ever cover documents the caller can
+        see — coverage totals, topic chunk counts, bridge documents,
+        and outlier relations all respect the workspace predicate.
+        """
+        assert services.knowledge_atlas is not None
+
+        settings = Settings()
+        catalog = services.documents.catalog
+        access_cache: dict[str, bool] = {}
+
+        def _can_see(document_id: str) -> bool:
+            cached = access_cache.get(document_id)
+            if cached is not None:
+                return cached
+            verdict = user_can_access(
+                user=current_user,
+                document_id=document_id,
+                catalog=catalog,
+                settings=settings,
+            )
+            access_cache[document_id] = verdict
+            return verdict
+
+        try:
+            return services.knowledge_atlas.build(
+                top_topics_limit=top_topics_limit,
+                recent_documents_limit=recent_documents_limit,
+                bridge_documents_limit=bridge_documents_limit,
+                outlier_relations_limit=outlier_relations_limit,
                 can_see_document=_can_see,
             )
         except ValueError as exc:
