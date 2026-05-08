@@ -204,6 +204,14 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         Disabled mode (``KW_AUTH_MODE=disabled``) bypasses the filter
         — :func:`user_can_access` returns ``True`` for every doc, so
         ``omitted_by_scope_count`` is always ``0`` in that mode.
+
+        Pagination note: the filter runs **after** the graph store
+        pages by ``cursor`` / ``limit``. A caller with restrictive
+        scope may therefore see pages **smaller than ``limit``** even
+        when more results exist; the ``next_cursor`` still advances
+        the underlying budget so paging the full corpus eventually
+        surfaces every accessible row. A future store-side scope
+        index (deferred) will close the thin-page surface entirely.
         """
         if limit > MAX_GRAPH_PAGE_LIMIT:
             raise HTTPException(

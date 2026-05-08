@@ -245,6 +245,45 @@ class TestEntityNodesRetained:
         assert "entity-shared" in node_ids
 
 
+# ─── Per-document cache hit (perf path) ──────────────────────────────
+
+
+class TestPerDocumentCacheHit:
+    def test_multiple_chunks_one_doc_one_catalog_hit(self, monkeypatch) -> None:
+        # Reviewer ask: protect the per-document cache that amortises
+        # the catalog roundtrip. Wrap ``user_can_access`` with a spy
+        # and seed multiple chunks on the SAME document — the spy
+        # should be called exactly ONCE per request even though the
+        # filter walks 5 chunks.
+        from app.services.auth import scope_filter as _scope_filter
+        from app.routes import knowledge as _knowledge_routes
+
+        monkeypatch.delenv("KW_AUTH_MODE", raising=False)
+        client, services = _client_and_services()
+        doc_id, ver_id = _upload_owned_document(client)
+        for i in range(5):
+            _seed_chunk(services, chunk_id=f"c{i}", document_id=doc_id, version_id=ver_id)
+
+        call_count = 0
+        original = _scope_filter.user_can_access
+
+        def _spy(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original(*args, **kwargs)
+
+        # Patch the symbol on the routes module — the route imports
+        # ``user_can_access`` directly, so swapping the module-level
+        # binding redirects the helper's lookup too.
+        monkeypatch.setattr(_knowledge_routes, "user_can_access", _spy)
+
+        response = client.get("/knowledge/graph")
+        assert response.status_code == 200
+        # Five chunks share one document_id → exactly one cache miss
+        # → exactly one call into ``user_can_access``.
+        assert call_count == 1
+
+
 # ─── Disabled mode bypasses filter ────────────────────────────────────
 
 
