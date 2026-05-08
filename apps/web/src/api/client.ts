@@ -31,6 +31,7 @@ import type {
   ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
   ApiPurgeArtifactsResponse,
+  ApiExtractionJobSnapshot,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
   ApiRelinkScopeRequest,
@@ -407,12 +408,19 @@ export function getVersion(
 /**
  * POST /documents/{document_id}/versions/{version_id}/extract
  * Triggers raw extraction for a stored document version.
+ *
+ * Returns ``ApiRawExtraction`` (HTTP 200) when the API runs extraction
+ * inline (the default, ``KW_EXTRACTION_INLINE=true``) and an
+ * ``ApiExtractionJobSnapshot`` (HTTP 202) when extraction is queued
+ * (``KW_EXTRACTION_INLINE=false``, ADR-006 PR-2). PR-3 will flip the
+ * default; the polling UI lands in a follow-up — for now the type
+ * just documents the contract.
  */
 export async function extractVersion(
   documentId: string,
   versionId: string,
   options: { signal?: AbortSignal } = {},
-): Promise<ApiRawExtraction> {
+): Promise<ApiRawExtraction | ApiExtractionJobSnapshot> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/extract", {
       params: { path: { document_id: documentId, version_id: versionId } },

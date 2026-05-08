@@ -861,12 +861,14 @@ export interface paths {
         put?: never;
         /**
          * Retry Extraction
-         * @description Retry extraction for a previously-FAILED version (#87).
+         * @description Retry extraction for a previously-FAILED version (#87, ADR-006 PR-2).
          *
-         *     Returns the fresh ``RawExtraction`` on success, ``422`` with the
-         *     new failure reason on a re-fail, ``404`` if the version doesn't
-         *     exist, or ``409`` if the version isn't in ``FAILED`` (review
-         *     states stay frozen — retry never bypasses the gate).
+         *     Returns the fresh ``RawExtraction`` (200) on success in inline
+         *     mode, an :class:`ExtractionJobSnapshot` (202) in async mode, or
+         *     ``422`` with the new failure reason on an inline re-fail. ``404``
+         *     if the version doesn't exist, ``409`` if the version isn't in
+         *     ``FAILED`` (review states stay frozen — retry never bypasses the
+         *     gate), ``503`` if the async queue is full.
          */
         post: operations["retry_extraction"];
         delete?: never;
@@ -1881,13 +1883,56 @@ export interface components {
          * DocumentVersionStatus
          * @enum {string}
          */
-        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED" | "PURGED";
+        DocumentVersionStatus: "UPLOADED" | "HASHED" | "DUPLICATE_DETECTED" | "STORED" | "QUEUED_FOR_EXTRACTION" | "EXTRACTING" | "EXTRACTED" | "SEMANTIC_READY" | "NEEDS_REVIEW" | "VALIDATED" | "REJECTED" | "FAILED" | "SUPERSEDED" | "PURGED";
         /** EmbeddingsConfig */
         EmbeddingsConfig: {
             /** Configured */
             configured: boolean;
             /** Model */
             model: string;
+        };
+        /**
+         * ExtractionJobSnapshot
+         * @description Receipt for an enqueued async extraction job (ADR-006, #40 PR-2).
+         *
+         *     Returned with HTTP 202 from ``POST /documents/{document_id}/versions/
+         *     {version_id}/extract`` (and the equivalent retry-extraction route)
+         *     when ``KW_EXTRACTION_INLINE=false``. Inline mode keeps returning
+         *     :class:`RawExtraction` with HTTP 200 — the union response model on
+         *     the route documents both shapes.
+         *
+         *     The ``job_id`` is opaque to clients and scoped to
+         *     ``(document_id, version_id)``. The MVP value is ``f"ext-{version_id}"``;
+         *     a future durable queue (ADR-022 trajectory) can swap in a UUID
+         *     without rotating the field name.
+         *
+         *     ``status`` always carries the canonical
+         *     :class:`DocumentVersionStatus.QUEUED_FOR_EXTRACTION` value at
+         *     submission time — clients poll ``GET /documents/{id}`` to observe
+         *     the version's progression through ``QUEUED_FOR_EXTRACTION →
+         *     EXTRACTING → EXTRACTED|FAILED``.
+         *
+         *     ``queue_position`` is best-effort — an in-memory ``asyncio.Queue``
+         *     has no atomic "position" primitive, so the value reported is the
+         *     queue depth right after the put. ``None`` when inline mode is on
+         *     (no queue exists) for forward-compatibility with the same shape
+         *     being reused as a synchronous receipt by future tooling.
+         */
+        ExtractionJobSnapshot: {
+            /** Document Id */
+            document_id: string;
+            /** Job Id */
+            job_id: string;
+            /** Queue Position */
+            queue_position: number | null;
+            status: components["schemas"]["DocumentVersionStatus"];
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * FailedVersion
@@ -3684,13 +3729,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Inline extraction completed (``KW_EXTRACTION_INLINE=true``, the default). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RawExtraction"];
+                };
+            };
+            /** @description Async extraction enqueued (``KW_EXTRACTION_INLINE=false``). Poll ``GET /documents/{document_id}`` for the version's lifecycle progression. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionJobSnapshot"];
                 };
             };
             /** @description Validation Error */
@@ -3701,6 +3755,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description Async extraction queue is at capacity. Includes ``Retry-After: 5`` and ``KW_QUEUE_FULL`` envelope. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3873,13 +3934,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Inline retry completed (``KW_EXTRACTION_INLINE=true``). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RawExtraction"];
+                };
+            };
+            /** @description Async retry enqueued (``KW_EXTRACTION_INLINE=false``). The version transitions ``FAILED → QUEUED_FOR_EXTRACTION``. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionJobSnapshot"];
                 };
             };
             /** @description Validation Error */
@@ -3890,6 +3960,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description Async extraction queue is at capacity. Includes ``Retry-After: 5`` and ``KW_QUEUE_FULL`` envelope. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

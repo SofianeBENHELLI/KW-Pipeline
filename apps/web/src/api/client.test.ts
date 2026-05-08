@@ -201,7 +201,10 @@ describe("API client — happy paths", () => {
 
   it("extractVersion triggers extraction via POST", async () => {
     const ext = await extractVersion("doc-001", "ver-001");
-    expect(ext.id).toBe("ext-001");
+    // The route now returns RawExtraction | ExtractionJobSnapshot
+    // (ADR-006 PR-2). The mock fixture serves the inline RawExtraction
+    // shape, which is identifiable by the ``parser_name`` field.
+    expect("parser_name" in ext ? ext.id : "").toBe("ext-001");
     const [input] = vi.mocked(fetch).mock.calls[0] as [RequestInfo | URL, ...unknown[]];
     expect((input as Request).method).toBe("POST");
   });
