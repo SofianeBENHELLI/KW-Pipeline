@@ -257,3 +257,89 @@ class TestProgrammaticConstruction:
         assert s.max_upload_bytes == 99
         assert s.allowed_content_types == {"text/markdown"}
         assert s.cors_allowed_origins == ["https://x.example.com"]
+
+
+class TestEnvExampleLoadable:
+    """Pin the contract that ``cp docker/.env.example docker/.env`` produces
+    a working file.
+
+    Pydantic strict-parses ``""`` to int / bool / float and crashes on
+    boot if the example ships ``KW_PERSISTENT=`` (or any other non-str
+    field with an empty value). This test loads every uncommented
+    ``KEY=VALUE`` line from the example and constructs ``Settings()``;
+    a bare ``key=value`` without a default is the regression we're
+    guarding against.
+    """
+
+    @staticmethod
+    def _parse_env_example() -> dict[str, str]:
+        from pathlib import Path
+
+        example = Path(__file__).resolve().parents[3] / "docker" / ".env.example"
+        assert example.is_file(), f"docker/.env.example not found at {example}"
+        env: dict[str, str] = {}
+        for raw_line in example.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip()
+        return env
+
+    def test_env_example_constructs_settings_cleanly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key, value in self._parse_env_example().items():
+            monkeypatch.setenv(key, value)
+        # If ``Settings()`` raises here, the regression is back: a non-str
+        # field somewhere in the example is shipping with an empty
+        # value. Comment out the offending line in ``.env.example``
+        # (operators uncomment + override; default applies otherwise).
+        Settings()
+
+    def test_uncommented_keys_with_blank_values_are_str_fields(self) -> None:
+        """Pin the convention: every uncommented ``KEY=`` line in
+        ``.env.example`` whose value is empty must map to a ``str``-typed
+        Settings field. Non-``str`` annotations (int / bool / float /
+        Literal) reject the empty string and crash pydantic on boot —
+        the very class of bug this test guards.
+
+        Lookup is via the field's ``validation_alias`` (``KW_…`` keys
+        are resolved through ``AliasChoices`` rather than the field
+        name). A key that doesn't resolve to any field is reported as
+        an unknown env var so a reviewer notices stale entries."""
+        from pydantic.fields import AliasChoices
+
+        env = self._parse_env_example()
+
+        # Build alias → annotation lookup once.
+        alias_to_annotation: dict[str, object] = {}
+        for field_name, field in Settings.model_fields.items():
+            annotation = field.annotation
+            aliases: list[str] = [field_name]
+            choices = field.validation_alias
+            if isinstance(choices, AliasChoices):
+                aliases.extend(str(c) for c in choices.choices)
+            elif isinstance(choices, str):
+                aliases.append(choices)
+            for alias in aliases:
+                alias_to_annotation[alias] = annotation
+
+        for key, value in env.items():
+            if value != "":
+                # Non-empty values are validated by the companion test
+                # via Settings() construction — only blank values are
+                # at risk of the strict-parse crash.
+                continue
+            annotation = alias_to_annotation.get(key)
+            assert annotation is not None, (
+                f"{key} is uncommented in .env.example but doesn't "
+                "match any Settings field — drop the line or rename it"
+            )
+            assert annotation is str, (
+                f"{key} is uncommented with a blank value but its "
+                f"Settings annotation is {annotation!r}, not str. "
+                "Pydantic will crash on boot. Comment the line out "
+                "(see the convention note at the top of "
+                ".env.example)."
+            )
