@@ -182,6 +182,32 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class ReadinessCheck(BaseModel):
+    """One probed dependency's status in the readiness report."""
+
+    status: Literal["ok", "error", "disabled"]
+    detail: str | None = None
+
+
+class ReadyResponse(BaseModel):
+    """Readiness probe payload — separate from ``/health`` (liveness).
+
+    ``/health`` answers "is the process alive" and must never fail on a
+    transient dependency hiccup (otherwise the orchestrator restarts the
+    container and the hiccup turns into a real outage).
+
+    ``/ready`` answers "can this instance serve traffic." It returns
+    ``200`` when the **required** dependency (the catalog) is reachable
+    and ``503`` otherwise. Optional dependencies (Neo4j, when the
+    knowledge layer is enabled) surface in ``checks`` as ``"error"`` /
+    ``"disabled"`` but never gate readiness — the core review path keeps
+    working even when the optional knowledge-layer stack is degraded.
+    """
+
+    status: Literal["ok", "error"]
+    checks: dict[str, ReadinessCheck]
+
+
 # ─── Batch upload (#82) ─────────────────────────────────────────────
 
 

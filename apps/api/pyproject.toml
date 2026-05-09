@@ -11,6 +11,13 @@ dependencies = [
   # a deployment opts in.
   "anthropic>=0.40",
   "fastapi==0.115.6",
+  # Process supervisor for production. uvicorn handles requests; gunicorn
+  # owns the worker lifecycle, signals, and graceful restart on
+  # ``--max-requests``. We pin a single worker so the in-process
+  # extraction queue (ADR-006) stays singleton; gunicorn is here for
+  # the periodic recycle that defends against slow leaks in spaCy /
+  # pdfplumber / SDK clients accumulating over weeks of uptime.
+  "gunicorn>=23",
   # Google Generative AI SDK for the optional Gemini LLM provider
   # (ADR-013 §6 amendment). Imported lazily by `GeminiLLMClient`; unit
   # tests use `FakeLLMClient` or inject a mock client so the SDK is

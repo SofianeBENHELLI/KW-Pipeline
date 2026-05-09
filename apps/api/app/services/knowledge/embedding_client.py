@@ -118,6 +118,7 @@ class VoyageEmbeddingClient:
         model: str = DEFAULT_VOYAGE_MODEL,
         batch_size: int = DEFAULT_BATCH_SIZE,
         client: Any = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         if not api_key:
             raise RuntimeError(
@@ -134,7 +135,12 @@ class VoyageEmbeddingClient:
                     "Install with `pip install voyageai` or use "
                     "FakeEmbeddingClient for tests."
                 ) from exc
-            client = voyageai.Client(api_key=api_key)
+            # Bound the SDK's per-request timeout so a slow embedding
+            # call cannot wedge a worker (uptime plan #2).
+            client_kwargs: dict[str, Any] = {"api_key": api_key}
+            if timeout_seconds is not None and timeout_seconds > 0:
+                client_kwargs["timeout"] = timeout_seconds
+            client = voyageai.Client(**client_kwargs)
         self._client = client
         self._model = model
         self._batch_size = max(1, int(batch_size))

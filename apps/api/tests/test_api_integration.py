@@ -12,6 +12,119 @@ def test_health_endpoint_returns_ok():
     assert response.json() == {"status": "ok"}
 
 
+def test_ready_endpoint_reports_catalog_ok_and_neo4j_disabled_by_default():
+    client = TestClient(create_app())
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["catalog"]["status"] == "ok"
+    # Knowledge layer is off by default → neo4j check reports disabled.
+    assert body["checks"]["neo4j"]["status"] == "disabled"
+
+
+def test_ready_endpoint_reports_503_when_catalog_probe_fails(monkeypatch):
+    app = create_app()
+    services = app.state.services
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated catalog outage")
+
+    monkeypatch.setattr(services.documents.catalog, "list_documents", _boom)
+    client = TestClient(app)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["checks"]["catalog"]["status"] == "error"
+    assert "simulated catalog outage" in body["checks"]["catalog"]["detail"]
+
+
+def test_ready_endpoint_reports_neo4j_disabled_with_detail_when_flag_on_but_in_memory(monkeypatch):
+    """KW_KNOWLEDGE_LAYER_ENABLED=true + no Neo4j config → disabled with detail."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    client = TestClient(create_app())
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checks"]["neo4j"]["status"] == "disabled"
+    assert "in-memory" in body["checks"]["neo4j"]["detail"]
+
+
+def test_ready_endpoint_reports_neo4j_ok_when_store_responds(monkeypatch):
+    """A Neo4j-shaped store that answers ``RETURN 1`` → ``ok``."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+
+    from app.services.knowledge.graph_store import Neo4jGraphStore
+
+    app = create_app()
+    services = app.state.services
+
+    # Replace the in-memory store with a fake that quacks like Neo4jGraphStore
+    # for the isinstance + driver.session().run("RETURN 1").consume() probe.
+    class _FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def run(self, _query):
+            class _Result:
+                def consume(_self):  # noqa: N805 - inner class self
+                    return None
+
+            return _Result()
+
+    class _FakeDriver:
+        def session(self, *, database):  # noqa: ARG002
+            return _FakeSession()
+
+    fake = Neo4jGraphStore.__new__(Neo4jGraphStore)
+    fake._driver = _FakeDriver()  # type: ignore[attr-defined]
+    fake._database = "neo4j"  # type: ignore[attr-defined]
+    object.__setattr__(services, "graph_store", fake)
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["neo4j"]["status"] == "ok"
+
+
+def test_ready_endpoint_reports_neo4j_error_but_stays_200_when_store_fails(monkeypatch):
+    """Neo4j down → reported as ``error`` but readiness still 200 (optional dep)."""
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+
+    from app.services.knowledge.graph_store import Neo4jGraphStore
+
+    app = create_app()
+    services = app.state.services
+
+    class _FakeDriver:
+        def session(self, *, database):  # noqa: ARG002
+            raise RuntimeError("bolt connection refused")
+
+    fake = Neo4jGraphStore.__new__(Neo4jGraphStore)
+    fake._driver = _FakeDriver()  # type: ignore[attr-defined]
+    fake._database = "neo4j"  # type: ignore[attr-defined]
+    object.__setattr__(services, "graph_store", fake)
+
+    response = TestClient(app).get("/ready")
+
+    # Still 200 — Neo4j is optional. The detail surfaces the failure.
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["neo4j"]["status"] == "error"
+    assert "bolt connection refused" in body["checks"]["neo4j"]["detail"]
+
+
 def test_upload_catalog_detail_extract_and_semantic_flow():
     client = TestClient(create_app())
 

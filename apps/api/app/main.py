@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,6 +11,7 @@ from app.dependencies import PipelineServices, build_persistent_services, build_
 from app.errors import install_error_handlers
 from app.logging_config import configure_logging, install_audit_handler
 from app.routes import build_router
+from app.services.catalog_backup import prune_old_snapshots, snapshot_catalog
 from app.services.extraction_recovery import recover_stuck_extractions
 from app.services.extraction_worker import (
     ExtractionWorker,
@@ -67,11 +70,36 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
     services: PipelineServices = app.state.services
     settings: Settings = services.settings
 
+    # Tracker for fire-and-forget validation side-effects when
+    # ``KW_KNOWLEDGE_PROJECTION_ASYNC=true`` is on. Holding strong
+    # references prevents the GC from reaping running tasks; the
+    # ``add_done_callback(discard)`` in the dispatcher cleans up
+    # finished ones. Initialized unconditionally so the route layer
+    # can rely on the attribute existing.
+    app.state.background_tasks = set()
+
     # Boot-time recovery — runs unconditionally (helper short-circuits
     # under inline mode internally so we don't double-gate it here).
     recover_stuck_extractions(services)
 
+    # Periodic catalog backup runs independent of the worker mode —
+    # data loss is just as bad in inline mode. The helper is a no-op
+    # under the in-memory wiring (no SQLite file to copy), so it's
+    # safe to spawn unconditionally.
+    backup_task: asyncio.Task[None] | None = None
+    if settings.backup_interval_seconds > 0:
+        backup_task = asyncio.create_task(
+            _periodic_catalog_backup(
+                services,
+                interval_seconds=settings.backup_interval_seconds,
+                retain=settings.backup_retain_count,
+            ),
+            name="catalog-backup",
+        )
+    app.state.catalog_backup_task = backup_task
+
     workers: list[ExtractionWorker] = []
+    recovery_task: asyncio.Task[None] | None = None
     if not settings.extraction_inline:
         queue = InMemoryExtractionQueue(maxsize=settings.extraction_queue_size)
         for i in range(settings.extraction_workers):
@@ -91,6 +119,19 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "queue_size": settings.extraction_queue_size,
             },
         )
+        # Periodic stuck-state recovery. Without it, a single transient
+        # worker failure can leave a doc in QUEUED_FOR_EXTRACTION /
+        # EXTRACTING until the next manual restart — exactly the kind
+        # of state operators end up bouncing the process to clear.
+        interval = settings.extraction_recovery_interval_seconds
+        if interval > 0:
+            recovery_task = asyncio.create_task(
+                _periodic_stuck_extraction_recovery(services, interval),
+                name="extraction-recovery",
+            )
+            app.state.extraction_recovery_task = recovery_task
+        else:
+            app.state.extraction_recovery_task = None
     else:
         # Inline mode: leave the attributes unset so callers that try
         # to enqueue receive an explicit ``AttributeError`` rather than
@@ -98,12 +139,182 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
         # check ``settings.extraction_inline`` first and route accordingly.
         app.state.extraction_queue = None
         app.state.extraction_workers = []
+        app.state.extraction_recovery_task = None
 
     try:
         yield
     finally:
+        if recovery_task is not None:
+            recovery_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await recovery_task
+        if backup_task is not None:
+            backup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await backup_task
+        await _drain_background_tasks(
+            app.state.background_tasks,
+            timeout_seconds=settings.background_task_shutdown_timeout_seconds,
+        )
         for worker in workers:
             await worker.stop()
+
+
+async def _drain_background_tasks(
+    tasks: set[asyncio.Task[None]],
+    *,
+    timeout_seconds: float,
+) -> None:
+    """Wait for in-flight async validation side-effects to finish.
+
+    Bounded so a stuck Anthropic / Voyage call cannot hold container
+    shutdown forever. Anything still running past ``timeout_seconds``
+    is cancelled and the count is logged. ``timeout_seconds=0``
+    cancels immediately (no graceful wait).
+    """
+    if not tasks:
+        return
+    pending = list(tasks)
+    if timeout_seconds <= 0:
+        for task in pending:
+            task.cancel()
+        log.info(
+            "knowledge.projection.background_tasks_cancelled_at_shutdown",
+            extra={"cancelled_count": len(pending), "timeout_seconds": timeout_seconds},
+        )
+        return
+
+    done, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+    if still_pending:
+        for task in still_pending:
+            task.cancel()
+        log.warning(
+            "knowledge.projection.background_tasks_timed_out_on_shutdown",
+            extra={
+                "drained_count": len(done),
+                "cancelled_count": len(still_pending),
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+
+
+def _run_one_backup_cycle(services: PipelineServices, retain: int) -> str:
+    """Snapshot the catalog once and prune old files. Pure-sync helper.
+
+    Returns one of:
+
+    - ``"ok"``: snapshot written; the caller should keep looping.
+    - ``"in_memory"``: the catalog has no file to back up. The caller
+      should stop looping (no point retrying — the wiring won't change
+      mid-process).
+    - ``"error"``: the snapshot failed. The caller should keep looping
+      so a transient I/O blip doesn't disable backups for the rest of
+      the process lifetime.
+
+    Extracted from the asyncio loop so the body is testable without
+    needing to wait on ``asyncio.sleep`` ticks. The loop scaffold stays
+    thin (sleep, dispatch, repeat) and exception-isolated.
+    """
+    try:
+        dest = snapshot_catalog(services)
+    except Exception as exc:  # noqa: BLE001 - never let the loop die
+        log.warning(
+            "catalog_backup.snapshot_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "error"
+
+    if dest is None:
+        log.info(
+            "catalog_backup.skipped",
+            extra={"reason": "in-memory catalog; nothing to back up"},
+        )
+        return "in_memory"
+
+    log.info(
+        "catalog_backup.snapshot_completed",
+        extra={"path": str(dest)},
+    )
+
+    try:
+        pruned = prune_old_snapshots(dest.parent, retain=retain)
+    except Exception as exc:  # noqa: BLE001 - prune failure ≠ backup failure
+        log.warning(
+            "catalog_backup.prune_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "ok"
+
+    if pruned:
+        log.info(
+            "catalog_backup.pruned",
+            extra={"pruned_count": len(pruned)},
+        )
+    return "ok"
+
+
+async def _periodic_catalog_backup(
+    services: PipelineServices,
+    *,
+    interval_seconds: int,
+    retain: int,
+) -> None:
+    """Sleep ``interval_seconds`` and run one backup cycle, forever.
+
+    Stops the loop when the cycle reports ``"in_memory"`` (no SQLite
+    file to back up — the wiring is fixed for the lifetime of the
+    process, so retrying is pointless). Continues on ``"ok"`` or
+    ``"error"``.
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            outcome = await asyncio.to_thread(_run_one_backup_cycle, services, retain)
+        except asyncio.CancelledError:  # pragma: no cover - cancellation race
+            return
+        if outcome == "in_memory":
+            return
+
+
+def _run_one_stuck_extraction_recovery(services: PipelineServices) -> None:
+    """Run one stuck-extraction recovery scan. Pure-sync helper.
+
+    Same extraction motivation as ``_run_one_backup_cycle``: lift the
+    body out of the asyncio loop so coverage tests can drive it
+    without sleeping.
+    """
+    try:
+        recovered = recover_stuck_extractions(services)
+    except Exception as exc:  # noqa: BLE001 - never let the loop die
+        log.warning(
+            "extraction.recovery.periodic_scan_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return
+    if recovered:
+        log.info(
+            "extraction.recovery.periodic_scan_recovered",
+            extra={"recovered_count": recovered},
+        )
+
+
+async def _periodic_stuck_extraction_recovery(
+    services: PipelineServices,
+    interval_seconds: int,
+) -> None:
+    """Sleep ``interval_seconds`` and run one recovery scan, forever."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            await asyncio.to_thread(_run_one_stuck_extraction_recovery, services)
+        except asyncio.CancelledError:  # pragma: no cover - cancellation race
+            return
 
 
 def create_app(

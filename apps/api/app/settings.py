@@ -45,6 +45,14 @@ class Settings(BaseSettings):
         # not blow up validation.
         extra="ignore",
         case_sensitive=False,
+        # Treat ``KEY=`` (empty string) the same as the env var being
+        # absent so the field default applies. Without this, every
+        # non-string field in ``.env.example`` (booleans, ints, floats)
+        # crashes pydantic on boot when shipped with the bare assignment
+        # form — see fix #353. The previous workaround commented those
+        # lines out; this flag makes the bare form safe again so a fresh
+        # ``cp .env.example .env && docker compose up`` cannot break boot.
+        env_ignore_empty=True,
     )
 
     # ------------------------------------------------------------------
@@ -162,6 +170,70 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+    extraction_recovery_interval_seconds: int = Field(
+        default=900,
+        validation_alias=AliasChoices("KW_EXTRACTION_RECOVERY_INTERVAL_SECONDS"),
+        description=(
+            "How often (seconds) to re-scan for stuck extractions after "
+            "boot. Without this, a single transient worker failure can "
+            "leave a document in ``QUEUED_FOR_EXTRACTION`` / "
+            "``EXTRACTING`` indefinitely until the next process restart. "
+            "Default ``900`` (15 min). ``0`` disables the periodic scan "
+            "(boot-time recovery still runs). Ignored under "
+            "``extraction_inline=true``."
+        ),
+        ge=0,
+    )
+    backup_interval_seconds: int = Field(
+        default=86_400,
+        validation_alias=AliasChoices("KW_BACKUP_INTERVAL_SECONDS"),
+        description=(
+            "How often (seconds) to snapshot the SQLite catalog to "
+            "``<data_dir>/backups/``. Uses SQLite's online backup API "
+            "(no writer lock, no torn reads) and retains the most "
+            "recent ``backup_retain_count`` files. Default ``86400`` "
+            "(24h). ``0`` disables. Always a no-op under the in-memory "
+            "wiring (no SQLite file to copy)."
+        ),
+        ge=0,
+    )
+    backup_retain_count: int = Field(
+        default=7,
+        validation_alias=AliasChoices("KW_BACKUP_RETAIN_COUNT"),
+        description=(
+            "How many catalog snapshots to keep in "
+            "``<data_dir>/backups/`` before pruning the oldest. "
+            "Default ``7`` (one week of dailies). Must be ``>= 1`` "
+            "when ``backup_interval_seconds > 0``."
+        ),
+        ge=1,
+    )
+    knowledge_projection_async: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KW_KNOWLEDGE_PROJECTION_ASYNC"),
+        description=(
+            "When truthy, ``POST /validate`` returns immediately after "
+            "the FSM transition and runs the knowledge-layer projection "
+            "(graph projection + LLM entity extraction) as a "
+            "fire-and-forget background task. When falsy (the default), "
+            "validate blocks until projection completes — the historical "
+            "contract that callers reading the graph immediately after "
+            "validate rely on. Operators flip this on once the UI can "
+            "tolerate eventual graph readiness."
+        ),
+    )
+    background_task_shutdown_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("KW_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_SECONDS"),
+        description=(
+            "Cap (seconds) on how long the lifespan waits for in-flight "
+            "background validation side-effects to drain on shutdown. "
+            "Bounded so a stuck Anthropic / Voyage call cannot hold the "
+            "container shutdown forever. Tasks still running past the "
+            "cap are cancelled and logged. ``0`` cancels immediately."
+        ),
+        ge=0,
+    )
     data_dir: str = Field(
         default=".kw-pipeline",
         validation_alias=AliasChoices("KW_DATA_DIR"),
@@ -276,6 +348,29 @@ class Settings(BaseSettings):
             "original unbounded behaviour."
         ),
     )
+    anthropic_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("KW_ANTHROPIC_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Anthropic SDK "
+            "client. Without it the SDK inherits httpx's default "
+            "(no read timeout), so a stalled LLM call can hold a worker "
+            "indefinitely and surface as 'API hang' to operators. "
+            "``0`` or negative disables the override (SDK default)."
+        ),
+    )
+    gemini_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("KW_GEMINI_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Gemini SDK "
+            "client. Same rationale as ``anthropic_timeout_seconds``: "
+            "bound the call so a stalled LLM cannot wedge a worker. "
+            "Internally converted to milliseconds for the google-genai "
+            "``HttpOptions.timeout`` field. ``0`` or negative disables "
+            "the override (SDK default)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias
@@ -303,6 +398,16 @@ class Settings(BaseSettings):
             "ADR-015. Operators may override (e.g. ``voyage-3-large``) "
             "without code changes; the index dimensionality is read "
             "from the configured model at construction time."
+        ),
+    )
+    voyage_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("KW_VOYAGE_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Voyage AI SDK "
+            "client. Same rationale as ``anthropic_timeout_seconds``: "
+            "prevents a slow embedding call from hanging a worker. "
+            "``0`` or negative disables the override (SDK default)."
         ),
     )
 

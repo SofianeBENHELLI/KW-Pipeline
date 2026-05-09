@@ -60,5 +60,25 @@ HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=20s \
 sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)" \
   || exit 1
 
-# uvicorn entry point — no ``--reload`` in production.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+# gunicorn supervises one uvicorn worker. Pinned to a single worker
+# because the in-process extraction queue (ADR-006) is per-process —
+# scaling out workers would multiply the queue and race the catalog.
+# ``--max-requests`` recycles the worker after ~1000 requests (with
+# jitter so all workers don't recycle at once if the count is ever
+# raised). The recycle is the actual uptime feature here: it returns
+# memory accumulated by spaCy / pdfplumber / SDK clients to the OS,
+# which is the silent killer over weeks-long uptimes.
+#
+# ``--graceful-timeout`` matches our SDK timeouts so an in-flight LLM
+# call that hits its own ceiling can finish before gunicorn forces
+# the recycle.
+CMD ["gunicorn", "app.main:app", \
+     "--bind", "0.0.0.0:8000", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "1", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
+     "--timeout", "120", \
+     "--graceful-timeout", "90", \
+     "--access-logfile", "-", \
+     "--forwarded-allow-ips", "*"]

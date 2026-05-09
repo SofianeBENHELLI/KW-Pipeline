@@ -35,6 +35,15 @@ services:
       start_period: 30s
     profiles: ["dev", "deploy"]
     restart: unless-stopped
+    # Cap docker logs at 50 MB × 5 files. Without this, ``docker logs``
+    # grows unbounded — over weeks of uptime that fills the host disk
+    # and SQLite starts failing with "database or disk is full," which
+    # looks like an outage but is really just log retention.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   api:
     build:
@@ -90,6 +99,26 @@ services:
         condition: service_healthy
     profiles: ["dev", "deploy"]
     restart: unless-stopped
+    # See the rationale on the ``neo4j`` service. The API logs
+    # access lines (gunicorn's ``--access-logfile -``) plus structured
+    # JSON app logs, so the log volume here is the heaviest.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # ── Defense-in-depth memory limit (opt-in) ───────────────────────
+    # The API container ships with gunicorn ``--max-requests 1000``
+    # which periodically recycles the worker and returns accumulated
+    # memory to the OS — that is the primary defense against slow
+    # leaks (spaCy / pdfplumber / SDK clients) over weeks of uptime.
+    # Uncomment ``mem_limit`` to cap the container as a backstop: if
+    # memory ever exceeds the cap, Docker kills the container and
+    # ``restart: unless-stopped`` brings it back. Tune to your host:
+    # 1g is comfortable for the default install; raise to 2g if NER
+    # (spaCy en_core_web_sm) is enabled or you regularly process
+    # large PDFs.
+    # mem_limit: 1g
 
   # ── Workstation deployment sidecar (``deploy`` profile only) ──────
   #
@@ -121,6 +150,11 @@ services:
         condition: service_started
     profiles: ["deploy"]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 volumes:
   neo4j_data:

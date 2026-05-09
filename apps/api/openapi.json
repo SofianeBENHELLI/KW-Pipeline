@@ -3339,6 +3339,63 @@
         "title": "RawSection",
         "type": "object"
       },
+      "ReadinessCheck": {
+        "description": "One probed dependency's status in the readiness report.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "detail"
+        ],
+        "title": "ReadinessCheck",
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "description": "Readiness probe payload — separate from ``/health`` (liveness).\n\n``/health`` answers \"is the process alive\" and must never fail on a\ntransient dependency hiccup (otherwise the orchestrator restarts the\ncontainer and the hiccup turns into a real outage).\n\n``/ready`` answers \"can this instance serve traffic.\" It returns\n``200`` when the **required** dependency (the catalog) is reachable\nand ``503`` otherwise. Optional dependencies (Neo4j, when the\nknowledge layer is enabled) surface in ``checks`` as ``\"error\"`` /\n``\"disabled\"`` but never gate readiness — the core review path keeps\nworking even when the optional knowledge-layer stack is degraded.",
+        "properties": {
+          "checks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReadinessCheck"
+            },
+            "title": "Checks",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "ReadyResponse",
+        "type": "object"
+      },
       "RelationEvidence": {
         "description": "Wire shape for ``GET /knowledge/relations/{relation_id}``.\n\nAll fields are optional except the routing-bones (``relation_id``,\n``kind``, ``provenance_class``, ``source_id``, ``target_id``) so\none model covers every edge kind. Unused fields stay at their\nPydantic defaults — the typed client on the frontend pattern-matches\non ``provenance_class`` to know which evidence fields to read.\n\nScoring fields (``score`` / ``strength_class`` / ``is_bridge`` /\n``is_outlier``) are populated for ``DETERMINISTIC`` edges via\n:func:`app.services.knowledge.scoring.score_edge`. They stay\n``None`` for ``STRUCTURAL`` (a structural parent-child edge has no\nnotion of \"strength\") and for ``LLM`` (the confidence field is the\ncloser analogue there — see ``confidence`` below).",
         "properties": {
@@ -6907,6 +6964,35 @@
           }
         },
         "summary": "Get Knowledge Taxonomy"
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Readiness probe — see :class:`ReadyResponse` for the contract.\n\nRequired: the catalog answers a one-row read. Optional: when\n``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND the graph store is the\nNeo4j backend, ping it with ``RETURN 1``. Optional failures are\nreported but never gate readiness — the core review path keeps\nserving even when the knowledge-layer stack is degraded.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ready"
       }
     }
   }

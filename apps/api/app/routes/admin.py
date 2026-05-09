@@ -3,6 +3,10 @@
 Holds:
 
 * ``GET /health`` — minimal liveness probe (parity with the legacy route).
+* ``GET /ready`` — readiness probe. Returns 200 when the catalog
+  answers and 503 when it does not. Optional dependencies (Neo4j when
+  the knowledge layer is enabled) surface in ``checks`` but never gate
+  readiness — see :class:`ReadyResponse` in ``app.schemas.document``.
 * ``GET /admin/config`` — sanitized configuration snapshot consumed by
   the Knowledge Forge Settings widget (``apps/_shared/settings-hub``).
   Strips every secret (API keys, auth tokens, DB passwords) before
@@ -55,7 +59,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.dependencies import PipelineServices, _resolve_llm_provider
 from app.errors import ApiError, ErrorCode
@@ -102,12 +106,13 @@ from app.schemas.admin_hitl import (
     AdminHITLStateResponse,
     BucketState,
 )
-from app.schemas.document import HealthResponse
+from app.schemas.document import HealthResponse, ReadinessCheck, ReadyResponse
 from app.schemas.scope import Scope
 from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
 from app.services.catalog_store import InvalidCursor
+from app.services.knowledge.graph_store import Neo4jGraphStore
 from app.services.knowledge.llm_client import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_GEMINI_MODEL,
@@ -281,6 +286,69 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
     @router.get("/health", operation_id="health", response_model=HealthResponse)
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @router.get(
+        "/ready",
+        operation_id="ready",
+        response_model=ReadyResponse,
+        responses={503: {"model": ReadyResponse}},
+    )
+    def ready(response: Response) -> ReadyResponse:
+        """Readiness probe — see :class:`ReadyResponse` for the contract.
+
+        Required: the catalog answers a one-row read. Optional: when
+        ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND the graph store is the
+        Neo4j backend, ping it with ``RETURN 1``. Optional failures are
+        reported but never gate readiness — the core review path keeps
+        serving even when the knowledge-layer stack is degraded.
+        """
+        checks: dict[str, ReadinessCheck] = {}
+        ready_overall = True
+
+        try:
+            services.documents.catalog.list_documents(limit=1)
+            checks["catalog"] = ReadinessCheck(status="ok")
+        except Exception as exc:  # noqa: BLE001 - readiness must not raise
+            checks["catalog"] = ReadinessCheck(
+                status="error",
+                detail=str(exc)[:200],
+            )
+            ready_overall = False
+
+        settings = Settings()
+        if not settings.knowledge_layer_enabled:
+            checks["neo4j"] = ReadinessCheck(status="disabled")
+        elif isinstance(services.graph_store, Neo4jGraphStore):
+            try:
+                store = services.graph_store
+                # Lightweight liveness ping — RETURN 1 is the cheapest
+                # statement Neo4j accepts and proves both the driver and
+                # the database session work.
+                with store._driver.session(  # noqa: SLF001 - intentional probe
+                    database=store._database,  # noqa: SLF001
+                ) as session:
+                    session.run("RETURN 1").consume()
+                checks["neo4j"] = ReadinessCheck(status="ok")
+            except Exception as exc:  # noqa: BLE001 - readiness must not raise
+                checks["neo4j"] = ReadinessCheck(
+                    status="error",
+                    detail=str(exc)[:200],
+                )
+                # Optional dep — do NOT flip ready_overall.
+        else:
+            # Knowledge layer flag is on but the in-memory store is in use
+            # (no Neo4j credentials configured). That is a valid posture
+            # for local demos; report it so operators can see the gap
+            # without it showing as an error.
+            checks["neo4j"] = ReadinessCheck(
+                status="disabled",
+                detail="in-memory graph store; KW_NEO4J_* not configured",
+            )
+
+        if not ready_overall:
+            response.status_code = 503
+            return ReadyResponse(status="error", checks=checks)
+        return ReadyResponse(status="ok", checks=checks)
 
     @router.get(
         "/admin/config",

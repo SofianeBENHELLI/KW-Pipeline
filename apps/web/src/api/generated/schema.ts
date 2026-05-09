@@ -1298,6 +1298,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ready
+         * @description Readiness probe — see :class:`ReadyResponse` for the contract.
+         *
+         *     Required: the catalog answers a one-row read. Optional: when
+         *     ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND the graph store is the
+         *     Neo4j backend, ping it with ``RETURN 1``. Optional failures are
+         *     reported but never gate readiness — the core review path keeps
+         *     serving even when the knowledge-layer stack is degraded.
+         */
+        get: operations["ready"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3182,6 +3208,45 @@ export interface components {
             source_reference_ids: string[];
             /** Text */
             text: string;
+        };
+        /**
+         * ReadinessCheck
+         * @description One probed dependency's status in the readiness report.
+         */
+        ReadinessCheck: {
+            /** Detail */
+            detail: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "error" | "disabled";
+        };
+        /**
+         * ReadyResponse
+         * @description Readiness probe payload — separate from ``/health`` (liveness).
+         *
+         *     ``/health`` answers "is the process alive" and must never fail on a
+         *     transient dependency hiccup (otherwise the orchestrator restarts the
+         *     container and the hiccup turns into a real outage).
+         *
+         *     ``/ready`` answers "can this instance serve traffic." It returns
+         *     ``200`` when the **required** dependency (the catalog) is reachable
+         *     and ``503`` otherwise. Optional dependencies (Neo4j, when the
+         *     knowledge layer is enabled) surface in ``checks`` as ``"error"`` /
+         *     ``"disabled"`` but never gate readiness — the core review path keeps
+         *     working even when the optional knowledge-layer stack is degraded.
+         */
+        ReadyResponse: {
+            /** Checks */
+            checks: {
+                [key: string]: components["schemas"]["ReadinessCheck"];
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "error";
         };
         /**
          * RelationEvidence
@@ -5145,6 +5210,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxonomyResponse"];
+                };
+            };
+        };
+    };
+    ready: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
                 };
             };
         };

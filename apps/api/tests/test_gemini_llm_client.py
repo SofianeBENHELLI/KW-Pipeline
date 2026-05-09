@@ -84,6 +84,87 @@ def _make_mock_gemini_text_client(
 # ─── Structured-output (function-calling) path ────────────────────────────
 
 
+def test_gemini_client_passes_timeout_via_http_options(monkeypatch):
+    """``timeout_seconds=N`` reaches ``HttpOptions(timeout=N*1000)``.
+
+    google-genai's HttpOptions.timeout is in MILLISECONDS, unlike
+    anthropic / voyage which take seconds. Convert at the boundary so
+    ``KW_GEMINI_TIMEOUT_SECONDS`` lines up with the other providers'
+    units (uptime plan #2).
+    """
+    import sys
+    import types
+
+    captured: dict = {}
+
+    fake_genai = types.ModuleType("genai")
+    fake_genai_types = types.ModuleType("types")
+
+    class _HttpOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    fake_genai_types.HttpOptions = _HttpOptions  # type: ignore[attr-defined]
+
+    def _fake_constructor(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return MagicMock()
+
+    fake_genai.Client = _fake_constructor  # type: ignore[attr-defined]
+
+    fake_genai.types = fake_genai_types  # type: ignore[attr-defined]
+    fake_google = types.ModuleType("google")
+    fake_google.genai = fake_genai  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_genai_types)
+
+    GeminiLLMClient(api_key="gk-test", timeout_seconds=12.5)
+
+    assert captured["api_key"] == "gk-test"
+    http_opts = captured["http_options"]
+    assert isinstance(http_opts, _HttpOptions)
+    assert http_opts.kwargs == {"timeout": 12500}  # seconds → milliseconds
+
+
+def test_gemini_client_omits_http_options_when_timeout_unset_or_nonpositive(monkeypatch):
+    """``timeout_seconds`` of ``None`` / ``0`` / negative leaves SDK default."""
+    import sys
+    import types
+
+    captured: dict = {}
+
+    fake_genai = types.ModuleType("genai")
+    fake_genai_types = types.ModuleType("types")
+    fake_genai_types.HttpOptions = MagicMock()  # type: ignore[attr-defined]
+
+    def _fake_constructor(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return MagicMock()
+
+    fake_genai.Client = _fake_constructor  # type: ignore[attr-defined]
+
+    fake_genai.types = fake_genai_types  # type: ignore[attr-defined]
+    fake_google = types.ModuleType("google")
+    fake_google.genai = fake_genai  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_genai_types)
+
+    GeminiLLMClient(api_key="gk-test")
+    assert captured == {"api_key": "gk-test"}
+
+    GeminiLLMClient(api_key="gk-test", timeout_seconds=0)
+    assert captured == {"api_key": "gk-test"}
+
+    GeminiLLMClient(api_key="gk-test", timeout_seconds=-1.0)
+    assert captured == {"api_key": "gk-test"}
+
+
 def test_gemini_client_returns_function_call_args():
     """Tool-use mode: Gemini emits a ``function_call``; we return its ``args``."""
     mock_client = _make_mock_gemini_client(function_args={"triples": [{"x": 1}]})

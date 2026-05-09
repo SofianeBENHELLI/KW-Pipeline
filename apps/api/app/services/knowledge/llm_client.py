@@ -146,6 +146,7 @@ class AnthropicLLMClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
+        timeout_seconds: float | None = None,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] | None = None,
     ) -> None:
@@ -162,7 +163,14 @@ class AnthropicLLMClient:
                     "Install with `pip install anthropic` or use FakeLLMClient "
                     "for tests."
                 ) from exc
-            client = anthropic.Anthropic(api_key=api_key)
+            # Without an explicit timeout the SDK inherits httpx's default
+            # (no read timeout). One slow LLM call would then hold a
+            # worker forever and surface as an "API hang" — see uptime
+            # plan #2.
+            client_kwargs: dict[str, Any] = {"api_key": api_key}
+            if timeout_seconds is not None and timeout_seconds > 0:
+                client_kwargs["timeout"] = timeout_seconds
+            client = anthropic.Anthropic(**client_kwargs)
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
@@ -506,6 +514,7 @@ class GeminiLLMClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
+        timeout_seconds: float | None = None,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] | None = None,
     ) -> None:
@@ -516,13 +525,24 @@ class GeminiLLMClient:
         if client is None:  # pragma: no cover - exercised behind pytest -m llm_integration
             try:
                 from google import genai  # noqa: PLC0415
+                from google.genai import types as genai_types  # noqa: PLC0415
             except ImportError as exc:
                 raise RuntimeError(
                     "GeminiLLMClient requires the `google-genai` package. "
                     "Install with `pip install google-genai` or use FakeLLMClient "
                     "for tests."
                 ) from exc
-            client = genai.Client(api_key=api_key)
+            # google-genai's HttpOptions.timeout is in MILLISECONDS,
+            # unlike anthropic and voyageai which take seconds. Mirror
+            # the same "0/negative disables" contract those clients
+            # already use so operators can flip a single env var to
+            # restore SDK defaults if needed.
+            client_kwargs: dict[str, Any] = {"api_key": api_key}
+            if timeout_seconds is not None and timeout_seconds > 0:
+                client_kwargs["http_options"] = genai_types.HttpOptions(
+                    timeout=int(timeout_seconds * 1000),
+                )
+            client = genai.Client(**client_kwargs)
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
