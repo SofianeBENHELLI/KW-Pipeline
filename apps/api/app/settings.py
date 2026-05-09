@@ -208,6 +208,32 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+    knowledge_projection_async: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KW_KNOWLEDGE_PROJECTION_ASYNC"),
+        description=(
+            "When truthy, ``POST /validate`` returns immediately after "
+            "the FSM transition and runs the knowledge-layer projection "
+            "(graph projection + LLM entity extraction) as a "
+            "fire-and-forget background task. When falsy (the default), "
+            "validate blocks until projection completes — the historical "
+            "contract that callers reading the graph immediately after "
+            "validate rely on. Operators flip this on once the UI can "
+            "tolerate eventual graph readiness."
+        ),
+    )
+    background_task_shutdown_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("KW_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_SECONDS"),
+        description=(
+            "Cap (seconds) on how long the lifespan waits for in-flight "
+            "background validation side-effects to drain on shutdown. "
+            "Bounded so a stuck Anthropic / Voyage call cannot hold the "
+            "container shutdown forever. Tasks still running past the "
+            "cap are cancelled and logged. ``0`` cancels immediately."
+        ),
+        ge=0,
+    )
     data_dir: str = Field(
         default=".kw-pipeline",
         validation_alias=AliasChoices("KW_DATA_DIR"),

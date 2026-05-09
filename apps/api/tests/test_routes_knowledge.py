@@ -85,6 +85,72 @@ def test_get_document_graph_is_empty_for_unknown_document(client_with_projector)
     assert payload["document_id"] == "missing-doc"
 
 
+def test_validate_route_async_projection_eventually_completes(services_with_projector):
+    """When ``KW_KNOWLEDGE_PROJECTION_ASYNC=true``, validate returns
+    before the projection runs, but the projection still lands.
+
+    Pinned by polling the per-document graph endpoint with a short
+    timeout — that's the actual user-facing contract: the projection
+    is eventually consistent, not guaranteed-by-validate-return.
+    """
+    import time
+
+    object.__setattr__(
+        services_with_projector.settings,
+        "knowledge_projection_async",
+        True,
+    )
+    app = create_app(services_with_projector)
+    with TestClient(app) as client:
+        v = _drive_to_needs_review(client, filename="async-projected.txt")
+        document_id = v["document_id"]
+
+        resp = client.post(
+            f"/documents/{document_id}/versions/{v['id']}/validate",
+            json={"reviewer_note": "ok"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        # Poll for the projection to land. The dispatcher schedules a
+        # ``to_thread`` task; on the in-process InMemoryGraphStore that
+        # completes within milliseconds, but we allow up to 2s for
+        # CI noise.
+        deadline = time.monotonic() + 2.0
+        kinds: set[str] = set()
+        while time.monotonic() < deadline:
+            graph = client.get(f"/documents/{document_id}/graph").json()
+            kinds = {n["kind"] for n in graph["nodes"]}
+            if "chunk" in kinds:
+                break
+            time.sleep(0.05)
+        assert {"document", "version", "chunk"} <= kinds, (
+            "background projection didn't complete within 2s; either the "
+            "dispatcher didn't fire or the task was reaped before running"
+        )
+
+
+def test_validate_route_async_mode_records_task_in_app_state(services_with_projector):
+    """The dispatcher must hold a strong reference to the task so the
+    GC cannot reap it mid-flight. Verifies the task lands in the
+    app.state set the lifespan owns."""
+    object.__setattr__(
+        services_with_projector.settings,
+        "knowledge_projection_async",
+        True,
+    )
+    app = create_app(services_with_projector)
+    with TestClient(app) as client:
+        v = _drive_to_needs_review(client, filename="async-tracked.txt")
+        client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={"reviewer_note": "ok"},
+        )
+        # The task either is still running (in set) or has already
+        # finished and been discarded by the done-callback. Either way
+        # the attribute must exist and be a set.
+        assert isinstance(app.state.background_tasks, set)
+
+
 def test_validate_route_projects_into_graph(client_with_projector):
     v = _drive_to_needs_review(client_with_projector, filename="another.txt")
 

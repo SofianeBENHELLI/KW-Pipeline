@@ -70,6 +70,14 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
     services: PipelineServices = app.state.services
     settings: Settings = services.settings
 
+    # Tracker for fire-and-forget validation side-effects when
+    # ``KW_KNOWLEDGE_PROJECTION_ASYNC=true`` is on. Holding strong
+    # references prevents the GC from reaping running tasks; the
+    # ``add_done_callback(discard)`` in the dispatcher cleans up
+    # finished ones. Initialized unconditionally so the route layer
+    # can rely on the attribute existing.
+    app.state.background_tasks = set()
+
     # Boot-time recovery — runs unconditionally (helper short-circuits
     # under inline mode internally so we don't double-gate it here).
     recover_stuck_extractions(services)
@@ -144,8 +152,50 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
             backup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_task
+        await _drain_background_tasks(
+            app.state.background_tasks,
+            timeout_seconds=settings.background_task_shutdown_timeout_seconds,
+        )
         for worker in workers:
             await worker.stop()
+
+
+async def _drain_background_tasks(
+    tasks: set[asyncio.Task[None]],
+    *,
+    timeout_seconds: float,
+) -> None:
+    """Wait for in-flight async validation side-effects to finish.
+
+    Bounded so a stuck Anthropic / Voyage call cannot hold container
+    shutdown forever. Anything still running past ``timeout_seconds``
+    is cancelled and the count is logged. ``timeout_seconds=0``
+    cancels immediately (no graceful wait).
+    """
+    if not tasks:
+        return
+    pending = list(tasks)
+    if timeout_seconds <= 0:
+        for task in pending:
+            task.cancel()
+        log.info(
+            "knowledge.projection.background_tasks_cancelled_at_shutdown",
+            extra={"cancelled_count": len(pending), "timeout_seconds": timeout_seconds},
+        )
+        return
+
+    done, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+    if still_pending:
+        for task in still_pending:
+            task.cancel()
+        log.warning(
+            "knowledge.projection.background_tasks_timed_out_on_shutdown",
+            extra={
+                "drained_count": len(done),
+                "cancelled_count": len(still_pending),
+                "timeout_seconds": timeout_seconds,
+            },
+        )
 
 
 async def _periodic_catalog_backup(

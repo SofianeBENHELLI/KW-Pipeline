@@ -14,6 +14,9 @@ rejected one:
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote as urlquote
 
@@ -58,6 +61,8 @@ from ._helpers import (
     _check_idempotency,
     _store_idempotency,
 )
+
+log = logging.getLogger(__name__)
 
 # Re-exported so existing test imports of ``DocumentVersion`` etc. via
 # ``app.routes`` keep working through the package façade.
@@ -681,7 +686,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         operation_id="validate_version",
         response_model=SemanticDocument,
     )
-    def validate_version(
+    async def validate_version(
         http_request: Request,
         document_id: str,
         version_id: str,
@@ -691,12 +696,27 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         # D.5: refuse before any review work happens. A scope-blocked
         # caller must not be able to flip another user's doc status.
         assert_can_access_document(request=http_request, document_id=document_id, user=current_user)
-        return _dispatch_review(
+
+        # Build the async-side-effects dispatcher when the operator has
+        # opted in. None disables the indirection and ReviewService runs
+        # the projection inline (the historical contract; what every
+        # existing test asserts).
+        dispatcher: Callable[[Callable[[], None]], None] | None = None
+        if services.settings.knowledge_projection_async:
+            dispatcher = _make_background_dispatcher(http_request.app)
+
+        # The handler chain is sync. ``asyncio.to_thread`` keeps the
+        # event loop free while gunicorn's single uvicorn worker handles
+        # other requests. Without this, the ``async def`` would block
+        # the loop on every catalog write.
+        return await asyncio.to_thread(
+            _dispatch_review,
             handler=services.review.handle_validation,
             document_id=document_id,
             version_id=version_id,
             reviewer_note=request.reviewer_note,
             actor=current_user.id,
+            extra_handler_kwargs={"side_effect_dispatcher": dispatcher},
         )
 
     @router.post(
@@ -1271,6 +1291,7 @@ def _dispatch_review(
     version_id: str,
     reviewer_note: str | None,
     actor: str,
+    extra_handler_kwargs: dict[str, Any] | None = None,
 ) -> Any:
     """Translate :class:`ReviewService` domain exceptions into HTTP envelopes.
 
@@ -1279,14 +1300,22 @@ def _dispatch_review(
     ``LIFECYCLE_CONFLICT`` envelope). Side-effect failures (projector,
     entity extractor) are caught and logged inside the service — they
     never reach this layer.
+
+    ``extra_handler_kwargs`` lets the validate route forward an opt-in
+    ``side_effect_dispatcher`` to ``handle_validation`` without
+    widening this helper's positional API for the reject path that
+    doesn't need one.
     """
+    kwargs: dict[str, Any] = {
+        "document_id": document_id,
+        "version_id": version_id,
+        "reviewer_note": reviewer_note,
+        "actor": actor,
+    }
+    if extra_handler_kwargs:
+        kwargs.update(extra_handler_kwargs)
     try:
-        return handler(
-            document_id=document_id,
-            version_id=version_id,
-            reviewer_note=reviewer_note,
-            actor=actor,
-        )
+        return handler(**kwargs)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1301,3 +1330,42 @@ def _dispatch_review(
                 "available actions."
             ),
         ) from exc
+
+
+def _make_background_dispatcher(
+    app: Any,
+) -> Callable[[Callable[[], None]], None]:
+    """Return a dispatcher that schedules ``fn`` as a background asyncio task.
+
+    Captured from inside an ``async def`` route, so ``get_running_loop``
+    succeeds. The dispatcher itself is invoked from the threadpool
+    inside ``ReviewService.handle_validation`` (``asyncio.to_thread``
+    in the route hands the sync handler off to a worker thread). It
+    schedules a coroutine onto the loop with
+    ``run_coroutine_threadsafe`` and stores the resulting task in
+    ``app.state.background_tasks`` so the GC can't reap it mid-flight.
+    The lifespan drains this set on shutdown with a bounded timeout.
+    """
+    loop = asyncio.get_running_loop()
+    background_tasks: set[asyncio.Task[None]] = app.state.background_tasks
+
+    async def _spawn(fn: Callable[[], None]) -> None:
+        # Side-effects are sync (they call into the projector / entity
+        # extractor which use blocking SDK clients). Push them off the
+        # loop so concurrent validations don't queue head-of-line.
+        task = asyncio.create_task(asyncio.to_thread(fn))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    def dispatch(fn: Callable[[], None]) -> None:
+        # Called from the worker thread that's running handle_validation.
+        # ``run_coroutine_threadsafe`` is the canonical loop-from-thread
+        # bridge; ``.result()`` is on the scheduling, not the side-effect
+        # itself, so we don't actually wait for the projection here.
+        future = asyncio.run_coroutine_threadsafe(_spawn(fn), loop)
+        try:
+            future.result(timeout=5)
+        except Exception:  # noqa: BLE001 - schedule failure must not break validate
+            log.exception("knowledge.projection.background_schedule_failed")
+
+    return dispatch

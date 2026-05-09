@@ -111,6 +111,7 @@ class ReviewService:
         version_id: str,
         reviewer_note: str | None = None,
         actor: str | None = None,
+        side_effect_dispatcher: Callable[[Callable[[], None]], None] | None = None,
     ) -> SemanticDocument:
         """Drive a version from NEEDS_REVIEW to VALIDATED.
 
@@ -127,6 +128,16 @@ class ReviewService:
         without an actor and the slicing plan in ADR-019 covers them
         next.
 
+        ``side_effect_dispatcher`` controls *when* the projection +
+        entity-extraction side-effects run. The default (``None``)
+        runs them inline before this method returns — the historical
+        contract that callers reading the graph immediately after
+        validate rely on. Passing a callable hands the side-effect
+        closure to the dispatcher (e.g. an asyncio background task);
+        validate then returns as soon as the FSM transition is
+        committed. Used by the route layer when
+        ``KW_KNOWLEDGE_PROJECTION_ASYNC=true``.
+
         Raises:
             KeyError: when the document or version cannot be found.
             ValueError: when the version is not in NEEDS_REVIEW (the
@@ -140,6 +151,7 @@ class ReviewService:
             mark=self._documents.mark_validated,
             decision="validated",
             actor=actor,
+            side_effect_dispatcher=side_effect_dispatcher,
         )
 
     def handle_rejection(
@@ -183,6 +195,7 @@ class ReviewService:
         mark: Callable[..., Any],
         decision: ReviewDecision,
         actor: str | None,
+        side_effect_dispatcher: Callable[[Callable[[], None]], None] | None = None,
     ) -> SemanticDocument:
         # FSM precheck — the catalog's ``update_version_status`` enforces
         # this at write time too, but doing it here gives the caller a
@@ -227,11 +240,23 @@ class ReviewService:
                 new_version_id=version_id,
                 actor=actor,
             )
-            self._fire_knowledge_layer_side_effects(
-                document_id=document_id,
-                version=version,
-                semantic=result,
-            )
+
+            def _run_side_effects() -> None:
+                self._fire_knowledge_layer_side_effects(
+                    document_id=document_id,
+                    version=version,
+                    semantic=result,
+                )
+
+            if side_effect_dispatcher is None:
+                _run_side_effects()
+            else:
+                # Fire-and-forget: the dispatcher (e.g. an asyncio task
+                # spawner) takes ownership. Side-effects are already
+                # exception-isolated inside ``_fire_knowledge_layer_side_effects``,
+                # so a dispatcher that just calls the closure later is
+                # all that's needed.
+                side_effect_dispatcher(_run_side_effects)
         else:
             # decision == "rejected". EPIC-A A.3 part 2 drift signal
             # (ADR-023 §6): if the router had decided to auto-validate

@@ -153,6 +153,92 @@ def test_backup_task_runs_when_interval_is_positive() -> None:
     assert task.cancelled() or task.exception() is None
 
 
+def test_lifespan_initializes_background_tasks_set() -> None:
+    """``app.state.background_tasks`` must exist before any route can
+    reach it. Initialized unconditionally so the validate route doesn't
+    need a feature-flag check before scheduling."""
+    services = _services_with(extraction_inline=True)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert isinstance(app.state.background_tasks, set)
+
+
+def test_drain_background_tasks_waits_for_completion() -> None:
+    """Helper drains the set within the timeout when tasks finish fast."""
+    import asyncio
+
+    from app.main import _drain_background_tasks
+
+    async def _runner() -> None:
+        async def fast() -> None:
+            await asyncio.sleep(0.01)
+
+        tasks: set[asyncio.Task[None]] = set()
+        t1 = asyncio.create_task(fast())
+        t2 = asyncio.create_task(fast())
+        tasks.update({t1, t2})
+
+        await _drain_background_tasks(tasks, timeout_seconds=2.0)
+
+        assert t1.done() and not t1.cancelled()
+        assert t2.done() and not t2.cancelled()
+
+    asyncio.run(_runner())
+
+
+def test_drain_background_tasks_cancels_when_timeout_exceeded() -> None:
+    """A stuck task is cancelled when it doesn't finish in time."""
+    import asyncio
+    import contextlib
+
+    from app.main import _drain_background_tasks
+
+    async def _runner() -> None:
+        async def stuck() -> None:
+            await asyncio.sleep(60)  # Far longer than the drain timeout.
+
+        tasks: set[asyncio.Task[None]] = set()
+        t = asyncio.create_task(stuck())
+        tasks.add(t)
+
+        await _drain_background_tasks(tasks, timeout_seconds=0.1)
+
+        # ``cancel()`` schedules the cancellation; awaiting the task
+        # lets the CancelledError actually propagate so ``cancelled()``
+        # flips to True.
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
+        assert t.cancelled(), "stuck task must be cancelled at timeout"
+
+    asyncio.run(_runner())
+
+
+def test_drain_background_tasks_zero_timeout_cancels_immediately() -> None:
+    """``timeout_seconds=0`` skips the wait and cancels every pending task."""
+    import asyncio
+    import contextlib
+
+    from app.main import _drain_background_tasks
+
+    async def _runner() -> None:
+        async def stuck() -> None:
+            await asyncio.sleep(60)
+
+        tasks: set[asyncio.Task[None]] = set()
+        t = asyncio.create_task(stuck())
+        tasks.add(t)
+
+        await _drain_background_tasks(tasks, timeout_seconds=0)
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
+        assert t.cancelled()
+
+    asyncio.run(_runner())
+
+
 def test_inline_mode_existing_extract_route_is_unchanged() -> None:
     """The whole point of PR-1 being additive: the existing
     ``POST /documents/.../extract`` synchronous route still returns 200
