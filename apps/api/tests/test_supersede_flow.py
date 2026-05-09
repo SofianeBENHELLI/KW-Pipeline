@@ -176,3 +176,74 @@ def test_supersede_chain_across_three_versions():
     }
     assert (v1_id, v2_id) in superseded_pairs
     assert (v2_id, v3_id) in superseded_pairs
+
+
+def test_supersede_lookup_failure_does_not_break_validation(monkeypatch):
+    """Defensive branch in ``_maybe_supersede_prior_validated``: a
+    failure looking up the document during the supersede phase must
+    not roll back the validation. The catalog stays the source of
+    truth (ADR-012 fire-and-log)."""
+    services = build_services()
+    create_app(services=services)
+    document_id, v1_id = _land_version_in_needs_review(services)
+    services.review.handle_validation(document_id=document_id, version_id=v1_id, actor="alice")
+
+    _, v2_id = _land_version_in_needs_review(
+        services,
+        document_id=document_id,
+        filename="policy-v2.txt",
+        content=b"Hello world. This is the second body.",
+    )
+
+    # Force the supersede helper's lookup to blow up. The validation
+    # itself must still succeed and the new version must still be
+    # VALIDATED — only the supersede side-effect is lost.
+    original_get = services.documents.get_document
+
+    def _flaky(doc_id):
+        # Only break the lookup that runs INSIDE the supersede helper:
+        # by then the new version has already been marked validated.
+        v2 = services.documents.get_version(document_id=document_id, version_id=v2_id)
+        if v2.status == DocumentVersionStatus.VALIDATED:
+            raise RuntimeError("transient catalog hiccup")
+        return original_get(doc_id)
+
+    monkeypatch.setattr(services.documents, "get_document", _flaky)
+
+    services.review.handle_validation(document_id=document_id, version_id=v2_id, actor="alice")
+
+    v1_final = services.documents.get_version(document_id=document_id, version_id=v1_id)
+    v2_final = services.documents.get_version(document_id=document_id, version_id=v2_id)
+    # v2 still landed; v1's supersede was lost (still VALIDATED, not SUPERSEDED).
+    assert v2_final.status == DocumentVersionStatus.VALIDATED
+    assert v1_final.status == DocumentVersionStatus.VALIDATED
+
+
+def test_supersede_mark_failure_does_not_break_validation(monkeypatch):
+    """Twin to the lookup-failure test: a failure inside
+    ``mark_superseded`` must also not roll back the new VALIDATED
+    transition. Pre-existing supersede helper branch."""
+    services = build_services()
+    create_app(services=services)
+    document_id, v1_id = _land_version_in_needs_review(services)
+    services.review.handle_validation(document_id=document_id, version_id=v1_id, actor="alice")
+
+    _, v2_id = _land_version_in_needs_review(
+        services,
+        document_id=document_id,
+        filename="policy-v2.txt",
+        content=b"Hello world. This is the second body.",
+    )
+
+    def _explode(**_kwargs):
+        raise RuntimeError("simulated mark_superseded failure")
+
+    monkeypatch.setattr(services.documents, "mark_superseded", _explode)
+
+    services.review.handle_validation(document_id=document_id, version_id=v2_id, actor="alice")
+
+    v2_final = services.documents.get_version(document_id=document_id, version_id=v2_id)
+    v1_final = services.documents.get_version(document_id=document_id, version_id=v1_id)
+    assert v2_final.status == DocumentVersionStatus.VALIDATED
+    # v1 supersede was attempted but raised; status stays VALIDATED.
+    assert v1_final.status == DocumentVersionStatus.VALIDATED

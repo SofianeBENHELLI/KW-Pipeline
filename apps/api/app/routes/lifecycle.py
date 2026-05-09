@@ -1365,7 +1365,12 @@ def _make_background_dispatcher(
         future = asyncio.run_coroutine_threadsafe(_spawn(fn), loop)
         try:
             future.result(timeout=5)
-        except Exception:  # noqa: BLE001 - schedule failure must not break validate
+        except Exception:  # noqa: BLE001  # pragma: no cover - schedule failure
+            # Defensive: ``run_coroutine_threadsafe`` only fails if the
+            # loop is closed, which means shutdown is already underway
+            # and the validate response is moot. Log and let validate
+            # return; the projection is lost but the catalog state is
+            # already committed.
             log.exception("knowledge.projection.background_schedule_failed")
 
     return dispatch

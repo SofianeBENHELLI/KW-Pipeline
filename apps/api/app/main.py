@@ -198,18 +198,73 @@ async def _drain_background_tasks(
         )
 
 
+def _run_one_backup_cycle(services: PipelineServices, retain: int) -> str:
+    """Snapshot the catalog once and prune old files. Pure-sync helper.
+
+    Returns one of:
+
+    - ``"ok"``: snapshot written; the caller should keep looping.
+    - ``"in_memory"``: the catalog has no file to back up. The caller
+      should stop looping (no point retrying — the wiring won't change
+      mid-process).
+    - ``"error"``: the snapshot failed. The caller should keep looping
+      so a transient I/O blip doesn't disable backups for the rest of
+      the process lifetime.
+
+    Extracted from the asyncio loop so the body is testable without
+    needing to wait on ``asyncio.sleep`` ticks. The loop scaffold stays
+    thin (sleep, dispatch, repeat) and exception-isolated.
+    """
+    try:
+        dest = snapshot_catalog(services)
+    except Exception as exc:  # noqa: BLE001 - never let the loop die
+        log.warning(
+            "catalog_backup.snapshot_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "error"
+
+    if dest is None:
+        log.info(
+            "catalog_backup.skipped",
+            extra={"reason": "in-memory catalog; nothing to back up"},
+        )
+        return "in_memory"
+
+    log.info(
+        "catalog_backup.snapshot_completed",
+        extra={"path": str(dest)},
+    )
+
+    try:
+        pruned = prune_old_snapshots(dest.parent, retain=retain)
+    except Exception as exc:  # noqa: BLE001 - prune failure ≠ backup failure
+        log.warning(
+            "catalog_backup.prune_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "ok"
+
+    if pruned:
+        log.info(
+            "catalog_backup.pruned",
+            extra={"pruned_count": len(pruned)},
+        )
+    return "ok"
+
+
 async def _periodic_catalog_backup(
     services: PipelineServices,
     *,
     interval_seconds: int,
     retain: int,
 ) -> None:
-    """Snapshot the SQLite catalog every ``interval_seconds``.
+    """Sleep ``interval_seconds`` and run one backup cycle, forever.
 
-    A no-op under the in-memory wiring: the helper returns ``None`` and
-    we exit the loop after logging the skip once, so test suites and
-    demo runs pay nothing. Errors in any cycle are logged and the loop
-    continues — losing one backup is far better than killing the task.
+    Stops the loop when the cycle reports ``"in_memory"`` (no SQLite
+    file to back up — the wiring is fixed for the lifetime of the
+    process, so retrying is pointless). Continues on ``"ok"`` or
+    ``"error"``.
     """
     while True:
         try:
@@ -217,79 +272,49 @@ async def _periodic_catalog_backup(
         except asyncio.CancelledError:
             return
         try:
-            dest = await asyncio.to_thread(snapshot_catalog, services)
-        except asyncio.CancelledError:
+            outcome = await asyncio.to_thread(_run_one_backup_cycle, services, retain)
+        except asyncio.CancelledError:  # pragma: no cover - cancellation race
             return
-        except Exception as exc:  # noqa: BLE001 - never let the loop die
-            log.warning(
-                "catalog_backup.snapshot_failed",
-                extra={"error_type": type(exc).__name__},
-            )
-            continue
-
-        if dest is None:
-            log.info(
-                "catalog_backup.skipped",
-                extra={"reason": "in-memory catalog; nothing to back up"},
-            )
+        if outcome == "in_memory":
             return
 
-        log.info(
-            "catalog_backup.snapshot_completed",
-            extra={"path": str(dest)},
+
+def _run_one_stuck_extraction_recovery(services: PipelineServices) -> None:
+    """Run one stuck-extraction recovery scan. Pure-sync helper.
+
+    Same extraction motivation as ``_run_one_backup_cycle``: lift the
+    body out of the asyncio loop so coverage tests can drive it
+    without sleeping.
+    """
+    try:
+        recovered = recover_stuck_extractions(services)
+    except Exception as exc:  # noqa: BLE001 - never let the loop die
+        log.warning(
+            "extraction.recovery.periodic_scan_failed",
+            extra={"error_type": type(exc).__name__},
         )
-
-        try:
-            pruned = await asyncio.to_thread(
-                prune_old_snapshots,
-                dest.parent,
-                retain=retain,
-            )
-        except Exception as exc:  # noqa: BLE001 - prune failure ≠ backup failure
-            log.warning(
-                "catalog_backup.prune_failed",
-                extra={"error_type": type(exc).__name__},
-            )
-            continue
-
-        if pruned:
-            log.info(
-                "catalog_backup.pruned",
-                extra={"pruned_count": len(pruned)},
-            )
+        return
+    if recovered:
+        log.info(
+            "extraction.recovery.periodic_scan_recovered",
+            extra={"recovered_count": recovered},
+        )
 
 
 async def _periodic_stuck_extraction_recovery(
     services: PipelineServices,
     interval_seconds: int,
 ) -> None:
-    """Re-run stuck-extraction recovery every ``interval_seconds``.
-
-    The scan itself is synchronous + cheap (a single ``list_documents``
-    filtered to the stuck states). Running it on a thread keeps the
-    event loop responsive even if the catalog adapter ever grows a
-    blocking call. Errors are logged and the loop continues — losing
-    one cycle is far better than killing the recovery task.
-    """
+    """Sleep ``interval_seconds`` and run one recovery scan, forever."""
     while True:
         try:
             await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
             return
         try:
-            recovered = await asyncio.to_thread(recover_stuck_extractions, services)
-            if recovered:
-                log.info(
-                    "extraction.recovery.periodic_scan_recovered",
-                    extra={"recovered_count": recovered},
-                )
-        except asyncio.CancelledError:
+            await asyncio.to_thread(_run_one_stuck_extraction_recovery, services)
+        except asyncio.CancelledError:  # pragma: no cover - cancellation race
             return
-        except Exception as exc:  # noqa: BLE001 - never let the loop die
-            log.warning(
-                "extraction.recovery.periodic_scan_failed",
-                extra={"error_type": type(exc).__name__},
-            )
 
 
 def create_app(
