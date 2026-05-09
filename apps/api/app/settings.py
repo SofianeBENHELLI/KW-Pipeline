@@ -184,6 +184,30 @@ class Settings(BaseSettings):
         ),
         ge=0,
     )
+    backup_interval_seconds: int = Field(
+        default=86_400,
+        validation_alias=AliasChoices("KW_BACKUP_INTERVAL_SECONDS"),
+        description=(
+            "How often (seconds) to snapshot the SQLite catalog to "
+            "``<data_dir>/backups/``. Uses SQLite's online backup API "
+            "(no writer lock, no torn reads) and retains the most "
+            "recent ``backup_retain_count`` files. Default ``86400`` "
+            "(24h). ``0`` disables. Always a no-op under the in-memory "
+            "wiring (no SQLite file to copy)."
+        ),
+        ge=0,
+    )
+    backup_retain_count: int = Field(
+        default=7,
+        validation_alias=AliasChoices("KW_BACKUP_RETAIN_COUNT"),
+        description=(
+            "How many catalog snapshots to keep in "
+            "``<data_dir>/backups/`` before pruning the oldest. "
+            "Default ``7`` (one week of dailies). Must be ``>= 1`` "
+            "when ``backup_interval_seconds > 0``."
+        ),
+        ge=1,
+    )
     data_dir: str = Field(
         default=".kw-pipeline",
         validation_alias=AliasChoices("KW_DATA_DIR"),

@@ -11,6 +11,7 @@ from app.dependencies import PipelineServices, build_persistent_services, build_
 from app.errors import install_error_handlers
 from app.logging_config import configure_logging, install_audit_handler
 from app.routes import build_router
+from app.services.catalog_backup import prune_old_snapshots, snapshot_catalog
 from app.services.extraction_recovery import recover_stuck_extractions
 from app.services.extraction_worker import (
     ExtractionWorker,
@@ -73,6 +74,22 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
     # under inline mode internally so we don't double-gate it here).
     recover_stuck_extractions(services)
 
+    # Periodic catalog backup runs independent of the worker mode —
+    # data loss is just as bad in inline mode. The helper is a no-op
+    # under the in-memory wiring (no SQLite file to copy), so it's
+    # safe to spawn unconditionally.
+    backup_task: asyncio.Task[None] | None = None
+    if settings.backup_interval_seconds > 0:
+        backup_task = asyncio.create_task(
+            _periodic_catalog_backup(
+                services,
+                interval_seconds=settings.backup_interval_seconds,
+                retain=settings.backup_retain_count,
+            ),
+            name="catalog-backup",
+        )
+    app.state.catalog_backup_task = backup_task
+
     workers: list[ExtractionWorker] = []
     recovery_task: asyncio.Task[None] | None = None
     if not settings.extraction_inline:
@@ -123,8 +140,73 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
             recovery_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await recovery_task
+        if backup_task is not None:
+            backup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await backup_task
         for worker in workers:
             await worker.stop()
+
+
+async def _periodic_catalog_backup(
+    services: PipelineServices,
+    *,
+    interval_seconds: int,
+    retain: int,
+) -> None:
+    """Snapshot the SQLite catalog every ``interval_seconds``.
+
+    A no-op under the in-memory wiring: the helper returns ``None`` and
+    we exit the loop after logging the skip once, so test suites and
+    demo runs pay nothing. Errors in any cycle are logged and the loop
+    continues — losing one backup is far better than killing the task.
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            dest = await asyncio.to_thread(snapshot_catalog, services)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            log.warning(
+                "catalog_backup.snapshot_failed",
+                extra={"error_type": type(exc).__name__},
+            )
+            continue
+
+        if dest is None:
+            log.info(
+                "catalog_backup.skipped",
+                extra={"reason": "in-memory catalog; nothing to back up"},
+            )
+            return
+
+        log.info(
+            "catalog_backup.snapshot_completed",
+            extra={"path": str(dest)},
+        )
+
+        try:
+            pruned = await asyncio.to_thread(
+                prune_old_snapshots,
+                dest.parent,
+                retain=retain,
+            )
+        except Exception as exc:  # noqa: BLE001 - prune failure ≠ backup failure
+            log.warning(
+                "catalog_backup.prune_failed",
+                extra={"error_type": type(exc).__name__},
+            )
+            continue
+
+        if pruned:
+            log.info(
+                "catalog_backup.pruned",
+                extra={"pruned_count": len(pruned)},
+            )
 
 
 async def _periodic_stuck_extraction_recovery(

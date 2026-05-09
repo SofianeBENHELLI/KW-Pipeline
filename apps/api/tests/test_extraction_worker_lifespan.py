@@ -28,6 +28,7 @@ def _services_with(
     workers: int = 1,
     queue_size: int = 4,
     recovery_interval: int = 0,
+    backup_interval: int = 0,
 ):
     services = build_services()
     object.__setattr__(services.settings, "extraction_inline", extraction_inline)
@@ -37,6 +38,11 @@ def _services_with(
         services.settings,
         "extraction_recovery_interval_seconds",
         recovery_interval,
+    )
+    object.__setattr__(
+        services.settings,
+        "backup_interval_seconds",
+        backup_interval,
     )
     return services
 
@@ -114,6 +120,37 @@ def test_inline_mode_does_not_spawn_recovery_task() -> None:
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         assert app.state.extraction_recovery_task is None
+
+
+def test_backup_task_skipped_when_interval_is_zero() -> None:
+    services = _services_with(extraction_inline=True, backup_interval=0)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert app.state.catalog_backup_task is None
+
+
+def test_backup_task_runs_when_interval_is_positive() -> None:
+    """Periodic backup loop is wired regardless of extraction mode.
+
+    The loop sleeps before its first cycle, so we don't need to wait
+    for a snapshot. We just verify the task exists, is running, and
+    is cancelled cleanly on shutdown.
+    """
+    services = _services_with(extraction_inline=True, backup_interval=1)
+    app = create_app(services=services)
+
+    task = None
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        task = app.state.catalog_backup_task
+        assert task is not None
+        assert not task.done()
+
+    assert task is not None
+    assert task.done()
+    assert task.cancelled() or task.exception() is None
 
 
 def test_inline_mode_existing_extract_route_is_unchanged() -> None:
