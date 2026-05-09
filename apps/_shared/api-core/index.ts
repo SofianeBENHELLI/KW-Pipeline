@@ -12,3 +12,5 @@ export {
   setSessionTrigger,
   clearSessionTrigger,
 } from "./ApiError";
+export { withRetry } from "./retryFetch";
+export type { RetryOptions } from "./retryFetch";

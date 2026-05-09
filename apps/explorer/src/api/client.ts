@@ -11,7 +11,7 @@
 
 import { widget } from "@widget-lab/3ddashboard-utils";
 
-import { asApiError } from "../../../_shared/api-core";
+import { asApiError, withRetry } from "../../../_shared/api-core";
 import type {
   Document,
   DocumentListResponse,
@@ -76,12 +76,18 @@ export function setApiBaseUrl(value: string): void {
 
 // ─── Core request helpers ────────────────────────────────────────────────────
 
+// ``fetchWithRetry`` transparently re-issues idempotent requests
+// (GET / HEAD) on transient backend hiccups (502/503/504 + network
+// errors). Only safe methods retry by default — see
+// ``apps/_shared/api-core/retryFetch.ts`` for the full policy.
+const fetchWithRetry = withRetry((...args) => fetch(...args));
+
 async function request<T>(
   path: string,
   init: RequestInit & { baseUrl?: string } = {},
 ): Promise<T> {
   const baseUrl = init.baseUrl ?? getApiBaseUrl();
-  const response = await fetch(baseUrl.replace(/\/$/, "") + path, init);
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, init);
   if (!response.ok) throw await asApiError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -92,7 +98,7 @@ async function requestText(
   init: RequestInit & { baseUrl?: string } = {},
 ): Promise<string> {
   const baseUrl = init.baseUrl ?? getApiBaseUrl();
-  const response = await fetch(baseUrl.replace(/\/$/, "") + path, init);
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, init);
   if (!response.ok) throw await asApiError(response);
   return response.text();
 }

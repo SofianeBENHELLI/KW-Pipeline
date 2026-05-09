@@ -188,8 +188,15 @@ describe("App", () => {
 
   it("shows empty state when the API returns no documents", async () => {
     vi.restoreAllMocks();
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      makeJsonResponse({ items: [], next_cursor: null }),
+    // Use ``mockImplementation`` so each fetch call gets a FRESH Response.
+    // ``mockResolvedValue`` would reuse the same Response object across
+    // every call, and React 19 strict-mode's double-render fires the
+    // same useEffect twice — the second read of the same Response
+    // would fail with "Body is unusable: Body has already been read."
+    // This was a latent test bug; the retry wrapper in this PR added a
+    // microtask that exposed it.
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(makeJsonResponse({ items: [], next_cursor: null })),
     );
 
     renderApp();
