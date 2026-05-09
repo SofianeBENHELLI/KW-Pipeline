@@ -616,3 +616,69 @@ def test_gemini_complete_text_does_not_retry_on_invalid_argument():
     with pytest.raises(InvalidArgument):
         llm.complete_text(system="s", user="u")
     assert mock_client.models.generate_content.call_count == 1
+
+
+def test_gemini_invalid_max_concurrent_rejected():
+    with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
+        GeminiLLMClient(api_key="unused", client=MagicMock(), max_concurrent=0)
+
+
+def test_gemini_max_concurrent_default_matches_settings_default():
+    from app.settings import Settings
+
+    client = GeminiLLMClient(api_key="unused", client=MagicMock())
+    assert client._max_concurrent == Settings().gemini_max_concurrent
+
+
+def test_gemini_concurrency_semaphore_caps_in_flight_calls():
+    """Symmetric to the AnthropicLLMClient semaphore test: prove the
+    semaphore actually gates the SDK call, not just that we store it.
+    """
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    max_concurrent = 2
+    parallel_callers = 8
+
+    in_flight = 0
+    in_flight_lock = threading.Lock()
+    max_observed = 0
+    enter_event = threading.Event()
+
+    def slow_generate_content(**_kwargs):
+        nonlocal in_flight, max_observed
+        with in_flight_lock:
+            in_flight += 1
+            max_observed = max(max_observed, in_flight)
+        enter_event.wait(timeout=1.0)
+        time.sleep(0.05)
+        with in_flight_lock:
+            in_flight -= 1
+        return _make_mock_gemini_client().models.generate_content()
+
+    fake_sdk = MagicMock()
+    fake_sdk.models.generate_content.side_effect = slow_generate_content
+
+    client = GeminiLLMClient(
+        api_key="unused",
+        client=fake_sdk,
+        max_concurrent=max_concurrent,
+    )
+
+    def call_once():
+        client.complete_with_tool(
+            system="sys",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+
+    with ThreadPoolExecutor(max_workers=parallel_callers) as pool:
+        futures = [pool.submit(call_once) for _ in range(parallel_callers)]
+        time.sleep(0.1)
+        enter_event.set()
+        for f in futures:
+            f.result(timeout=5)
+
+    assert max_observed <= max_concurrent
+    assert max_observed == max_concurrent

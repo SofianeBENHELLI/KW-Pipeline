@@ -371,6 +371,29 @@ class Settings(BaseSettings):
             "the override (SDK default)."
         ),
     )
+    anthropic_max_concurrent: int = Field(
+        default=4,
+        validation_alias=AliasChoices("KW_ANTHROPIC_MAX_CONCURRENT"),
+        description=(
+            "Cap on concurrent in-flight Anthropic SDK calls per process. "
+            "Without this, a burst of validations can fan out to dozens "
+            "of parallel calls and trip Anthropic's per-minute rate limit, "
+            "triggering cascading retries that look like an outage. "
+            "Default ``4`` is comfortable for the workstation deploy. "
+            "Must be ``>= 1``."
+        ),
+        ge=1,
+    )
+    gemini_max_concurrent: int = Field(
+        default=4,
+        validation_alias=AliasChoices("KW_GEMINI_MAX_CONCURRENT"),
+        description=(
+            "Cap on concurrent in-flight Gemini SDK calls per process. "
+            "Same rationale as ``anthropic_max_concurrent``. Must be "
+            "``>= 1``."
+        ),
+        ge=1,
+    )
 
     # ------------------------------------------------------------------
     # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias
@@ -409,6 +432,17 @@ class Settings(BaseSettings):
             "prevents a slow embedding call from hanging a worker. "
             "``0`` or negative disables the override (SDK default)."
         ),
+    )
+    voyage_max_concurrent: int = Field(
+        default=4,
+        validation_alias=AliasChoices("KW_VOYAGE_MAX_CONCURRENT"),
+        description=(
+            "Cap on concurrent in-flight Voyage SDK calls per process. "
+            "Same rationale as ``anthropic_max_concurrent``: bound "
+            "instantaneous fan-out so a burst doesn't trip the "
+            "provider's rate limit. Must be ``>= 1``."
+        ),
+        ge=1,
     )
 
     # ------------------------------------------------------------------
