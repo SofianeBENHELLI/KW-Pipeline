@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -147,6 +148,7 @@ class AnthropicLLMClient:
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
         timeout_seconds: float | None = None,
+        max_concurrent: int = 4,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] | None = None,
     ) -> None:
@@ -154,6 +156,8 @@ class AnthropicLLMClient:
             raise ValueError("max_retries must be >= 0")
         if retry_backoff_seconds < 0:
             raise ValueError("retry_backoff_seconds must be >= 0")
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
         if client is None:  # pragma: no cover - exercised behind pytest -m llm_integration
             try:
                 import anthropic  # noqa: PLC0415
@@ -177,6 +181,14 @@ class AnthropicLLMClient:
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
         self._retry_backoff_cap_seconds = retry_backoff_cap_seconds
+        # Bound concurrent in-flight calls so a burst of validations
+        # cannot fan out beyond the provider's per-minute rate limit.
+        # Acquired around the SDK call only (not the backoff sleep) so
+        # a stalled retry doesn't artificially throttle other callers.
+        # ``threading.Semaphore`` because the SDK calls are blocking
+        # and may run from the FastAPI threadpool or any other thread.
+        self._max_concurrent = max_concurrent
+        self._concurrency_semaphore = threading.Semaphore(max_concurrent)
         self._sleep = sleep or time.sleep
         self._rng = rng or random.random
 
@@ -307,30 +319,31 @@ class AnthropicLLMClient:
         attempt = 0
         while True:
             try:
-                return self._client.messages.create(
-                    model=self._model,
-                    max_tokens=self._max_tokens,
-                    system=[
-                        {
-                            "type": "text",
-                            "text": system,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                    messages=[{"role": "user", "content": user}],
-                    tools=[
-                        {
-                            "name": tool_name,
-                            "description": (
-                                "Emit the structured payload that conforms to the "
-                                "provided JSON schema. Always invoke this tool; "
-                                "never reply in plain text."
-                            ),
-                            "input_schema": tool_schema,
-                        }
-                    ],
-                    tool_choice={"type": "tool", "name": tool_name},
-                )
+                with self._concurrency_semaphore:
+                    return self._client.messages.create(
+                        model=self._model,
+                        max_tokens=self._max_tokens,
+                        system=[
+                            {
+                                "type": "text",
+                                "text": system,
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                        messages=[{"role": "user", "content": user}],
+                        tools=[
+                            {
+                                "name": tool_name,
+                                "description": (
+                                    "Emit the structured payload that conforms to the "
+                                    "provided JSON schema. Always invoke this tool; "
+                                    "never reply in plain text."
+                                ),
+                                "input_schema": tool_schema,
+                            }
+                        ],
+                        tool_choice={"type": "tool", "name": tool_name},
+                    )
             except Exception as exc:  # noqa: BLE001 - classified below
                 if attempt >= self._max_retries or not _is_retryable(exc):
                     raise
@@ -363,18 +376,19 @@ class AnthropicLLMClient:
         attempt = 0
         while True:
             try:
-                return self._client.messages.create(
-                    model=self._model,
-                    max_tokens=max_tokens,
-                    system=[
-                        {
-                            "type": "text",
-                            "text": system,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                    messages=[{"role": "user", "content": user}],
-                )
+                with self._concurrency_semaphore:
+                    return self._client.messages.create(
+                        model=self._model,
+                        max_tokens=max_tokens,
+                        system=[
+                            {
+                                "type": "text",
+                                "text": system,
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                        messages=[{"role": "user", "content": user}],
+                    )
             except Exception as exc:  # noqa: BLE001 - classified below
                 if attempt >= self._max_retries or not _is_retryable(exc):
                     raise
@@ -515,6 +529,7 @@ class GeminiLLMClient:
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
         timeout_seconds: float | None = None,
+        max_concurrent: int = 4,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] | None = None,
     ) -> None:
@@ -522,6 +537,8 @@ class GeminiLLMClient:
             raise ValueError("max_retries must be >= 0")
         if retry_backoff_seconds < 0:
             raise ValueError("retry_backoff_seconds must be >= 0")
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
         if client is None:  # pragma: no cover - exercised behind pytest -m llm_integration
             try:
                 from google import genai  # noqa: PLC0415
@@ -549,6 +566,9 @@ class GeminiLLMClient:
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
         self._retry_backoff_cap_seconds = retry_backoff_cap_seconds
+        # See AnthropicLLMClient.__init__ for the rationale.
+        self._max_concurrent = max_concurrent
+        self._concurrency_semaphore = threading.Semaphore(max_concurrent)
         self._sleep = sleep or time.sleep
         self._rng = rng or random.random
 
@@ -694,11 +714,12 @@ class GeminiLLMClient:
         attempt = 0
         while True:
             try:
-                return self._client.models.generate_content(
-                    model=self._model,
-                    contents=user,
-                    config=config,
-                )
+                with self._concurrency_semaphore:
+                    return self._client.models.generate_content(
+                        model=self._model,
+                        contents=user,
+                        config=config,
+                    )
             except Exception as exc:  # noqa: BLE001 - classified below
                 if attempt >= self._max_retries or not _is_retryable_gemini(exc):
                     raise
@@ -732,11 +753,12 @@ class GeminiLLMClient:
         attempt = 0
         while True:
             try:
-                return self._client.models.generate_content(
-                    model=self._model,
-                    contents=user,
-                    config=config,
-                )
+                with self._concurrency_semaphore:
+                    return self._client.models.generate_content(
+                        model=self._model,
+                        contents=user,
+                        config=config,
+                    )
             except Exception as exc:  # noqa: BLE001 - classified below
                 if attempt >= self._max_retries or not _is_retryable_gemini(exc):
                     raise

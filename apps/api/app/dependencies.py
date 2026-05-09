@@ -515,21 +515,41 @@ def _maybe_build_llm(
         api_key = settings.gemini_api_key.strip()
         model = settings.gemini_model.strip() or None
         gemini_timeout = settings.gemini_timeout_seconds
+        gemini_concurrency = settings.gemini_max_concurrent
         llm: LLMClient = (
-            GeminiLLMClient(api_key=api_key, model=model, timeout_seconds=gemini_timeout)
+            GeminiLLMClient(
+                api_key=api_key,
+                model=model,
+                timeout_seconds=gemini_timeout,
+                max_concurrent=gemini_concurrency,
+            )
             if model
-            else GeminiLLMClient(api_key=api_key, timeout_seconds=gemini_timeout)
+            else GeminiLLMClient(
+                api_key=api_key,
+                timeout_seconds=gemini_timeout,
+                max_concurrent=gemini_concurrency,
+            )
         )
         return llm, (model or DEFAULT_GEMINI_MODEL)
 
     # provider == "anthropic"
     api_key = settings.anthropic_api_key.strip()
     model = settings.anthropic_model.strip() or None
-    timeout = settings.anthropic_timeout_seconds
+    anthropic_timeout = settings.anthropic_timeout_seconds
+    anthropic_concurrency = settings.anthropic_max_concurrent
     llm = (
-        AnthropicLLMClient(api_key=api_key, model=model, timeout_seconds=timeout)
+        AnthropicLLMClient(
+            api_key=api_key,
+            model=model,
+            timeout_seconds=anthropic_timeout,
+            max_concurrent=anthropic_concurrency,
+        )
         if model
-        else AnthropicLLMClient(api_key=api_key, timeout_seconds=timeout)
+        else AnthropicLLMClient(
+            api_key=api_key,
+            timeout_seconds=anthropic_timeout,
+            max_concurrent=anthropic_concurrency,
+        )
     )
     return llm, (model or DEFAULT_ANTHROPIC_MODEL)
 
@@ -595,11 +615,21 @@ def _maybe_build_embedding_client(
     # model from API key" path), at which point the SDK's own default
     # kicks in via ``VoyageEmbeddingClient``'s constructor default.
     model = settings.embedding_model.strip() or None
-    timeout = settings.voyage_timeout_seconds
+    voyage_timeout = settings.voyage_timeout_seconds
+    voyage_concurrency = settings.voyage_max_concurrent
     return (
-        VoyageEmbeddingClient(api_key=api_key, model=model, timeout_seconds=timeout)
+        VoyageEmbeddingClient(
+            api_key=api_key,
+            model=model,
+            timeout_seconds=voyage_timeout,
+            max_concurrent=voyage_concurrency,
+        )
         if model
-        else VoyageEmbeddingClient(api_key=api_key, timeout_seconds=timeout)
+        else VoyageEmbeddingClient(
+            api_key=api_key,
+            timeout_seconds=voyage_timeout,
+            max_concurrent=voyage_concurrency,
+        )
     )
 
 

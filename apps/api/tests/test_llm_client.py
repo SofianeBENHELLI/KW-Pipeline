@@ -630,3 +630,107 @@ def test_invalid_max_retries_rejected():
 def test_invalid_backoff_rejected():
     with pytest.raises(ValueError):
         AnthropicLLMClient(api_key="unused", client=MagicMock(), retry_backoff_seconds=-0.1)
+
+
+def test_invalid_max_concurrent_rejected():
+    """``max_concurrent < 1`` is meaningless (would block forever)."""
+    with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
+        AnthropicLLMClient(api_key="unused", client=MagicMock(), max_concurrent=0)
+
+
+def test_max_concurrent_default_matches_settings_default():
+    """The hard-coded default in the constructor must stay in sync with
+    the ``KW_ANTHROPIC_MAX_CONCURRENT`` Settings default. If either
+    changes without the other, this test fires."""
+    from app.settings import Settings
+
+    client = AnthropicLLMClient(api_key="unused", client=MagicMock())
+    assert client._max_concurrent == Settings().anthropic_max_concurrent
+
+
+def test_concurrency_semaphore_caps_in_flight_calls():
+    """Drives ``max_concurrent`` parallel callers and verifies that no
+    more than ``max_concurrent`` of them are inside ``messages.create``
+    at any one time. Proves the semaphore isn't just stored — it
+    actually gates the SDK call.
+    """
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    max_concurrent = 2
+    parallel_callers = 10
+
+    in_flight_count = 0
+    in_flight_lock = threading.Lock()
+    max_observed = 0
+    enter_event = threading.Event()
+
+    def slow_create(**_kwargs):
+        nonlocal in_flight_count, max_observed
+        with in_flight_lock:
+            in_flight_count += 1
+            max_observed = max(max_observed, in_flight_count)
+        # Hold the slot long enough for other threads to pile up so the
+        # cap is actually exercised.
+        enter_event.wait(timeout=1.0)
+        time.sleep(0.05)
+        with in_flight_lock:
+            in_flight_count -= 1
+        return _make_mock_anthropic_client().messages.create()
+
+    fake_sdk = MagicMock()
+    fake_sdk.messages.create.side_effect = slow_create
+
+    client = AnthropicLLMClient(
+        api_key="unused",
+        client=fake_sdk,
+        max_concurrent=max_concurrent,
+    )
+
+    def call_once():
+        client.complete_with_tool(
+            system="sys",
+            user="u",
+            tool_schema={"type": "object", "properties": {}, "required": []},
+        )
+
+    with ThreadPoolExecutor(max_workers=parallel_callers) as pool:
+        futures = [pool.submit(call_once) for _ in range(parallel_callers)]
+        # Let the contention build for a moment, then release.
+        time.sleep(0.1)
+        enter_event.set()
+        for f in futures:
+            f.result(timeout=5)
+
+    assert max_observed <= max_concurrent, (
+        f"Observed {max_observed} concurrent in-flight calls; "
+        f"semaphore should have capped at {max_concurrent}."
+    )
+    # And we actually saturated the cap (not just one-at-a-time
+    # serialisation by accident).
+    assert max_observed == max_concurrent
+
+
+def test_concurrency_semaphore_released_when_sdk_raises():
+    """A failing SDK call must release the slot so the next caller
+    isn't blocked forever. Tests the ``with semaphore:`` contract.
+    """
+    fake_sdk = MagicMock()
+    fake_sdk.messages.create.side_effect = RuntimeError("boom")
+    client = AnthropicLLMClient(
+        api_key="unused",
+        client=fake_sdk,
+        max_concurrent=1,
+        max_retries=0,
+    )
+
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="boom"):
+            client.complete_with_tool(
+                system="sys",
+                user="u",
+                tool_schema={"type": "object", "properties": {}, "required": []},
+            )
+    # If the slot wasn't released, the second iteration would have hung
+    # waiting for the semaphore. Reaching here means it was released.

@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import threading
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
@@ -119,6 +120,7 @@ class VoyageEmbeddingClient:
         batch_size: int = DEFAULT_BATCH_SIZE,
         client: Any = None,
         timeout_seconds: float | None = None,
+        max_concurrent: int = 4,
     ) -> None:
         if not api_key:
             raise RuntimeError(
@@ -126,6 +128,8 @@ class VoyageEmbeddingClient:
                 "Set `VOYAGE_API_KEY` (or `KW_VOYAGE_API_KEY`) or use "
                 "FakeEmbeddingClient for tests."
             )
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
         if client is None:
             try:
                 import voyageai  # noqa: PLC0415
@@ -144,6 +148,11 @@ class VoyageEmbeddingClient:
         self._client = client
         self._model = model
         self._batch_size = max(1, int(batch_size))
+        # Bound concurrent in-flight calls so a burst of validations
+        # cannot fan out beyond Voyage's per-minute rate limit. See
+        # AnthropicLLMClient for the full rationale.
+        self._max_concurrent = max_concurrent
+        self._concurrency_semaphore = threading.Semaphore(max_concurrent)
         # Public ``dim`` is read by the Phase 3 vector-index migration
         # to size the Neo4j HNSW index. Unknown models fall back to a
         # one-shot probe via ``embed_query`` on first use; we keep the
@@ -182,11 +191,12 @@ class VoyageEmbeddingClient:
         input_type: str,
     ) -> list[list[float]]:
         """One Voyage API call. Isolates the SDK shape for testability."""
-        response = self._client.embed(
-            texts=texts,
-            model=self._model,
-            input_type=input_type,
-        )
+        with self._concurrency_semaphore:
+            response = self._client.embed(
+                texts=texts,
+                model=self._model,
+                input_type=input_type,
+            )
         # The Voyage SDK returns an object with ``.embeddings`` — a
         # list[list[float]] in the same order as the input texts.
         embeddings = getattr(response, "embeddings", None)

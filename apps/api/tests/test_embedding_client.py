@@ -262,3 +262,60 @@ class TestVoyageEmbeddingClient:
 
         VoyageEmbeddingClient(api_key="vk-test", timeout_seconds=0)
         assert captured == {"api_key": "vk-test"}
+
+    def test_invalid_max_concurrent_rejected(self) -> None:
+        with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
+            VoyageEmbeddingClient(api_key="x", client=_StubVoyageClient(), max_concurrent=0)
+
+    def test_max_concurrent_default_matches_settings_default(self) -> None:
+        from app.settings import Settings
+
+        client = VoyageEmbeddingClient(api_key="x", client=_StubVoyageClient())
+        assert client._max_concurrent == Settings().voyage_max_concurrent
+
+    def test_concurrency_semaphore_caps_in_flight_calls(self) -> None:
+        """Drives ``max_concurrent`` parallel callers and verifies that
+        no more than ``max_concurrent`` are inside ``embed`` at once.
+        """
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        max_concurrent = 2
+        parallel_callers = 8
+
+        in_flight = 0
+        in_flight_lock = threading.Lock()
+        max_observed = 0
+        enter_event = threading.Event()
+
+        class _SlowVoyage:
+            def embed(self, *, texts, model, input_type):  # noqa: ARG002
+                nonlocal in_flight, max_observed
+                with in_flight_lock:
+                    in_flight += 1
+                    max_observed = max(max_observed, in_flight)
+                enter_event.wait(timeout=1.0)
+                time.sleep(0.05)
+                with in_flight_lock:
+                    in_flight -= 1
+                return _StubVoyageResponse([[1.0] * 4 for _ in texts])
+
+        client = VoyageEmbeddingClient(
+            api_key="x",
+            client=_SlowVoyage(),
+            max_concurrent=max_concurrent,
+        )
+
+        def call_once():
+            client.embed_documents(["one"])
+
+        with ThreadPoolExecutor(max_workers=parallel_callers) as pool:
+            futures = [pool.submit(call_once) for _ in range(parallel_callers)]
+            time.sleep(0.1)
+            enter_event.set()
+            for f in futures:
+                f.result(timeout=5)
+
+        assert max_observed <= max_concurrent
+        assert max_observed == max_concurrent

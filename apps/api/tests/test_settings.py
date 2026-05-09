@@ -85,6 +85,35 @@ class TestDefaults:
         assert s.anthropic_model == ""
         # ADR-014 §3 circuit breaker disabled by default.
         assert s.entity_extractor_max_input_tokens_per_document == 0
+        # Provider concurrency caps default to 4 (comfortable for the
+        # workstation deploy; operators raise per-tenant if they have
+        # higher provider rate limits).
+        assert s.anthropic_max_concurrent == 4
+        assert s.gemini_max_concurrent == 4
+        assert s.voyage_max_concurrent == 4
+
+
+class TestProviderConcurrencyCaps:
+    """Cover the env-driven overrides + the >=1 lower bound."""
+
+    def test_anthropic_max_concurrent_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_ANTHROPIC_MAX_CONCURRENT", "12")
+        assert Settings().anthropic_max_concurrent == 12
+
+    def test_gemini_max_concurrent_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_GEMINI_MAX_CONCURRENT", "12")
+        assert Settings().gemini_max_concurrent == 12
+
+    def test_voyage_max_concurrent_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KW_VOYAGE_MAX_CONCURRENT", "8")
+        assert Settings().voyage_max_concurrent == 8
+
+    def test_zero_or_negative_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``0`` would mean "block forever"; pydantic-settings refuses
+        below the ``ge=1`` floor so a typo can't disable LLM calls."""
+        monkeypatch.setenv("KW_ANTHROPIC_MAX_CONCURRENT", "0")
+        with pytest.raises(Exception, match="greater than or equal to 1"):
+            Settings()
 
 
 class TestUploadGuardrails:
