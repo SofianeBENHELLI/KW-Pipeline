@@ -431,8 +431,14 @@ function ReviewerWorkbench() {
   // Hidden for non-admin users (403) and on fetch errors — the banner
   // is informational and a transient hiccup shouldn't block the app.
   const adminConfig = useAdminConfig(getApiBaseUrl());
+  // Guard ``hitl`` too, not just ``config``: tests (and any future
+  // partial-shape upstream response) can return an admin-config-shaped
+  // body without the HITL block, and the bare ``.hitl.force_auto_corpus``
+  // access would crash the whole tree. This banner is informational —
+  // a missing block should fall through to "not active", not a render crash.
   const forceAutoActive =
-    adminConfig.status === "ok" && adminConfig.config?.hitl.force_auto_corpus === true;
+    adminConfig.status === "ok" &&
+    adminConfig.config?.hitl?.force_auto_corpus === true;
 
   // Register the 401-triggered session-expired hook on mount and tear
   // it down on unmount. The trigger is module-level state on the API
