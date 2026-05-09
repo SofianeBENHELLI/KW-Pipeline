@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 _COMPOSE = Path(__file__).resolve().parents[3] / "docker" / "docker-compose.yml"
+_DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile"
 
 
 def _cloudflared_block(text: str) -> str:
@@ -54,4 +55,26 @@ def test_cloudflared_command_passes_config_flag() -> None:
         "list elements. Without it the connector skips the mounted "
         'config and errors "tunnel run requires the ID or name of '
         'the tunnel". See git blame on this test for context.'
+    )
+
+
+def test_dockerfile_uses_gunicorn_with_periodic_recycling() -> None:
+    """Pin the worker-recycling defense in the production CMD.
+
+    Memory drift in spaCy / pdfplumber / SDK clients accumulates over
+    weeks-long uptimes and is invisible until the kernel OOM-kills the
+    container. ``gunicorn --max-requests`` recycles the worker every N
+    requests, returning that memory to the OS. If a future change
+    drops back to a bare ``uvicorn`` invocation, this guard fires.
+    """
+    text = _DOCKERFILE.read_text()
+    # Tolerate either the JSON-array CMD form or the shell form, but
+    # require all three load-bearing tokens to be present.
+    assert '"gunicorn"' in text, "production CMD must use gunicorn as the supervisor"
+    assert '"uvicorn.workers.UvicornWorker"' in text, (
+        "gunicorn must run the uvicorn worker class so FastAPI's async stack still serves requests."
+    )
+    assert '"--max-requests"' in text, (
+        "gunicorn must be configured with --max-requests so the worker "
+        "periodically recycles and returns leaked memory to the OS."
     )

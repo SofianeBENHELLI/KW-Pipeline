@@ -90,6 +90,18 @@ services:
         condition: service_healthy
     profiles: ["dev", "deploy"]
     restart: unless-stopped
+    # ── Defense-in-depth memory limit (opt-in) ───────────────────────
+    # The API container ships with gunicorn ``--max-requests 1000``
+    # which periodically recycles the worker and returns accumulated
+    # memory to the OS — that is the primary defense against slow
+    # leaks (spaCy / pdfplumber / SDK clients) over weeks of uptime.
+    # Uncomment ``mem_limit`` to cap the container as a backstop: if
+    # memory ever exceeds the cap, Docker kills the container and
+    # ``restart: unless-stopped`` brings it back. Tune to your host:
+    # 1g is comfortable for the default install; raise to 2g if NER
+    # (spaCy en_core_web_sm) is enabled or you regularly process
+    # large PDFs.
+    # mem_limit: 1g
 
   # ── Workstation deployment sidecar (``deploy`` profile only) ──────
   #
