@@ -19,7 +19,7 @@
 
 import { widget } from "@widget-lab/3ddashboard-utils";
 
-import { ApiError, asApiError } from "../../../_shared/api-core";
+import { ApiError, asApiError, withRetry } from "../../../_shared/api-core";
 import type {
   ChatMode,
   ChatResponse,
@@ -103,12 +103,20 @@ export function getOrbitalUrl(): string {
 
 // ─── Core request helper ─────────────────────────────────────────────────────
 
+// Idempotent reads (GET / HEAD) transparently retry on transient backend
+// hiccups (502/503/504 + network errors). The widget runs inside the
+// 3DEXPERIENCE dashboard where a brief tunnel reconnect or a gunicorn
+// worker recycle would otherwise surface to the user as an error tile;
+// retry-with-backoff lets the dashboard ride through the blip. See
+// ``apps/_shared/api-core/retryFetch.ts`` for the policy.
+const fetchWithRetry = withRetry((...args) => fetch(...args));
+
 async function request<T>(
   path: string,
   init: RequestInit & { baseUrl?: string } = {},
 ): Promise<T> {
   const baseUrl = init.baseUrl ?? getApiBaseUrl();
-  const response = await fetch(baseUrl.replace(/\/$/, "") + path, init);
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, init);
   if (!response.ok) throw await asApiError(response);
   // 204 No Content path — most KW-Pipeline endpoints return JSON, but be
   // defensive in case a future route doesn't.

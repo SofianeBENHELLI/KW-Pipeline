@@ -130,10 +130,16 @@ describe("KnowledgeGraphView", () => {
   });
 
   it("shows an error banner with a Retry button when the fetch fails", async () => {
+    // The shared ``withRetry`` wraps every GET in 1 initial attempt + 2
+    // retries (default), so a single 503 mock would silently recover
+    // before the user sees anything. We explicitly exhaust the retry
+    // window so the error surfaces, then succeed on the manual retry
+    // click — that's the user-facing contract this test pins.
     let attempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(() => {
       attempts += 1;
-      if (attempts === 1) {
+      // First three attempts (initial + 2 retries) all fail.
+      if (attempts <= 3) {
         return Promise.resolve(makeJsonResponse({ detail: "boom" }, 503));
       }
       return Promise.resolve(makeJsonResponse(FIXTURE_PROJECTION));
@@ -146,6 +152,7 @@ describe("KnowledgeGraphView", () => {
     expect(screen.getByText(/Couldn't load the knowledge graph/i)).toBeInTheDocument();
     expect(screen.getByText(/boom/)).toBeInTheDocument();
     expect(screen.queryByTestId("nvl-stub")).not.toBeInTheDocument();
+    expect(attempts).toBe(3);
 
     // Retry must be a real button so it's keyboard-reachable. Click it and
     // verify the panel recovers with a fresh payload.
@@ -154,7 +161,8 @@ describe("KnowledgeGraphView", () => {
 
     const stub = await screen.findByTestId("nvl-stub");
     expect(stub).toBeInTheDocument();
-    expect(attempts).toBe(2);
+    // 3 (initial 503 burst exhausting retries) + 1 (manual retry click).
+    expect(attempts).toBe(4);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 

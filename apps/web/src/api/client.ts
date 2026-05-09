@@ -13,6 +13,8 @@
 
 import createClient from "openapi-fetch";
 
+import { withRetry } from "../../../_shared/api-core";
+
 import type { paths } from "./generated/schema";
 import type {
   ApiAdminAuditEventsResponse,
@@ -57,9 +59,16 @@ export function getApiBaseUrl(): string {
 // openapi-fetch capture a reference at construction). This keeps test
 // spies on `globalThis.fetch` effective even though the client is
 // created at module load.
+//
+// ``withRetry`` transparently re-issues idempotent requests (GET / HEAD)
+// on transient backend hiccups (502/503/504 + network errors). The
+// defaults are conservative — POST/PUT/PATCH/DELETE never retry — so
+// dropping it in front of the existing fetch can only improve
+// behaviour, never make it worse. See ``apps/_shared/api-core/retryFetch.ts``.
+const fetchWithRetry = withRetry((...args) => globalThis.fetch(...args));
 const http = createClient<paths>({
   baseUrl: BASE_URL,
-  fetch: (...args) => globalThis.fetch(...args),
+  fetch: fetchWithRetry,
 });
 
 // ─── 401 / session-expired hook (#83 slice 3) ────────────────────────────────
