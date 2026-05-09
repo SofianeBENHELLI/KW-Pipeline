@@ -333,6 +333,18 @@ class Settings(BaseSettings):
             "``0`` or negative disables the override (SDK default)."
         ),
     )
+    gemini_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("KW_GEMINI_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Gemini SDK "
+            "client. Same rationale as ``anthropic_timeout_seconds``: "
+            "bound the call so a stalled LLM cannot wedge a worker. "
+            "Internally converted to milliseconds for the google-genai "
+            "``HttpOptions.timeout`` field. ``0`` or negative disables "
+            "the override (SDK default)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias

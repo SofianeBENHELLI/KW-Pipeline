@@ -503,10 +503,11 @@ def _maybe_build_llm(
     if provider == "gemini":
         api_key = settings.gemini_api_key.strip()
         model = settings.gemini_model.strip() or None
+        gemini_timeout = settings.gemini_timeout_seconds
         llm: LLMClient = (
-            GeminiLLMClient(api_key=api_key, model=model)
+            GeminiLLMClient(api_key=api_key, model=model, timeout_seconds=gemini_timeout)
             if model
-            else GeminiLLMClient(api_key=api_key)
+            else GeminiLLMClient(api_key=api_key, timeout_seconds=gemini_timeout)
         )
         return llm, (model or DEFAULT_GEMINI_MODEL)
 

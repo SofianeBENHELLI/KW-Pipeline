@@ -58,6 +58,26 @@ def test_cloudflared_command_passes_config_flag() -> None:
     )
 
 
+def test_every_service_caps_docker_log_size() -> None:
+    """Pin docker-log rotation on every service.
+
+    Docker's default ``json-file`` driver keeps growing log files
+    forever. Over weeks of uptime that fills the host disk, and SQLite
+    starts failing with "database or disk is full" — looks like an
+    outage but is actually just retention. Each service must declare
+    a bounded ``max-size`` / ``max-file`` policy so the host floor is
+    knowable.
+    """
+    text = _COMPOSE.read_text()
+    # One occurrence per service block (neo4j, api, cloudflared = 3).
+    assert text.count("driver: json-file") >= 3, (
+        "every service in docker-compose.yml must declare a bounded "
+        "logging driver to prevent runaway docker-log growth"
+    )
+    assert text.count('max-size: "50m"') >= 3
+    assert text.count('max-file: "5"') >= 3
+
+
 def test_dockerfile_uses_gunicorn_with_periodic_recycling() -> None:
     """Pin the worker-recycling defense in the production CMD.
 
