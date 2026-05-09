@@ -232,3 +232,33 @@ class TestVoyageEmbeddingClient:
     def test_voyage_dim_map_includes_default(self) -> None:
         assert DEFAULT_VOYAGE_MODEL in VOYAGE_MODEL_DIMS
         assert VOYAGE_MODEL_DIMS[DEFAULT_VOYAGE_MODEL] == 1024
+
+    def test_passes_timeout_to_sdk(self, monkeypatch) -> None:
+        """``timeout_seconds=N`` reaches ``voyageai.Client(timeout=N)``.
+
+        Same rationale as the matching ``AnthropicLLMClient`` test: a
+        slow embedding call must not hang a worker (uptime plan #2).
+        """
+        import sys
+        import types
+
+        captured: dict = {}
+
+        fake_voyageai = types.ModuleType("voyageai")
+
+        def _fake_constructor(**kwargs):
+            captured.clear()
+            captured.update(kwargs)
+            return _StubVoyageClient()
+
+        fake_voyageai.Client = _fake_constructor  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "voyageai", fake_voyageai)
+
+        VoyageEmbeddingClient(api_key="vk-test", timeout_seconds=12.5)
+        assert captured == {"api_key": "vk-test", "timeout": 12.5}
+
+        VoyageEmbeddingClient(api_key="vk-test")
+        assert captured == {"api_key": "vk-test"}
+
+        VoyageEmbeddingClient(api_key="vk-test", timeout_seconds=0)
+        assert captured == {"api_key": "vk-test"}

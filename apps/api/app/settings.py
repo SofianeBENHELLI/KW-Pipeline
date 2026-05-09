@@ -276,6 +276,17 @@ class Settings(BaseSettings):
             "original unbounded behaviour."
         ),
     )
+    anthropic_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("KW_ANTHROPIC_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Anthropic SDK "
+            "client. Without it the SDK inherits httpx's default "
+            "(no read timeout), so a stalled LLM call can hold a worker "
+            "indefinitely and surface as 'API hang' to operators. "
+            "``0`` or negative disables the override (SDK default)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Embeddings (ADR-015). ``VOYAGE_API_KEY`` is kept as a legacy alias
@@ -303,6 +314,16 @@ class Settings(BaseSettings):
             "ADR-015. Operators may override (e.g. ``voyage-3-large``) "
             "without code changes; the index dimensionality is read "
             "from the configured model at construction time."
+        ),
+    )
+    voyage_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("KW_VOYAGE_TIMEOUT_SECONDS"),
+        description=(
+            "Per-request timeout (seconds) applied to the Voyage AI SDK "
+            "client. Same rationale as ``anthropic_timeout_seconds``: "
+            "prevents a slow embedding call from hanging a worker. "
+            "``0`` or negative disables the override (SDK default)."
         ),
     )
 

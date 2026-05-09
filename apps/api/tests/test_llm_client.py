@@ -47,6 +47,61 @@ def _make_mock_anthropic_client(
     return client
 
 
+def test_anthropic_client_passes_timeout_to_sdk(monkeypatch):
+    """``timeout_seconds=N`` reaches ``anthropic.Anthropic(timeout=N)``.
+
+    Without this, the SDK inherits httpx's default (no read timeout)
+    and a stalled call would block a worker indefinitely (uptime plan
+    item #2). We stub the SDK module so the lazy import inside
+    ``AnthropicLLMClient`` returns our spy and we can assert on the
+    constructor kwargs.
+    """
+    import sys
+    import types
+
+    captured: dict = {}
+
+    fake_anthropic = types.ModuleType("anthropic")
+
+    def _fake_constructor(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    fake_anthropic.Anthropic = _fake_constructor  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    AnthropicLLMClient(api_key="sk-test", timeout_seconds=42.5)
+
+    assert captured == {"api_key": "sk-test", "timeout": 42.5}
+
+
+def test_anthropic_client_omits_timeout_when_unset_or_nonpositive(monkeypatch):
+    """``timeout_seconds`` of ``None`` / ``0`` / negative leaves SDK default."""
+    import sys
+    import types
+
+    captured: dict = {}
+
+    fake_anthropic = types.ModuleType("anthropic")
+
+    def _fake_constructor(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return MagicMock()
+
+    fake_anthropic.Anthropic = _fake_constructor  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    AnthropicLLMClient(api_key="sk-test")
+    assert captured == {"api_key": "sk-test"}
+
+    AnthropicLLMClient(api_key="sk-test", timeout_seconds=0)
+    assert captured == {"api_key": "sk-test"}
+
+    AnthropicLLMClient(api_key="sk-test", timeout_seconds=-1.0)
+    assert captured == {"api_key": "sk-test"}
+
+
 def test_anthropic_client_sends_system_with_ephemeral_cache_control():
     """ADR-014 §2: the static system block carries cache_control."""
     mock_client = _make_mock_anthropic_client()

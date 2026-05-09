@@ -12,6 +12,38 @@ def test_health_endpoint_returns_ok():
     assert response.json() == {"status": "ok"}
 
 
+def test_ready_endpoint_reports_catalog_ok_and_neo4j_disabled_by_default():
+    client = TestClient(create_app())
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["catalog"]["status"] == "ok"
+    # Knowledge layer is off by default → neo4j check reports disabled.
+    assert body["checks"]["neo4j"]["status"] == "disabled"
+
+
+def test_ready_endpoint_reports_503_when_catalog_probe_fails(monkeypatch):
+    app = create_app()
+    services = app.state.services
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated catalog outage")
+
+    monkeypatch.setattr(services.documents.catalog, "list_documents", _boom)
+    client = TestClient(app)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["checks"]["catalog"]["status"] == "error"
+    assert "simulated catalog outage" in body["checks"]["catalog"]["detail"]
+
+
 def test_upload_catalog_detail_extract_and_semantic_flow():
     client = TestClient(create_app())
 

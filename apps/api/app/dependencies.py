@@ -513,10 +513,11 @@ def _maybe_build_llm(
     # provider == "anthropic"
     api_key = settings.anthropic_api_key.strip()
     model = settings.anthropic_model.strip() or None
+    timeout = settings.anthropic_timeout_seconds
     llm = (
-        AnthropicLLMClient(api_key=api_key, model=model)
+        AnthropicLLMClient(api_key=api_key, model=model, timeout_seconds=timeout)
         if model
-        else AnthropicLLMClient(api_key=api_key)
+        else AnthropicLLMClient(api_key=api_key, timeout_seconds=timeout)
     )
     return llm, (model or DEFAULT_ANTHROPIC_MODEL)
 
@@ -582,10 +583,11 @@ def _maybe_build_embedding_client(
     # model from API key" path), at which point the SDK's own default
     # kicks in via ``VoyageEmbeddingClient``'s constructor default.
     model = settings.embedding_model.strip() or None
+    timeout = settings.voyage_timeout_seconds
     return (
-        VoyageEmbeddingClient(api_key=api_key, model=model)
+        VoyageEmbeddingClient(api_key=api_key, model=model, timeout_seconds=timeout)
         if model
-        else VoyageEmbeddingClient(api_key=api_key)
+        else VoyageEmbeddingClient(api_key=api_key, timeout_seconds=timeout)
     )
 
 

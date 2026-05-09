@@ -146,6 +146,7 @@ class AnthropicLLMClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         retry_backoff_cap_seconds: float = DEFAULT_RETRY_BACKOFF_CAP_SECONDS,
+        timeout_seconds: float | None = None,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] | None = None,
     ) -> None:
@@ -162,7 +163,14 @@ class AnthropicLLMClient:
                     "Install with `pip install anthropic` or use FakeLLMClient "
                     "for tests."
                 ) from exc
-            client = anthropic.Anthropic(api_key=api_key)
+            # Without an explicit timeout the SDK inherits httpx's default
+            # (no read timeout). One slow LLM call would then hold a
+            # worker forever and surface as an "API hang" — see uptime
+            # plan #2.
+            client_kwargs: dict[str, Any] = {"api_key": api_key}
+            if timeout_seconds is not None and timeout_seconds > 0:
+                client_kwargs["timeout"] = timeout_seconds
+            client = anthropic.Anthropic(**client_kwargs)
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
