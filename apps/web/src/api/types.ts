@@ -70,6 +70,7 @@ export type ApiGraphNode = Schemas["GraphNode"];
 export type ApiGraphEdge = Schemas["GraphEdge"];
 export type ApiKnowledgeGraphProjection = Schemas["KnowledgeGraphProjection"];
 export type ApiKnowledgeGraphPage = Schemas["KnowledgeGraphPage"];
+export type ApiProjectionStatusResponse = Schemas["ProjectionStatusResponse"];
 
 // ─── Knowledge search (Phase 3 / ADR-015) ──────────────────────────────────
 

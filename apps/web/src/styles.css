@@ -70,6 +70,52 @@ button {
   gap: 12px;
 }
 
+/* Projection status indicator next to the validate button. Renders only
+   while the tracker has a meaningful state for this version (see
+   ReviewWorkspace + ProjectionStatusPill). */
+.projection-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.projection-status-pill--in-progress {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.projection-status-pill--completed {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.projection-status-pill--failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  cursor: help;
+}
+
+.projection-status-pill__spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: projection-pill-spin 0.9s linear infinite;
+}
+
+@keyframes projection-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 h1,
 h2,
 h3,

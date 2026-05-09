@@ -51,6 +51,7 @@ from app.services.knowledge import (
 )
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
+from app.services.projection_status_tracker import ProjectionStatusTracker
 from app.services.review_service import ReviewService
 from app.services.sampling_state_store import (
     InMemorySamplingStateStore,
@@ -329,6 +330,13 @@ class PipelineServices:
     # stateless — building it eagerly here keeps the route layer's
     # ``Depends(...)`` injection trivial.
     document_similarity: DocumentSimilarityService = field(init=False)
+    # Process-local tracker for knowledge-projection side-effect status.
+    # The catalog stays the source of truth for the FSM; this tracker
+    # tells reviewer UIs whether the *graph* is populated yet so they
+    # can render a "Projecting…" indicator. See
+    # :mod:`app.services.projection_status_tracker` for the full
+    # rationale.
+    projection_status: ProjectionStatusTracker = field(default_factory=ProjectionStatusTracker)
 
     def __post_init__(self) -> None:
         # Frozen dataclass — bypass the immutability guard for the
@@ -348,6 +356,9 @@ class PipelineServices:
                 # version was originally routed to ``auto``.
                 validation_metadata=self.validation_metadata,
                 sampling_state=self.sampling_state,
+                # Tracker so the side-effects helper records start /
+                # complete / fail transitions reviewer UIs can poll.
+                projection_status=self.projection_status,
             ),
         )
         object.__setattr__(

@@ -28,6 +28,7 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiProjectionStatusResponse,
   ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
   ApiPurgeArtifactsResponse,
@@ -556,6 +557,34 @@ export async function getDocumentGraph(
       params: { path: { document_id: documentId } },
     }),
   );
+}
+
+/**
+ * GET /knowledge/projection_status/{version_id}
+ *
+ * Returns the in-process tracker entry for a version's knowledge-layer
+ * projection (graph + entity extraction). The reviewer UI polls this
+ * after validate to know when the graph is fully populated; a
+ * ``"COMPLETED"`` / ``"FAILED"`` response stops the poll loop.
+ *
+ * Returns ``null`` on 404 — either projection never ran (knowledge
+ * layer disabled) or the entry was pruned by the TTL. Both are
+ * "fall back to whatever the graph endpoint returns directly", which
+ * is the historical contract for clients that don't poll status.
+ */
+export async function getProjectionStatus(
+  versionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiProjectionStatusResponse | null> {
+  const result = await http.GET(
+    "/knowledge/projection_status/{version_id}",
+    {
+      params: { path: { version_id: versionId } },
+      signal: options.signal,
+    },
+  );
+  if (result.response.status === 404) return null;
+  return unwrap(result);
 }
 
 /**

@@ -11,7 +11,9 @@ import { documentScopes, latestVersion } from "../../domain/document";
 import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
+import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import { ReviewActions } from "./ReviewActions";
+import { useProjectionStatus } from "./useProjectionStatus";
 
 interface ReviewWorkspaceProps {
   document: ApiDocument;
@@ -46,6 +48,11 @@ export function ReviewWorkspace({
   const [reviewerNote, setReviewerNote] = useState("");
   const [reviewBusy, setReviewBusy] = useState<"validate" | "reject" | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  // Bumped after every successful validate so the projection-status
+  // hook restarts polling from a fresh window. Without this bump, a
+  // re-validation of a version that previously COMPLETED would leave
+  // the hook on its terminal state and the pill wouldn't update.
+  const [projectionPollToken, setProjectionPollToken] = useState<number>(0);
 
   // Dedup guard against rapid double-clicks. The disabled-button state
   // is the primary defence; this ref is the belt-and-braces second
@@ -129,6 +136,12 @@ export function ReviewWorkspace({
     fn(documentId, versionId, reviewerNote || undefined)
       .then(async (updated) => {
         setSemantic(updated);
+        if (action === "validate") {
+          // Restart the projection-status poll loop on every successful
+          // validate so the pill reflects the new projection cycle (and
+          // not a stale terminal state from a prior validation).
+          setProjectionPollToken((n) => n + 1);
+        }
         if (onMutationCompleted) await onMutationCompleted();
       })
       .catch((err: unknown) => {
@@ -147,6 +160,14 @@ export function ReviewWorkspace({
   }
 
   const canReview = version.status === "NEEDS_REVIEW" && reviewBusy === null;
+
+  // Poll projection status only for VALIDATED versions — that's the
+  // only state where projection ran. NEEDS_REVIEW / FAILED / etc. have
+  // nothing to show.
+  const projectionStatus = useProjectionStatus(
+    version.status === "VALIDATED" ? versionId : null,
+    projectionPollToken,
+  );
 
   return (
     <section className="workspace" aria-labelledby="workspace-title">
@@ -334,6 +355,10 @@ export function ReviewWorkspace({
           >
             {reviewBusy === "validate" ? "Validating…" : "Validate"}
           </button>
+          <ProjectionStatusPill
+            status={projectionStatus.status}
+            done={projectionStatus.done}
+          />
         </div>
       </footer>
     </section>

@@ -133,6 +133,59 @@ def test_reject_route_does_not_project(client_with_projector):
     assert payload["edges"] == []
 
 
+def test_projection_status_completed_after_validate(client_with_projector):
+    """After a successful validate, the tracker entry for the version
+    is ``COMPLETED``. With sync (default) projection that's the state
+    by the time validate returns; with async it's the eventual state.
+    Either way, polling immediately after validate sees a useful entry."""
+    v = _drive_to_needs_review(client_with_projector, filename="status-ok.txt")
+    client_with_projector.post(
+        f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+        json={"reviewer_note": "ok"},
+    )
+
+    resp = client_with_projector.get(f"/knowledge/projection_status/{v['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["version_id"] == v["id"]
+    assert body["status"] == "COMPLETED"
+    assert body["completed_at"] is not None
+    assert body["error"] is None
+
+
+def test_projection_status_failed_after_projector_raises(monkeypatch, services_with_projector):
+    """When projection raises, the tracker entry is ``FAILED`` with the
+    truncated error string. Validate itself still succeeds (fire-and-log)."""
+    client = TestClient(create_app(services_with_projector))
+    v = _drive_to_needs_review(client, filename="status-fail.txt")
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("graph store down")
+
+    monkeypatch.setattr(services_with_projector.knowledge_projector, "project", explode)
+
+    validate_resp = client.post(
+        f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+        json={"reviewer_note": "ok"},
+    )
+    assert validate_resp.status_code == 200
+
+    status_resp = client.get(f"/knowledge/projection_status/{v['id']}")
+    assert status_resp.status_code == 200
+    body = status_resp.json()
+    assert body["status"] == "FAILED"
+    assert body["error"] is not None
+    assert "graph store down" in body["error"]
+
+
+def test_projection_status_404_for_unknown_version(client_with_projector):
+    """No tracker entry → 404, not an empty 200. The UI uses the 404 to
+    fall back to whatever the graph endpoint returns directly (the
+    historical contract for clients that don't poll status)."""
+    resp = client_with_projector.get("/knowledge/projection_status/never-validated")
+    assert resp.status_code == 404
+
+
 def test_validate_succeeds_even_if_projection_raises(monkeypatch, services_with_projector):
     """If the graph store throws, validation still succeeds; the catalog
     is the source of truth and the graph catches up later."""
