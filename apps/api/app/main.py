@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -72,6 +74,7 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
     recover_stuck_extractions(services)
 
     workers: list[ExtractionWorker] = []
+    recovery_task: asyncio.Task[None] | None = None
     if not settings.extraction_inline:
         queue = InMemoryExtractionQueue(maxsize=settings.extraction_queue_size)
         for i in range(settings.extraction_workers):
@@ -91,6 +94,19 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "queue_size": settings.extraction_queue_size,
             },
         )
+        # Periodic stuck-state recovery. Without it, a single transient
+        # worker failure can leave a doc in QUEUED_FOR_EXTRACTION /
+        # EXTRACTING until the next manual restart — exactly the kind
+        # of state operators end up bouncing the process to clear.
+        interval = settings.extraction_recovery_interval_seconds
+        if interval > 0:
+            recovery_task = asyncio.create_task(
+                _periodic_stuck_extraction_recovery(services, interval),
+                name="extraction-recovery",
+            )
+            app.state.extraction_recovery_task = recovery_task
+        else:
+            app.state.extraction_recovery_task = None
     else:
         # Inline mode: leave the attributes unset so callers that try
         # to enqueue receive an explicit ``AttributeError`` rather than
@@ -98,12 +114,50 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
         # check ``settings.extraction_inline`` first and route accordingly.
         app.state.extraction_queue = None
         app.state.extraction_workers = []
+        app.state.extraction_recovery_task = None
 
     try:
         yield
     finally:
+        if recovery_task is not None:
+            recovery_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await recovery_task
         for worker in workers:
             await worker.stop()
+
+
+async def _periodic_stuck_extraction_recovery(
+    services: PipelineServices,
+    interval_seconds: int,
+) -> None:
+    """Re-run stuck-extraction recovery every ``interval_seconds``.
+
+    The scan itself is synchronous + cheap (a single ``list_documents``
+    filtered to the stuck states). Running it on a thread keeps the
+    event loop responsive even if the catalog adapter ever grows a
+    blocking call. Errors are logged and the loop continues — losing
+    one cycle is far better than killing the recovery task.
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            recovered = await asyncio.to_thread(recover_stuck_extractions, services)
+            if recovered:
+                log.info(
+                    "extraction.recovery.periodic_scan_recovered",
+                    extra={"recovered_count": recovered},
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            log.warning(
+                "extraction.recovery.periodic_scan_failed",
+                extra={"error_type": type(exc).__name__},
+            )
 
 
 def create_app(

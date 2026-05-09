@@ -45,6 +45,14 @@ class Settings(BaseSettings):
         # not blow up validation.
         extra="ignore",
         case_sensitive=False,
+        # Treat ``KEY=`` (empty string) the same as the env var being
+        # absent so the field default applies. Without this, every
+        # non-string field in ``.env.example`` (booleans, ints, floats)
+        # crashes pydantic on boot when shipped with the bare assignment
+        # form — see fix #353. The previous workaround commented those
+        # lines out; this flag makes the bare form safe again so a fresh
+        # ``cp .env.example .env && docker compose up`` cannot break boot.
+        env_ignore_empty=True,
     )
 
     # ------------------------------------------------------------------
@@ -161,6 +169,20 @@ class Settings(BaseSettings):
             "is ``true``."
         ),
         ge=1,
+    )
+    extraction_recovery_interval_seconds: int = Field(
+        default=900,
+        validation_alias=AliasChoices("KW_EXTRACTION_RECOVERY_INTERVAL_SECONDS"),
+        description=(
+            "How often (seconds) to re-scan for stuck extractions after "
+            "boot. Without this, a single transient worker failure can "
+            "leave a document in ``QUEUED_FOR_EXTRACTION`` / "
+            "``EXTRACTING`` indefinitely until the next process restart. "
+            "Default ``900`` (15 min). ``0`` disables the periodic scan "
+            "(boot-time recovery still runs). Ignored under "
+            "``extraction_inline=true``."
+        ),
+        ge=0,
     )
     data_dir: str = Field(
         default=".kw-pipeline",

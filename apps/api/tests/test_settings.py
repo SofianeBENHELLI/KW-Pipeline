@@ -259,6 +259,55 @@ class TestProgrammaticConstruction:
         assert s.cors_allowed_origins == ["https://x.example.com"]
 
 
+class TestEnvIgnoreEmpty:
+    """``env_ignore_empty=True`` must be in effect so a bare ``KEY=`` line
+    (the most common .env mistake) cannot crash boot.
+
+    Regression guard for fix #353 — the previous workaround was to comment
+    out every non-string default in ``.env.example``; this flag makes the
+    bare form safe again so any operator's accidental ``KW_PERSISTENT=``
+    falls back to the field's default instead of raising ValidationError.
+    """
+
+    def test_empty_bool_env_var_falls_back_to_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("KW_PERSISTENT", "")
+        s = Settings()
+        # Default for ``persistent`` is ``False``.
+        assert s.persistent is False
+
+    def test_empty_int_env_var_falls_back_to_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("KW_MAX_UPLOAD_BYTES", "")
+        s = Settings()
+        # Default is 50 MiB.
+        assert s.max_upload_bytes == 50 * 1024 * 1024
+
+    def test_empty_float_env_var_falls_back_to_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("KW_ANTHROPIC_TIMEOUT_SECONDS", "")
+        s = Settings()
+        assert s.anthropic_timeout_seconds == 60.0
+
+    def test_explicit_value_still_overrides_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Sanity: ``env_ignore_empty`` only ignores empty strings —
+        # real values still take effect.
+        monkeypatch.setenv("KW_PERSISTENT", "true")
+        monkeypatch.setenv("KW_MAX_UPLOAD_BYTES", "12345")
+        s = Settings()
+        assert s.persistent is True
+        assert s.max_upload_bytes == 12345
+
+
 class TestEnvExampleLoadable:
     """Pin the contract that ``cp docker/.env.example docker/.env`` produces
     a working file.

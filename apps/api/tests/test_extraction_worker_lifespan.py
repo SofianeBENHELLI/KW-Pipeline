@@ -22,11 +22,22 @@ from app.dependencies import build_services
 from app.main import create_app
 
 
-def _services_with(*, extraction_inline: bool, workers: int = 1, queue_size: int = 4):
+def _services_with(
+    *,
+    extraction_inline: bool,
+    workers: int = 1,
+    queue_size: int = 4,
+    recovery_interval: int = 0,
+):
     services = build_services()
     object.__setattr__(services.settings, "extraction_inline", extraction_inline)
     object.__setattr__(services.settings, "extraction_workers", workers)
     object.__setattr__(services.settings, "extraction_queue_size", queue_size)
+    object.__setattr__(
+        services.settings,
+        "extraction_recovery_interval_seconds",
+        recovery_interval,
+    )
     return services
 
 
@@ -61,6 +72,48 @@ def test_async_mode_spawns_workers_and_stops_them_on_shutdown() -> None:
     # TestClient's context manager exit triggers shutdown — every
     # worker task must have stopped cleanly.
     assert all(not worker.running for worker in workers)
+
+
+def test_async_mode_skips_periodic_recovery_when_interval_is_zero() -> None:
+    services = _services_with(extraction_inline=False, recovery_interval=0)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert app.state.extraction_recovery_task is None
+
+
+def test_async_mode_runs_periodic_recovery_when_interval_is_positive() -> None:
+    """Periodic stuck-state recovery loop is wired in async mode.
+
+    We don't wait for a tick (the loop sleeps before the first scan, by
+    design — boot recovery already covered the at-startup pass). We
+    just assert the task exists, is running, and is cancelled cleanly
+    on shutdown. Avoids flakiness from real-time sleeps in unit tests.
+    """
+    services = _services_with(extraction_inline=False, recovery_interval=1)
+    app = create_app(services=services)
+
+    task = None
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        task = app.state.extraction_recovery_task
+        assert task is not None
+        assert not task.done()
+
+    # Lifespan exit cancels the task; assert it stopped without raising.
+    assert task is not None
+    assert task.done()
+    assert task.cancelled() or task.exception() is None
+
+
+def test_inline_mode_does_not_spawn_recovery_task() -> None:
+    services = _services_with(extraction_inline=True, recovery_interval=900)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert app.state.extraction_recovery_task is None
 
 
 def test_inline_mode_existing_extract_route_is_unchanged() -> None:
