@@ -454,3 +454,21 @@ class KnowledgeCatalogResponse(BaseModel):
 
     items: list[KnowledgeCatalogItem]
     next_cursor: str | None = None
+
+
+class ProjectionStatusResponse(BaseModel):
+    """Response body for ``GET /knowledge/projection_status/{version_id}``.
+
+    Used by reviewer UIs to show a "Projecting…" indicator after
+    validate. Polled until ``status`` reaches ``COMPLETED`` or
+    ``FAILED``. The route returns 404 when the tracker has nothing
+    recorded for the version (either projection finished long enough
+    ago that the TTL pruned the entry, or the projection never ran —
+    the knowledge layer is disabled or the version isn't validated).
+    """
+
+    version_id: str
+    status: Literal["IN_PROGRESS", "COMPLETED", "FAILED"]
+    started_at: datetime
+    completed_at: datetime | None = None
+    error: str | None = None

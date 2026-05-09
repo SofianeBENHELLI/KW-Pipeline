@@ -3022,6 +3022,61 @@
         "title": "PersistenceConfig",
         "type": "object"
       },
+      "ProjectionStatusResponse": {
+        "description": "Response body for ``GET /knowledge/projection_status/{version_id}``.\n\nUsed by reviewer UIs to show a \"Projecting…\" indicator after\nvalidate. Polled until ``status`` reaches ``COMPLETED`` or\n``FAILED``. The route returns 404 when the tracker has nothing\nrecorded for the version (either projection finished long enough\nago that the TTL pruned the entry, or the projection never ran —\nthe knowledge layer is disabled or the version isn't validated).",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "IN_PROGRESS",
+              "COMPLETED",
+              "FAILED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "status",
+          "started_at",
+          "completed_at",
+          "error"
+        ],
+        "title": "ProjectionStatusResponse",
+        "type": "object"
+      },
       "PromotedVersion": {
         "description": "One version the worker successfully promoted to VALIDATED.\n\n``score_overall`` is the ``ConfidenceScore.overall`` the router\nused to pick ``auto`` — surfaced so the admin response carries the\naudit-relevant context without a follow-up read.",
         "properties": {
@@ -6789,6 +6844,46 @@
           }
         },
         "summary": "Get Knowledge Neighborhood"
+      }
+    },
+    "/knowledge/projection_status/{version_id}": {
+      "get": {
+        "description": "Return the in-process tracker entry for ``version_id``.\n\nReviewer UIs poll this after validate to know when the graph\nis fully populated. ``404`` means the tracker has nothing\nrecorded — either the projection never ran (knowledge layer\ndisabled, version not validated yet) or the entry's TTL\npruned. Either way the UI should fall back to whatever the\ngraph endpoints return.",
+        "operationId": "knowledge_projection_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectionStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Projection Status"
       }
     },
     "/knowledge/relations/aggregate": {

@@ -55,6 +55,7 @@ from app.schemas.semantic_document import SemanticDocument
 from app.services.document_service import DocumentService
 from app.services.knowledge.entity_extractor import EntityExtractor
 from app.services.knowledge.projector import KnowledgeProjector
+from app.services.projection_status_tracker import ProjectionStatusTracker
 from app.services.sampling_state_store import SamplingBucket, SamplingStateStore
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.validation_metadata_store import ValidationMetadataStore
@@ -92,6 +93,7 @@ class ReviewService:
         entity_extractor: EntityExtractor | None = None,
         validation_metadata: ValidationMetadataStore | None = None,
         sampling_state: SamplingStateStore | None = None,
+        projection_status: ProjectionStatusTracker | None = None,
     ) -> None:
         self._documents = documents
         self._semantic_outputs = semantic_outputs
@@ -103,6 +105,14 @@ class ReviewService:
         # no-op when either is missing.
         self._validation_metadata = validation_metadata
         self._sampling_state = sampling_state
+        # Projection-status tracker (optional). When wired,
+        # ``_fire_knowledge_layer_side_effects`` records start /
+        # complete / fail transitions so reviewer UIs can poll the
+        # ``GET /knowledge/projection_status/{version_id}`` route and
+        # show a "Projecting…" indicator. ``None`` is allowed for the
+        # bare-bones unit tests that build ReviewService without the
+        # tracker — the projection still runs, just unobserved.
+        self._projection_status = projection_status
 
     def handle_validation(
         self,
@@ -399,9 +409,22 @@ class ReviewService:
         exception and log; the catalog stays the source of truth and
         the graph catches up via re-projection or out-of-band
         reconciliation (ADR-012 §3).
+
+        Records start / complete / fail transitions in
+        ``self._projection_status`` (when wired) so reviewer UIs can
+        poll the ``GET /knowledge/projection_status/{version_id}``
+        route and surface a "Projecting…" indicator. The entity
+        extractor's success/failure is rolled into the same tracker
+        entry — operators care about "is the knowledge for this
+        version fully populated", not "which sub-stage finished".
         """
         if self._knowledge_projector is None:
             return
+
+        if self._projection_status is not None:
+            self._projection_status.mark_started(version.id)
+
+        first_failure: str | None = None
 
         document_for_projection = None
         try:
@@ -412,11 +435,12 @@ class ReviewService:
                     version=version,
                     semantic=semantic,
                 )
-        except Exception:
+        except Exception as exc:
             log.exception(
                 "knowledge.projection.failed",
                 extra={"document_id": document_id, "version_id": version.id},
             )
+            first_failure = f"{type(exc).__name__}: {exc}"
 
         # Phase 2 (ADR-013): LLM-driven entity extraction. Same
         # fire-and-log discipline — extraction failures must not roll
@@ -425,6 +449,7 @@ class ReviewService:
         # projector's ``delete_subgraph_for_version`` already cleaned
         # old entity edges, so the upserts are against a fresh slate.
         if self._entity_extractor is None or document_for_projection is None:
+            self._record_projection_outcome(version.id, first_failure)
             return
 
         try:
@@ -444,7 +469,7 @@ class ReviewService:
                     "token_usage": extraction_result.token_usage,
                 },
             )
-        except Exception:
+        except Exception as exc:
             log.exception(
                 "knowledge.entity_extraction.failed",
                 extra={
@@ -452,3 +477,25 @@ class ReviewService:
                     "version_id": version.id,
                 },
             )
+            if first_failure is None:
+                first_failure = f"{type(exc).__name__}: {exc}"
+
+        self._record_projection_outcome(version.id, first_failure)
+
+    def _record_projection_outcome(
+        self,
+        version_id: str,
+        first_failure: str | None,
+    ) -> None:
+        """Flip the tracker's IN_PROGRESS entry to a terminal state.
+
+        Either stage failing flips the entry to FAILED with the first
+        error string (the second is captured in logs). Both succeeding
+        flips it to COMPLETED. Tracker-less callers no-op.
+        """
+        if self._projection_status is None:
+            return
+        if first_failure is None:
+            self._projection_status.mark_completed(version_id)
+        else:
+            self._projection_status.mark_failed(version_id, first_failure)

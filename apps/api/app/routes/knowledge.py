@@ -27,6 +27,7 @@ from app.schemas.knowledge import (
     KnowledgeCatalogResponse,
     KnowledgeGraphPage,
     KnowledgeGraphProjection,
+    ProjectionStatusResponse,
 )
 from app.schemas.knowledge_atlas import AtlasResponse
 from app.schemas.knowledge_explore_search import ExploreSearchResponse
@@ -928,6 +929,38 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
                     break
 
         return KnowledgeCatalogResponse(items=items, next_cursor=next_cursor)
+
+    @router.get(
+        "/knowledge/projection_status/{version_id}",
+        operation_id="knowledge_projection_status",
+        response_model=ProjectionStatusResponse,
+    )
+    def projection_status(
+        version_id: str,
+        _user: User = Depends(require_viewer),
+    ) -> ProjectionStatusResponse:
+        """Return the in-process tracker entry for ``version_id``.
+
+        Reviewer UIs poll this after validate to know when the graph
+        is fully populated. ``404`` means the tracker has nothing
+        recorded — either the projection never ran (knowledge layer
+        disabled, version not validated yet) or the entry's TTL
+        pruned. Either way the UI should fall back to whatever the
+        graph endpoints return.
+        """
+        entry = services.projection_status.get(version_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No projection status recorded for version {version_id!r}.",
+            )
+        return ProjectionStatusResponse(
+            version_id=entry.version_id,
+            status=entry.status.value,
+            started_at=entry.started_at,
+            completed_at=entry.completed_at,
+            error=entry.error,
+        )
 
     return router
 

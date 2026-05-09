@@ -1152,6 +1152,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/projection_status/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Projection Status
+         * @description Return the in-process tracker entry for ``version_id``.
+         *
+         *     Reviewer UIs poll this after validate to know when the graph
+         *     is fully populated. ``404`` means the tracker has nothing
+         *     recorded — either the projection never ran (knowledge layer
+         *     disabled, version not validated yet) or the entry's TTL
+         *     pruned. Either way the UI should fall back to whatever the
+         *     graph endpoints return.
+         */
+        get: operations["knowledge_projection_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/relations/aggregate": {
         parameters: {
             query?: never;
@@ -3021,6 +3048,35 @@ export interface components {
             data_dir: string;
             /** Persistent */
             persistent: boolean;
+        };
+        /**
+         * ProjectionStatusResponse
+         * @description Response body for ``GET /knowledge/projection_status/{version_id}``.
+         *
+         *     Used by reviewer UIs to show a "Projecting…" indicator after
+         *     validate. Polled until ``status`` reaches ``COMPLETED`` or
+         *     ``FAILED``. The route returns 404 when the tracker has nothing
+         *     recorded for the version (either projection finished long enough
+         *     ago that the TTL pruned the entry, or the projection never ran —
+         *     the knowledge layer is disabled or the version isn't validated).
+         */
+        ProjectionStatusResponse: {
+            /** Completed At */
+            completed_at: string | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+            /** Version Id */
+            version_id: string;
         };
         /**
          * PromotedVersion
@@ -5085,6 +5141,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FocusedNeighborhood"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    knowledge_projection_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectionStatusResponse"];
                 };
             };
             /** @description Validation Error */
