@@ -331,6 +331,80 @@ def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0010_taxonomy(conn: sqlite3.Connection) -> None:
+    """Imposed taxonomy storage (ADR-017 + ADR-031, #379).
+
+    Moves the operator-imposed taxonomy out of the
+    ``KW_TAXONOMY_PATH`` YAML-only home into SQLite so it can be
+    versioned, audited, and edited without redeploying. The YAML
+    loader stays in place as a **bootstrap import** path
+    (``POST /admin/taxonomy/import_yaml``) so existing operator
+    workflows keep working.
+
+    Two tables:
+
+    * ``taxonomies`` — one row per published taxonomy version.
+      ``active=1`` on exactly the most recently published row;
+      ``publish`` flips the predecessor to ``active=0`` atomically.
+      ``source`` records ``"yaml_import"`` (bootstrap) vs ``"api"``
+      (admin-route publish) for audit traceability.
+    * ``taxonomy_categories`` — flattened tree pinned to a taxonomy
+      version. ``parent_id`` links a child to its parent; ``NULL``
+      for a top-level category. ``sort_order`` preserves the order
+      operators authored in the YAML or via the future API editor —
+      the read path sorts by ``(parent_id, sort_order)``.
+
+    The ``id`` column is the operator-stable category id
+    (``hr.hybrid_work``) — same shape the YAML loader enforces. The
+    composite primary key ``(taxonomy_id, id)`` allows the same
+    category id to appear under different taxonomy versions
+    simultaneously without conflict.
+
+    Both DDL statements use ``IF NOT EXISTS`` so a re-run on a
+    database that already has the tables is safe (no real-world
+    deployments exist yet, but the convention matches every other
+    migration).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS taxonomies (
+            id              TEXT PRIMARY KEY,
+            schema_version  TEXT NOT NULL,
+            source          TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            created_by      TEXT NOT NULL,
+            active          INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS taxonomy_categories (
+            taxonomy_id     TEXT NOT NULL,
+            id              TEXT NOT NULL,
+            parent_id       TEXT,
+            label           TEXT NOT NULL,
+            description     TEXT NOT NULL,
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (taxonomy_id, id),
+            FOREIGN KEY (taxonomy_id) REFERENCES taxonomies(id) ON DELETE CASCADE
+        )
+        """
+    )
+    # Read pattern: "give me the active taxonomy" — common, single
+    # row at most, justifies the partial index. SQLite supports
+    # WHERE clauses on indexes, so this stays cheap.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taxonomies_active ON taxonomies (active) WHERE active = 1"
+    )
+    # Read pattern: "give me the children of category X under
+    # taxonomy T" — used by tree assembly on read.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taxonomy_categories_parent "
+        "ON taxonomy_categories (taxonomy_id, parent_id, sort_order)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ordered registry — append only, never renumber
 # ---------------------------------------------------------------------------
@@ -408,6 +482,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0007_validation_metadata", _migrate_0007_validation_metadata),
     ("0008_corpus_norms", _migrate_0008_corpus_norms),
     ("0009_sampling_state", _migrate_0009_sampling_state),
+    ("0010_taxonomy", _migrate_0010_taxonomy),
     ("0011_document_relations", _migrate_0011_document_relations),
 ]
 

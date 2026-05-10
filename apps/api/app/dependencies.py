@@ -71,7 +71,12 @@ from app.services.storage_service import (
     InMemoryStorageService,
     StorageService,
 )
-from app.services.taxonomy_loader import load_taxonomy
+from app.services.taxonomy_store import (
+    InMemoryTaxonomyStore,
+    SQLiteTaxonomyStore,
+    TaxonomyStore,
+    import_yaml_into_store,
+)
 from app.services.validation_metadata_store import (
     InMemoryValidationMetadataStore,
     SQLiteValidationMetadataStore,
@@ -282,12 +287,20 @@ class PipelineServices:
     # / ``build_persistent_services`` swap in the configured impl when
     # the env var is set.
     auth: AuthService = field(default_factory=DisabledAuthService)
-    # Operator-imposed taxonomy (ADR-017). Loaded once at startup
-    # from ``KW_TAXONOMY_PATH`` (or left ``None`` when no path is
-    # configured / the file is missing). The ``GET /knowledge/taxonomy``
-    # route reads from this; the classifier (B3) reads from this.
-    # ``None`` means "fall back to auto-deduced clustering".
+    # Operator-imposed taxonomy (ADR-017 + ADR-031, #379). Read from
+    # the SQLite-backed :class:`TaxonomyStore` at boot. Stays cached
+    # in this dataclass for hot-path reads; the ``POST
+    # /admin/taxonomy/import_yaml`` route invalidates the cache by
+    # rebuilding the services container (operator workflow at MVP
+    # cadence). ``None`` means "no taxonomy ever published" → fall
+    # back to auto-deduced clustering.
     taxonomy: Taxonomy | None = None
+    # Backing store for the imposed taxonomy. Always present (the
+    # in-memory default is the test/demo affordance; persistent
+    # builds wire the SQLite-backed implementation). The
+    # ``POST /admin/taxonomy/import_yaml`` route writes through
+    # this store.
+    taxonomy_store: TaxonomyStore = field(default_factory=InMemoryTaxonomyStore)
     # Resolved absolute path the taxonomy was read from, surfaced in
     # the route response so operators can verify which file the API
     # is reading. ``None`` when no taxonomy is configured.
@@ -644,6 +657,62 @@ def _maybe_build_embedding_client(
     )
 
 
+def _bootstrap_taxonomy(
+    settings: Settings,
+    store: TaxonomyStore,
+) -> tuple[Taxonomy | None, str | None]:
+    """Resolve the active taxonomy at boot, with optional one-time YAML import.
+
+    Read order:
+
+    1. Prefer the SQLite-backed store. If a taxonomy has been
+       published, return it.
+    2. If the store is empty AND ``KW_TAXONOMY_PATH`` resolves to a
+       readable YAML file, run a one-time bootstrap import so the
+       imposed taxonomy survives the migration to SQLite without an
+       admin step. Future redeploys hit branch 1 and skip the import.
+    3. If the store is empty and no YAML is configured, return
+       ``(None, None)`` — same shape the YAML-only path returned
+       when ``KW_TAXONOMY_PATH`` was unset.
+
+    The ``source_path`` second-tuple is preserved for backwards
+    compat with the route's ``TaxonomyResponse.source_path`` field;
+    populated only when the bootstrap import actually fired.
+    """
+    active = store.get_active()
+    if active is not None:
+        return active, None
+    yaml_path = settings.taxonomy_path or None
+    if yaml_path is None:
+        return None, None
+    # Bootstrap import — fires once when the operator first redeploys
+    # against a fresh SQLite store but already has their YAML in
+    # place. ``import_yaml_into_store`` returns ``None`` if the YAML
+    # file is missing or empty; that's a valid "not configured yet"
+    # state, not an error.
+    try:
+        new_id = import_yaml_into_store(
+            store,
+            yaml_path=yaml_path,
+            actor="boot.bootstrap_yaml_import",
+        )
+    except Exception:  # noqa: BLE001 - import errors should not stop boot
+        # The YAML loader raises ``TaxonomyLoadError`` for malformed
+        # files. Surface that loudly via logging but don't crash the
+        # process — the operator can fix the YAML and redeploy.
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "knowledge.taxonomy.bootstrap_import_failed",
+            extra={"taxonomy_path": yaml_path},
+        )
+        return None, None
+    if new_id is None:
+        # YAML resolved but file was empty / missing.
+        return None, str(yaml_path)
+    return store.get_active(), str(yaml_path)
+
+
 class ProductionMisconfiguration(RuntimeError):
     """Raised on boot when a production deployment is missing required wiring.
 
@@ -850,7 +919,8 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     llm_pair = _maybe_build_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
-    taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    taxonomy_store: TaxonomyStore = InMemoryTaxonomyStore()
+    taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
     # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
     # scorer is constructed unless the kill switch is on. The lazy
     # provider sources samples from the catalog so unknown buckets
@@ -928,6 +998,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
+        taxonomy_store=taxonomy_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
@@ -971,7 +1042,8 @@ def build_persistent_services(
     llm_pair = _maybe_build_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None
     llm_model = llm_pair[1] if llm_pair else None
-    taxonomy, taxonomy_source_path = load_taxonomy(settings.taxonomy_path or None)
+    taxonomy_store: TaxonomyStore = SQLiteTaxonomyStore(root / "catalog.sqlite3")
+    taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
     # HITL slice 1 wiring (persistent path): SQLite-backed corpus
     # norms + sidecar store. Both reuse the catalog database file so
     # the schema migrations land beside ``document_versions`` and a
@@ -1053,6 +1125,7 @@ def build_persistent_services(
         auth=build_auth_service(settings),
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
+        taxonomy_store=taxonomy_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,

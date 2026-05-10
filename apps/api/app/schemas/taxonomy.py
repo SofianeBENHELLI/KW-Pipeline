@@ -128,11 +128,42 @@ class TaxonomyResponse(BaseModel):
     categories: list[TaxonomyCategory] = Field(default_factory=list)
 
 
+class TaxonomyImportYamlRequest(BaseModel):
+    """Request body for ``POST /admin/taxonomy/import_yaml`` (#379).
+
+    ``path`` is optional — when omitted, the import reads from the
+    server-side ``KW_TAXONOMY_PATH`` setting. When provided, it is
+    read **on the server** at the supplied path; this field is for
+    operators who keep multiple taxonomy YAMLs alongside the data
+    directory and want to point the importer at a specific one
+    without restarting the API.
+    """
+
+    path: str | None = Field(default=None, max_length=4096)
+
+
+class TaxonomyImportYamlResponse(BaseModel):
+    """Response body for ``POST /admin/taxonomy/import_yaml`` (#379).
+
+    Returns the new ``taxonomy_id`` so the operator can correlate
+    with the audit event (``orbital.taxonomy.publish``) and the
+    fields a dashboard would surface (count of categories, source
+    path actually read).
+    """
+
+    taxonomy_id: str
+    source: Literal["yaml_import"]
+    source_path: str
+    category_count: int
+
+
 __all__ = [
     "MAX_TAXONOMY_DEPTH",
     "MAX_TAXONOMY_FANOUT",
     "TAXONOMY_SCHEMA_VERSION",
     "Taxonomy",
     "TaxonomyCategory",
+    "TaxonomyImportYamlRequest",
+    "TaxonomyImportYamlResponse",
     "TaxonomyResponse",
 ]
