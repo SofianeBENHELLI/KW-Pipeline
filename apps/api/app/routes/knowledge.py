@@ -352,14 +352,28 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         source_document_id: str = Query(min_length=1),
         target_document_id: str = Query(min_length=1),
         top_n: int = Query(default=10, ge=1, le=100),
+        refresh: bool = Query(
+            default=False,
+            description=(
+                "When true, bypass the SQLite cache and force a fresh "
+                "Neo4j compute. The new result is written through the "
+                "cache. Used for cache-miss debugging and operator "
+                "drift overrides; defaults false (#380)."
+            ),
+        ),
         current_user: User = Depends(require_viewer),
     ) -> Any:
-        """Synthesised doc-doc relation evidence (#311, ADR-028).
+        """Synthesised doc-doc relation evidence (#311, ADR-028, #380).
 
         Walks the chunk-level edges that cross the boundary between
         ``source_document_id`` and ``target_document_id``, scores each
         via the #314 policy, and returns the top contributing pairs
         sorted by combined score.
+
+        Caching (#380): the SQLite cache serves the row when present.
+        Cache miss falls through to the on-demand Neo4j compute and
+        writes the result back. ``?refresh=true`` always bypasses the
+        cache for a fresh compute (and updates the cache).
 
         D.5: both endpoints must be visible to the caller. Either side
         hidden by the scope filter → 404 (hidden-existence) before the
@@ -378,17 +392,17 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         assert_can_access_document(
             request=request, document_id=target_document_id, user=current_user
         )
-        # ``knowledge_relations`` is always wired in ``build_services``
-        # (graph_store is always-on) — the field is Optional only so
-        # back-compat tests that build ``PipelineServices`` partially
-        # don't break. If we ever land here with ``None``, that's a
-        # construction bug, not a runtime gate.
-        assert services.knowledge_relations is not None
+        # ``document_relations_cache`` is always wired alongside
+        # ``knowledge_relations`` (graph_store is always-on) — the
+        # field is Optional only so back-compat tests that build
+        # ``PipelineServices`` partially don't break.
+        assert services.document_relations_cache is not None
         try:
-            return services.knowledge_relations.explain_aggregate(
+            return services.document_relations_cache.get_or_compute(
                 source_document_id=source_document_id,
                 target_document_id=target_document_id,
                 top_n=top_n,
+                refresh=refresh,
             )
         except RelationNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

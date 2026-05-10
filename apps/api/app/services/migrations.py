@@ -335,6 +335,69 @@ def _migrate_0004_document_scopes(conn: sqlite3.Connection) -> None:
 # Ordered registry — append only, never renumber
 # ---------------------------------------------------------------------------
 
+
+def _migrate_0011_document_relations(conn: sqlite3.Connection) -> None:
+    """Aggregated document↔document relation cache (ADR-031, #380).
+
+    The Explorer's relation-evidence drawer (#318) calls
+    ``GET /knowledge/relations/aggregate`` which today walks the
+    Neo4j chunk-edge layer for every request. At the target catalog
+    scale (100k+ chunks) that's a real cost on every render. This
+    table caches the aggregate per (source, target) pair and is
+    kept fresh by a recompute trigger fired on projection
+    completion.
+
+    Cache shape:
+
+    * ``aggregate_score`` — max of contributing chunk-pair scores
+      (matches the on-demand compute policy in
+      :class:`KnowledgeRelationsService.explain_aggregate`).
+    * ``pair_count`` — un-truncated total of contributing pairs
+      (so the frontend's "+ N more" indicator stays accurate).
+    * ``is_bridge`` / ``is_outlier`` — booleans (stored as INTEGER
+      0/1 for SQLite portability; the read path coerces back).
+    * ``top_pairs_json`` — JSON-encoded list of
+      :class:`ContributingChunkPair` payloads; up to 100 entries
+      stored (the route caps ``top_n`` at 100). Bigger ``top_n``
+      requests fall through to the on-demand compute.
+    * ``computed_at`` — ISO-8601 timestamp of when this row was
+      written. The periodic sweep re-computes rows whose
+      ``computed_at`` is older than the configured window.
+
+    Two rows per pair (one per direction) — keeps the read path
+    branchless and lets the route preserve the caller's
+    ``(source, target)`` orientation in the response without
+    re-orienting contributing pair fields.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_relations (
+            source_document_id  TEXT NOT NULL,
+            target_document_id  TEXT NOT NULL,
+            aggregate_score     REAL NOT NULL,
+            pair_count          INTEGER NOT NULL,
+            is_bridge           INTEGER NOT NULL DEFAULT 0,
+            is_outlier          INTEGER NOT NULL DEFAULT 0,
+            top_pairs_json      TEXT NOT NULL,
+            computed_at         TEXT NOT NULL,
+            PRIMARY KEY (source_document_id, target_document_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_relations_source "
+        "ON document_relations (source_document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_relations_target "
+        "ON document_relations (target_document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_relations_computed_at "
+        "ON document_relations (computed_at)"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
@@ -345,6 +408,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0007_validation_metadata", _migrate_0007_validation_metadata),
     ("0008_corpus_norms", _migrate_0008_corpus_norms),
     ("0009_sampling_state", _migrate_0009_sampling_state),
+    ("0011_document_relations", _migrate_0011_document_relations),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
