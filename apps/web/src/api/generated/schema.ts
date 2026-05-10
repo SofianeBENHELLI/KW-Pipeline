@@ -1434,6 +1434,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/processes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Processes
+         * @description Paginated list of extracted Process summaries (#369, ADR-031).
+         *
+         *     Returns metadata-only :class:`ProcessSummary` rows so the list
+         *     view stays cheap regardless of how many steps a Playbook
+         *     carries. Clients fetch the full :class:`Process` body
+         *     (including ordered steps) via ``GET /processes/{id}``.
+         *
+         *     Cursor codec is shared with the document list — opaque
+         *     base64 over ``(created_at, id)``. Page size defaults to the
+         *     same per-list ceiling used by the catalog (50, capped at
+         *     200) so clients tune one knob across the surface.
+         */
+        get: operations["list_processes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/processes/{process_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Process
+         * @description Return one Process with its ordered steps (#369, ADR-031).
+         *
+         *     Steps come back sorted by ``step_number`` ASC — both store
+         *     backends honour that ordering so callers don't have to
+         *     re-sort. ``404`` when ``process_id`` is unknown.
+         */
+        get: operations["get_process"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ready": {
         parameters: {
             query?: never;
@@ -3286,6 +3340,142 @@ export interface components {
             data_dir: string;
             /** Persistent */
             persistent: boolean;
+        };
+        /**
+         * Process
+         * @description Top-level Process — metadata + ordered steps.
+         *
+         *     ``id`` is server-generated at extraction time. ``owning_document_id``
+         *     and ``version_id`` link the Process back to the SOP it was
+         *     extracted from so a re-extraction can replace the prior Process
+         *     row deterministically (see
+         *     :meth:`app.services.process_store.ProcessStore.delete_for_version`).
+         *
+         *     ``steps`` is sorted by :attr:`ProcessStep.step_number` ASC on
+         *     every read — both backends honour this ordering so consumers
+         *     don't have to re-sort. An empty ``steps`` list is a valid shape
+         *     (e.g. a Process whose extractor recognised the document as
+         *     procedural but couldn't segment it) but the typical case is
+         *     one or more steps.
+         *
+         *     ``created_at`` is set server-side by the store on save; clients
+         *     that pass a value have it overridden so the store remains the
+         *     single source of truth for the timestamp.
+         */
+        Process: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Owning Document Id */
+            owning_document_id: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Steps */
+            steps: components["schemas"]["ProcessStep"][];
+            /** Title */
+            title: string;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ProcessListResponse
+         * @description Response shape for ``GET /processes``.
+         *
+         *     Mirrors the cursor-pagination envelope used by the rest of the
+         *     knowledge surface: ``items`` carries the page; ``next_cursor``
+         *     is opaque and ``None`` at end-of-stream. ``schema_version``
+         *     pins the version of the Process wire shape so clients can
+         *     reject incompatible payloads without inspecting individual
+         *     items.
+         */
+        ProcessListResponse: {
+            /** Items */
+            items: components["schemas"]["ProcessSummary"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+        };
+        /**
+         * ProcessStep
+         * @description One ordered step inside a :class:`Process`.
+         *
+         *     ``step_number`` is 1-indexed (matches how operators write
+         *     "Step 1", "Step 2" in source SOPs) and unique within a Process.
+         *     The compound PK ``(process_id, step_number)`` at the storage
+         *     layer enforces that invariant; this schema enforces ``ge=1`` so
+         *     a malformed payload never reaches the store.
+         *
+         *     ``preconditions`` and ``outcomes`` are free-text bullets — the
+         *     rule of thumb is "what must be true before this step can run"
+         *     and "what is true after". Both default to empty lists rather
+         *     than ``None`` because a step without preconditions is a real
+         *     case (the first step typically has none) and the empty-list
+         *     shape keeps the wire contract uniform for generated clients.
+         *
+         *     ``referenced_tool_id`` is forward-compatible: there is no tools
+         *     table today, so the field is just a free-text identifier the
+         *     extractor can populate when a step explicitly says "invoke
+         *     tool X". A future tool-calling integration (AURA #16) will
+         *     join against a real ``tools`` table; until then, the string is
+         *     stored as-is and treated as opaque.
+         */
+        ProcessStep: {
+            /** Body */
+            body: string;
+            /** Outcomes */
+            outcomes: string[];
+            /** Preconditions */
+            preconditions: string[];
+            /** Referenced Tool Id */
+            referenced_tool_id: string | null;
+            /** Step Number */
+            step_number: number;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ProcessSummary
+         * @description Metadata-only Process row for the list view.
+         *
+         *     The full :class:`Process` payload includes ``steps``, which is
+         *     unbounded in size. ``GET /processes`` returns summaries (no
+         *     steps) so the list response stays cheap even when the catalog
+         *     holds large playbooks; consumers fetch a single Process via
+         *     ``GET /processes/{id}`` to get the ordered step bodies.
+         */
+        ProcessSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Owning Document Id */
+            owning_document_id: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Title */
+            title: string;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * ProjectionStatusResponse
@@ -5660,6 +5850,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+        };
+    };
+    list_processes: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_process: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                process_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Process"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

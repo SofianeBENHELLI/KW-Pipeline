@@ -62,6 +62,11 @@ from app.services.knowledge import (
 )
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
+from app.services.process_store import (
+    InMemoryProcessStore,
+    ProcessStore,
+    SQLiteProcessStore,
+)
 from app.services.projection_status_tracker import ProjectionStatusTracker
 from app.services.review_service import ReviewService
 from app.services.sampling_state_store import (
@@ -312,6 +317,13 @@ class PipelineServices:
     # ``GET /knowledge/claims``; future LLM extractor wiring writes
     # through this store via ``save_claims``.
     claim_store: ClaimStore = field(default_factory=InMemoryClaimStore)
+    # First-class Playbook/Process data model (#369, ADR-031). Always
+    # present (in-memory default for tests / the in-process demo;
+    # persistent builds wire the SQLite-backed implementation).
+    # The ``GET /knowledge/processes`` and
+    # ``GET /knowledge/processes/{id}`` routes read through this
+    # store; the future SOP-aware parser writes to it.
+    process_store: ProcessStore = field(default_factory=InMemoryProcessStore)
     # Resolved absolute path the taxonomy was read from, surfaced in
     # the route response so operators can verify which file the API
     # is reading. ``None`` when no taxonomy is configured.
@@ -933,6 +945,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     taxonomy_store: TaxonomyStore = InMemoryTaxonomyStore()
     taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
     claim_store: ClaimStore = InMemoryClaimStore()
+    process_store: ProcessStore = InMemoryProcessStore()
     # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
     # scorer is constructed unless the kill switch is on. The lazy
     # provider sources samples from the catalog so unknown buckets
@@ -1019,6 +1032,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
         claim_store=claim_store,
+        process_store=process_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
@@ -1070,6 +1084,7 @@ def build_persistent_services(
     # the schema migrations land beside ``document_versions`` and a
     # backup of ``catalog.sqlite3`` carries the metadata along.
     catalog_db_path = root / "catalog.sqlite3"
+    process_store: ProcessStore = SQLiteProcessStore(catalog_db_path)
     persisted_norms_store = SQLiteCorpusNormsStore(catalog_db_path)
     corpus_norms_store: CorpusNormsProvider = LazyCorpusNorms(
         store=persisted_norms_store,
@@ -1153,6 +1168,7 @@ def build_persistent_services(
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
         claim_store=claim_store,
+        process_store=process_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
