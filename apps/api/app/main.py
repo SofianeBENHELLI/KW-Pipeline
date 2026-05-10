@@ -18,6 +18,10 @@ from app.services.extraction_worker import (
     InMemoryExtractionQueue,
 )
 from app.services.knowledge.graph_store import VECTOR_INDEX_NAME
+from app.services.neo4j_backup import (
+    prune_old_neo4j_snapshots,
+    snapshot_neo4j,
+)
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -98,6 +102,31 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.catalog_backup_task = backup_task
 
+    # #381: parallel Neo4j backup task. Disabled by default; operator
+    # opts in via ``KW_NEO4J_BACKUP_INTERVAL_SECONDS > 0``. Boot fails
+    # below if the interval is set but the destination directory is
+    # missing — silent disablement is the failure mode this option
+    # exists to prevent.
+    neo4j_backup_task: asyncio.Task[None] | None = None
+    if settings.neo4j_backup_interval_seconds > 0:
+        if not (settings.neo4j_backup_dir or "").strip():
+            raise RuntimeError(
+                "KW_NEO4J_BACKUP_INTERVAL_SECONDS is set but "
+                "KW_NEO4J_BACKUP_DIR is empty. Configure a writable "
+                "directory for the Neo4j backup task or set the "
+                "interval to 0 to disable. See ADR-031 for the "
+                "disaster-recovery rationale."
+            )
+        neo4j_backup_task = asyncio.create_task(
+            _periodic_neo4j_backup(
+                settings,
+                interval_seconds=settings.neo4j_backup_interval_seconds,
+                retain=settings.neo4j_backup_retain_count,
+            ),
+            name="neo4j-backup",
+        )
+    app.state.neo4j_backup_task = neo4j_backup_task
+
     workers: list[ExtractionWorker] = []
     recovery_task: asyncio.Task[None] | None = None
     if not settings.extraction_inline:
@@ -152,6 +181,10 @@ async def _extraction_worker_lifespan(app: FastAPI) -> AsyncIterator[None]:
             backup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_task
+        if neo4j_backup_task is not None:
+            neo4j_backup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await neo4j_backup_task
         await _drain_background_tasks(
             app.state.background_tasks,
             timeout_seconds=settings.background_task_shutdown_timeout_seconds,
@@ -276,6 +309,94 @@ async def _periodic_catalog_backup(
         except asyncio.CancelledError:  # pragma: no cover - cancellation race
             return
         if outcome == "in_memory":
+            return
+
+
+def _run_one_neo4j_backup_cycle(settings: Settings, retain: int) -> str:
+    """Snapshot Neo4j once and prune old dump subdirectories. Pure-sync (#381).
+
+    Returns ``"ok"`` on success, ``"error"`` on a failed dump (the
+    loop continues so a transient failure doesn't disable backups).
+    Audit emission is structured per ADR-027 conventions:
+    ``ops.neo4j_backup.completed`` on success,
+    ``ops.neo4j_backup.failed`` on dump failure. Operators scrape
+    these via the existing ``GET /admin/audit/events`` route.
+    """
+    import subprocess
+
+    try:
+        dest = snapshot_neo4j(settings)
+    except subprocess.CalledProcessError as exc:
+        log.warning(
+            "ops.neo4j_backup.failed",
+            extra={
+                "command": " ".join(exc.cmd) if exc.cmd else "",
+                "returncode": exc.returncode,
+                "stderr": (exc.stderr or "")[:500],
+                "error_type": "CalledProcessError",
+            },
+        )
+        return "error"
+    except Exception as exc:  # noqa: BLE001 - never let the loop die
+        log.warning(
+            "ops.neo4j_backup.failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "error"
+
+    if dest is None:
+        # ``KW_NEO4J_BACKUP_DIR`` is empty. The lifespan boot guard
+        # prevents this in production wiring; defensive log here for
+        # the off-chance a test path lands here.
+        log.warning(
+            "ops.neo4j_backup.skipped",
+            extra={"reason": "no destination configured"},
+        )
+        return "error"
+
+    log.info(
+        "ops.neo4j_backup.completed",
+        extra={"path": str(dest)},
+    )
+
+    try:
+        pruned = prune_old_neo4j_snapshots(dest.parent, retain=retain)
+    except Exception as exc:  # noqa: BLE001 - prune failure ≠ backup failure
+        log.warning(
+            "ops.neo4j_backup.prune_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        return "ok"
+
+    if pruned:
+        log.info(
+            "ops.neo4j_backup.pruned",
+            extra={"pruned_count": len(pruned)},
+        )
+    return "ok"
+
+
+async def _periodic_neo4j_backup(
+    settings: Settings,
+    *,
+    interval_seconds: int,
+    retain: int,
+) -> None:
+    """Sleep ``interval_seconds`` and run one Neo4j backup cycle, forever.
+
+    Mirrors :func:`_periodic_catalog_backup` for the SQLite catalog
+    (#357). Always continues on a failed cycle — a stuck Neo4j or a
+    transient ``neo4j-admin`` blip should not silently disable
+    backups for the rest of the process lifetime.
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            await asyncio.to_thread(_run_one_neo4j_backup_cycle, settings, retain)
+        except asyncio.CancelledError:  # pragma: no cover - cancellation race
             return
 
 
