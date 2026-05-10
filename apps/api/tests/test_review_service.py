@@ -280,3 +280,123 @@ def test_handle_validation_does_not_roll_back_on_projector_failure():
     assert result.validation_status == "validated"
     final = services.documents.get_version(document_id=document_id, version_id=version_id)
     assert final.status == DocumentVersionStatus.VALIDATED
+
+
+# ─── Defensive branch coverage (audit hygiene) ────────────────────────────────
+
+
+def test_drift_signal_swallows_metadata_lookup_failure():
+    """Defensive branch in ``_maybe_record_drift_event``: a transient
+    lookup failure on ``validation_metadata.get`` must be logged and
+    swallowed — the rejection still completes (ADR-012 fire-and-log).
+    """
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    def _boom(_version_id):
+        raise RuntimeError("metadata store unreachable")
+
+    services.validation_metadata.get = _boom  # type: ignore[method-assign]
+
+    # Rejection must still succeed; the drift bump is best-effort.
+    services.review.handle_rejection(document_id=document_id, version_id=version_id)
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
+    assert final.status == DocumentVersionStatus.REJECTED
+
+
+def test_drift_signal_skipped_when_validation_method_already_set():
+    """A version that the auto-promoter already promoted has
+    ``validation_method != None``; the rejection (which the FSM
+    shouldn't allow on a VALIDATED version anyway) must NOT bump the
+    drift counter — defensive double-promotion guard."""
+    from app.schemas.validation_metadata import ValidationMetadata
+    from app.services.sampling_state_store import SamplingBucket
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    services.validation_metadata.upsert(
+        ValidationMetadata(
+            version_id=version_id,
+            confidence_score=None,
+            routing_decision="auto",
+            validation_method="auto",  # already promoted
+        ),
+    )
+
+    services.review.handle_rejection(document_id=document_id, version_id=version_id)
+    counters = services.sampling_state.read_counters(
+        bucket=SamplingBucket(content_type="text/plain", topic_cluster="_unknown_"),
+    )
+    assert counters.samples_human_after_auto == 0
+
+
+def test_drift_signal_swallows_record_drift_event_failure(monkeypatch):
+    """Defensive branch in ``_maybe_record_drift_event``: if
+    ``sampling_state.record_drift_event`` raises, the rejection must
+    still complete (fire-and-log)."""
+    from app.schemas.validation_metadata import ValidationMetadata
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+    services.validation_metadata.upsert(
+        ValidationMetadata(
+            version_id=version_id,
+            routing_decision="auto",
+        ),
+    )
+
+    def _boom(*, bucket):
+        raise RuntimeError("sampling store down")
+
+    monkeypatch.setattr(services.sampling_state, "record_drift_event", _boom)
+
+    services.review.handle_rejection(document_id=document_id, version_id=version_id)
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
+    assert final.status == DocumentVersionStatus.REJECTED
+
+
+def test_supersede_no_op_when_get_document_returns_none():
+    """Defensive: if the catalog's ``get_document`` returns None
+    mid-supersede (e.g. a race with archive), the supersede helper
+    silently no-ops — the validation has already committed."""
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+
+    original_get = services.documents.get_document
+
+    def _flaky(doc_id):
+        # Drop the document only when called from inside the supersede
+        # helper (after the FSM transition). Serve normally otherwise.
+        version = services.documents.get_version(document_id=document_id, version_id=version_id)
+        if version.status == DocumentVersionStatus.VALIDATED:
+            return None
+        return original_get(doc_id)
+
+    services.documents.get_document = _flaky  # type: ignore[method-assign]
+
+    result = services.review.handle_validation(document_id=document_id, version_id=version_id)
+    assert result.validation_status == "validated"
+
+
+def test_review_service_works_without_projection_status_tracker():
+    """``projection_status=None`` is the bare-bones unit-test path —
+    projection still runs, just unobserved. Covers the no-tracker
+    branch in ``_record_projection_outcome``."""
+    from app.services.knowledge import InMemoryGraphStore, KnowledgeProjector
+    from app.services.review_service import ReviewService
+
+    services = build_services()
+    graph_store = InMemoryGraphStore()
+    projector = KnowledgeProjector(graph_store=graph_store)
+
+    bare_review = ReviewService(
+        documents=services.documents,
+        semantic_outputs=services.semantic_outputs,
+        knowledge_projector=projector,
+        # No projection_status= kwarg → tracker is None.
+    )
+
+    document_id, version_id = _land_version_in_needs_review(services)
+    result = bare_review.handle_validation(document_id=document_id, version_id=version_id)
+    assert result.validation_status == "validated"

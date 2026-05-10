@@ -89,22 +89,13 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run pytest with coverage
-        # NOTE: temporarily 94 (was 95). The uptime-hardening + provider-
-        # concurrency PRs added async background-task scaffolding,
-        # semaphore wrapping, and tracker plumbing where some defensive
-        # ``except Exception`` branches are impractical to trigger from
-        # tests. New code in those PRs sits at 95–100% per file; the
-        # small overall regression is in pre-existing defensive paths
-        # in ``routes/lifecycle.py`` and ``services/review_service.py``
-        # that the new code amplified. Climb back to 95 in a follow-up
-        # that targets the pre-existing uncovered branches.
         run: |
           pytest \
             --cov=app \
             --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=94 \
+            --cov-fail-under=95 \
             --junitxml=pytest-junit.xml
 
       - name: Append coverage to job summary

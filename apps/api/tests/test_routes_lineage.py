@@ -157,3 +157,62 @@ def test_lineage_single_version_family_has_no_superseded_chain():
     assert len(body["versions"]) == 1
     assert body["versions"][0]["is_latest"] is True
     assert body["versions"][0]["superseded_by_version_id"] is None
+
+
+def test_build_lineage_response_with_no_versions_returns_empty_versions_list():
+    """Defensive branch in ``_build_lineage_response``: an empty
+    ``Document.versions`` list (only possible mid-archive race) yields
+    a lineage response with ``versions=[]`` rather than crashing."""
+    from datetime import UTC, datetime
+
+    from app.routes.lifecycle import _build_lineage_response
+    from app.schemas.document import Document
+
+    doc = Document(
+        id="empty-doc",
+        original_filename="empty.txt",
+        latest_version_id="ignored",
+        created_at=datetime.now(UTC),
+        versions=[],
+    )
+
+    response = _build_lineage_response(doc)
+    assert response.document_id == "empty-doc"
+    assert response.family_filename == "empty.txt"
+    assert response.versions == []
+
+
+def test_get_version_including_archived_raises_when_version_id_missing():
+    """``_get_version_including_archived`` resolves a version even on
+    archived documents, but raises ``KeyError`` when the version_id
+    isn't on the document. Pinned with a direct unit test rather than
+    going through HTTP so the helper's contract stays explicit."""
+    import pytest
+
+    from app.dependencies import build_services
+    from app.routes.lifecycle import _get_version_including_archived
+
+    services = build_services()
+    version = services.documents.upload(
+        filename="seed.txt",
+        content_type="text/plain",
+        content=b"unit test seed",
+    )
+
+    # Wrong version_id on a real document → KeyError on the version, not
+    # the document. Catches the line-829 fall-through after the for
+    # loop completes without finding a match.
+    with pytest.raises(KeyError, match="Document version not found"):
+        _get_version_including_archived(
+            services=services,
+            document_id=version.document_id,
+            version_id="nonexistent-version-id",
+        )
+
+    # Wrong document_id → the earlier KeyError at line 825.
+    with pytest.raises(KeyError, match="Document not found"):
+        _get_version_including_archived(
+            services=services,
+            document_id="nonexistent-doc-id",
+            version_id="anything",
+        )
