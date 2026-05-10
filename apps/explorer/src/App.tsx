@@ -34,6 +34,7 @@ import { DetailPanel, type DetailAction, type DetailNode } from "./components/De
 import { DocViewer } from "./components/DocViewer";
 import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
+import { SearchResults, type SearchHit } from "./components/SearchResults";
 import { SettingsModal } from "./components/SettingsModal";
 import { LineageModal } from "./components/LineageModal";
 import {
@@ -42,6 +43,7 @@ import {
   getKnowledgeTaxonomy,
   setSessionTrigger,
 } from "./api/client";
+import { useExploreSearch } from "./state/use-explore-search";
 import {
   taxonomyExportFilename,
   taxonomyResponseToYaml,
@@ -137,6 +139,11 @@ export default function App(): React.ReactElement {
   const [conceptFocus, setConceptFocus] = useState<string>("");
   const [depth, setDepth] = useState<number>(3);
   const [search, setSearch] = useState<string>("");
+  // #319 — server-backed grouped semantic search. The legacy local
+  // typeahead (``searchResults`` below) stays as a fallback when the
+  // backend reports the route disabled (KW_VECTOR_SEARCH_DISABLED).
+  const [validatedOnly, setValidatedOnly] = useState<boolean>(true);
+  const exploreSnapshot = useExploreSearch(search, { apiBaseUrl });
   const [hovered, setHovered] = useState<string | null>(null);
   const [focusRoot, setFocusRoot] = useState<FocusRoot | null>(null);
   const [history, setHistory] = useState<Array<FocusRoot | null>>([]);
@@ -704,8 +711,38 @@ export default function App(): React.ReactElement {
               <Icon name="x" size={11} />
             </button>
           )}
-          {searchResults && (
-            <div className="kx-search-pop">
+          {/* #319 — server-backed multi-kind grouped search.
+              Replaces the legacy local typeahead as the primary
+              affordance. The local ``searchResults`` memo still
+              powers the disabled-fallback popover below so users
+              don't lose all search when Phase 3 is off. */}
+          {exploreSnapshot.state !== "disabled" && (
+            <SearchResults
+              snapshot={exploreSnapshot}
+              validatedOnly={validatedOnly}
+              onToggleValidated={setValidatedOnly}
+              onPick={(hit: SearchHit) => {
+                if (hit.kind === "doc" && hit.documentId) {
+                  selectById(hit.documentId, "doc");
+                } else if (hit.kind === "chunk") {
+                  selectById(hit.id, "chunk");
+                }
+                // Topic hits don't map to the existing DetailPanel
+                // node kinds (concept ≠ topic in the seeded model);
+                // selecting one is a no-op pending #318 (relation
+                // inspector / topic detail). Closing the popover
+                // is still useful as feedback.
+                setSearch("");
+              }}
+            />
+          )}
+          {exploreSnapshot.state === "disabled" && searchResults && (
+            <div className="kx-search-pop" data-testid="kx-search-pop-local">
+              <div className="kx-search-toolbar">
+                <span className="kx-mute">
+                  Vector search disabled — showing local matches.
+                </span>
+              </div>
               <SearchSection
                 title="DOCUMENTS"
                 items={searchResults.docs}
