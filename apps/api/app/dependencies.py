@@ -957,6 +957,13 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         store=document_relations_store,
         relations=knowledge_relations,
     )
+    # #385: wire the cache onto the projector so post-projection
+    # warm fires for every validate. ``None``-safe: when the
+    # knowledge layer is disabled, ``knowledge_projector`` is None
+    # and the cache simply never gets a warm trigger (the route's
+    # cache-miss path still warms on demand).
+    if knowledge_projector is not None:
+        knowledge_projector.set_document_relations_cache(document_relations_cache)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1084,6 +1091,11 @@ def build_persistent_services(
         store=document_relations_store,
         relations=knowledge_relations,
     )
+    # #385: same as build_services — wire the cache onto the
+    # projector so post-projection warm fires for every validate
+    # in the persistent runtime.
+    if knowledge_projector is not None:
+        knowledge_projector.set_document_relations_cache(document_relations_cache)
     return PipelineServices(
         storage=storage,
         documents=documents,

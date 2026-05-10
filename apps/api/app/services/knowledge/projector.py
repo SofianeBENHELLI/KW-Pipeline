@@ -66,6 +66,14 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Avoid an import cycle at runtime — DocumentRelationsCache lives
+    # in app.services and depends on knowledge.relations, which is
+    # adjacent to this module. Forward-referencing the type keeps
+    # the projector's runtime imports unchanged.
+    from app.services.document_relations_cache import DocumentRelationsCache
 
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.knowledge import (
@@ -108,6 +116,7 @@ class KnowledgeProjector:
         chunk_relation_service: ChunkRelationService | None = None,
         topic_clustering_service: TopicClusteringService | None = None,
         embedding_client: EmbeddingClient | None = None,
+        document_relations_cache: DocumentRelationsCache | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -127,6 +136,32 @@ class KnowledgeProjector:
         # bounded by the unique-chunk count of one process; that's fine
         # for the single-API-pod deployment story.
         self._embedding_cache: dict[tuple[str, str], list[float]] = {}
+        # #385: when set, the projector calls ``warm_for_document``
+        # after each successful projection so the document_relations
+        # cache reflects the new graph state. The first read for any
+        # bridged pair becomes a cache hit instead of a slow
+        # on-demand compute. ``None`` preserves the previous
+        # behaviour exactly (the route's cache-miss path still warms
+        # on demand).
+        self._document_relations_cache = document_relations_cache
+
+    def set_document_relations_cache(
+        self,
+        cache: DocumentRelationsCache | None,
+    ) -> None:
+        """Wire the cache after construction (#385).
+
+        ``DocumentRelationsCache`` depends on ``KnowledgeRelationsService``,
+        which itself depends on the same graph store the projector
+        uses. The build order is projector → relations → cache;
+        this setter lets the build wire the cache onto the projector
+        once both exist, without breaking the projector's
+        constructor signature.
+
+        Pass ``None`` to disable warming (used by tests + as the
+        default when knowledge layer is disabled).
+        """
+        self._document_relations_cache = cache
 
     def project(
         self,
@@ -202,6 +237,25 @@ class KnowledgeProjector:
                 "chunk_relation_count": len(relations),
             },
         )
+
+        # #385: warm the document_relations cache for every pair this
+        # document now bridges. Fire-and-log per ADR-012 §3 — a cache
+        # warm failure leaves the structural projection intact; the
+        # next route call falls through to the on-demand compute and
+        # writes back. ``None`` (cache not wired) preserves the
+        # previous behaviour exactly.
+        if self._document_relations_cache is not None:
+            try:
+                self._document_relations_cache.warm_for_document(document.id)
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.document_relations.cache.warm_failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
         # Phase 3 vector RAG: write per-chunk embeddings if Voyage is
         # wired. Fire-and-log per ADR-012 §3 — a Voyage hiccup leaves

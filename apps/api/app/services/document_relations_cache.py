@@ -22,7 +22,10 @@ import logging
 
 from app.schemas.knowledge_relations import AggregatedRelationEvidence
 from app.services.document_relations_store import DocumentRelationsStore
-from app.services.knowledge.relations import KnowledgeRelationsService
+from app.services.knowledge.relations import (
+    KnowledgeRelationsService,
+    RelationNotFound,
+)
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +116,69 @@ class DocumentRelationsCache:
             },
         )
         return _truncate(full_evidence, top_n=top_n)
+
+    def warm_for_document(self, document_id: str) -> int:
+        """Recompute every cache row that names ``document_id`` as
+        either side, then write both directions for each bridged pair
+        (#385).
+
+        Used by the projection-completion hook: when a document's
+        knowledge subgraph is re-projected, every cached aggregate
+        touching it could be stale. Walking the graph store's
+        boundary-docs query returns the up-to-date set; we recompute
+        and upsert each pair (both directions, since the cache
+        stores them independently).
+
+        Returns the number of pair-rows written. Pairs that no
+        longer have any boundary edges (the projection removed the
+        bridge) are skipped via the underlying ``RelationNotFound``
+        — those rows stay stale until a future cache eviction; a
+        future cleanup hook can prune them. Errors on individual
+        pairs are swallowed so one malformed pair can't take down
+        the whole warm pass.
+        """
+        rows_written = 0
+        try:
+            bridged = self._relations.list_bridged_documents(document_id=document_id)
+        except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+            log.warning(
+                "knowledge.document_relations.cache.warm.bridged_failed",
+                extra={"document_id": document_id, "error_type": type(exc).__name__},
+            )
+            return 0
+        for other in bridged:
+            for src, tgt in (
+                (document_id, other),
+                (other, document_id),
+            ):
+                try:
+                    self.refresh(source_document_id=src, target_document_id=tgt)
+                    rows_written += 1
+                except RelationNotFound:
+                    # Race: the bridged set reflects a graph snapshot
+                    # taken inside list_bridged_documents; by the time
+                    # we recompute, the boundary edges may be gone.
+                    # Skip — the next projection catches up.
+                    continue
+                except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                    log.warning(
+                        "knowledge.document_relations.cache.warm.pair_failed",
+                        extra={
+                            "source_document_id": src,
+                            "target_document_id": tgt,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                    continue
+        log.info(
+            "knowledge.document_relations.cache.warm",
+            extra={
+                "document_id": document_id,
+                "bridged_doc_count": len(bridged),
+                "rows_written": rows_written,
+            },
+        )
+        return rows_written
 
 
 def _truncate(
