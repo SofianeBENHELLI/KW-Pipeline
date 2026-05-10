@@ -18,6 +18,7 @@ import type {
   Health,
   KnowledgeGraphPage,
   KnowledgeGraphProjection,
+  ProjectionStatusResponse,
   RawExtraction,
   SemanticDocument,
   TaxonomyResponse,
@@ -107,6 +108,34 @@ async function requestText(
 
 export function getHealth(opts: { baseUrl?: string; signal?: AbortSignal } = {}): Promise<Health> {
   return request<Health>("/health", opts);
+}
+
+/**
+ * GET /knowledge/projection_status/{version_id}
+ *
+ * Returns the in-process tracker entry for a version's knowledge-layer
+ * projection (graph + entity extraction). The Explorer's detail panel
+ * polls this on validated documents to know when the graph is fully
+ * populated; a ``"COMPLETED"`` / ``"FAILED"`` response stops the poll
+ * loop.
+ *
+ * Returns ``null`` on 404 — either projection never ran (knowledge
+ * layer disabled) or the entry was pruned by the TTL. Both are "fall
+ * back to whatever the graph endpoint returns directly", which is the
+ * historical contract for clients that don't poll status.
+ */
+export async function getProjectionStatus(
+  versionId: string,
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<ProjectionStatusResponse | null> {
+  const baseUrl = opts.baseUrl ?? getApiBaseUrl();
+  const path = `/knowledge/projection_status/${encodeURIComponent(versionId)}`;
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, {
+    signal: opts.signal,
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as ProjectionStatusResponse;
 }
 
 /**
