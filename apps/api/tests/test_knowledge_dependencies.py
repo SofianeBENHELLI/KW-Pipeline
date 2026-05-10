@@ -81,6 +81,85 @@ def test_layer_enabled_with_full_neo4j_config_constructs_neo4j_store(
             store.close()
 
 
+# ─── Production-guard contract (ADR-031, #378) ─────────────────────────────
+#
+# When the operator opts into the persistent runtime (KW_PERSISTENT=true)
+# AND turns on the knowledge layer, Neo4j must be configured. The
+# in-memory graph store loses every chunk / edge / embedding on restart,
+# which is fine for the in-process demo but a footgun in production at
+# the target catalog scale (100k+ chunks). The boot guard makes the
+# misconfiguration loud instead of silent.
+
+
+from app.dependencies import ProductionMisconfiguration  # noqa: E402
+
+
+def test_persistent_with_knowledge_layer_but_no_neo4j_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KW_PERSISTENT", "true")
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.delenv("KW_NEO4J_URI", raising=False)
+    monkeypatch.delenv("KW_NEO4J_USER", raising=False)
+
+    with pytest.raises(ProductionMisconfiguration) as excinfo:
+        _maybe_build_knowledge_layer()
+
+    message = str(excinfo.value)
+    # The operator-facing message must point at the env vars they need to
+    # set and at the ADR that explains why.
+    assert "KW_NEO4J_URI" in message
+    assert "KW_NEO4J_USER" in message
+    assert "ADR-031" in message
+
+
+def test_persistent_with_knowledge_layer_off_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KW_PERSISTENT=true + KW_KNOWLEDGE_LAYER_ENABLED=false is a valid
+    posture (operator wants a SQLite-only deployment). The guard fires
+    only when the layer is on without Neo4j."""
+    monkeypatch.setenv("KW_PERSISTENT", "true")
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "false")
+    store, projector = _maybe_build_knowledge_layer()
+    assert isinstance(store, InMemoryGraphStore)
+    assert projector is None
+
+
+def test_persistent_with_full_neo4j_config_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The intended production posture: persistent + knowledge layer +
+    Neo4j wired."""
+    monkeypatch.setenv("KW_PERSISTENT", "true")
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_NEO4J_URI", "bolt://localhost:7687")
+    monkeypatch.setenv("KW_NEO4J_USER", "neo4j")
+    monkeypatch.setenv("KW_NEO4J_PASSWORD", "neo4j")
+
+    store, projector = _maybe_build_knowledge_layer()
+    try:
+        assert isinstance(store, Neo4jGraphStore)
+        assert isinstance(projector, KnowledgeProjector)
+    finally:
+        if isinstance(store, Neo4jGraphStore):
+            store.close()
+
+
+def test_non_persistent_with_knowledge_layer_no_neo4j_still_uses_inmemory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dev / test posture: KW_PERSISTENT=false keeps the in-memory
+    affordance. The guard is production-only."""
+    monkeypatch.setenv("KW_PERSISTENT", "false")
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.delenv("KW_NEO4J_URI", raising=False)
+    monkeypatch.delenv("KW_NEO4J_USER", raising=False)
+    store, projector = _maybe_build_knowledge_layer()
+    assert isinstance(store, InMemoryGraphStore)
+    assert isinstance(projector, KnowledgeProjector)
+
+
 # ─── Phase 3 embedding-client wiring (ADR-015 / #186) ─────────────────────
 
 

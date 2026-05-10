@@ -633,6 +633,16 @@ def _maybe_build_embedding_client(
     )
 
 
+class ProductionMisconfiguration(RuntimeError):
+    """Raised on boot when a production deployment is missing required wiring.
+
+    The single trigger today is ADR-031: ``KW_PERSISTENT=true`` AND
+    ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND no Neo4j configured.
+    Future production-only invariants raise the same exception so the
+    operator-facing message is consistent.
+    """
+
+
 def _maybe_build_knowledge_layer(
     settings: Settings | None = None,
     *,
@@ -648,6 +658,15 @@ def _maybe_build_knowledge_layer(
     When ``embedding_client`` is provided, the projector wires it
     through so the embedding write path activates after each
     structural projection.
+
+    Production guard (ADR-031): when both ``KW_PERSISTENT=true`` and
+    ``KW_KNOWLEDGE_LAYER_ENABLED=true`` are set but no Neo4j URI /
+    user is configured, boot fails with
+    :class:`ProductionMisconfiguration`. Silently falling back to
+    ``InMemoryGraphStore`` in production was never the intent — at
+    the target scale (100k+ chunks) the in-memory store loses every
+    edge / topic / embedding on restart, and operators need the
+    failure to be loud, not silent.
 
     Returns the active ``GraphStore`` (always non-None so the read
     routes have something to query, even if it's empty) plus an
@@ -668,9 +687,21 @@ def _maybe_build_knowledge_layer(
             database=settings.neo4j_database or "neo4j",
         )
     else:
-        # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` without Neo4j config still
-        # turns on projection — useful for in-process demos and tests
-        # without spinning up a database.
+        # Production deployments must wire Neo4j. Dev / test (KW_PERSISTENT=
+        # false) keeps the in-memory affordance. See ADR-031 §"Production
+        # posture" / §"Dev / test posture".
+        if settings.persistent:
+            raise ProductionMisconfiguration(
+                "KW_KNOWLEDGE_LAYER_ENABLED=true with KW_PERSISTENT=true "
+                "requires KW_NEO4J_URI and KW_NEO4J_USER to be set. "
+                "Production deployments cannot fall back to the "
+                "in-memory graph store — chunks, edges, and embeddings "
+                "would not survive restart at the target catalog scale "
+                "(see docs/adr/ADR-031-storage-boundary-sqlite-vs-neo4j.md). "
+                "Either configure Neo4j, set KW_KNOWLEDGE_LAYER_ENABLED=false "
+                "to ship without the knowledge layer, or unset "
+                "KW_PERSISTENT to run the in-process demo."
+            )
         store = InMemoryGraphStore()
     return store, KnowledgeProjector(
         graph_store=store,
