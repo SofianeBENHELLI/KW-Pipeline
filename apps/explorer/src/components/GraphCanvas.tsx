@@ -28,6 +28,7 @@ import {
   DOC_TYPES,
   type ChunkConceptLink,
   type ConceptEdge,
+  type DocEdgeType,
   type ExplorerChunk,
   type ExplorerConcept,
   type ExplorerDocEdge,
@@ -122,6 +123,12 @@ interface GraphCanvasProps {
   onHover: (id: string | null) => void;
   search: string;
   focusRoot: FocusRoot | null;
+  /**
+   * #318 partial — invoked when the user clicks a doc-to-doc edge in
+   * the canvas. Used by App to open the relation evidence drawer.
+   * Optional so consumers without that affordance keep working.
+   */
+  onEdgeClick?: (sourceId: string, targetId: string, edgeType: DocEdgeType) => void;
 }
 
 const CLUSTER_COLOR = (key: string): string => {
@@ -889,6 +896,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   onHover,
   search,
   focusRoot,
+  onEdgeClick,
 }) => {
   const layout = useLayout({
     snapshot,
@@ -1203,19 +1211,57 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             const s = edgeStyle(e.type, theme);
             const hasGradient = e.type === "reference" || e.type === "contains";
             const stroke = hasGradient ? `url(#kx-edge-${i})` : s.stroke;
+            // #318 partial — doc-to-doc edges are clickable when an
+            // ``onEdgeClick`` handler is provided, opening the relation
+            // evidence drawer for the pair. We render a transparent
+            // wider line behind the visible one so the hit area is
+            // forgiving (raw <line> is hard to click). Other edge
+            // kinds (cluster→doc contains, doc→chunk contains,
+            // chunk→concept mentions, concept→concept related) stay
+            // non-interactive — they don't have aggregated evidence
+            // routes behind them.
+            const isDocToDoc =
+              a.kind === "doc" &&
+              b.kind === "doc" &&
+              (e.type === "reference" ||
+                e.type === "similar" ||
+                e.type === "contradict");
+            const clickable = isDocToDoc && onEdgeClick !== undefined && !dim;
             return (
-              <line
-                key={i}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke={stroke}
-                strokeWidth={s.width}
-                strokeDasharray={s.dash}
-                opacity={dim ? 0.06 : 0.7}
-                markerEnd={s.arrow && showArrows ? arrowMarker : undefined}
-              />
+              <g key={i}>
+                {clickable && (
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="transparent"
+                    strokeWidth={Math.max(10, s.width + 8)}
+                    style={{ cursor: "pointer" }}
+                    data-testid="kx-graph-edge-hit"
+                    data-edge-source={e.a}
+                    data-edge-target={e.b}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onEdgeClick?.(e.a, e.b, e.type as DocEdgeType);
+                    }}
+                  >
+                    <title>Show evidence linking these documents</title>
+                  </line>
+                )}
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke={stroke}
+                  strokeWidth={s.width}
+                  strokeDasharray={s.dash}
+                  opacity={dim ? 0.06 : 0.7}
+                  markerEnd={s.arrow && showArrows ? arrowMarker : undefined}
+                  pointerEvents="none"
+                />
+              </g>
             );
           })}
         </g>
