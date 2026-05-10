@@ -15,6 +15,7 @@ import { asApiError, withRetry } from "../../../_shared/api-core";
 import type {
   Document,
   DocumentListResponse,
+  ExploreSearchResponse,
   Health,
   KnowledgeGraphPage,
   KnowledgeGraphProjection,
@@ -249,6 +250,52 @@ export function getKnowledgeGraph(
     baseUrl: opts.baseUrl,
     signal: opts.signal,
   });
+}
+
+/**
+ * GET /knowledge/explore/search
+ *
+ * Multi-kind grouped semantic search (#319 / #313, ADR-028). Returns
+ * results bucketed by kind (chunks / documents / topics / entities /
+ * relations) so the Explorer's search bar can render section-by-section.
+ *
+ * Requires the same gates as ``GET /knowledge/search`` —
+ * ``KW_KNOWLEDGE_LAYER_ENABLED=true`` plus ``VOYAGE_API_KEY``. When
+ * either is missing the route returns 503 with
+ * ``KW_VECTOR_SEARCH_DISABLED``; the caller should surface a "vector
+ * search disabled" panel and fall back to the local typeahead.
+ *
+ * Empty / whitespace queries should not be sent — the route rejects
+ * them with 422; callers should short-circuit before the call.
+ */
+export function exploreSearch(
+  query: string,
+  opts: {
+    chunkLimit?: number;
+    documentLimit?: number;
+    topicLimit?: number;
+    contributingChunksPerDocument?: number;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ExploreSearchResponse> {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  if (opts.chunkLimit !== undefined) params.set("chunk_limit", String(opts.chunkLimit));
+  if (opts.documentLimit !== undefined) {
+    params.set("document_limit", String(opts.documentLimit));
+  }
+  if (opts.topicLimit !== undefined) params.set("topic_limit", String(opts.topicLimit));
+  if (opts.contributingChunksPerDocument !== undefined) {
+    params.set(
+      "contributing_chunks_per_document",
+      String(opts.contributingChunksPerDocument),
+    );
+  }
+  return request<ExploreSearchResponse>(
+    `/knowledge/explore/search?${params.toString()}`,
+    { baseUrl: opts.baseUrl, signal: opts.signal },
+  );
 }
 
 /**

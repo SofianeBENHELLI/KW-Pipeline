@@ -221,3 +221,74 @@ export interface ProjectionStatusResponse {
   completed_at: string | null;
   error: string | null;
 }
+
+/**
+ * Per-group result types for the multi-kind Explorer search
+ * (#319 / #313, ADR-028). Mirrors
+ * ``apps/api/app/schemas/knowledge_explore_search.py``.
+ *
+ * v0.1 ships chunks / documents / topics with content; entities and
+ * relations ride through as empty lists so the wire shape stays
+ * forward-compat for v0.2.
+ *
+ * Trust fields:
+ *   - ``validation_status`` populated only at the document level in
+ *     v0.1 (the backend leaves it ``null`` on chunks). The Explorer
+ *     uses it to drive a "validated only" filter on the document
+ *     group; chunk-level filtering by trust waits for v0.2.
+ *   - ``is_source_backed`` is reserved at every level; ``false`` in
+ *     v0.1.
+ */
+export interface ExploreSearchChunk {
+  chunk_id: string;
+  document_id: string;
+  version_id: string;
+  section_id: string;
+  snippet: string | null;
+  score: number;
+  validation_status: string | null;
+  is_source_backed: boolean;
+}
+
+export interface ExploreSearchDocument {
+  document_id: string;
+  title: string;
+  score: number;
+  validation_status: string | null;
+  is_source_backed: boolean;
+  contributing_chunks: ExploreSearchChunk[];
+}
+
+export interface ExploreSearchTopic {
+  topic_id: string;
+  label: string;
+  keywords: string[];
+  score: number;
+  evidence_chunks: ExploreSearchChunk[];
+}
+
+export interface ExploreSearchEntity {
+  entity_id: string;
+  label: string;
+  score: number;
+  mention_chunks: ExploreSearchChunk[];
+}
+
+export interface ExploreSearchRelation {
+  relation_id: string;
+  kind: string;
+  score: number;
+  reason: string | null;
+  shared_keywords: string[];
+}
+
+export interface ExploreSearchResponse {
+  schema_version: "v0.1";
+  query: string;
+  embedding_model: string;
+  chunks: ExploreSearchChunk[];
+  documents: ExploreSearchDocument[];
+  topics: ExploreSearchTopic[];
+  entities: ExploreSearchEntity[];
+  relations: ExploreSearchRelation[];
+}
