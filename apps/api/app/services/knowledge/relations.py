@@ -238,6 +238,18 @@ class KnowledgeRelationsService:
             raise RelationNotFound(f"Relation {relation_id!r} not found.")
         return _project_edge(edge)
 
+    def list_bridged_documents(self, *, document_id: str) -> list[str]:
+        """Return every other document id sharing a chunk-level
+        boundary edge with ``document_id`` (#385).
+
+        Thin adapter over
+        :meth:`GraphStore.find_document_ids_with_boundary_edges_to`,
+        used by the document_relations cache warm path. Excludes
+        ``document_id`` itself; the underlying store sorts the result
+        for deterministic test ordering.
+        """
+        return self._graph_store.find_document_ids_with_boundary_edges_to(document_id)
+
     def explain_aggregate(
         self,
         *,

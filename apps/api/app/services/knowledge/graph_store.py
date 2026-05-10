@@ -173,6 +173,27 @@ class GraphStore(Protocol):
         translates an empty list into a 404 ``KW_NOT_FOUND``.
         """
 
+    def find_document_ids_with_boundary_edges_to(
+        self,
+        document_id: str,
+    ) -> list[str]:
+        """Return every other document id that shares at least one
+        chunk-level boundary edge with ``document_id``.
+
+        Used by the document_relations cache warm path (#385): when a
+        document's subgraph is re-projected, the warm pass needs to
+        recompute aggregates for every doc on the other side of a
+        boundary edge. Walks the chunk-level edges incident to any
+        chunk of ``document_id`` and collects the distinct
+        ``document_id`` values from the edge's other-end chunk
+        properties.
+
+        Excludes ``document_id`` itself from the result. Returns a
+        sorted list for deterministic test ordering. Empty result
+        means the document has no cross-doc edges (yet) — the warm
+        pass then no-ops.
+        """
+
     def find_node_by_id(self, node_id: str) -> GraphNode | None:
         """Return one node by its stable id, or ``None`` if missing.
 
@@ -433,6 +454,30 @@ class InMemoryGraphStore:
                 or (edge.source_id in target_chunks and edge.target_id in source_chunks)
             ]
             return sorted(edges, key=lambda e: e.id)
+
+    def find_document_ids_with_boundary_edges_to(self, document_id: str) -> list[str]:
+        with self._lock:
+            # Map every chunk node to its owning document id once so the
+            # edge sweep is a single pass rather than nested lookups.
+            chunk_to_doc: dict[str, str] = {}
+            for node in self._nodes.values():
+                if node.kind != "chunk":
+                    continue
+                doc_id = _document_id_from_properties(node.properties)
+                if doc_id is not None:
+                    chunk_to_doc[node.id] = doc_id
+
+            other_docs: set[str] = set()
+            for edge in self._edges.values():
+                source_doc = chunk_to_doc.get(edge.source_id)
+                target_doc = chunk_to_doc.get(edge.target_id)
+                if source_doc is None or target_doc is None:
+                    continue
+                if source_doc == document_id and target_doc != document_id:
+                    other_docs.add(target_doc)
+                elif target_doc == document_id and source_doc != document_id:
+                    other_docs.add(source_doc)
+            return sorted(other_docs)
 
     def find_node_by_id(self, node_id: str) -> GraphNode | None:
         with self._lock:
@@ -808,6 +853,22 @@ class Neo4jGraphStore:
             {"src": source_document_id, "tgt": target_document_id},
         )
         return [_edge_dict_to_edge(row) for row in rows]
+
+    def find_document_ids_with_boundary_edges_to(
+        self, document_id: str
+    ) -> list[str]:  # pragma: no cover - exercised behind pytest -m integration
+        rows = self._read(
+            """
+            MATCH (s:KnowledgeNode {kind: 'chunk', document_id: $doc})
+                  -[:KNOWLEDGE_EDGE]-
+                  (t:KnowledgeNode {kind: 'chunk'})
+            WHERE t.document_id IS NOT NULL AND t.document_id <> $doc
+            RETURN DISTINCT t.document_id AS other_doc
+            ORDER BY other_doc
+            """,
+            {"doc": document_id},
+        )
+        return [str(row["other_doc"]) for row in rows]
 
     def find_node_by_id(  # pragma: no cover - exercised behind pytest -m integration
         self, node_id: str
