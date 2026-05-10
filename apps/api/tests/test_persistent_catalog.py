@@ -778,9 +778,7 @@ def test_sqlite_count_documents_by_latest_status_groups_via_group_by(tmp_path):
         DocumentVersionStatus.SEMANTIC_READY,
         DocumentVersionStatus.NEEDS_REVIEW,
     ):
-        services.documents.update_status(
-            document_id=a.document_id, version_id=a.id, status=status
-        )
+        services.documents.update_status(document_id=a.document_id, version_id=a.id, status=status)
     for status in (
         DocumentVersionStatus.EXTRACTING,
         DocumentVersionStatus.EXTRACTED,
@@ -788,9 +786,7 @@ def test_sqlite_count_documents_by_latest_status_groups_via_group_by(tmp_path):
         DocumentVersionStatus.NEEDS_REVIEW,
         DocumentVersionStatus.VALIDATED,
     ):
-        services.documents.update_status(
-            document_id=b.document_id, version_id=b.id, status=status
-        )
+        services.documents.update_status(document_id=b.document_id, version_id=b.id, status=status)
 
     counts = services.documents.catalog.count_documents_by_latest_status()
     assert counts == {

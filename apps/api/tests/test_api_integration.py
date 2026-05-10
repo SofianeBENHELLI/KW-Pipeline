@@ -22,9 +22,7 @@ def test_metrics_endpoint_returns_zero_filled_buckets_for_empty_catalog():
     # Zero-fill from the enum — every status appears in the response.
     from app.models.document import DocumentVersionStatus
 
-    assert set(body["documents_by_latest_status"]) == {
-        s.value for s in DocumentVersionStatus
-    }
+    assert set(body["documents_by_latest_status"]) == {s.value for s in DocumentVersionStatus}
     assert all(v == 0 for v in body["documents_by_latest_status"].values())
     assert "generated_at" in body
 
