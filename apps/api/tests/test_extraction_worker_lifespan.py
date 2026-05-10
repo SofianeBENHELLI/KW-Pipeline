@@ -272,7 +272,17 @@ def test_run_one_stuck_extraction_recovery_logs_when_recovered(monkeypatch, capl
 def test_periodic_catalog_backup_loop_exits_on_in_memory_outcome() -> None:
     """The loop runs one iteration and exits when the cycle returns
     ``in_memory`` — proves the body of the loop (not just the sleep) is
-    executed."""
+    executed.
+
+    Uses :func:`asyncio.wait_for` with a generous 2-second wall-clock
+    timeout rather than spin-counting event-loop ticks (#384). The
+    loop body uses ``asyncio.to_thread`` which depends on the OS
+    thread scheduler — on a busy CI runner the worker can take more
+    than the previous "20 ticks" budget to hand back, producing
+    spurious "loop did not exit" failures on py3.12. A real timeout
+    surfaces a genuine hang as a clean ``TimeoutError`` while
+    tolerating thread-pool latency variance.
+    """
     import asyncio
 
     from app.main import _periodic_catalog_backup
@@ -282,14 +292,12 @@ def test_periodic_catalog_backup_loop_exits_on_in_memory_outcome() -> None:
         task = asyncio.create_task(
             _periodic_catalog_backup(services, interval_seconds=0, retain=3),
         )
-        # Yield long enough for sleep(0) → cycle → return.
-        for _ in range(20):
-            await asyncio.sleep(0)
-            if task.done():
-                break
-        assert task.done(), "loop did not exit after the in-memory outcome"
-        # Either completed normally (returned None) or was cancelled.
-        assert task.cancelled() or task.exception() is None
+        # 2s is enormous in event-loop time but bounded enough to
+        # surface a real hang; ``wait_for`` re-raises any task
+        # exception so the assertion below is just a defensive
+        # ``done`` check.
+        await asyncio.wait_for(task, timeout=2.0)
+        assert task.done()
 
     asyncio.run(_runner())
 
