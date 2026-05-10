@@ -1173,6 +1173,141 @@
         "title": "ChunkSearchResult",
         "type": "object"
       },
+      "Claim": {
+        "description": "One atomic assertion extracted from a validated document.\n\n``subject_entity_id`` is a soft reference to the entity-id\nconvention emitted by\n:func:`app.services.knowledge.entity_extractor` — a deterministic\n``entity-<sha256[:16]>`` hash. There is no centralised entities\ntable today, so the field is a free-text string and the store\nlayer adds no FK; a future \"entities\" table can introduce one\nwithout changing the wire.\n\n``predicate`` is a free-text string (e.g. ``is_a``,\n``has_property``, ``located_in``) — keeping it open lets the v0.1\nextractor emit any verb the LLM produces. A future controlled\nvocabulary lives at the schema layer (a ``Literal[...]`` swap)\nwhen the consumer set stabilises.\n\n``object_value`` and ``object_entity_id`` are mutually exclusive.\nA literal object (\"ISO 9001 was published in 2015\") sets\n``object_value=\"2015\"``; an entity object (\"Acme acquired\nBeta\") sets ``object_entity_id=\"entity-<hash>\"``. The\n``model_validator`` below enforces XOR.\n\n``confidence`` is a value in [0, 1] reflecting the extractor's\ncertainty in the triple — the same band as the\n:class:`EntityExtractor` confidence field so consumers can apply\na single threshold across both surfaces.\n\n``provenance_chunk_ids`` is the list of section / chunk ids the\ntriple was sourced from. The list is always non-empty; a claim\nwith no provenance is unverifiable and the extractor must skip\nit. Stored on disk as a JSON-encoded array per ADR-031 (SQLite\nis the truth; the JSON column avoids a N:M join table for the\nv1 read API).\n\n``extracted_at`` is set server-side by the store on save — the\nextractor hands the claim in without it (the operator workflow\nhas no notion of \"when did the LLM run\"). The store's\n``save_claims`` populates it before INSERT.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "extracted_at": {
+            "format": "date-time",
+            "title": "Extracted At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "object_entity_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Entity Id"
+          },
+          "object_value": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Value"
+          },
+          "predicate": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Predicate",
+            "type": "string"
+          },
+          "provenance_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Provenance Chunk Ids",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "subject_entity_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Subject Entity Id",
+            "type": "string"
+          },
+          "version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "document_id",
+          "version_id",
+          "subject_entity_id",
+          "predicate",
+          "object_value",
+          "object_entity_id",
+          "confidence",
+          "schema_version",
+          "extracted_at",
+          "provenance_chunk_ids"
+        ],
+        "title": "Claim",
+        "type": "object"
+      },
+      "ClaimsListResponse": {
+        "description": "Response envelope for ``GET /knowledge/claims``.\n\n``next_cursor`` follows the same opaque-cursor pattern as the\nrest of the catalog read paths — the codec lives in\n:mod:`app.services.catalog_store` and clients must treat the\nstring as opaque.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "items",
+          "next_cursor"
+        ],
+        "title": "ClaimsListResponse",
+        "type": "object"
+      },
       "ContributingChunkPair": {
         "description": "One chunk-level edge contributing to an aggregated doc-doc relation.\n\nThe pair carries the edge's evidence (``reason``, ``shared_keywords``)\nplus the combined #314 score so the frontend can rank pairs without\nre-running the scoring policy.",
         "properties": {
@@ -6711,6 +6846,76 @@
           }
         },
         "summary": "Chat With Knowledge"
+      }
+    },
+    "/knowledge/claims": {
+      "get": {
+        "description": "List atomic claims about a subject entity (#368, ADR-031).\n\nReturns the claims (subject–predicate–object atoms with\nprovenance back to the source chunks) that the future LLM\nextractor pass has emitted for ``subject_entity_id``. The\nv0.1 wire shape is gated by ``schema_version`` so a future\nv0.2 evolution lands without silently flowing through to\nv0.1 readers.\n\nPagination follows the same opaque-cursor convention as the\nrest of the catalog read paths. ``next_cursor`` is ``None``\nwhen no more rows exist behind the current page.\n\nRead-only at this slice — write happens via the future\nextractor wiring (filed as a follow-up to this PR). An empty\n``items`` list is a valid response (no claims yet for the\nsubject) and is returned as HTTP 200, mirroring the rest of\nthe knowledge-layer read surface.",
+        "operationId": "list_knowledge_claims",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subject_entity_id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Subject Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Knowledge Claims"
       }
     },
     "/knowledge/explore/search": {

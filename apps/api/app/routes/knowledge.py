@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
+from app.schemas.claim import ClaimsListResponse
 from app.schemas.document import Document
 from app.schemas.knowledge import (
     ChatRequest,
@@ -56,6 +57,10 @@ from app.services.auth import (
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
+from app.services.claim_store import (
+    DEFAULT_CLAIMS_PAGE_LIMIT,
+    MAX_CLAIMS_PAGE_LIMIT,
+)
 from app.services.knowledge.atlas import (
     DEFAULT_BRIDGE_DOCUMENTS,
     DEFAULT_OUTLIER_RELATIONS,
@@ -788,6 +793,50 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             source_path=services.taxonomy_source_path,
             categories=merged,
         )
+
+    @router.get(
+        "/knowledge/claims",
+        operation_id="list_knowledge_claims",
+        response_model=ClaimsListResponse,
+    )
+    def list_knowledge_claims(
+        subject_entity_id: str = Query(min_length=1, max_length=200),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(
+            default=DEFAULT_CLAIMS_PAGE_LIMIT,
+            ge=1,
+            le=MAX_CLAIMS_PAGE_LIMIT,
+        ),
+        _user: User = Depends(require_viewer),
+    ) -> Any:
+        """List atomic claims about a subject entity (#368, ADR-031).
+
+        Returns the claims (subject–predicate–object atoms with
+        provenance back to the source chunks) that the future LLM
+        extractor pass has emitted for ``subject_entity_id``. The
+        v0.1 wire shape is gated by ``schema_version`` so a future
+        v0.2 evolution lands without silently flowing through to
+        v0.1 readers.
+
+        Pagination follows the same opaque-cursor convention as the
+        rest of the catalog read paths. ``next_cursor`` is ``None``
+        when no more rows exist behind the current page.
+
+        Read-only at this slice — write happens via the future
+        extractor wiring (filed as a follow-up to this PR). An empty
+        ``items`` list is a valid response (no claims yet for the
+        subject) and is returned as HTTP 200, mirroring the rest of
+        the knowledge-layer read surface.
+        """
+        try:
+            items, next_cursor = services.claim_store.list_for_subject(
+                subject_entity_id,
+                cursor=cursor,
+                limit=limit,
+            )
+        except InvalidCursor as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid cursor: {exc}") from exc
+        return ClaimsListResponse(items=items, next_cursor=next_cursor)
 
     # ─── EPIC-C C.3 catalog view (ADR-025 §3) ─────────────────────────
     # Appended at the end of the file by convention so the parallel

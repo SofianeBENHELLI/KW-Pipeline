@@ -410,6 +410,74 @@ def _migrate_0010_taxonomy(conn: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _migrate_0012_claims(conn: sqlite3.Connection) -> None:
+    """Atomic Claim/Fact data model (ADR-031, #368).
+
+    Adds the first-class subject–predicate–object atom alongside
+    documents and chunks. Each row is a single assertion extracted
+    from a validated version, with a pointer back to the chunks it
+    was sourced from for evidence drill-down.
+
+    Per ADR-031 ("SQLite is the truth for what was uploaded, parsed,
+    validated, governed"), claims live here rather than in Neo4j —
+    they are governance / audit data, not primary graph traversal
+    data. Future contradiction detection / gap analysis consumers
+    read from this table.
+
+    Schema notes:
+
+    * ``object_value`` and ``object_entity_id`` are mutually exclusive
+      — exactly one is set per row. The Pydantic schema enforces the
+      XOR; the DB schema is permissive (both nullable) so a future
+      migration can relax the rule without a CHECK-constraint
+      rewrite.
+    * ``subject_entity_id`` is a soft reference to the entity-id
+      convention used by ``app.services.knowledge.entity_extractor``
+      (a deterministic ``entity-<sha256[:16]>`` hash). There is no
+      centralised entities table today, so no FK is added — by
+      contrast with ``version_id`` which has a real FK so cascade
+      deletion of a document version cleans its claims.
+    * ``provenance_chunk_ids_json`` stores the list of contributing
+      chunk ids as a JSON-encoded string array. SQLite's JSON1 is
+      sufficient for the v1 ad-hoc queries the read API exposes; a
+      future migration can promote it to a join table without a
+      contract change.
+    * ``schema_version`` is recorded per-row so a future v0.2
+      extractor can co-exist with v0.1 rows during a gradual
+      re-extraction.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS claims (
+            id                          TEXT PRIMARY KEY,
+            document_id                 TEXT NOT NULL,
+            version_id                  TEXT NOT NULL,
+            subject_entity_id           TEXT NOT NULL,
+            predicate                   TEXT NOT NULL,
+            object_value                TEXT,
+            object_entity_id            TEXT,
+            confidence                  REAL NOT NULL,
+            schema_version              TEXT NOT NULL,
+            extracted_at                TEXT NOT NULL,
+            provenance_chunk_ids_json   TEXT NOT NULL,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id)
+        )
+        """
+    )
+    # Read pattern: "every claim about subject X" — primary surface for
+    # the contradiction-detection consumer (filed as the next slice).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_subject_entity_id ON claims (subject_entity_id)"
+    )
+    # Read pattern: "all claims for version V" — used by cascade
+    # deletion (delete_for_version) and the "what changed across
+    # versions" diff consumer.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_claims_version_id ON claims (version_id)")
+    # Read pattern: "every claim with predicate P" — used by the
+    # gap-analysis consumer ("find documents with no `is_a` claim").
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_claims_predicate ON claims (predicate)")
+
+
 def _migrate_0011_document_relations(conn: sqlite3.Connection) -> None:
     """Aggregated document↔document relation cache (ADR-031, #380).
 
@@ -484,6 +552,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0009_sampling_state", _migrate_0009_sampling_state),
     ("0010_taxonomy", _migrate_0010_taxonomy),
     ("0011_document_relations", _migrate_0011_document_relations),
+    ("0012_claims", _migrate_0012_claims),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
