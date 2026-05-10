@@ -204,3 +204,20 @@ export interface TaxonomyResponse {
   source_path: string | null;
   categories: TaxonomyCategory[];
 }
+
+/**
+ * Tracker entry for a knowledge-projection cycle.
+ *
+ * Mirrors ``apps/api/app/schemas/knowledge.py::ProjectionStatusResponse``
+ * (added in #359). Polled by ``useProjectionStatus`` while
+ * ``status === "IN_PROGRESS"`` so the Explorer's detail panel can show
+ * a "Projecting…" indicator on validated documents whose graph is
+ * still being populated.
+ */
+export interface ProjectionStatusResponse {
+  version_id: string;
+  status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+}

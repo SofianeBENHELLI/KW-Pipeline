@@ -17,6 +17,7 @@
 import React from "react";
 
 import { confColor } from "./GraphCanvas";
+import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import {
   CLUSTERS,
   DOC_TYPES,
@@ -31,6 +32,7 @@ import {
   docById,
   docsForConcept,
 } from "../state/explorer-data";
+import { useProjectionStatus } from "../state/use-projection-status";
 import { Icon, ACCENT, NAVY, NAVY2 } from "./icons";
 
 export type DetailKind = "cluster" | "doc" | "chunk" | "concept";
@@ -107,6 +109,22 @@ export const DetailPanel: React.FC<Props> = ({
   React.useEffect(() => {
     activeRowRef.current?.scrollIntoView({ block: "nearest" });
   }, [highlightChunkId]);
+
+  // Resolve the latest VALIDATED version_id once at the top of the
+  // component so the projection-status hook fires unconditionally
+  // (rules of hooks). ``null`` when the selected node isn't a
+  // document, isn't validated, or has no version metadata — the hook
+  // short-circuits to an inert state and the pill renders nothing.
+  const docForProjection = node?.kind === "doc" ? (node.doc ?? docById(snapshot, node.id)) : null;
+  const latestVersionForProjection = docForProjection?.versions?.[
+    (docForProjection.versions?.length ?? 0) - 1
+  ];
+  const projectionVersionId =
+    latestVersionForProjection?.status === "VALIDATED"
+      ? latestVersionForProjection.id
+      : null;
+  const projection = useProjectionStatus(projectionVersionId);
+
   if (!node) {
     return (
       <div className="kx-detail kx-detail-empty">
@@ -152,6 +170,7 @@ export const DetailPanel: React.FC<Props> = ({
               {versionCount > 1 && (
                 <span className="kx-ver-count kx-mute">({versionCount} versions)</span>
               )}
+              <ProjectionStatusPill status={projection.status} done={projection.done} />
             </div>
           </div>
         </div>

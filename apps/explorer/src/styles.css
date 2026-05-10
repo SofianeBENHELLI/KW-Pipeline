@@ -944,6 +944,49 @@ body {
   color: var(--ink-2);
   border: 1px solid var(--line);
 }
+
+/* Projection-status pill on the detail panel header. Renders only
+   when the polling hook has a meaningful state for the latest
+   validated version (see ProjectionStatusPill + useProjectionStatus). */
+.kx-projection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.kx-projection-pill--in-progress {
+  background: #eef2ff;
+  color: #3730a3;
+}
+.kx-projection-pill--completed {
+  background: #ecfdf5;
+  color: #047857;
+}
+.kx-projection-pill--failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  cursor: help;
+}
+.kx-projection-pill__spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: kx-projection-pill-spin 0.9s linear infinite;
+}
+@keyframes kx-projection-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .kx-ver-count {
   font-size: 11px;
   font-style: italic;
