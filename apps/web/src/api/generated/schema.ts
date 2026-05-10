@@ -1325,6 +1325,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics
+         * @description Catalog lifecycle snapshot — see :class:`MetricsResponse` (#96).
+         *
+         *     Unauthenticated by design so monitoring tools can scrape it
+         *     without provisioning an API key. The payload is count-only —
+         *     no document titles or contents — so there's no information
+         *     leak risk on the operator-facing dashboard surface.
+         */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ready": {
         parameters: {
             query?: never;
@@ -2908,6 +2933,42 @@ export interface components {
             format: "json" | "text";
             /** Level */
             level: string;
+        };
+        /**
+         * MetricsResponse
+         * @description Operator-facing snapshot of the catalog's lifecycle distribution.
+         *
+         *     Surfaced by ``GET /metrics`` (#96 first slice). Operators (and
+         *     monitoring tools) can scrape this to answer the everyday "is the
+         *     pipeline backed up" question without paging through the catalog:
+         *
+         *       * ``document_count`` — total non-archived document families.
+         *       * ``documents_by_latest_status`` — same families, bucketed by
+         *         their **latest version's** status. The bucket key matches
+         *         :class:`app.models.document.DocumentVersionStatus`. Buckets
+         *         with zero documents are present in the response (zero-filled
+         *         from the enum) so dashboards don't have to guess at missing
+         *         keys.
+         *       * ``generated_at`` — UTC timestamp of the snapshot. Useful for
+         *         graphing scrape latency / freshness.
+         *
+         *     The endpoint is deliberately count-only and lightweight: a single
+         *     ``GROUP BY`` walks the catalog. Heavier aggregates (per-source,
+         *     per-cluster, queue depth) are deferred until the metrics matter to
+         *     a customer pilot.
+         */
+        MetricsResponse: {
+            /** Document Count */
+            document_count: number;
+            /** Documents By Latest Status */
+            documents_by_latest_status: {
+                [key: string]: number;
+            };
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
         };
         /**
          * NeighborhoodEdge
@@ -5297,6 +5358,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxonomyResponse"];
+                };
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsResponse"];
                 };
             };
         };
