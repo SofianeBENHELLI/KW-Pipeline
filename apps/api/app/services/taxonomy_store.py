@@ -28,16 +28,18 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Literal, Protocol
 
 from app.schemas.taxonomy import Taxonomy, TaxonomyCategory
 from app.services.taxonomy_loader import TaxonomyLoadError, load_taxonomy
 
 # Recorded on the ``taxonomies.source`` column. The set is closed —
 # new sources require both a value here and an audit-event policy
-# decision.
-TAXONOMY_SOURCE_YAML_IMPORT = "yaml_import"
-TAXONOMY_SOURCE_API = "api"
+# decision. Typed as ``Final[Literal[...]]`` so static checkers can
+# pass the constants straight to ``Literal``-typed wire fields like
+# ``TaxonomyImportYamlResponse.source`` without a cast.
+TAXONOMY_SOURCE_YAML_IMPORT: Final[Literal["yaml_import"]] = "yaml_import"
+TAXONOMY_SOURCE_API: Final[Literal["api"]] = "api"
 
 _VALID_SOURCES = frozenset({TAXONOMY_SOURCE_YAML_IMPORT, TAXONOMY_SOURCE_API})
 
