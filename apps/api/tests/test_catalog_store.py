@@ -410,3 +410,91 @@ class TestInMemoryCatalogStoreArtefacts:
         store.save_semantic_document("ver-1", self._semantic(title="Second"))
 
         assert store.get_semantic_document("ver-1").document_profile.title == "Second"
+
+
+class TestCountDocumentsByLatestStatus:
+    """Pin the per-latest-status count contract that powers ``GET /metrics``.
+
+    The shape is shared by both store implementations; SQLite-side
+    coverage lives in ``test_persistent_catalog.py``. Here we cover
+    the in-memory side plus the cross-store invariants (only the
+    latest version is counted; archived rows are excluded; empty
+    catalog returns an empty mapping).
+    """
+
+    def test_empty_catalog_returns_empty_mapping(self):
+        store = InMemoryCatalogStore()
+        assert store.count_documents_by_latest_status() == {}
+
+    def test_buckets_documents_by_their_latest_version_status(self):
+        store = InMemoryCatalogStore()
+        for ix, status in enumerate(
+            [
+                DocumentVersionStatus.NEEDS_REVIEW,
+                DocumentVersionStatus.NEEDS_REVIEW,
+                DocumentVersionStatus.VALIDATED,
+                DocumentVersionStatus.FAILED,
+            ]
+        ):
+            v = _make_version(
+                document_id=f"doc-{ix}",
+                version_id=f"ver-{ix}",
+                sha256=f"{ix:064d}",
+                status=status,
+            )
+            store.save_document_with_version(_make_document(v), v)
+
+        counts = store.count_documents_by_latest_status()
+        assert counts == {
+            DocumentVersionStatus.NEEDS_REVIEW: 2,
+            DocumentVersionStatus.VALIDATED: 1,
+            DocumentVersionStatus.FAILED: 1,
+        }
+
+    def test_counts_the_latest_version_only_not_every_version(self):
+        store = InMemoryCatalogStore()
+        v1 = _make_version(
+            document_id="doc-1",
+            version_id="ver-1",
+            sha256="a" * 64,
+            status=DocumentVersionStatus.SUPERSEDED,
+        )
+        v2 = _make_version(
+            document_id="doc-1",
+            version_id="ver-2",
+            sha256="b" * 64,
+            status=DocumentVersionStatus.VALIDATED,
+        )
+        store.save_document_with_version(_make_document(v1), v1)
+        store.append_version_to_document("doc-1", v2)
+
+        counts = store.count_documents_by_latest_status()
+        # The doc has one SUPERSEDED + one VALIDATED version, but the
+        # bucket key is the *latest* one's status.
+        assert counts == {DocumentVersionStatus.VALIDATED: 1}
+
+    def test_archived_documents_are_excluded(self):
+        store = InMemoryCatalogStore()
+        v_active = _make_version(
+            document_id="doc-active",
+            version_id="ver-a",
+            sha256="a" * 64,
+            status=DocumentVersionStatus.VALIDATED,
+        )
+        v_archived = _make_version(
+            document_id="doc-archived",
+            version_id="ver-z",
+            sha256="z" * 64,
+            status=DocumentVersionStatus.VALIDATED,
+        )
+        store.save_document_with_version(_make_document(v_active), v_active)
+        store.save_document_with_version(_make_document(v_archived), v_archived)
+
+        # Mark the second document as flag-archived (ADR-020 §4) — it
+        # should drop out of the count.
+        from datetime import datetime
+
+        store.documents["doc-archived"].archived_at = datetime.now(UTC)
+
+        counts = store.count_documents_by_latest_status()
+        assert counts == {DocumentVersionStatus.VALIDATED: 1}

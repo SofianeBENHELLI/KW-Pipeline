@@ -106,7 +106,12 @@ from app.schemas.admin_hitl import (
     AdminHITLStateResponse,
     BucketState,
 )
-from app.schemas.document import HealthResponse, ReadinessCheck, ReadyResponse
+from app.schemas.document import (
+    HealthResponse,
+    MetricsResponse,
+    ReadinessCheck,
+    ReadyResponse,
+)
 from app.schemas.scope import Scope
 from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
@@ -349,6 +354,34 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             response.status_code = 503
             return ReadyResponse(status="error", checks=checks)
         return ReadyResponse(status="ok", checks=checks)
+
+    @router.get(
+        "/metrics",
+        operation_id="metrics",
+        response_model=MetricsResponse,
+    )
+    def metrics() -> MetricsResponse:
+        """Catalog lifecycle snapshot — see :class:`MetricsResponse` (#96).
+
+        Unauthenticated by design so monitoring tools can scrape it
+        without provisioning an API key. The payload is count-only —
+        no document titles or contents — so there's no information
+        leak risk on the operator-facing dashboard surface.
+        """
+        counts_by_status = services.documents.catalog.count_documents_by_latest_status()
+        # Zero-fill from the enum so dashboards always see every
+        # bucket key even when nothing's in that lifecycle slot. The
+        # bucket key is the enum's string value (matches the wire
+        # shape used everywhere else in the API).
+        zero_filled: dict[str, int] = {status.value: 0 for status in DocumentVersionStatus}
+        for status, count in counts_by_status.items():
+            zero_filled[status.value] = count
+        total = sum(counts_by_status.values())
+        return MetricsResponse(
+            document_count=total,
+            documents_by_latest_status=zero_filled,
+            generated_at=datetime.now(UTC),
+        )
 
     @router.get(
         "/admin/config",

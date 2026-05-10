@@ -208,6 +208,34 @@ class ReadyResponse(BaseModel):
     checks: dict[str, ReadinessCheck]
 
 
+class MetricsResponse(BaseModel):
+    """Operator-facing snapshot of the catalog's lifecycle distribution.
+
+    Surfaced by ``GET /metrics`` (#96 first slice). Operators (and
+    monitoring tools) can scrape this to answer the everyday "is the
+    pipeline backed up" question without paging through the catalog:
+
+      * ``document_count`` — total non-archived document families.
+      * ``documents_by_latest_status`` — same families, bucketed by
+        their **latest version's** status. The bucket key matches
+        :class:`app.models.document.DocumentVersionStatus`. Buckets
+        with zero documents are present in the response (zero-filled
+        from the enum) so dashboards don't have to guess at missing
+        keys.
+      * ``generated_at`` — UTC timestamp of the snapshot. Useful for
+        graphing scrape latency / freshness.
+
+    The endpoint is deliberately count-only and lightweight: a single
+    ``GROUP BY`` walks the catalog. Heavier aggregates (per-source,
+    per-cluster, queue depth) are deferred until the metrics matter to
+    a customer pilot.
+    """
+
+    document_count: int
+    documents_by_latest_status: dict[str, int]
+    generated_at: datetime
+
+
 # ─── Batch upload (#82) ─────────────────────────────────────────────
 
 

@@ -12,6 +12,56 @@ def test_health_endpoint_returns_ok():
     assert response.json() == {"status": "ok"}
 
 
+def test_metrics_endpoint_returns_zero_filled_buckets_for_empty_catalog():
+    """Empty catalog → every status bucket present at zero (#96 first slice)."""
+    response = TestClient(create_app()).get("/metrics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_count"] == 0
+    # Zero-fill from the enum — every status appears in the response.
+    from app.models.document import DocumentVersionStatus
+
+    assert set(body["documents_by_latest_status"]) == {s.value for s in DocumentVersionStatus}
+    assert all(v == 0 for v in body["documents_by_latest_status"].values())
+    assert "generated_at" in body
+
+
+def test_metrics_endpoint_buckets_uploaded_documents_by_latest_status():
+    """Uploads default to STORED — the corresponding bucket increments."""
+    app = create_app()
+    client = TestClient(app)
+    # Two uploads → two STORED rows.
+    a = client.post(
+        "/documents/upload",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+    )
+    b = client.post(
+        "/documents/upload",
+        files={"file": ("b.txt", b"world", "text/plain")},
+    )
+    assert a.status_code == 200, a.text
+    assert b.status_code == 200, b.text
+
+    body = client.get("/metrics").json()
+    from app.models.document import DocumentVersionStatus
+
+    assert body["document_count"] == 2
+    assert body["documents_by_latest_status"][DocumentVersionStatus.STORED.value] == 2
+    # Other buckets stay at zero — no false-positive lifecycle activity.
+    assert body["documents_by_latest_status"][DocumentVersionStatus.VALIDATED.value] == 0
+
+
+def test_metrics_endpoint_is_unauthenticated_so_monitoring_can_scrape():
+    """Reachable without an auth header — operator dashboards rely on this.
+
+    The route is documented as count-only (no titles / contents) so
+    there's no information leak risk in the open contract.
+    """
+    response = TestClient(create_app()).get("/metrics")
+    assert response.status_code == 200
+
+
 def test_ready_endpoint_reports_catalog_ok_and_neo4j_disabled_by_default():
     client = TestClient(create_app())
 

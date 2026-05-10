@@ -162,6 +162,22 @@ class CatalogStore(Protocol):
     def get_version(self, document_id: str, version_id: str) -> DocumentVersion:
         """Return one version within a document family."""
 
+    def count_documents_by_latest_status(self) -> dict[DocumentVersionStatus, int]:
+        """Return per-latest-status counts of non-archived documents.
+
+        Operator-facing snapshot powering ``GET /metrics`` (#96). The
+        bucket dimension is the **latest version's** status — same
+        semantic the ``status_filter`` argument of ``list_documents``
+        uses, so an operator's "5 awaiting review" metric matches the
+        catalog list when filtered to ``NEEDS_REVIEW``.
+
+        Excludes archived documents (matches the default ``list_documents``
+        view); flag-archived rows are intentionally invisible to
+        operator dashboards. Statuses with zero documents are omitted
+        from the result; callers that need a complete histogram should
+        zero-fill from :class:`DocumentVersionStatus`.
+        """
+
     def update_version_status(
         self,
         document_id: str,
@@ -555,6 +571,17 @@ class InMemoryCatalogStore:
             if version.id == version_id:
                 return version
         raise KeyError("Document version not found.")
+
+    def count_documents_by_latest_status(self) -> dict[DocumentVersionStatus, int]:
+        counts: dict[DocumentVersionStatus, int] = {}
+        for document in self.documents.values():
+            if document.archived_at is not None:
+                continue
+            status = _latest_status(document, self.versions)
+            if status is None:
+                continue
+            counts[status] = counts.get(status, 0) + 1
+        return counts
 
     def update_version_status(
         self,
@@ -1120,6 +1147,35 @@ class SQLiteCatalogStore:
                 raise KeyError("Document not found.")
             raise KeyError("Document version not found.")
         return self._version_from_row(row)
+
+    def count_documents_by_latest_status(self) -> dict[DocumentVersionStatus, int]:
+        # Single GROUP BY against (documents JOIN latest_version) — same
+        # join shape ``list_documents`` uses for ``status_filter``. Cheap
+        # enough to call on every ``GET /metrics`` scrape: SQLite walks
+        # one row per active document, no per-version fan-out.
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT latest.status AS status, COUNT(*) AS cnt
+                FROM documents d
+                JOIN document_versions latest
+                  ON latest.id = d.latest_version_id
+                WHERE d.archived_at IS NULL
+                GROUP BY latest.status
+                """,
+            ).fetchall()
+        counts: dict[DocumentVersionStatus, int] = {}
+        for row in rows:
+            try:
+                status = DocumentVersionStatus(row["status"])
+            except ValueError:
+                # An unknown status string in the catalog is a schema
+                # drift signal; skip rather than crash the metrics
+                # endpoint. The status survives in the raw row and a
+                # future migration audit will surface it.
+                continue
+            counts[status] = int(row["cnt"])
+        return counts
 
     def update_version_status(
         self,

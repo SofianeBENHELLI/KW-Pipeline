@@ -754,3 +754,69 @@ def test_sqlite_find_version_by_hash_skips_purged_rows(tmp_path):
     # original sha256 — a re-upload must take the new-version path.
     original_sha = uploaded.sha256
     assert services.documents.catalog.find_version_by_hash(original_sha) is None
+
+
+def test_sqlite_count_documents_by_latest_status_groups_via_group_by(tmp_path):
+    """SQLite-side parity for the in-memory ``count_documents_by_latest_status``.
+
+    The SQLite path uses a single GROUP BY to avoid an O(N) walk of
+    the catalog, so we exercise it against a multi-status corpus to
+    confirm the JOIN + bucket shape matches the in-memory contract
+    (#96 first slice).
+    """
+    services = build_persistent_services(tmp_path)
+    # Three documents, distinct latest statuses. Walk the FSM to
+    # NEEDS_REVIEW for one and VALIDATED for another so the GROUP BY
+    # has multiple buckets; the third stays at the default STORED.
+    a = services.documents.upload("a.txt", "text/plain", b"a")
+    b = services.documents.upload("b.txt", "text/plain", b"b")
+    services.documents.upload("c.txt", "text/plain", b"c")
+
+    for status in (
+        DocumentVersionStatus.EXTRACTING,
+        DocumentVersionStatus.EXTRACTED,
+        DocumentVersionStatus.SEMANTIC_READY,
+        DocumentVersionStatus.NEEDS_REVIEW,
+    ):
+        services.documents.update_status(document_id=a.document_id, version_id=a.id, status=status)
+    for status in (
+        DocumentVersionStatus.EXTRACTING,
+        DocumentVersionStatus.EXTRACTED,
+        DocumentVersionStatus.SEMANTIC_READY,
+        DocumentVersionStatus.NEEDS_REVIEW,
+        DocumentVersionStatus.VALIDATED,
+    ):
+        services.documents.update_status(document_id=b.document_id, version_id=b.id, status=status)
+
+    counts = services.documents.catalog.count_documents_by_latest_status()
+    assert counts == {
+        DocumentVersionStatus.STORED: 1,
+        DocumentVersionStatus.NEEDS_REVIEW: 1,
+        DocumentVersionStatus.VALIDATED: 1,
+    }
+
+
+def test_sqlite_count_documents_by_latest_status_skips_unknown_status_strings(tmp_path):
+    """Schema drift on the status column shouldn't crash the metrics endpoint."""
+    services = build_persistent_services(tmp_path)
+    services.documents.upload("a.txt", "text/plain", b"a")
+
+    # Inject a synthetic row with a status string the enum doesn't
+    # know about — simulates an old deployment that wrote a now-
+    # removed status value.
+    db_path = tmp_path / "catalog.sqlite3"
+    with sqlite3.connect(db_path) as cn:
+        cn.execute(
+            """
+            UPDATE document_versions
+               SET status = 'NOT_A_REAL_STATUS'
+             WHERE id = (SELECT latest_version_id FROM documents LIMIT 1)
+            """
+        )
+        cn.commit()
+
+    counts = services.documents.catalog.count_documents_by_latest_status()
+    # Unknown row is skipped; the call returns whatever buckets are
+    # still recognisable. With our single doc gone, the result is
+    # an empty mapping.
+    assert counts == {}

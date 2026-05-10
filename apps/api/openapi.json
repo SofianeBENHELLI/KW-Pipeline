@@ -2753,6 +2753,34 @@
         "title": "LoggingConfig",
         "type": "object"
       },
+      "MetricsResponse": {
+        "description": "Operator-facing snapshot of the catalog's lifecycle distribution.\n\nSurfaced by ``GET /metrics`` (#96 first slice). Operators (and\nmonitoring tools) can scrape this to answer the everyday \"is the\npipeline backed up\" question without paging through the catalog:\n\n  * ``document_count`` — total non-archived document families.\n  * ``documents_by_latest_status`` — same families, bucketed by\n    their **latest version's** status. The bucket key matches\n    :class:`app.models.document.DocumentVersionStatus`. Buckets\n    with zero documents are present in the response (zero-filled\n    from the enum) so dashboards don't have to guess at missing\n    keys.\n  * ``generated_at`` — UTC timestamp of the snapshot. Useful for\n    graphing scrape latency / freshness.\n\nThe endpoint is deliberately count-only and lightweight: a single\n``GROUP BY`` walks the catalog. Heavier aggregates (per-source,\nper-cluster, queue depth) are deferred until the metrics matter to\na customer pilot.",
+        "properties": {
+          "document_count": {
+            "title": "Document Count",
+            "type": "integer"
+          },
+          "documents_by_latest_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Documents By Latest Status",
+            "type": "object"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_count",
+          "documents_by_latest_status",
+          "generated_at"
+        ],
+        "title": "MetricsResponse",
+        "type": "object"
+      },
       "NeighborhoodEdge": {
         "description": "One edge in a focused neighborhood, carrying its #314 score.\n\nMirrors the public :class:`GraphEdge` shape (id / kind / endpoints\n/ properties) and adds the per-edge scoring fields the canvas\nconsumes. Score-related fields stay ``None`` for non-deterministic\nedges (structural / topic-membership / has_entity) since the\nscoring policy doesn't apply.",
         "properties": {
@@ -7059,6 +7087,25 @@
           }
         },
         "summary": "Get Knowledge Taxonomy"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Catalog lifecycle snapshot — see :class:`MetricsResponse` (#96).\n\nUnauthenticated by design so monitoring tools can scrape it\nwithout provisioning an API key. The payload is count-only —\nno document titles or contents — so there's no information\nleak risk on the operator-facing dashboard surface.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metrics"
       }
     },
     "/ready": {
