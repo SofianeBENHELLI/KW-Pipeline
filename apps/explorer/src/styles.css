@@ -156,7 +156,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   font-size: 11px;
@@ -171,6 +172,28 @@ body {
 }
 .kx-search-toggle input { margin: 0; cursor: pointer; }
 .kx-search-meta { font-size: 10px; }
+/* #320 partial — minimum-score slider in the search toolbar.
+   Sits between the validated-only toggle and the embedding-model
+   meta so the user can tune the score floor without leaving the
+   typing context. */
+.kx-search-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.kx-search-threshold input[type="range"] {
+  width: 100px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.kx-search-threshold-value {
+  min-width: 32px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--ink-2);
+}
 .kx-search-row--btn {
   display: grid;
   grid-template-columns: 44px 1fr auto;
