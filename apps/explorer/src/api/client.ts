@@ -13,6 +13,7 @@ import { widget } from "@widget-lab/3ddashboard-utils";
 
 import { asApiError, withRetry } from "../../../_shared/api-core";
 import type {
+  AggregatedRelationEvidence,
   Document,
   DocumentListResponse,
   ExploreSearchResponse,
@@ -21,6 +22,7 @@ import type {
   KnowledgeGraphProjection,
   ProjectionStatusResponse,
   RawExtraction,
+  RelationEvidence,
   SemanticDocument,
   TaxonomyResponse,
 } from "./types";
@@ -328,4 +330,61 @@ export function rawFileUrl(
     baseUrl.replace(/\/$/, "") +
     `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/raw`
   );
+}
+
+/**
+ * GET /knowledge/relations/{relation_id}
+ *
+ * Single-edge evidence lookup. ``relation_id`` is the engine's
+ * structural composite (kind:source->target) — it contains ``:`` and
+ * ``->`` separators that MUST be URL-encoded, which
+ * ``encodeURIComponent`` handles.
+ *
+ * Returns ``null`` on 404 — the relation may have been pruned by a
+ * subsequent re-projection. Callers should treat that the same as
+ * "evidence unavailable" rather than an error state.
+ */
+export async function getRelationEvidence(
+  relationId: string,
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<RelationEvidence | null> {
+  const baseUrl = opts.baseUrl ?? getApiBaseUrl();
+  const path = `/knowledge/relations/${encodeURIComponent(relationId)}`;
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, {
+    signal: opts.signal,
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as RelationEvidence;
+}
+
+/**
+ * GET /knowledge/relations/aggregate?source_document_id=X&target_document_id=Y
+ *
+ * Aggregated doc→doc evidence — returns the top contributing chunk
+ * pairs that explain why the projection drew an edge between two
+ * documents. Used by the Explorer's relation evidence drawer.
+ *
+ * Returns ``null`` on 404 — there are no boundary edges between the
+ * two documents (e.g. both belong to the same neighborhood and the
+ * projection didn't materialise a cross-document link). Callers
+ * should treat that the same as "no evidence to show".
+ */
+export async function getAggregateRelationEvidence(
+  sourceDocumentId: string,
+  targetDocumentId: string,
+  opts: { topN?: number; baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<AggregatedRelationEvidence | null> {
+  const baseUrl = opts.baseUrl ?? getApiBaseUrl();
+  const params = new URLSearchParams();
+  params.set("source_document_id", sourceDocumentId);
+  params.set("target_document_id", targetDocumentId);
+  if (opts.topN !== undefined) params.set("top_n", String(opts.topN));
+  const path = `/knowledge/relations/aggregate?${params.toString()}`;
+  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, {
+    signal: opts.signal,
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as AggregatedRelationEvidence;
 }
