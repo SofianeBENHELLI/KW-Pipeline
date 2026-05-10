@@ -208,6 +208,60 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+    neo4j_backup_interval_seconds: int = Field(
+        default=0,
+        validation_alias=AliasChoices("KW_NEO4J_BACKUP_INTERVAL_SECONDS"),
+        description=(
+            "How often (seconds) to dump the Neo4j knowledge graph to "
+            "disk via :data:`neo4j_backup_command`. Default ``0`` "
+            "(disabled — operator opts in based on Neo4j edition + "
+            "deployment topology). At the target catalog scale "
+            "(100k+ chunks, ADR-031) re-projecting from SQLite is "
+            "hours of recovery time, so taking periodic Neo4j dumps "
+            "is the operational way to keep the recovery window short."
+        ),
+        ge=0,
+    )
+    neo4j_backup_retain_count: int = Field(
+        default=7,
+        validation_alias=AliasChoices("KW_NEO4J_BACKUP_RETAIN_COUNT"),
+        description=(
+            "How many Neo4j dumps to keep in :data:`neo4j_backup_dir` "
+            "before pruning the oldest. Default ``7``. Must be "
+            "``>= 1`` when ``neo4j_backup_interval_seconds > 0``."
+        ),
+        ge=1,
+    )
+    neo4j_backup_dir: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_NEO4J_BACKUP_DIR"),
+        description=(
+            "Filesystem directory the Neo4j backup task writes dumps "
+            "into. Each cycle creates a timestamped subdirectory "
+            "(``<dir>/<UTC-iso>/``) and runs the configured command. "
+            "Required when ``neo4j_backup_interval_seconds > 0``; "
+            "boot fails if the interval is set but the directory is "
+            "empty. Subdirectory layout matches what the pruner "
+            "expects."
+        ),
+    )
+    neo4j_backup_command: str = Field(
+        default=("neo4j-admin database dump {database} --to-path={dest_dir}"),
+        validation_alias=AliasChoices("KW_NEO4J_BACKUP_COMMAND"),
+        description=(
+            "Shell command template used to produce one Neo4j dump. "
+            "Placeholders: ``{database}`` (from ``KW_NEO4J_DATABASE``), "
+            "``{dest_dir}`` (the timestamped subdirectory the runner "
+            "creates), ``{timestamp}`` (UTC ISO). Default invokes "
+            "``neo4j-admin database dump`` for a Community edition "
+            "operator running the API on the same host as Neo4j. "
+            "Override for Enterprise online backup, sidecar tooling, "
+            "or a webhook-driven backup orchestrator. The command "
+            "runs via ``subprocess.run`` with ``shell=False``; the "
+            "template is split with :func:`shlex.split` so quoting "
+            "follows POSIX shell rules."
+        ),
+    )
     knowledge_projection_async: bool = Field(
         default=False,
         validation_alias=AliasChoices("KW_KNOWLEDGE_PROJECTION_ASYNC"),
