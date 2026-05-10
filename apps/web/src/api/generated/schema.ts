@@ -1188,12 +1188,17 @@ export interface paths {
         };
         /**
          * Explain Aggregate Relation
-         * @description Synthesised doc-doc relation evidence (#311, ADR-028).
+         * @description Synthesised doc-doc relation evidence (#311, ADR-028, #380).
          *
          *     Walks the chunk-level edges that cross the boundary between
          *     ``source_document_id`` and ``target_document_id``, scores each
          *     via the #314 policy, and returns the top contributing pairs
          *     sorted by combined score.
+         *
+         *     Caching (#380): the SQLite cache serves the row when present.
+         *     Cache miss falls through to the on-demand Neo4j compute and
+         *     writes the result back. ``?refresh=true`` always bypasses the
+         *     cache for a fresh compute (and updates the cache).
          *
          *     D.5: both endpoints must be visible to the caller. Either side
          *     hidden by the scope filter → 404 (hidden-existence) before the
@@ -5252,6 +5257,8 @@ export interface operations {
                 source_document_id: string;
                 target_document_id: string;
                 top_n?: number;
+                /** @description When true, bypass the SQLite cache and force a fresh Neo4j compute. The new result is written through the cache. Used for cache-miss debugging and operator drift overrides; defaults false (#380). */
+                refresh?: boolean;
             };
             header?: never;
             path?: never;

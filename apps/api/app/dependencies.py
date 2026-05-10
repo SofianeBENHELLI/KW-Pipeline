@@ -18,6 +18,12 @@ from app.services.corpus_norms import (
     SQLiteCorpusNormsStore,
 )
 from app.services.document_parser import ParserRegistry, PlainTextParser
+from app.services.document_relations_cache import DocumentRelationsCache
+from app.services.document_relations_store import (
+    DocumentRelationsStore,
+    InMemoryDocumentRelationsStore,
+    SQLiteDocumentRelationsStore,
+)
 from app.services.document_service import DocumentService
 from app.services.document_similarity_service import DocumentSimilarityService
 from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
@@ -247,6 +253,11 @@ class PipelineServices:
     # routes return empty / 404 when the graph store has no matching
     # edges, mirroring the rest of the knowledge-layer read surface.
     knowledge_relations: KnowledgeRelationsService | None = None
+    # Cached aggregate-relation read (#380, ADR-031). Backs
+    # ``GET /knowledge/relations/aggregate``: cache hit serves
+    # SQLite, cache miss falls through to ``knowledge_relations``
+    # and writes back. Always wired alongside ``knowledge_relations``.
+    document_relations_cache: DocumentRelationsCache | None = None
     # Focused neighborhood read service (#310, ADR-028). Always wired
     # in ``build_services``; depends only on ``graph_store`` so the
     # field is Optional only for partial-construction back-compat.
@@ -870,6 +881,12 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         hitl_router=hitl_router,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
+    knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)
+    document_relations_store: DocumentRelationsStore = InMemoryDocumentRelationsStore()
+    document_relations_cache = DocumentRelationsCache(
+        store=document_relations_store,
+        relations=knowledge_relations,
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -890,7 +907,8 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
             knowledge_search=knowledge_search,
             graph_store=graph_store,
         ),
-        knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
+        knowledge_relations=knowledge_relations,
+        document_relations_cache=document_relations_cache,
         knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
         knowledge_explore_search=(
             KnowledgeExploreSearchService(
@@ -988,6 +1006,12 @@ def build_persistent_services(
         hitl_router=hitl_router,
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
+    knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)
+    document_relations_store: DocumentRelationsStore = SQLiteDocumentRelationsStore(catalog_db_path)
+    document_relations_cache = DocumentRelationsCache(
+        store=document_relations_store,
+        relations=knowledge_relations,
+    )
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1008,7 +1032,8 @@ def build_persistent_services(
             knowledge_search=knowledge_search,
             graph_store=graph_store,
         ),
-        knowledge_relations=KnowledgeRelationsService(graph_store=graph_store),
+        knowledge_relations=knowledge_relations,
+        document_relations_cache=document_relations_cache,
         knowledge_neighborhood=KnowledgeNeighborhoodService(graph_store=graph_store),
         knowledge_explore_search=(
             KnowledgeExploreSearchService(

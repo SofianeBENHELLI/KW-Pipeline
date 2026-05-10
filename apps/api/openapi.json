@@ -6916,7 +6916,7 @@
     },
     "/knowledge/relations/aggregate": {
       "get": {
-        "description": "Synthesised doc-doc relation evidence (#311, ADR-028).\n\nWalks the chunk-level edges that cross the boundary between\n``source_document_id`` and ``target_document_id``, scores each\nvia the #314 policy, and returns the top contributing pairs\nsorted by combined score.\n\nD.5: both endpoints must be visible to the caller. Either side\nhidden by the scope filter → 404 (hidden-existence) before the\ngraph walk runs.\n\nReturns 404 with a ``KW_NOT_FOUND`` envelope when the documents\nhave no detectable cross-boundary edges. ``pair_count`` on the\nresponse is the un-truncated total so the frontend can render\na \"+ N more contributing pairs\" indicator.",
+        "description": "Synthesised doc-doc relation evidence (#311, ADR-028, #380).\n\nWalks the chunk-level edges that cross the boundary between\n``source_document_id`` and ``target_document_id``, scores each\nvia the #314 policy, and returns the top contributing pairs\nsorted by combined score.\n\nCaching (#380): the SQLite cache serves the row when present.\nCache miss falls through to the on-demand Neo4j compute and\nwrites the result back. ``?refresh=true`` always bypasses the\ncache for a fresh compute (and updates the cache).\n\nD.5: both endpoints must be visible to the caller. Either side\nhidden by the scope filter → 404 (hidden-existence) before the\ngraph walk runs.\n\nReturns 404 with a ``KW_NOT_FOUND`` envelope when the documents\nhave no detectable cross-boundary edges. ``pair_count`` on the\nresponse is the un-truncated total so the frontend can render\na \"+ N more contributing pairs\" indicator.",
         "operationId": "explain_aggregate_relation",
         "parameters": [
           {
@@ -6949,6 +6949,18 @@
               "minimum": 1,
               "title": "Top N",
               "type": "integer"
+            }
+          },
+          {
+            "description": "When true, bypass the SQLite cache and force a fresh Neo4j compute. The new result is written through the cache. Used for cache-miss debugging and operator drift overrides; defaults false (#380).",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, bypass the SQLite cache and force a fresh Neo4j compute. The new result is written through the cache. Used for cache-miss debugging and operator drift overrides; defaults false (#380).",
+              "title": "Refresh",
+              "type": "boolean"
             }
           }
         ],
