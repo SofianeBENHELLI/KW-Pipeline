@@ -488,6 +488,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/taxonomy/import_yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Taxonomy Import Yaml
+         * @description Import an operator-authored YAML taxonomy into the SQLite
+         *     store and flip it active (#379 / ADR-031).
+         *
+         *     Reads the YAML from ``body.path`` when provided, otherwise
+         *     from the server-side ``KW_TAXONOMY_PATH`` setting. Each call
+         *     publishes a new ``taxonomies`` row regardless of content —
+         *     operators who want at-most-once-per-edit semantics should
+         *     gate the call client-side (or wait for the upcoming
+         *     diff-aware editor).
+         *
+         *     Audits ``orbital.taxonomy.publish`` with the new
+         *     ``taxonomy_id`` + actor + category count so the operator
+         *     dashboard surface can show "who published what when".
+         *
+         *     Errors:
+         *
+         *     * ``404`` when no path is configured (neither in the body
+         *       nor in ``KW_TAXONOMY_PATH``) — the operator gets a clear
+         *       remediation hint.
+         *     * ``422`` when the YAML is malformed (invalid id, duplicate,
+         *       excessive depth, schema version mismatch, etc.) — the
+         *       ``TaxonomyLoadError`` message is surfaced verbatim so the
+         *       author can fix their file.
+         */
+        post: operations["admin_taxonomy_import_yaml"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -3725,6 +3767,43 @@ export interface components {
             path: string;
         };
         /**
+         * TaxonomyImportYamlRequest
+         * @description Request body for ``POST /admin/taxonomy/import_yaml`` (#379).
+         *
+         *     ``path`` is optional — when omitted, the import reads from the
+         *     server-side ``KW_TAXONOMY_PATH`` setting. When provided, it is
+         *     read **on the server** at the supplied path; this field is for
+         *     operators who keep multiple taxonomy YAMLs alongside the data
+         *     directory and want to point the importer at a specific one
+         *     without restarting the API.
+         */
+        TaxonomyImportYamlRequest: {
+            /** Path */
+            path?: string | null;
+        };
+        /**
+         * TaxonomyImportYamlResponse
+         * @description Response body for ``POST /admin/taxonomy/import_yaml`` (#379).
+         *
+         *     Returns the new ``taxonomy_id`` so the operator can correlate
+         *     with the audit event (``orbital.taxonomy.publish``) and the
+         *     fields a dashboard would surface (count of categories, source
+         *     path actually read).
+         */
+        TaxonomyImportYamlResponse: {
+            /** Category Count */
+            category_count: number;
+            /**
+             * Source
+             * @constant
+             */
+            source: "yaml_import";
+            /** Source Path */
+            source_path: string;
+            /** Taxonomy Id */
+            taxonomy_id: string;
+        };
+        /**
          * TaxonomyResponse
          * @description Response shape for ``GET /knowledge/taxonomy``.
          *
@@ -4322,6 +4401,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrbitalPurgeDocumentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_import_yaml: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxonomyImportYamlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyImportYamlResponse"];
                 };
             };
             /** @description Validation Error */

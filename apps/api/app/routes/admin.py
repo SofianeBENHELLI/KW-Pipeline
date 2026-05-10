@@ -113,6 +113,10 @@ from app.schemas.document import (
     ReadyResponse,
 )
 from app.schemas.scope import Scope
+from app.schemas.taxonomy import (
+    TaxonomyImportYamlRequest,
+    TaxonomyImportYamlResponse,
+)
 from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
@@ -122,9 +126,37 @@ from app.services.knowledge.llm_client import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_GEMINI_MODEL,
 )
+from app.services.taxonomy_loader import TaxonomyLoadError
+from app.services.taxonomy_store import (
+    TAXONOMY_SOURCE_YAML_IMPORT,
+    import_yaml_into_store,
+)
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
+
+
+def _settings_taxonomy_path(settings: Settings) -> str:
+    """Resolve the operator-side ``KW_TAXONOMY_PATH`` for the import route.
+
+    Stripped + empty-string handled so a bare ``KW_TAXONOMY_PATH=``
+    in the env-file (per the empty-tolerant convention in
+    ``docker/.env.example``) is treated the same as the env var
+    being unset.
+    """
+    return (settings.taxonomy_path or "").strip()
+
+
+def _count_categories(categories: list) -> int:
+    """Count nodes across a taxonomy tree — recursion of the
+    ``categories[].subcategories`` shape used by the ``Taxonomy``
+    schema. Used for the audit payload + the import response."""
+
+    def walk(node: object) -> int:
+        sub = getattr(node, "subcategories", None) or []
+        return 1 + sum(walk(child) for child in sub)
+
+    return sum(walk(c) for c in categories)
 
 
 def _build_llm_config(settings: Settings) -> LLMConfig:
@@ -381,6 +413,89 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             document_count=total,
             documents_by_latest_status=zero_filled,
             generated_at=datetime.now(UTC),
+        )
+
+    @router.post(
+        "/admin/taxonomy/import_yaml",
+        operation_id="admin_taxonomy_import_yaml",
+        response_model=TaxonomyImportYamlResponse,
+    )
+    def admin_taxonomy_import_yaml(
+        body: TaxonomyImportYamlRequest,
+        user: User = Depends(require_admin),
+    ) -> TaxonomyImportYamlResponse:
+        """Import an operator-authored YAML taxonomy into the SQLite
+        store and flip it active (#379 / ADR-031).
+
+        Reads the YAML from ``body.path`` when provided, otherwise
+        from the server-side ``KW_TAXONOMY_PATH`` setting. Each call
+        publishes a new ``taxonomies`` row regardless of content —
+        operators who want at-most-once-per-edit semantics should
+        gate the call client-side (or wait for the upcoming
+        diff-aware editor).
+
+        Audits ``orbital.taxonomy.publish`` with the new
+        ``taxonomy_id`` + actor + category count so the operator
+        dashboard surface can show "who published what when".
+
+        Errors:
+
+        * ``404`` when no path is configured (neither in the body
+          nor in ``KW_TAXONOMY_PATH``) — the operator gets a clear
+          remediation hint.
+        * ``422`` when the YAML is malformed (invalid id, duplicate,
+          excessive depth, schema version mismatch, etc.) — the
+          ``TaxonomyLoadError`` message is surfaced verbatim so the
+          author can fix their file.
+        """
+        path = (body.path or "").strip() or _settings_taxonomy_path(services.settings)
+        if not path:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=(
+                    "No taxonomy path configured. Provide ``path`` in the "
+                    "request body or set the ``KW_TAXONOMY_PATH`` env var."
+                ),
+            )
+        try:
+            new_id = import_yaml_into_store(
+                services.taxonomy_store,
+                yaml_path=path,
+                actor=user.id,
+            )
+        except TaxonomyLoadError as exc:
+            raise ApiError(
+                status_code=422,
+                code=ErrorCode.UNPROCESSABLE_ENTITY,
+                message=str(exc),
+            ) from exc
+        if new_id is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=(f"Taxonomy file at {path!r} could not be read (missing or empty)."),
+            )
+        # Re-read the active taxonomy so we can report the category
+        # count. Cheap — single SELECT + tree assemble.
+        active = services.taxonomy_store.get_active()
+        category_count = _count_categories(active.categories) if active else 0
+        log.info(
+            "orbital.taxonomy.publish",
+            extra={
+                "taxonomy_id": new_id,
+                "source": TAXONOMY_SOURCE_YAML_IMPORT,
+                "source_path": path,
+                "category_count": category_count,
+                "actor": user.id,
+                "actor_role": user.role,
+            },
+        )
+        return TaxonomyImportYamlResponse(
+            taxonomy_id=new_id,
+            source=TAXONOMY_SOURCE_YAML_IMPORT,
+            source_path=path,
+            category_count=category_count,
         )
 
     @router.get(
