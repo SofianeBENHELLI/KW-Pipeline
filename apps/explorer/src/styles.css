@@ -1424,3 +1424,225 @@ body {
   background: #134f99;
 }
 
+/* ─── Related-document row + relation evidence drawer (#318) ─────────
+   The "Related documents" section now carries a per-row Evidence
+   button that opens an aggregated doc→doc evidence drawer. The row
+   itself splits into a primary ``kx-related-open`` button (full-width,
+   replaces the previous ``<li onClick>``) and a secondary, smaller
+   ``kx-related-evidence`` button. Keeping the open and evidence
+   targets distinct prevents the user from accidentally navigating
+   when they wanted to inspect provenance. */
+.kx-related-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.kx-related-open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  border-radius: 4px;
+  min-width: 0;
+}
+.kx-related-open:hover {
+  background: var(--bg-2);
+}
+.kx-related-evidence {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kx-related-evidence:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+
+.kx-evidence-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 22, 30, 0.45);
+  z-index: 1001;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px;
+}
+.kx-evidence-modal {
+  background: var(--bg);
+  color: var(--ink);
+  width: min(620px, 100%);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.kx-evidence-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.kx-evidence-head-t .kx-kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+.kx-evidence-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  flex-wrap: wrap;
+}
+.kx-evidence-doc {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kx-evidence-arrow {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.kx-evidence-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.kx-evidence-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border-radius: 6px;
+}
+.kx-evidence-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kx-evidence-metric-l {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+.kx-evidence-metric-v {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.kx-evidence-flag {
+  margin-left: auto;
+}
+.kx-evidence-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kx-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kx-evidence-row {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kx-evidence-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kx-evidence-row-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navy);
+}
+.kx-evidence-row-chunks {
+  font-size: 11px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.kx-evidence-row-reason {
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.4;
+}
+.kx-evidence-row-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.kx-tag-static {
+  cursor: default;
+}
+.kx-tag-static:hover {
+  border-color: var(--line);
+  color: inherit;
+}
+.kx-evidence-empty {
+  text-align: center;
+  padding: 24px 12px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.kx-evidence-error {
+  color: var(--bad);
+}
+.kx-evidence-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+}
+/* ``kx-stat-muted`` was previously scoped to the lineage modal only.
+   Promote to a global variant so the evidence drawer's strength
+   badge can use the same neutral palette. */
+.kx-cat-badge.kx-stat-muted {
+  background: var(--bg-3);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+}
+

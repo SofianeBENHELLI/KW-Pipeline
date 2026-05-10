@@ -18,6 +18,7 @@ import React from "react";
 
 import { confColor } from "./GraphCanvas";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
+import { RelationEvidenceDrawer } from "./RelationEvidenceDrawer";
 import {
   CLUSTERS,
   DOC_TYPES,
@@ -110,6 +111,24 @@ export const DetailPanel: React.FC<Props> = ({
     activeRowRef.current?.scrollIntoView({ block: "nearest" });
   }, [highlightChunkId]);
 
+  // #318 partial — state for the relation evidence drawer. Held at the
+  // panel top so the hooks above any early returns stay stable; the
+  // drawer itself only mounts inside the doc branch but the
+  // open/close state needs to survive node-kind changes (clicking
+  // away to a chunk should dismiss the drawer).
+  const [evidencePair, setEvidencePair] = React.useState<
+    | {
+        sourceDocumentId: string;
+        sourceTitle: string;
+        targetDocumentId: string;
+        targetTitle: string;
+      }
+    | null
+  >(null);
+  React.useEffect(() => {
+    setEvidencePair(null);
+  }, [node?.id, node?.kind]);
+
   // Resolve the latest VALIDATED version_id once at the top of the
   // component so the projection-status hook fires unconditionally
   // (rules of hooks). ``null`` when the selected node isn't a
@@ -196,14 +215,41 @@ export const DetailPanel: React.FC<Props> = ({
         </div>
         <div className="kx-section">
           <div className="kx-sec-h">RELATED DOCUMENTS</div>
-          <ul className="kx-list">
+          <ul className="kx-list" data-testid="kx-related-docs">
             {related.map((rd) => (
-              <li key={rd.id} onClick={() => onSelectId(rd.id, "doc")}>
-                <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[rd.type]?.color ?? "#888" }}>
-                  {DOC_TYPES[rd.type]?.short ?? "DOC"}
-                </span>
-                <span className="kx-list-t">{rd.title}</span>
-                <Icon name="chevron-right" size={12} stroke={NAVY2} />
+              <li key={rd.id} className="kx-related-row">
+                <button
+                  type="button"
+                  className="kx-related-open"
+                  onClick={() => onSelectId(rd.id, "doc")}
+                  data-testid="kx-related-open"
+                >
+                  <span
+                    className="kx-doc-chip kx-sm"
+                    style={{ background: DOC_TYPES[rd.type]?.color ?? "#888" }}
+                  >
+                    {DOC_TYPES[rd.type]?.short ?? "DOC"}
+                  </span>
+                  <span className="kx-list-t">{rd.title}</span>
+                  <Icon name="chevron-right" size={12} stroke={NAVY2} />
+                </button>
+                <button
+                  type="button"
+                  className="kx-related-evidence"
+                  title="Show why these documents are linked"
+                  aria-label={`Show evidence linking ${d.title} and ${rd.title}`}
+                  data-testid="kx-related-evidence-btn"
+                  onClick={() =>
+                    setEvidencePair({
+                      sourceDocumentId: d.id,
+                      sourceTitle: d.title,
+                      targetDocumentId: rd.id,
+                      targetTitle: rd.title,
+                    })
+                  }
+                >
+                  Evidence
+                </button>
               </li>
             ))}
             {related.length === 0 && <li className="kx-mute">No related documents</li>}
@@ -295,6 +341,15 @@ export const DetailPanel: React.FC<Props> = ({
             Focus from here
           </button>
         </div>
+        {evidencePair && (
+          <RelationEvidenceDrawer
+            sourceDocumentId={evidencePair.sourceDocumentId}
+            sourceTitle={evidencePair.sourceTitle}
+            targetDocumentId={evidencePair.targetDocumentId}
+            targetTitle={evidencePair.targetTitle}
+            onClose={() => setEvidencePair(null)}
+          />
+        )}
       </div>
     );
   }

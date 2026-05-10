@@ -292,3 +292,76 @@ export interface ExploreSearchResponse {
   entities: ExploreSearchEntity[];
   relations: ExploreSearchRelation[];
 }
+
+/**
+ * Wire shapes for the relation explanation API (#311 / #318, ADR-028).
+ *
+ * Mirrors ``apps/api/app/schemas/knowledge_relations.py``. Used by
+ * the relation evidence drawer (#318) to answer "why does this link
+ * exist?" with score, reason, shared keywords, source chunks, and
+ * citations.
+ *
+ * ``RelationEvidence`` covers single-edge evidence — every stored
+ * graph-edge kind projects onto this one shape. The drawer pattern-
+ * matches on ``provenance_class`` to know which evidence fields to
+ * read (structural / deterministic / llm).
+ *
+ * ``AggregatedRelationEvidence`` synthesises a doc-doc relation from
+ * the chunk-level edges that cross the (source, target) document
+ * boundary; the drawer uses this for the "Related documents" surface
+ * where a single edge id isn't available.
+ */
+export type ProvenanceClass = "structural" | "deterministic" | "llm";
+
+export type StrengthClass = "strong" | "medium" | "weak";
+
+export interface RelationEvidence {
+  relation_id: string;
+  kind: string;
+  provenance_class: ProvenanceClass;
+  source_id: string;
+  target_id: string;
+
+  // Scoring (#314) — populated for DETERMINISTIC edges only.
+  score: number | null;
+  strength_class: StrengthClass | null;
+  is_bridge: boolean | null;
+  is_outlier: boolean | null;
+  contributing_factors: Record<string, number>;
+
+  // Deterministic-edge evidence.
+  reason: string | null;
+  shared_keywords: string[];
+  source_chunk_ids: string[];
+
+  // LLM-edge evidence.
+  confidence: number | null;
+  predicate: string | null;
+  source_section_id: string | null;
+  source_reference_ids: string[];
+
+  // Document context.
+  document_id: string | null;
+  version_id: string | null;
+}
+
+export interface ContributingChunkPair {
+  relation_id: string;
+  kind: string;
+  source_chunk_id: string;
+  target_chunk_id: string;
+  score: number;
+  strength_class: StrengthClass;
+  reason: string;
+  shared_keywords: string[];
+}
+
+export interface AggregatedRelationEvidence {
+  source_document_id: string;
+  target_document_id: string;
+  aggregate_score: number;
+  pair_count: number;
+  top_contributing_pairs: ContributingChunkPair[];
+  is_bridge: boolean;
+  is_outlier: boolean;
+}
