@@ -237,6 +237,35 @@ class Settings(BaseSettings):
             "end-user widen toggle; regulated deployments leave it on."
         ),
     )
+    companion_feedback_wrong_threshold: int = Field(
+        default=3,
+        validation_alias=AliasChoices("KW_COMPANION_FEEDBACK_WRONG_THRESHOLD"),
+        description=(
+            "Re-review trigger threshold for the AURA companion "
+            "feedback bridge (#371 / ADR-029). When a chunk "
+            'accumulates this many ``"wrong"`` reactions within '
+            "``companion_feedback_window_days``, the chunk's parent "
+            "document version is promoted into the Orbital re-review "
+            'queue with reason ``"companion_feedback_wrong"``. '
+            "Default 3 — small enough to catch real signal quickly, "
+            "large enough to ride out a single drive-by complaint. "
+            "Must be >= 1."
+        ),
+        ge=1,
+    )
+    companion_feedback_window_days: int = Field(
+        default=14,
+        validation_alias=AliasChoices("KW_COMPANION_FEEDBACK_WINDOW_DAYS"),
+        description=(
+            'Rolling window (days) for the ``"wrong"`` threshold '
+            "above. Default 14 — long enough that a chunk that drew "
+            "complaints across two weeks still trips the trigger, "
+            "short enough that an answer that's been quietly correct "
+            "for months isn't re-promoted on a single late complaint. "
+            "Must be >= 1."
+        ),
+        ge=1,
+    )
     background_task_shutdown_timeout_seconds: float = Field(
         default=30.0,
         validation_alias=AliasChoices("KW_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_SECONDS"),
