@@ -460,7 +460,7 @@ def _migrate_0012_claims(conn: sqlite3.Connection) -> None:
             schema_version              TEXT NOT NULL,
             extracted_at                TEXT NOT NULL,
             provenance_chunk_ids_json   TEXT NOT NULL,
-            FOREIGN KEY (version_id) REFERENCES document_versions(id)
+            FOREIGN KEY (version_id) REFERENCES document_versions(id) ON DELETE CASCADE
         )
         """
     )

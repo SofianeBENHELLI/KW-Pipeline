@@ -380,6 +380,54 @@ def test_store_default_page_limit_constant_is_sane() -> None:
     assert 0 < DEFAULT_CLAIMS_PAGE_LIMIT <= 200
 
 
+# ─── FK contract: cascade on parent delete + reject orphan inserts ─
+
+
+def test_sqlite_store_rejects_claim_with_unknown_version_id(tmp_path: Path) -> None:
+    """The migration declares ``FOREIGN KEY (version_id) REFERENCES
+    document_versions(id) ON DELETE CASCADE`` and ``_connect`` enables
+    ``PRAGMA foreign_keys = ON`` — inserting a claim against a
+    version_id that doesn't exist must raise an integrity error
+    rather than silently writing an orphan row."""
+    db_path = tmp_path / "catalog.sqlite3"
+    _seed_sqlite_schema(db_path)
+    store = SQLiteClaimStore(db_path)
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_claims([_make_claim(version_id="ver-does-not-exist")])
+
+
+def test_sqlite_store_cascade_deletes_claims_when_parent_version_deleted(
+    tmp_path: Path,
+) -> None:
+    """Deleting a ``document_versions`` row must cascade to the
+    ``claims`` table per the migration's documented contract — claims
+    don't outlive their version."""
+    db_path = tmp_path / "catalog.sqlite3"
+    _seed_sqlite_schema(db_path)
+    store = SQLiteClaimStore(db_path)
+    store.save_claims(
+        [
+            _make_claim(claim_id="c-1", version_id="ver-1"),
+            _make_claim(claim_id="c-2", version_id="ver-2"),
+        ]
+    )
+
+    # Delete one parent version directly — bypasses the catalog API
+    # so we exercise the FK behaviour, not the application code.
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("DELETE FROM document_versions WHERE id = ?", ("ver-1",))
+    finally:
+        conn.close()
+
+    # Claims for ver-1 vanished; ver-2 still has its claim.
+    items_v1, _ = store.list_for_subject(subject_entity_id="entity-aaa111")
+    surviving_versions = {c.version_id for c in items_v1}
+    assert "ver-1" not in surviving_versions
+    assert "ver-2" in surviving_versions
+
+
 # ─── Route: GET /knowledge/claims ─────────────────────────────────
 
 
