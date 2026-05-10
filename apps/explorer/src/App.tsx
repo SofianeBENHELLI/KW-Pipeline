@@ -37,6 +37,7 @@ import { Icon, NAVY2 } from "./components/icons";
 import { SearchResults, type SearchHit } from "./components/SearchResults";
 import { SettingsModal } from "./components/SettingsModal";
 import { LineageModal } from "./components/LineageModal";
+import { RelationEvidenceDrawer } from "./components/RelationEvidenceDrawer";
 import {
   clearSessionTrigger,
   getApiBaseUrl,
@@ -219,6 +220,21 @@ export default function App(): React.ReactElement {
   // can render directly from ``doc.versions`` without re-fetching.
   const [lineageDocument, setLineageDocument] = useState<ExplorerDocument | null>(null);
   const closeLineage = useCallback(() => setLineageDocument(null), []);
+
+  // #318 partial — when the user clicks a doc-to-doc edge in the
+  // graph canvas, open the relation evidence drawer for that pair.
+  // The DetailPanel keeps its own drawer for the "Related Documents"
+  // list affordance; the two are independent.
+  const [graphEdgeEvidence, setGraphEdgeEvidence] = useState<{
+    sourceId: string;
+    sourceTitle: string;
+    targetId: string;
+    targetTitle: string;
+  } | null>(null);
+  const closeGraphEdgeEvidence = useCallback(
+    () => setGraphEdgeEvidence(null),
+    [],
+  );
 
   // Keep selection / open-doc / concept-focus in sync with the data
   // refresh — the sample → live transition can rename ids out from
@@ -1254,6 +1270,20 @@ export default function App(): React.ReactElement {
                 onHover={setHovered}
                 search={search}
                 focusRoot={focusRoot}
+                onEdgeClick={(sourceId, targetId) => {
+                  // Resolve titles from the unfiltered snapshot so the
+                  // drawer header reads correctly even when the user
+                  // has narrowed the cluster rail.
+                  const src = docById(snapshot, sourceId);
+                  const tgt = docById(snapshot, targetId);
+                  if (!src || !tgt) return;
+                  setGraphEdgeEvidence({
+                    sourceId,
+                    sourceTitle: src.title,
+                    targetId,
+                    targetTitle: tgt.title,
+                  });
+                }}
               />
             )}
             <div className="kx-readonly">
@@ -1300,6 +1330,15 @@ export default function App(): React.ReactElement {
       />
       {lineageDocument && (
         <LineageModal document={lineageDocument} onClose={closeLineage} />
+      )}
+      {graphEdgeEvidence && (
+        <RelationEvidenceDrawer
+          sourceDocumentId={graphEdgeEvidence.sourceId}
+          sourceTitle={graphEdgeEvidence.sourceTitle}
+          targetDocumentId={graphEdgeEvidence.targetId}
+          targetTitle={graphEdgeEvidence.targetTitle}
+          onClose={closeGraphEdgeEvidence}
+        />
       )}
     </div>
   );
