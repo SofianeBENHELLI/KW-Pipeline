@@ -222,6 +222,21 @@ class Settings(BaseSettings):
             "tolerate eventual graph readiness."
         ),
     )
+    companion_trust_gate_strict: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("KW_COMPANION_TRUST_GATE_STRICT"),
+        description=(
+            "Default-deny trust gate for the AURA companion (#372 / "
+            "ADR-029). When ``True`` (the default), the companion "
+            "filters cited chunks to ``validation_status == VALIDATED`` "
+            "OR ``is_source_backed == true`` — candidate / unvalidated "
+            "knowledge is hidden from grounded answers. Tightening "
+            'defaults later is a regression ("the assistant used to '
+            "answer that, now it doesn't\"); loosening them is fine, so "
+            "this stays default-on. Set ``False`` to honour an "
+            "end-user widen toggle; regulated deployments leave it on."
+        ),
+    )
     background_task_shutdown_timeout_seconds: float = Field(
         default=30.0,
         validation_alias=AliasChoices("KW_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_SECONDS"),

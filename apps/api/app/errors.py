@@ -61,6 +61,17 @@ class ErrorCode:
     # ─── Phase 3 grounded chat (POST /knowledge/chat) ──────────────
     CHAT_DISABLED = "KW_CHAT_DISABLED"
 
+    # ─── AURA companion trust gate (#372 / ADR-029) ────────────────
+    # Surfaced when the default-deny trust gate filters every
+    # candidate citation out of a grounded answer, leaving nothing
+    # validated to cite. The companion returns this rather than
+    # fabricating a body from candidate-only knowledge — the failure
+    # mode the gate is designed to prevent is silent suppression
+    # ("the assistant invented an answer with no sources"). Frontends
+    # render a "no validated knowledge supports this question — toggle
+    # to widen" surface using the response remediation field.
+    COMPANION_NO_VALIDATED_KNOWLEDGE = "KW_COMPANION_NO_VALIDATED_KNOWLEDGE"
+
     # ─── ADR-027 §3 — purged document / version reads ──────────────
     # 410 Gone envelope code surfaced when ``purge_artifacts`` has
     # tombstoned a version's bytes. Distinguished from KW_NOT_FOUND
