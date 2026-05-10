@@ -44,6 +44,7 @@ import {
   setSessionTrigger,
 } from "./api/client";
 import { useExploreSearch } from "./state/use-explore-search";
+import { useSearchFilters } from "./state/use-search-filters";
 import {
   taxonomyExportFilename,
   taxonomyResponseToYaml,
@@ -142,7 +143,9 @@ export default function App(): React.ReactElement {
   // #319 — server-backed grouped semantic search. The legacy local
   // typeahead (``searchResults`` below) stays as a fallback when the
   // backend reports the route disabled (KW_VECTOR_SEARCH_DISABLED).
-  const [validatedOnly, setValidatedOnly] = useState<boolean>(true);
+  // #320 partial — both filter knobs persist via the widget store.
+  const { validatedOnly, scoreThreshold, setValidatedOnly, setScoreThreshold } =
+    useSearchFilters();
   const exploreSnapshot = useExploreSearch(search, { apiBaseUrl });
   const [hovered, setHovered] = useState<string | null>(null);
   const [focusRoot, setFocusRoot] = useState<FocusRoot | null>(null);
@@ -721,6 +724,8 @@ export default function App(): React.ReactElement {
               snapshot={exploreSnapshot}
               validatedOnly={validatedOnly}
               onToggleValidated={setValidatedOnly}
+              scoreThreshold={scoreThreshold}
+              onChangeScoreThreshold={setScoreThreshold}
               onPick={(hit: SearchHit) => {
                 if (hit.kind === "doc" && hit.documentId) {
                   selectById(hit.documentId, "doc");

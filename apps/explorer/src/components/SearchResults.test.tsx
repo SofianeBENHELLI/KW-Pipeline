@@ -8,9 +8,10 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { SearchResults } from "./SearchResults";
+import { SearchResults, type SearchResultsProps } from "./SearchResults";
 import type { ExploreSearchSnapshot } from "../state/use-explore-search";
 import type { ExploreSearchResponse } from "../api/types";
 
@@ -23,6 +24,27 @@ function snapshot(
     error: partial.error ?? null,
     ...partial,
   };
+}
+
+/**
+ * Tiny render helper — injects safe defaults for every prop the test
+ * doesn't override. Keeps the per-test boilerplate down to the prop
+ * actually under test, and means adding a future required prop only
+ * touches one place.
+ */
+function renderResults(
+  overrides: Partial<SearchResultsProps> &
+    Pick<SearchResultsProps, "snapshot">,
+): ReactElement {
+  const props: SearchResultsProps = {
+    snapshot: overrides.snapshot,
+    validatedOnly: overrides.validatedOnly ?? false,
+    onToggleValidated: overrides.onToggleValidated ?? (() => {}),
+    scoreThreshold: overrides.scoreThreshold ?? 0,
+    onChangeScoreThreshold: overrides.onChangeScoreThreshold ?? (() => {}),
+    onPick: overrides.onPick ?? (() => {}),
+  };
+  return <SearchResults {...props} />;
 }
 
 const POPULATED: ExploreSearchResponse = {
@@ -75,95 +97,64 @@ const POPULATED: ExploreSearchResponse = {
 describe("SearchResults", () => {
   it("renders nothing when state is idle", () => {
     const { container } = render(
-      <SearchResults
-        snapshot={snapshot({ state: "idle", query: "" })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
+      renderResults({ snapshot: snapshot({ state: "idle", query: "" }), validatedOnly: true }),
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it("renders the loading affordance while debounce / fetch is in flight", () => {
-    render(
-      <SearchResults
-        snapshot={snapshot({ state: "loading" })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
-    );
+    render(renderResults({ snapshot: snapshot({ state: "loading" }), validatedOnly: true }));
     expect(screen.getByTestId("kx-search-loading")).toHaveTextContent(/Searching/);
   });
 
   it("renders the disabled callout when Phase 3 is off", () => {
-    render(
-      <SearchResults
-        snapshot={snapshot({ state: "disabled" })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
-    );
+    render(renderResults({ snapshot: snapshot({ state: "disabled" }), validatedOnly: true }));
     expect(screen.getByTestId("kx-search-disabled")).toBeInTheDocument();
     expect(screen.getByText(/Vector search is disabled/i)).toBeInTheDocument();
   });
 
   it("renders the error banner with the message preserved", () => {
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "error", error: "Boom" })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "error", error: "Boom" }),
+        validatedOnly: true,
+      }),
     );
     expect(screen.getByTestId("kx-search-error")).toHaveTextContent("Boom");
   });
 
   it("renders 'no matches' for the empty-corpus / no-hit response", () => {
     render(
-      <SearchResults
-        snapshot={snapshot({
+      renderResults({
+        snapshot: snapshot({
           state: "empty",
           query: "noresults",
           response: { ...POPULATED, chunks: [], documents: [], topics: [] },
-        })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
+        }),
+        validatedOnly: true,
+      }),
     );
     expect(screen.getByTestId("kx-search-empty")).toHaveTextContent("noresults");
   });
 
   it("renders all three populated groups with embedding-model meta", () => {
-    render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly={false}
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
-    );
+    render(renderResults({ snapshot: snapshot({ state: "data", response: POPULATED }) }));
     // All three sections present.
     expect(screen.getByTestId("kx-search-section-documents")).toBeInTheDocument();
     expect(screen.getByTestId("kx-search-section-chunks")).toBeInTheDocument();
     expect(screen.getByTestId("kx-search-section-topics")).toBeInTheDocument();
-    // Toolbar shows the embedding model + the toggle.
+    // Toolbar shows the embedding model + the toggle + the threshold slider.
     expect(screen.getByText("voyage-3")).toBeInTheDocument();
     expect(screen.getByTestId("kx-search-validated-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("kx-search-threshold-slider")).toBeInTheDocument();
   });
 
   it("validated-only toggle hides candidate documents and chunks", () => {
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        validatedOnly: true,
+      }),
     );
     // Validated doc remains.
     expect(screen.getByText("Supplier policy")).toBeInTheDocument();
@@ -175,7 +166,7 @@ describe("SearchResults", () => {
     ).toBeInTheDocument();
   });
 
-  it("'no validated matches' surfaces when the filter zeroes out every group", () => {
+  it("'no matches' surfaces when the trust filter zeroes out every group", () => {
     const onlyCandidates: ExploreSearchResponse = {
       ...POPULATED,
       documents: [
@@ -203,25 +194,73 @@ describe("SearchResults", () => {
       topics: [],
     };
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: onlyCandidates })}
-        validatedOnly
-        onToggleValidated={() => {}}
-        onPick={() => {}}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: onlyCandidates }),
+        validatedOnly: true,
+      }),
     );
     expect(screen.getByTestId("kx-search-empty-after-filter")).toBeInTheDocument();
+  });
+
+  it("score threshold hides rows below the floor across every group", () => {
+    // POPULATED scores: doc d-1=0.94, doc d-2=0.63, chunk c-1=0.91, topic t-1=0.81.
+    // A 0.80 floor keeps d-1 + c-1 + t-1, drops d-2.
+    render(
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        scoreThreshold: 0.8,
+      }),
+    );
+    expect(screen.getByText("Supplier policy")).toBeInTheDocument();
+    expect(screen.queryByText("Draft note")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Reviewer must validate every claim."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Compliance")).toBeInTheDocument();
+  });
+
+  it("score threshold at 1.0 surfaces the after-filter empty state", () => {
+    render(
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        scoreThreshold: 1.0,
+      }),
+    );
+    expect(screen.getByTestId("kx-search-empty-after-filter")).toBeInTheDocument();
+  });
+
+  it("threshold slider invokes onChangeScoreThreshold with the parsed numeric value", () => {
+    const onChange = vi.fn();
+    render(
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        scoreThreshold: 0,
+        onChangeScoreThreshold: onChange,
+      }),
+    );
+    fireEvent.change(screen.getByTestId("kx-search-threshold-slider"), {
+      target: { value: "0.5" },
+    });
+    expect(onChange).toHaveBeenCalledWith(0.5);
+  });
+
+  it("threshold value is rendered as a percentage in the toolbar", () => {
+    render(
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        scoreThreshold: 0.42,
+      }),
+    );
+    expect(screen.getByTestId("kx-search-threshold-value")).toHaveTextContent("42%");
   });
 
   it("clicking a document hit invokes onPick with the document_id", () => {
     const onPick = vi.fn();
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly={false}
-        onToggleValidated={() => {}}
-        onPick={onPick}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        onPick,
+      }),
     );
     fireEvent.click(screen.getByText("Supplier policy"));
     expect(onPick).toHaveBeenCalledWith({
@@ -234,12 +273,10 @@ describe("SearchResults", () => {
   it("clicking a chunk hit invokes onPick with the chunk_id + parent document_id", () => {
     const onPick = vi.fn();
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly={false}
-        onToggleValidated={() => {}}
-        onPick={onPick}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        onPick,
+      }),
     );
     fireEvent.click(screen.getByText("Reviewer must validate every claim."));
     expect(onPick).toHaveBeenCalledWith({
@@ -252,12 +289,10 @@ describe("SearchResults", () => {
   it("clicking a topic hit invokes onPick with the topic_id", () => {
     const onPick = vi.fn();
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly={false}
-        onToggleValidated={() => {}}
-        onPick={onPick}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        onPick,
+      }),
     );
     fireEvent.click(screen.getByText("Compliance"));
     expect(onPick).toHaveBeenCalledWith({ kind: "topic", id: "t-1" });
@@ -266,12 +301,11 @@ describe("SearchResults", () => {
   it("toggle invokes onToggleValidated with the new value", () => {
     const onToggle = vi.fn();
     render(
-      <SearchResults
-        snapshot={snapshot({ state: "data", response: POPULATED })}
-        validatedOnly
-        onToggleValidated={onToggle}
-        onPick={() => {}}
-      />,
+      renderResults({
+        snapshot: snapshot({ state: "data", response: POPULATED }),
+        validatedOnly: true,
+        onToggleValidated: onToggle,
+      }),
     );
     fireEvent.click(screen.getByTestId("kx-search-validated-toggle"));
     expect(onToggle).toHaveBeenCalledWith(false);
