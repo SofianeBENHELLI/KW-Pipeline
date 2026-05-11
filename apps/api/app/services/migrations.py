@@ -679,8 +679,7 @@ def _migrate_0014_document_topics(conn: sqlite3.Connection) -> None:
         "ON document_topics (document_id)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_document_topics_version_id "
-        "ON document_topics (version_id)"
+        "CREATE INDEX IF NOT EXISTS idx_document_topics_version_id ON document_topics (version_id)"
     )
 
 

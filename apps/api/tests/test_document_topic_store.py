@@ -117,8 +117,7 @@ def test_migration_0014_creates_document_topics_table(tmp_path: Path) -> None:
     db = sqlite3.connect(tmp_path / "catalog.sqlite3")
     try:
         cursor = db.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name = 'document_topics'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = 'document_topics'"
         )
         assert cursor.fetchone() is not None, "document_topics table missing"
     finally:
@@ -132,8 +131,7 @@ def test_migration_0014_creates_document_topics_indexes(tmp_path: Path) -> None:
         names = {
             row[0]
             for row in db.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='index' AND tbl_name='document_topics'"
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='document_topics'"
             )
         }
     finally:
@@ -248,10 +246,12 @@ def test_store_round_trips_long_keyword_and_chunk_lists(store: Any) -> None:
 
 
 def test_store_filters_by_document_id(store: Any) -> None:
-    store.save_topics([
-        _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
-        _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
-    ])
+    store.save_topics(
+        [
+            _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
+            _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
+        ]
+    )
     items, _ = store.list_for_document("doc-1")
     assert [t.id for t in items] == ["t-a"]
     items, _ = store.list_for_document("doc-2")
@@ -259,18 +259,19 @@ def test_store_filters_by_document_id(store: Any) -> None:
 
 
 def test_store_list_all_returns_every_topic(store: Any) -> None:
-    store.save_topics([
-        _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
-        _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
-    ])
+    store.save_topics(
+        [
+            _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
+            _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
+        ]
+    )
     items, _ = store.list_all()
     assert {t.id for t in items} == {"t-a", "t-b"}
 
 
 def test_store_pagination_walks_all_pages(store: Any) -> None:
     topics = [
-        _make_topic(topic_id=f"t-{i:02d}", supporting_chunk_ids=[f"chunk-{i}"])
-        for i in range(5)
+        _make_topic(topic_id=f"t-{i:02d}", supporting_chunk_ids=[f"chunk-{i}"]) for i in range(5)
     ]
     store.save_topics(topics)
 
@@ -288,15 +289,18 @@ def test_store_pagination_walks_all_pages(store: Any) -> None:
 
 def test_store_pagination_invalid_cursor_raises(store: Any) -> None:
     from app.services.catalog_store import InvalidCursor
+
     with pytest.raises(InvalidCursor):
         store.list_for_document("doc-1", cursor="not-a-real-cursor")
 
 
 def test_store_delete_for_version_removes_only_that_version(store: Any) -> None:
-    store.save_topics([
-        _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
-        _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
-    ])
+    store.save_topics(
+        [
+            _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
+            _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
+        ]
+    )
     removed = store.delete_for_version("ver-1")
     assert removed == 1
     items, _ = store.list_all()
@@ -368,10 +372,12 @@ def test_route_returns_empty_list_when_no_topics_recorded(
 def test_route_filters_by_document_id(monkeypatch: pytest.MonkeyPatch) -> None:
     app = create_app()
     services = app.state.services
-    services.document_topic_store.save_topics([
-        _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
-        _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
-    ])
+    services.document_topic_store.save_topics(
+        [
+            _make_topic(topic_id="t-a", document_id="doc-1", version_id="ver-1"),
+            _make_topic(topic_id="t-b", document_id="doc-2", version_id="ver-2"),
+        ]
+    )
     client = TestClient(app)
 
     # Filtered by document_id=doc-1 → just t-a.

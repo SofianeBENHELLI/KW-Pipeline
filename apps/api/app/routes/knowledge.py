@@ -18,8 +18,8 @@ from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.claim import ClaimsListResponse
-from app.schemas.document_topic import DocumentTopicsListResponse
 from app.schemas.document import Document
+from app.schemas.document_topic import DocumentTopicsListResponse
 from app.schemas.knowledge import (
     ChatRequest,
     ChatResponse,

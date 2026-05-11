@@ -16,11 +16,6 @@ from app.services.claim_store import (
     InMemoryClaimStore,
     SQLiteClaimStore,
 )
-from app.services.document_topic_store import (
-    DocumentTopicStore,
-    InMemoryDocumentTopicStore,
-    SQLiteDocumentTopicStore,
-)
 from app.services.confidence_scorer import ConfidenceScorer
 from app.services.corpus_norms import (
     CorpusNormsProvider,
@@ -37,6 +32,11 @@ from app.services.document_relations_store import (
 )
 from app.services.document_service import DocumentService
 from app.services.document_similarity_service import DocumentSimilarityService
+from app.services.document_topic_store import (
+    DocumentTopicStore,
+    InMemoryDocumentTopicStore,
+    SQLiteDocumentTopicStore,
+)
 from app.services.enrichers import RuleBasedEntityEnricher, SemanticEnricher
 from app.services.enrichers.spacy_ner import SpacyNerEnricher
 from app.services.extraction_job_service import ExtractionJobService
