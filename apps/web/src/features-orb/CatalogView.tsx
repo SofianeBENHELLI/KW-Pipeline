@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, listDocuments } from "../api/client";
 import type { components } from "../api/generated/schema";
+import { Btn, Icon } from "../ui/orb";
 
+import {
+  type BatchSnapshot,
+  pruneSelectionAfterBatch,
+  runBatchPipeline,
+} from "./batch";
 import { CatalogRail, type CatalogView as ViewId, viewToStatuses } from "./CatalogRail";
 import { CatalogTable } from "./CatalogTable";
 import { ReviewPane } from "./ReviewPane";
@@ -12,12 +18,19 @@ type ApiDocument = components["schemas"]["Document"];
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+const VIEW_TITLES: Record<ViewId, string> = {
+  recent: "Recent documents",
+  review: "Awaiting review",
+  validated: "Validated documents",
+  failed: "Failed documents",
+};
+
 /**
- * Phase-1 catalog view — the `/orb` route's main entry point. Wires the
+ * Phase-1/2/3 catalog view — the `/orb` route's entry point. Wires the
  * new shell to the real backend via `listDocuments`. Saved-view filters
  * map onto the existing `status[]` query param; the search input is
- * debounced. Selecting a row sets local state only; deep wiring into
- * the review workspace is Phase 2 territory.
+ * debounced. Selecting a row opens the review pane (Phase 2); selecting
+ * rows via checkbox arms the batch run bar (Phase 3).
  */
 export function OrbCatalogView() {
   const [view, setView] = useState<ViewId>("recent");
@@ -27,10 +40,11 @@ export function OrbCatalogView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
+  const [batchSnapshot, setBatchSnapshot] = useState<BatchSnapshot | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Debounce the filename filter so each keystroke doesn't fan out into
-  // its own GET /documents request.
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
@@ -48,17 +62,11 @@ export function OrbCatalogView() {
         q: debouncedQuery,
         limit: 50,
       });
-      if (!controller.signal.aborted) {
-        setDocuments(response.items ?? []);
-      }
+      if (!controller.signal.aborted) setDocuments(response.items ?? []);
     } catch (err) {
       if (controller.signal.aborted) return;
       const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
+        err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
       setError(message);
       setDocuments([]);
     } finally {
@@ -71,24 +79,77 @@ export function OrbCatalogView() {
     return () => abortRef.current?.abort();
   }, [refresh]);
 
+  const toggleBatch = useCallback((id: string, next: boolean) => {
+    setBatchSelection((current) => {
+      const updated = new Set(current);
+      if (next) updated.add(id);
+      else updated.delete(id);
+      return updated;
+    });
+  }, []);
+
+  const clearBatch = useCallback(() => {
+    setBatchSelection(new Set());
+    setBatchSnapshot(null);
+  }, []);
+
+  const runBatch = useCallback(async () => {
+    if (batchRunning || batchSelection.size === 0) return;
+    const targets = documents.filter((doc) => batchSelection.has(doc.id));
+    if (targets.length === 0) return;
+    setBatchRunning(true);
+    try {
+      const finalSnapshot = await runBatchPipeline(targets, (next) => {
+        setBatchSnapshot((prev) =>
+          typeof next === "function" ? next(prev ?? { progress: {}, failures: [] }) : next,
+        );
+      });
+      setBatchSelection((current) => pruneSelectionAfterBatch(current, finalSnapshot));
+      await refresh();
+    } finally {
+      setBatchRunning(false);
+    }
+  }, [batchRunning, batchSelection, documents, refresh]);
+
+  const selectionCount = batchSelection.size;
+  const failures = batchSnapshot?.failures ?? [];
+  const progress = batchSnapshot?.progress;
+  const title = useMemo(() => VIEW_TITLES[view], [view]);
+
   return (
     <OrbShell rail={<CatalogRail view={view} onView={setView} query={query} onQuery={setQuery} />}>
       <div className={selectedId ? "orb-canvas--split" : "orb-canvas--full"}>
         <div className="orb-catalog">
           <div className="orb-catalog__head">
-            <h1 className="orb-catalog__title">
-              {view === "recent"
-                ? "Recent documents"
-                : view === "review"
-                  ? "Awaiting review"
-                  : view === "validated"
-                    ? "Validated documents"
-                    : "Failed documents"}
-            </h1>
+            <h1 className="orb-catalog__title">{title}</h1>
             <span className="orb-catalog__meta">
-              {documents.length} shown
-              {loading && documents.length > 0 ? " · refreshing" : ""}
+              {documents.length} shown{loading && documents.length > 0 ? " · refreshing" : ""}
             </span>
+            <span className="orb-catalog__head-spacer" />
+            {selectionCount > 0 && (
+              <div className="orb-catalog__batchbar">
+                <span className="orb-mono orb-catalog__batchbar-count">
+                  {selectionCount} selected
+                </span>
+                <button
+                  type="button"
+                  className="orb-btn orb-btn--ghost orb-btn--xs"
+                  onClick={clearBatch}
+                  disabled={batchRunning}
+                >
+                  Clear
+                </button>
+                <Btn
+                  kind="primary"
+                  size="xs"
+                  icon={<Icon name="bolt" />}
+                  onClick={runBatch}
+                  disabled={batchRunning}
+                >
+                  {batchRunning ? "Running…" : "Run pipeline"}
+                </Btn>
+              </div>
+            )}
           </div>
           <CatalogTable
             documents={documents}
@@ -96,7 +157,24 @@ export function OrbCatalogView() {
             error={error}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            selection={batchSelection}
+            onToggleBatch={toggleBatch}
+            batchProgress={progress}
           />
+          {failures.length > 0 && (
+            <div className="orb-catalog__failures" role="status">
+              <strong>{failures.length} document(s) failed during the last batch run:</strong>
+              <ul>
+                {failures.map((failure) => (
+                  <li key={failure.document_id}>
+                    <span className="orb-mono orb-catalog__failures-id">{failure.document_id.slice(0, 8)}</span>
+                    <span> {failure.filename} — </span>
+                    <span className="orb-catalog__failures-reason">{failure.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="orb-catalog__footer">
             <span>
               View: <strong>{view}</strong>

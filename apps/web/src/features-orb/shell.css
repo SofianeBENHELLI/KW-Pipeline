@@ -449,3 +449,53 @@
   font-size: var(--orb-fs-xs);
   color: var(--orb-fg-dim);
 }
+
+/* ---- Batch operations (Phase 3) ---- */
+
+.orb-catalog__batchbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--orb-r-sm);
+  background: var(--orb-bg-sel);
+  border: 1px solid var(--orb-border);
+}
+
+.orb-catalog__batchbar-count {
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-muted);
+}
+
+.orb-catalog__cell-check {
+  text-align: center;
+  width: 32px;
+}
+.orb-catalog__cell-check input { cursor: pointer; }
+
+.orb-catalog__failures {
+  margin: 0 var(--orb-pad);
+  padding: 10px 14px;
+  border: 1px solid var(--orb-err);
+  background: var(--orb-err-bg);
+  color: var(--orb-err-fg);
+  border-radius: var(--orb-r-sm);
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-catalog__failures ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.orb-catalog__failures-id {
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  margin-right: 4px;
+}
+
+.orb-catalog__failures-reason {
+  color: var(--orb-err-fg);
+  font-family: var(--orb-font-mono);
+  font-size: var(--orb-fs-xs);
+}

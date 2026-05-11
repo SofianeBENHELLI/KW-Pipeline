@@ -14,3 +14,5 @@ export { CatalogTable } from "./CatalogTable";
 export type { CatalogTableProps } from "./CatalogTable";
 export { ReviewPane } from "./ReviewPane";
 export type { ReviewPaneProps } from "./ReviewPane";
+export { pruneSelectionAfterBatch, runBatchPipeline } from "./batch";
+export type { BatchFailure, BatchProgressEntry, BatchSnapshot, BatchStage } from "./batch";

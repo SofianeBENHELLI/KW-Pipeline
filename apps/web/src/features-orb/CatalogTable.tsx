@@ -5,6 +5,8 @@ import { latestVersion } from "../domain/document";
 import { OrbScopeChip, OrbStatusBadge } from "../ui/orb";
 import { Mono } from "../ui/orb/atoms";
 
+import type { BatchProgressEntry } from "./batch";
+
 type ApiDocument = components["schemas"]["Document"];
 
 type SortColumn = "filename" | "status" | "uploaded" | "versions";
@@ -16,7 +18,18 @@ export interface CatalogTableProps {
   error?: string | null;
   selectedId?: string | null;
   onSelect?: (documentId: string) => void;
+  selection?: ReadonlySet<string>;
+  onToggleBatch?: (documentId: string, next: boolean) => void;
+  batchProgress?: Record<string, BatchProgressEntry>;
 }
+
+const PROGRESS_LABELS: Record<BatchProgressEntry["stage"], { label: string; cls: string }> = {
+  queued: { label: "QUEUED", cls: "orb-status--stored" },
+  extracting: { label: "EXTRACTING", cls: "orb-status--extracting" },
+  semantic: { label: "SEMANTIC", cls: "orb-status--semantic" },
+  done: { label: "DONE", cls: "orb-status--validated" },
+  failed: { label: "FAILED", cls: "orb-status--failed" },
+};
 
 function compare(a: ApiDocument, b: ApiDocument, col: SortColumn, dir: SortDir): number {
   let av: string | number = "";
@@ -56,7 +69,17 @@ function formatDate(iso: string | null | undefined): string {
  * states. Reads `ApiDocument` shape straight from the OpenAPI schema so it
  * picks up backend changes for free.
  */
-export function CatalogTable({ documents, loading, error, selectedId, onSelect }: CatalogTableProps) {
+export function CatalogTable({
+  documents,
+  loading,
+  error,
+  selectedId,
+  onSelect,
+  selection,
+  onToggleBatch,
+  batchProgress,
+}: CatalogTableProps) {
+  const batchEnabled = !!onToggleBatch;
   const [sort, setSort] = useState<{ col: SortColumn; dir: SortDir }>({
     col: "uploaded",
     dir: "desc",
@@ -93,6 +116,7 @@ export function CatalogTable({ documents, loading, error, selectedId, onSelect }
     <table className="orb-catalog__table">
       <thead>
         <tr>
+          {batchEnabled && <th style={{ width: 32 }} aria-label="Batch select" />}
           <th style={{ width: 60 }}>
             <button type="button" onClick={() => toggleSort("versions")}>
               Versions{arrow("versions")}
@@ -108,6 +132,7 @@ export function CatalogTable({ documents, loading, error, selectedId, onSelect }
               Status{arrow("status")}
             </button>
           </th>
+          {batchProgress && <th style={{ width: 140 }}>Batch</th>}
           <th style={{ width: 240 }}>Scopes</th>
           <th style={{ width: 180 }}>
             <button type="button" onClick={() => toggleSort("uploaded")}>
@@ -120,12 +145,24 @@ export function CatalogTable({ documents, loading, error, selectedId, onSelect }
         {sorted.map((doc) => {
           const selected = selectedId === doc.id;
           const scopes = doc.scopes ?? [];
+          const checked = selection?.has(doc.id) ?? false;
+          const progress = batchProgress?.[doc.id];
           return (
             <tr
               key={doc.id}
               className={`orb-catalog__row ${selected ? "is-selected" : ""}`.trim()}
               onClick={() => onSelect?.(doc.id)}
             >
+              {batchEnabled && (
+                <td className="orb-catalog__cell-check" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    aria-label={`Select ${doc.original_filename} for batch`}
+                    onChange={(event) => onToggleBatch?.(doc.id, event.target.checked)}
+                  />
+                </td>
+              )}
               <td className="orb-catalog__cell-versions">v{doc.versions?.length ?? 0}</td>
               <td>
                 <div className="orb-catalog__filename">
@@ -136,6 +173,18 @@ export function CatalogTable({ documents, loading, error, selectedId, onSelect }
               <td>
                 <OrbStatusBadge status={latestVersion(doc)?.status} />
               </td>
+              {batchProgress && (
+                <td>
+                  {progress ? (
+                    <span className={`orb-status ${PROGRESS_LABELS[progress.stage].cls}`} title={progress.reason}>
+                      <span className="dot" aria-hidden="true" />
+                      {PROGRESS_LABELS[progress.stage].label}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--orb-fg-faint)" }}>—</span>
+                  )}
+                </td>
+              )}
               <td>
                 <div className="orb-catalog__cell-scopes">
                   {scopes.length === 0 && <span style={{ color: "var(--orb-fg-faint)" }}>—</span>}
