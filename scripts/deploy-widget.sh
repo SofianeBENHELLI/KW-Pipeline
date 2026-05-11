@@ -96,7 +96,17 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WIDGET_DIR="$REPO_ROOT/apps/widget"
 BUCKET="3dx-kwforge-widgets"
 REGION="eu-north-1"
-PREFIX="3dx-knowledgeforge"
+
+# Production prefix vs preview prefix. Set KW_FORGE_PREVIEW=true to
+# publish to the parallel preview prefix and SKIP the demo.html
+# auto-update, so the production demo URL keeps pointing at the live
+# bundle until cutover day. Mirrors the same flag on deploy-orbital.sh
+# (docs/roadmap/orbital-redesign.md §5).
+if [ "${KW_FORGE_PREVIEW:-false}" = "true" ]; then
+  PREFIX="3dx-knowledgeforge-next"
+else
+  PREFIX="3dx-knowledgeforge"
+fi
 
 # Resolve the version: argv[1] wins; otherwise read package.json.
 if [ "${1-}" != "" ]; then
@@ -165,10 +175,15 @@ echo "→ verifying $URL"
 if curl -fsI "$URL" >/dev/null 2>&1; then
   echo "✓ deploy ok"
   # 5. Update the repo-root demo.html so its "Production deploys"
-  # tile points at this version. Best-effort — the helper exits 0
-  # when ``demo.html`` is missing (contributors shipping a backend-only
-  # PR don't need the dashboard).
-  "$SCRIPT_DIR/_update-demo-deployment.sh" widget "$URL" || true
+  # tile points at this version. Preview deploys skip this so the
+  # public landing page keeps pointing at the live production bundle
+  # until cutover day. Best-effort otherwise — the helper exits 0
+  # when ``demo.html`` is missing.
+  if [ "${KW_FORGE_PREVIEW:-false}" = "true" ]; then
+    echo "→ KW_FORGE_PREVIEW=true → skipping demo.html update"
+  else
+    "$SCRIPT_DIR/_update-demo-deployment.sh" widget "$URL" || true
+  fi
   echo
   echo "Register this URL in 3DEXPERIENCE → Run Your App:"
   echo
