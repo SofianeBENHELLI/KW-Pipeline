@@ -280,14 +280,18 @@ class KnowledgeProjector:
                     document=document,
                     version=version,
                 )
+                # Drop any prior Process row for this version
+                # **unconditionally** — including when the new
+                # extraction returns ``None`` (the document used to
+                # be procedural and the operator edited it so
+                # ``detect_sop_structure`` no longer trips). Without
+                # this, the stale Process row would keep claiming
+                # the version is procedural after the structure was
+                # removed. Mirrors the same posture
+                # ``ClaimExtractor`` uses on its hook (delete then
+                # maybe save).
+                self._process_store.delete_for_version(version.id)
                 if process is not None:
-                    # Re-projection: replace the prior Process row
-                    # for this version atomically. ``save_process``
-                    # is itself a replace-by-id, but a version
-                    # whose new extraction yields a different id
-                    # would otherwise leak the old row — clear by
-                    # version_id first to keep the contract clean.
-                    self._process_store.delete_for_version(version.id)
                     self._process_store.save_process(process)
                     log.info(
                         "knowledge.process_extraction.written",

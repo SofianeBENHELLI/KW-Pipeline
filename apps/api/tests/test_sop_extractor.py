@@ -146,6 +146,86 @@ def test_detect_returns_false_on_table_of_contents_only() -> None:
     assert detect_sop_structure(semantic) is False
 
 
+def test_detect_returns_false_on_short_sentence_policy_clauses() -> None:
+    """Real policy docs use the same ``1. Topic. <one short
+    sentence>`` shape as a TOC + tagline. The body-content guard
+    must reject this — the procedural threshold isn't "any prose
+    after the number" but "enough prose to look like an action
+    step."
+
+    Reviewer-flagged false-positive case: ``1. Background. <one
+    sentence>.`` × 3 must NOT be flagged as procedural.
+    """
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(
+                id="s-1",
+                heading="Policy",
+                text=(
+                    "1. Background. The audit covers fiscal year 2024.\n"
+                    "2. Scope. Internal use only.\n"
+                    "3. References. See Annex A.\n"
+                ),
+            )
+        ],
+    )
+    assert detect_sop_structure(semantic) is False
+
+
+def test_detect_returns_false_on_step_n_in_narrative_prose() -> None:
+    """Audit reports and meeting notes routinely refer to past
+    procedural steps in narrative prose: "Step 1 was completed.
+    Step 2 had a delay." The relaxed ``Step N`` heading regex
+    would have matched these in body text — the strict
+    ``_STEP_HEADING_BODY_RE`` (requires markdown ``#+`` markers)
+    is what stops this.
+
+    Reviewer-flagged false-positive case: prose narration of
+    prior steps must NOT be flagged as procedural.
+    """
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(
+                id="s-1",
+                heading="Audit summary",
+                text=(
+                    "The audit report covered three findings.\n"
+                    "Step 1 was completed by Q2 2024.\n"
+                    "Step 2 had a one-month delay due to weather.\n"
+                    "Step 3 is currently on hold pending review.\n"
+                ),
+            )
+        ],
+    )
+    assert detect_sop_structure(semantic) is False
+
+
+def test_detect_returns_false_on_audit_findings_with_step_references() -> None:
+    """Variant of the prose case — multi-paragraph audit findings
+    that mention "Step 1", "Step 2", etc. across paragraphs.
+    Strict body regex still rejects."""
+    version = _make_version()
+    semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(
+                id="s-1",
+                heading="Findings",
+                text=(
+                    "Step 1 in the proposal was reviewed and accepted.\n\n"
+                    "Step 2 in the proposal was reviewed and rejected.\n\n"
+                    "Step 3 in the proposal needs more analysis.\n"
+                ),
+            )
+        ],
+    )
+    assert detect_sop_structure(semantic) is False
+
+
 # ─── detect_sop_structure: returns True on ───────────────────────
 
 
@@ -457,6 +537,48 @@ def test_projector_replaces_prior_process_on_re_projection() -> None:
     summaries, _cursor = store.list()
     assert len(summaries) == 1
     assert summaries[0].version_id == version.id
+
+
+def test_projector_drops_prior_process_when_doc_becomes_non_procedural() -> None:
+    """Re-projection of a previously-procedural version that now
+    fails the detector must clear the stale Process row, not leak
+    it.
+
+    Reviewer-flagged idempotence gap: with the previous "delete
+    only inside ``if process is not None``" shape, an operator
+    edit that removed the procedural structure would leave the
+    old Process row claiming the version was still a SOP.
+    """
+    store = InMemoryProcessStore()
+    projector = KnowledgeProjector(graph_store=InMemoryGraphStore())
+    projector.set_process_store(cast(ProcessStore, store))
+
+    version = _make_version()
+    document = _make_document(version)
+
+    # First projection: procedural — writes a Process.
+    projector.project(document=document, version=version, semantic=_sop_semantic(version))
+    summaries, _ = store.list()
+    assert len(summaries) == 1
+
+    # Second projection: SAME version, but the operator has
+    # rewritten the doc as flat prose — no longer procedural.
+    flat_semantic = _make_semantic(
+        version=version,
+        sections=[
+            SemanticSection(
+                id="s-1",
+                heading="Overview",
+                text="The previous procedural list has been replaced with prose.",
+            )
+        ],
+    )
+    projector.project(document=document, version=version, semantic=flat_semantic)
+
+    # The stale Process row is gone — no Process claims this
+    # version is procedural any more.
+    summaries, _ = store.list()
+    assert summaries == []
 
 
 def test_projector_swallows_save_failures() -> None:

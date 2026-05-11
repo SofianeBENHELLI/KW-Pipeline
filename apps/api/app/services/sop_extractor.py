@@ -49,14 +49,20 @@ _MIN_NUMBERED_ITEMS = 3
 # rather not flag as a procedural list).
 _NUMBERED_LINE_RE = re.compile(r"^[ \t]*(\d+)\.[ \t]+\S", re.MULTILINE)
 
-# Markdown heading: ``## Step 1`` / ``### step 2`` / bare
-# ``Step 1``. The leading ``#+`` is optional because semantic
-# extraction strips markdown markers from
-# :attr:`SemanticSection.heading` — what reaches us is usually the
-# bare label. Keeping ``#+`` optional means raw markdown text
-# (used by some fixtures and the inline-text path below) still
-# matches.
+# ``SemanticSection.heading`` arrives with markdown markers stripped
+# (semantic extraction normalises them away), so the heading-level
+# check matches a bare label like ``Step 1``. Body text on the
+# other hand DOES preserve markdown markers, which is the only
+# distinguishing signal between a real procedural heading
+# (``## Step 1``) and prose narration (``Step 1 was completed
+# yesterday.``). We use two regexes:
+#
+# * ``_STEP_HEADING_RE`` — lenient; for ``section.heading`` lookups
+#   only.
+# * ``_STEP_HEADING_BODY_RE`` — strict; requires markdown ``#+``
+#   markers, used when scanning aggregated body text.
 _STEP_HEADING_RE = re.compile(r"^[ \t]*#*[ \t]*step\s+(\d+)\b", re.IGNORECASE | re.MULTILINE)
+_STEP_HEADING_BODY_RE = re.compile(r"^[ \t]*#+[ \t]+step\s+(\d+)\b", re.IGNORECASE | re.MULTILINE)
 
 # Inline ``Step 1:`` line. Matches at start of line because mid-
 # paragraph "step 1:" callouts are usually not the procedural
@@ -110,7 +116,11 @@ def detect_sop_structure(semantic: SemanticDocument) -> bool:
     # combining a TOC's "1. Background\\n2. Scope" with a body
     # section's standalone "1. Item / 2. Item" into a false hit.
     full_text = "\n\n".join(section.text for section in semantic.sections)
-    if len(_STEP_HEADING_RE.findall(full_text)) >= _MIN_NUMBERED_ITEMS:
+    # Strict body regex: requires markdown ``#+`` markers so prose
+    # narration ("Step 1 was completed yesterday. Step 2 had a
+    # delay...") doesn't trip the detector. Real SOPs preserve
+    # markdown headings in the body.
+    if len(_STEP_HEADING_BODY_RE.findall(full_text)) >= _MIN_NUMBERED_ITEMS:
         return True
     if len(_STEP_LINE_RE.findall(full_text)) >= _MIN_NUMBERED_ITEMS:
         return True
@@ -200,12 +210,20 @@ def _has_numbered_run(text: str) -> bool:
         if curr != prev + 1:
             return False
 
-    # Body-content guard: every numbered item should carry more than
-    # a bare label. Slice the text from each match's end to the next
-    # match's start (or end-of-text for the last) and require ≥3
-    # words on average. Short "1. Background\\n2. Scope" TOCs fall
-    # below this threshold; real procedural items ("1. Open the
-    # control panel and...") clear it easily.
+    # Body-content guard: every numbered item should carry an
+    # action-shaped sentence, not a bare label. Slice the text
+    # from each match's end to the next match's start (or end-of-
+    # text for the last) and require ≥6 words on average. The
+    # threshold was tuned to reject the policy-doc structure
+    # "1. Background. The audit covers." (~4 words) while
+    # accepting concise procedural items like "Acquire the lock
+    # before mutation." (~6 words).
+    #
+    # The narrative-prose false positive ("Step 1 was X. Step 2
+    # was Y.") is caught separately by the strict
+    # ``_STEP_HEADING_BODY_RE`` (requires markdown ``#+``
+    # markers); this guard exists for the orthogonal
+    # numbered-list-TOC failure mode the reviewer flagged.
     bodies: list[str] = []
     for i, match in enumerate(matches):
         body_start = match.end()
@@ -213,7 +231,7 @@ def _has_numbered_run(text: str) -> bool:
         bodies.append(text[body_start:body_end].strip())
 
     avg_words = sum(len(body.split()) for body in bodies) / len(bodies)
-    return avg_words >= 3.0
+    return avg_words >= 6.0
 
 
 def _segment_into_steps(sections: list[SemanticSection]) -> list[ProcessStep]:
