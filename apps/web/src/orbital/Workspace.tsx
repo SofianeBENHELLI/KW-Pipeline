@@ -24,6 +24,7 @@ import { latestVersion } from "../domain/document";
 import { Btn, Icon, Kbd, MetaRow, ScopeChip, StatusBadge } from "./atoms";
 import { runBatch, type BatchEntry, type BatchFailure } from "./batch";
 import { LinkedView } from "./LinkedView";
+import { PurgeDialog } from "./PurgeDialog";
 
 /**
  * Variant-A `ReviewWorkspaceA` from the mockup, ported verbatim to TSX
@@ -89,6 +90,7 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
   const [sort, setSort] = useState<{ col: SortCol; dir: SortDir }>({ col: "uploaded", dir: "desc" });
   const [extractTab, setExtractTab] = useState<"extraction.json" | "page-spans" | "tables">("extraction.json");
   const [mdTab, setMdTab] = useState<"preview" | "source" | "diff">("preview");
+  const [purgeOpen, setPurgeOpen] = useState(false);
 
   const inFlightRef = useRef<Set<FsmAction>>(new Set());
   const docAbortRef = useRef<AbortController | null>(null);
@@ -439,8 +441,7 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
   /* ───── main canvas ───── */
   if (docLoading && !doc) {
     return (
-      <div className="orb-app rwA">
-        <TopBar onBackToCatalog={onBackToCatalog} />
+      <div className="orb-app rwA" style={{ gridTemplateRows: "1fr" }}>
         <div className="rwA-fab">
           {Rail}
           <main className="rwA-main">
@@ -452,8 +453,7 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
   }
   if (!doc) {
     return (
-      <div className="orb-app rwA">
-        <TopBar onBackToCatalog={onBackToCatalog} />
+      <div className="orb-app rwA" style={{ gridTemplateRows: "1fr" }}>
         <div className="rwA-fab">
           {Rail}
           <main className="rwA-main">
@@ -478,9 +478,7 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
     projectionLabel === "COMPLETED" ? "var(--orb-ok)" : projectionLabel === "EMPTY" ? "var(--orb-warn)" : "var(--orb-fg-faint)";
 
   return (
-    <div className="orb-app rwA">
-      <TopBar onBackToCatalog={onBackToCatalog} />
-
+    <div className="orb-app rwA" style={{ gridTemplateRows: "1fr" }}>
       <div className="rwA-fab">
         {Rail}
 
@@ -536,6 +534,9 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
               </Btn>
               <Btn kind="ghost" icon={<Icon name="refresh" />} onClick={() => void fetchDoc()}>
                 Refresh
+              </Btn>
+              <Btn kind="ghost" icon={<Icon name="trash" />} onClick={() => setPurgeOpen(true)}>
+                Purge
               </Btn>
             </div>
           </header>
@@ -751,51 +752,18 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
           </footer>
         </main>
       </div>
+      <PurgeDialog
+        open={purgeOpen}
+        onClose={() => setPurgeOpen(false)}
+        onConfirmed={() => {
+          setPurgeOpen(false);
+          onBackToCatalog();
+        }}
+        documentId={doc.id}
+        filename={doc.original_filename}
+        versionCount={doc.versions.length}
+      />
     </div>
   );
 }
 
-function TopBar({ onBackToCatalog }: { onBackToCatalog: () => void }) {
-  return (
-    <div className="rwA-topbar">
-      <div className="rwA-brand">
-        <span className="rwA-mark"></span>
-        <button
-          type="button"
-          className="rwA-brandname"
-          onClick={onBackToCatalog}
-          style={{ background: "transparent", border: 0, padding: 0, cursor: "pointer", color: "inherit", font: "inherit", fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em" }}
-        >
-          orbital
-        </button>
-        <span className="rwA-brandtag orb-mono">reviewer · kw-pipeline</span>
-      </div>
-      <nav className="rwA-nav">
-        <button className="rwA-navbtn is-active">
-          <Icon name="doc" /> Review
-        </button>
-        <button className="rwA-navbtn">
-          <Icon name="graph" /> Graph
-        </button>
-        <button className="rwA-navbtn">
-          <Icon name="spark" /> Search
-        </button>
-        <button className="rwA-navbtn">
-          <Icon name="chat" /> Chat
-        </button>
-        <button className="rwA-navbtn">
-          <Icon name="shield" /> Admin
-        </button>
-      </nav>
-      <div className="rwA-topright">
-        <span className="orb-chip orb-mono">
-          <span className="dot" style={{ background: "var(--orb-ok)" }}></span>v0.1.0-preview.3
-        </span>
-        <button className="orb-btn orb-btn--ghost orb-btn--icon" title="Settings">
-          <Icon name="cog" />
-        </button>
-        <div className="rwA-avatar">SB</div>
-      </div>
-    </div>
-  );
-}

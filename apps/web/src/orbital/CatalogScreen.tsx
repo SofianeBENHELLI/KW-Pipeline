@@ -6,6 +6,7 @@ import { latestVersion } from "../domain/document";
 
 import { Btn, Icon, StatusBadge } from "./atoms";
 import { runBatch, type BatchEntry, type BatchFailure } from "./batch";
+import { PurgeAllDialog, PurgeDialog } from "./PurgeDialog";
 
 /**
  * `OrbBannersAndCatalog` artboard from the mockup, ported verbatim. Flat
@@ -55,6 +56,8 @@ export function CatalogScreen({
   const [batchProgress, setBatchProgress] = useState<Record<string, BatchEntry>>({});
   const [batchFailures, setBatchFailures] = useState<BatchFailure[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [purgeAllOpen, setPurgeAllOpen] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -231,12 +234,13 @@ export function CatalogScreen({
               <th>VERS</th>
               <th>SCOPE</th>
               <th>UPDATED</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {documents.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: 24, color: "var(--orb-fg-muted)", textAlign: "center" }}>
+                <td colSpan={8} style={{ padding: 24, color: "var(--orb-fg-muted)", textAlign: "center" }}>
                   {loading ? "Loading documents…" : "No documents match this filter."}
                 </td>
               </tr>
@@ -275,6 +279,20 @@ export function CatalogScreen({
                   </td>
                   <td className="orb-mono" style={{ color: "var(--orb-fg-dim)" }}>
                     {d.created_at?.slice(0, 16).replace("T", " ") ?? "—"}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "right" }}>
+                    <button
+                      type="button"
+                      className="orb-btn orb-btn--ghost orb-btn--xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPurgeTarget(d);
+                      }}
+                      title="Purge document"
+                      aria-label={`Purge ${d.original_filename}`}
+                    >
+                      <Icon name="trash" />
+                    </button>
                   </td>
                 </tr>
               );
@@ -321,7 +339,46 @@ export function CatalogScreen({
             </button>
           </div>
         )}
+
+        <footer className="rwA-foot orb-mono" style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--orb-rule)" }}>
+          <span>Documents · {documents.length.toLocaleString()}</span>
+          <span>·</span>
+          <span>view {view}</span>
+          {debouncedQ && (
+            <>
+              <span>·</span>
+              <span>q "{debouncedQ}"</span>
+            </>
+          )}
+          <span style={{ flex: 1 }}></span>
+          <button type="button" className="cat-link" style={{ color: "var(--orb-err-fg)" }} onClick={() => setPurgeAllOpen(true)}>
+            purge all…
+          </button>
+        </footer>
       </div>
+
+      <PurgeDialog
+        open={purgeTarget != null}
+        onClose={() => setPurgeTarget(null)}
+        onConfirmed={() => {
+          setPurgeTarget(null);
+          void refresh();
+        }}
+        documentId={purgeTarget?.id ?? ""}
+        filename={purgeTarget?.original_filename ?? ""}
+        versionCount={purgeTarget?.versions.length ?? 0}
+      />
+      <PurgeAllDialog
+        open={purgeAllOpen}
+        onClose={() => setPurgeAllOpen(false)}
+        onConfirmed={() => {
+          setPurgeAllOpen(false);
+          setSelected(new Set());
+          setBatchProgress({});
+          setBatchFailures([]);
+          void refresh();
+        }}
+      />
     </div>
   );
 }
