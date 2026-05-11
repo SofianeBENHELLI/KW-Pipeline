@@ -16,6 +16,11 @@ from app.services.claim_store import (
     InMemoryClaimStore,
     SQLiteClaimStore,
 )
+from app.services.document_topic_store import (
+    DocumentTopicStore,
+    InMemoryDocumentTopicStore,
+    SQLiteDocumentTopicStore,
+)
 from app.services.confidence_scorer import ConfidenceScorer
 from app.services.corpus_norms import (
     CorpusNormsProvider,
@@ -325,6 +330,17 @@ class PipelineServices:
     # ``GET /knowledge/processes/{id}`` routes read through this
     # store; the future SOP-aware parser writes to it.
     process_store: ProcessStore = field(default_factory=InMemoryProcessStore)
+    # LLM-extracted document-level topic store (#411, ADR-031).
+    # Always present (in-memory default for tests / the in-process
+    # demo; persistent builds wire the SQLite-backed implementation).
+    # Read by ``GET /knowledge/topics``; future LLM TopicExtractor
+    # wiring writes through this store via ``save_topics``. Distinct
+    # from the deterministic chunk-cluster ``Topic`` that lives in
+    # the knowledge graph — this store holds document-level themes
+    # for the operator-facing topic UX (Explorer, Atlas, Orbital).
+    document_topic_store: DocumentTopicStore = field(
+        default_factory=InMemoryDocumentTopicStore,
+    )
     # Resolved absolute path the taxonomy was read from, surfaced in
     # the route response so operators can verify which file the API
     # is reading. ``None`` when no taxonomy is configured.
@@ -981,6 +997,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
     claim_store: ClaimStore = InMemoryClaimStore()
     process_store: ProcessStore = InMemoryProcessStore()
+    document_topic_store: DocumentTopicStore = InMemoryDocumentTopicStore()
     # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
     # scorer is constructed unless the kill switch is on. The lazy
     # provider sources samples from the catalog so unknown buckets
@@ -1088,6 +1105,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy_store=taxonomy_store,
         claim_store=claim_store,
         process_store=process_store,
+        document_topic_store=document_topic_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
@@ -1140,6 +1158,7 @@ def build_persistent_services(
     # backup of ``catalog.sqlite3`` carries the metadata along.
     catalog_db_path = root / "catalog.sqlite3"
     process_store: ProcessStore = SQLiteProcessStore(catalog_db_path)
+    document_topic_store: DocumentTopicStore = SQLiteDocumentTopicStore(catalog_db_path)
     persisted_norms_store = SQLiteCorpusNormsStore(catalog_db_path)
     corpus_norms_store: CorpusNormsProvider = LazyCorpusNorms(
         store=persisted_norms_store,
@@ -1243,6 +1262,7 @@ def build_persistent_services(
         taxonomy_store=taxonomy_store,
         claim_store=claim_store,
         process_store=process_store,
+        document_topic_store=document_topic_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,

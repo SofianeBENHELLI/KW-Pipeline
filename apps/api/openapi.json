@@ -1693,6 +1693,123 @@
         "title": "DocumentScopesResponse",
         "type": "object"
       },
+      "DocumentTopic": {
+        "description": "One LLM-extracted document-level theme.\n\n``label`` is a short human-readable name (e.g. ``\"Microservices\narchitecture\"``); ``summary`` is one or two sentences explaining\nwhat the theme covers in this document. Both fields are bounded\nso the v1 read API can render them inline without truncation\ngames on the consumer side.\n\n``keywords`` is a small list of single-word identifiers (3–8 in\npractice) that the extractor associates with the theme. The\nschema doesn't enforce an upper bound — the extractor is the\nright place to police the size, and trimming on read would\nsilently lose data.\n\n``supporting_chunk_ids`` is the list of section / chunk ids the\ntheme was sourced from. Non-empty by Pydantic ``min_length=1`` —\na theme without provenance is unverifiable and the extractor\nmust skip it. Stored on disk as a JSON-encoded array per ADR-031\n(SQLite is the truth; the JSON column avoids a N:M join table\nfor the v1 read API).\n\n``extracted_at`` is set server-side by the store on save — the\nextractor hands the topic in without it (the operator workflow\nhas no notion of \"when did the LLM run\"). The store's\n``save_topics`` populates it before INSERT.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "extracted_at": {
+            "format": "date-time",
+            "title": "Extracted At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "supporting_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Supporting Chunk Ids",
+            "type": "array"
+          },
+          "version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "document_id",
+          "version_id",
+          "label",
+          "summary",
+          "keywords",
+          "confidence",
+          "schema_version",
+          "extracted_at",
+          "supporting_chunk_ids"
+        ],
+        "title": "DocumentTopic",
+        "type": "object"
+      },
+      "DocumentTopicsListResponse": {
+        "description": "Response envelope for ``GET /knowledge/topics``.\n\n``next_cursor`` follows the same opaque-cursor pattern as the\nrest of the catalog read paths — the codec lives in\n:mod:`app.services.catalog_store` and clients must treat the\nstring as opaque.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentTopic"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "items",
+          "next_cursor"
+        ],
+        "title": "DocumentTopicsListResponse",
+        "type": "object"
+      },
       "DocumentVersion": {
         "description": "One immutable binary upload in the catalog.",
         "properties": {
@@ -7686,6 +7803,82 @@
           }
         },
         "summary": "Get Knowledge Taxonomy"
+      }
+    },
+    "/knowledge/topics": {
+      "get": {
+        "description": "List LLM-extracted document-level topics (#411, ADR-031).\n\nReturns the document themes (label / summary / keywords /\nconfidence + supporting chunk ids) that the future\n:class:`~app.services.topic_extractor.TopicExtractor` pass\nhas emitted. The v0.1 wire shape is gated by\n``schema_version`` so a future v0.2 evolution lands without\nsilently flowing through to v0.1 readers.\n\nDistinct from the deterministic chunk-cluster ``Topic`` that\nlives in the knowledge graph — this read returns\n:class:`~app.schemas.document_topic.DocumentTopic` rows from\nthe SQLite governance store.\n\nWith ``document_id`` set, returns only that document's\ntopics (the Explorer / Orbital per-document view). Without\nit, returns every topic in the store (the Atlas / corpus-\nwide overview).\n\nPagination follows the same opaque-cursor convention as the\nrest of the catalog read paths. ``next_cursor`` is ``None``\nwhen no more rows exist behind the current page.\n\nRead-only at this slice — write happens via the future\nextractor wiring (filed as a follow-up to this PR). An empty\n``items`` list is a valid response (no topics yet) and is\nreturned as HTTP 200, mirroring the rest of the\nknowledge-layer read surface.",
+        "operationId": "list_knowledge_topics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTopicsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Knowledge Topics"
       }
     },
     "/metrics": {
