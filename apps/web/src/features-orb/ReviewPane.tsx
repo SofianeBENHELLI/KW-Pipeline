@@ -20,6 +20,8 @@ import { latestVersion } from "../domain/document";
 import { Btn, Card, Mono, OrbScopeChip, OrbStatusBadge, SectionHeading } from "../ui/orb";
 import { MetaRow } from "../ui/orb/atoms";
 
+import { GraphPanel } from "./GraphPanel";
+
 type ReviewAction = "extract" | "semantic" | "validate" | "reject";
 
 const EXTRACTABLE = new Set(["STORED", "EXTRACTED", "FAILED"]);
@@ -67,6 +69,7 @@ export function ReviewPane({ documentId, onMutated }: ReviewPaneProps) {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionState, setActionState] = useState<ActionState>({ busy: null, error: null });
   const [reviewerNote, setReviewerNote] = useState("");
+  const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const inFlightRef = useRef<Set<ReviewAction>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
 
@@ -150,6 +153,9 @@ export function ReviewPane({ documentId, onMutated }: ReviewPaneProps) {
       onMutated?.(refreshed);
       // Re-pull derived artefacts; status changes typically affect them.
       void fetchAll();
+      // Bumping the key forces the graph panel to refetch — Validate +
+      // Reject can both move the graph projection.
+      setGraphRefreshKey((current) => current + 1);
     } catch (err) {
       const message =
         err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
@@ -251,6 +257,11 @@ export function ReviewPane({ documentId, onMutated }: ReviewPaneProps) {
             </p>
           )}
         </Card>
+      </section>
+
+      <section className="orb-review__section">
+        <SectionHeading>Knowledge graph</SectionHeading>
+        <GraphPanel documentId={doc.id} refreshKey={graphRefreshKey} />
       </section>
 
       <section className="orb-review__section">

@@ -16,3 +16,5 @@ export { ReviewPane } from "./ReviewPane";
 export type { ReviewPaneProps } from "./ReviewPane";
 export { pruneSelectionAfterBatch, runBatchPipeline } from "./batch";
 export type { BatchFailure, BatchProgressEntry, BatchSnapshot, BatchStage } from "./batch";
+export { GraphPanel } from "./GraphPanel";
+export type { GraphPanelProps } from "./GraphPanel";

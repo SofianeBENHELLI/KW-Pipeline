@@ -499,3 +499,106 @@
   font-family: var(--orb-font-mono);
   font-size: var(--orb-fs-xs);
 }
+
+/* ---- Knowledge graph panel (Phase 4) ---- */
+
+.orb-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orb-graph__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.orb-graph__counts {
+  margin-left: auto;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+}
+
+.orb-graph__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.orb-graph__list-wrap,
+.orb-graph__inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.orb-graph__list,
+.orb-graph__edges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--orb-rule);
+  border-radius: var(--orb-r-sm);
+  background: var(--orb-bg);
+}
+
+.orb-graph__empty {
+  padding: 10px 12px;
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-graph__node {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--orb-fg);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  text-align: left;
+}
+.orb-graph__node:hover { background: var(--orb-bg-hov); }
+.orb-graph__node.is-active { background: var(--orb-bg-sel); font-weight: 500; }
+
+.orb-graph__node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.orb-graph__node-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-graph__node-kind {
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  text-transform: uppercase;
+}
+
+.orb-graph__edge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-muted);
+  border-bottom: 1px solid var(--orb-rule);
+}
+.orb-graph__edge:last-child { border-bottom: 0; }
+.orb-graph__edge-kind { color: var(--orb-fg-dim); }
