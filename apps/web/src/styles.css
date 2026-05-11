@@ -711,6 +711,212 @@ pre {
   font-weight: 700;
 }
 
+/* #408 — readable Semantic output sub-panels (sections / assets /
+   warnings). Each sub-panel is a small block under the existing
+   ``.panel`` card with its own heading + list of rows. The visual
+   hierarchy is: ``.semantic-list`` (validation, single row at top)
+   then ``.sem-subpanel`` × 3. */
+
+.sem-subpanel {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sem-subpanel__heading {
+  margin: 0 0 8px 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.sem-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sem-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.sem-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--bg-2, #f8fafb);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sem-row__refs-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.sem-truncated-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.sem-truncated-more:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+/* Sections — expandable rows with chevron. */
+.sem-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.sem-section__heading {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.sem-section__chevron {
+  color: var(--muted);
+  font-size: 0.72rem;
+  flex: 0 0 auto;
+}
+.sem-section__text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.sem-section__refs,
+.sem-asset__refs {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+.sem-section__refs code,
+.sem-asset__refs code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+/* Assets — type chip · text · confidence bar · status pill. */
+.sem-asset__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sem-asset__type {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(31, 143, 191, 0.12);
+  color: #1F8FBF;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.sem-asset__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.sem-asset__status--needs_review {
+  background: #FFF8E1;
+  color: #8B6500;
+  border-color: #F2D689;
+}
+.sem-asset__status--source_backed {
+  background: #E5F2F8;
+  color: #1F8FBF;
+  border-color: #B0D6E6;
+}
+.sem-asset__status--validated {
+  background: #E5F4EC;
+  color: #1F7A4A;
+  border-color: #CFE9DD;
+}
+.sem-asset__status--rejected {
+  background: #F8E2E0;
+  color: #B3261E;
+  border-color: #F3C4C4;
+}
+.sem-asset__text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.sem-asset__confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sem-asset__confidence-track {
+  flex: 1 1 auto;
+  height: 4px;
+  background: rgba(122, 136, 147, 0.2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.sem-asset__confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #B26A00 0%, #1F7A4A 100%);
+  transition: width 0.2s ease;
+}
+.sem-asset__confidence-value {
+  flex: 0 0 auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Warnings — flat list with a glyph. */
+.sem-warning {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  background: #FBEFD8;
+  border-color: #F6DCA6;
+}
+.sem-warning__glyph {
+  color: #B26A00;
+  font-size: 1rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.sem-warning__text {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
 .review-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

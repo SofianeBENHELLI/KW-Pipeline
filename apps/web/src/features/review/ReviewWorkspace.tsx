@@ -13,6 +13,9 @@ import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import { ReviewActions } from "./ReviewActions";
+import { SemanticAssetList } from "./SemanticAssetList";
+import { SemanticSectionList } from "./SemanticSectionList";
+import { SemanticWarningList } from "./SemanticWarningList";
 import { useProjectionStatus } from "./useProjectionStatus";
 
 interface ReviewWorkspaceProps {
@@ -272,24 +275,57 @@ export function ReviewWorkspace({
           {loadingDetails ? (
             <p className="muted" role="status">Loading…</p>
           ) : semantic !== null ? (
-            <dl className="semantic-list">
-              <div>
-                <dt>Validation</dt>
-                <dd>{semantic.validation_status}</dd>
-              </div>
-              <div>
-                <dt>Sections</dt>
-                <dd>{semantic.sections.length}</dd>
-              </div>
-              <div>
-                <dt>Assets</dt>
-                <dd>{semantic.assets.length}</dd>
-              </div>
-              <div>
-                <dt>Warnings</dt>
-                <dd>{semantic.warnings.length}</dd>
-              </div>
-            </dl>
+            <>
+              {/* Validation status stays in its own one-row block —
+                  it's the document-level signal the reviewer is
+                  about to act on, distinct from the per-row
+                  review_status pills inside the asset list below. */}
+              <dl className="semantic-list">
+                <div>
+                  <dt>Validation</dt>
+                  <dd data-testid="sem-validation">{semantic.validation_status}</dd>
+                </div>
+              </dl>
+
+              {/* #408 — three readable sub-panels. The earlier
+                  count-only <dl> told the reviewer how many of each
+                  but never let them read the actual content; the
+                  decision to validate / reject the document is
+                  load-bearing enough that the structured artifacts
+                  need to be visible inline. */}
+              <section
+                className="sem-subpanel"
+                aria-labelledby="sem-sections-heading"
+                data-testid="sem-sections-subpanel"
+              >
+                <h4 id="sem-sections-heading" className="sem-subpanel__heading">
+                  Sections{semantic.sections.length > 0 && ` · ${semantic.sections.length}`}
+                </h4>
+                <SemanticSectionList sections={semantic.sections} />
+              </section>
+
+              <section
+                className="sem-subpanel"
+                aria-labelledby="sem-assets-heading"
+                data-testid="sem-assets-subpanel"
+              >
+                <h4 id="sem-assets-heading" className="sem-subpanel__heading">
+                  Assets{semantic.assets.length > 0 && ` · ${semantic.assets.length}`}
+                </h4>
+                <SemanticAssetList assets={semantic.assets} />
+              </section>
+
+              <section
+                className="sem-subpanel"
+                aria-labelledby="sem-warnings-heading"
+                data-testid="sem-warnings-subpanel"
+              >
+                <h4 id="sem-warnings-heading" className="sem-subpanel__heading">
+                  Warnings{semantic.warnings.length > 0 && ` · ${semantic.warnings.length}`}
+                </h4>
+                <SemanticWarningList warnings={semantic.warnings} />
+              </section>
+            </>
           ) : (
             <p className="muted">Semantic output has not been generated.</p>
           )}
