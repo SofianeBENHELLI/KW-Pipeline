@@ -77,7 +77,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ORBITAL_DIR="$REPO_ROOT/apps/web"
 BUCKET="3dx-kwforge-widgets"
 REGION="eu-north-1"
-PREFIX="3dx-knowledge-orbital"
+
+# Production prefix vs preview prefix.
+#
+# Set KW_ORBITAL_PREVIEW=true to publish to the parallel preview prefix
+# (3dx-knowledge-orbital-next/) and SKIP the demo.html auto-update. This
+# is the path the redesign sprint (docs/roadmap/orbital-redesign.md §5)
+# uses while phases 0-8 are in flight, so the production demo URL keeps
+# serving v0.0.0 until cutover day.
+if [ "${KW_ORBITAL_PREVIEW:-false}" = "true" ]; then
+  PREFIX="3dx-knowledge-orbital-next"
+else
+  PREFIX="3dx-knowledge-orbital"
+fi
 
 # Resolve the version: argv[1] wins; otherwise read package.json.
 # Orbital's package.json starts at 0.0.0 so the first deploy lives at
@@ -151,8 +163,14 @@ if curl -fsI "$URL" >/dev/null 2>&1; then
   echo "✓ deploy ok"
   # 5. Update the repo-root demo.html so its "Production deploys"
   # tile points at this version. Best-effort — the helper exits 0
-  # when ``demo.html`` is missing.
-  "$SCRIPT_DIR/_update-demo-deployment.sh" orbital "$URL" || true
+  # when ``demo.html`` is missing. Preview deploys skip this so the
+  # public landing page keeps pointing at the live production bundle
+  # until cutover day.
+  if [ "${KW_ORBITAL_PREVIEW:-false}" = "true" ]; then
+    echo "→ KW_ORBITAL_PREVIEW=true → skipping demo.html update"
+  else
+    "$SCRIPT_DIR/_update-demo-deployment.sh" orbital "$URL" || true
+  fi
   echo
   echo "Open Orbital at:"
   echo
