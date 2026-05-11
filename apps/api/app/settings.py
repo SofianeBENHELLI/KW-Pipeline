@@ -446,6 +446,23 @@ class Settings(BaseSettings):
             "original unbounded behaviour."
         ),
     )
+    claim_extractor_max_input_tokens_per_document: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "KW_CLAIM_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT",
+        ),
+        description=(
+            "Per-section input-token cap for the LLM-driven Claim "
+            "extractor (#392, ADR-031). When set to a positive value, "
+            "any ``SemanticSection`` whose text exceeds the cap is "
+            "skipped (no LLM call, no claims written for that section). "
+            "``0`` (the default) disables the cap — sections of any "
+            "size are passed to the LLM. Mirrors the posture of "
+            "``KW_ENTITY_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT`` but "
+            "applies per-section rather than as a per-document budget, "
+            "since claim extraction is a section-local pass."
+        ),
+    )
     anthropic_timeout_seconds: float = Field(
         default=60.0,
         validation_alias=AliasChoices("KW_ANTHROPIC_TIMEOUT_SECONDS"),

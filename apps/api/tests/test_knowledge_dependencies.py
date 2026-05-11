@@ -282,3 +282,43 @@ def test_layer_threads_embedding_client_when_enabled(
     projector.project(document=document, version=version, semantic=semantic)
     hits = store.find_chunks_by_similarity(embedder.embed_query("hello"), limit=5)
     assert {h.chunk_id for h in hits} == {"s1"}
+
+
+# ─── Claim extractor wiring (#392, ADR-031) ──────────────────────────
+
+
+def test_claim_extractor_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No LLM key set → no Claim extractor wired onto the projector."""
+    from app.dependencies import build_services
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("KW_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("KW_GEMINI_API_KEY", raising=False)
+    services = build_services()
+    assert services.knowledge_projector is not None
+    assert services.knowledge_projector._claim_extractor is None  # type: ignore[attr-defined]
+    # The store is always present (in-memory default) but the
+    # extractor None gates the post-projection hook.
+    assert services.knowledge_projector._claim_store is services.claim_store  # type: ignore[attr-defined]
+
+
+def test_claim_extractor_wired_when_llm_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the LLM is configured and the layer is on, the Claim
+    extractor and the store are both wired onto the projector so the
+    post-projection hook fires on validate."""
+    from app.dependencies import build_services
+    from app.services.claim_extractor import ClaimExtractor as _ClaimExtractor
+
+    monkeypatch.setenv("KW_KNOWLEDGE_LAYER_ENABLED", "true")
+    monkeypatch.setenv("KW_ANTHROPIC_API_KEY", "ak-test")
+    monkeypatch.delenv("KW_GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    services = build_services()
+    assert services.knowledge_projector is not None
+    assert isinstance(
+        services.knowledge_projector._claim_extractor,
+        _ClaimExtractor,  # type: ignore[attr-defined]
+    )
+    assert services.knowledge_projector._claim_store is services.claim_store  # type: ignore[attr-defined]

@@ -73,6 +73,8 @@ if TYPE_CHECKING:
     # in app.services and depends on knowledge.relations, which is
     # adjacent to this module. Forward-referencing the type keeps
     # the projector's runtime imports unchanged.
+    from app.services.claim_extractor import ClaimExtractor
+    from app.services.claim_store import ClaimStore
     from app.services.document_relations_cache import DocumentRelationsCache
     from app.services.process_store import ProcessStore
 
@@ -119,6 +121,8 @@ class KnowledgeProjector:
         embedding_client: EmbeddingClient | None = None,
         document_relations_cache: DocumentRelationsCache | None = None,
         process_store: ProcessStore | None = None,
+        claim_extractor: ClaimExtractor | None = None,
+        claim_store: ClaimStore | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -153,6 +157,14 @@ class KnowledgeProjector:
         # exactly — non-procedural docs continue to extract as
         # chunks without a Process row appearing.
         self._process_store = process_store
+        # #392: LLM-driven Claim extractor + the SQLite-backed Claim
+        # store. The pair is wired together (both-or-nothing) — if the
+        # operator wires the extractor but no store, the post-projection
+        # hook is a no-op so we don't run the LLM call only to throw
+        # the result away. Both ``None`` (the default) preserves the
+        # pre-#392 behaviour exactly.
+        self._claim_extractor = claim_extractor
+        self._claim_store = claim_store
 
     def set_document_relations_cache(
         self,
@@ -187,6 +199,28 @@ class KnowledgeProjector:
         the default when callers don't want Process emission).
         """
         self._process_store = store
+
+    def set_claim_extractor(self, extractor: ClaimExtractor | None) -> None:
+        """Wire the Claim extractor after construction (#392).
+
+        Mirrors :meth:`set_document_relations_cache` so the
+        wiring layer can attach the extractor without breaking the
+        projector's constructor signature for the existing tests that
+        build ``KnowledgeProjector(graph_store=...)`` directly.
+
+        The post-projection hook only fires when BOTH this and the
+        Claim store are set — see :meth:`set_claim_store`.
+        """
+        self._claim_extractor = extractor
+
+    def set_claim_store(self, store: ClaimStore | None) -> None:
+        """Wire the Claim store after construction (#392).
+
+        See :meth:`set_claim_extractor`. Both must be wired for the
+        post-projection extraction hook to run; either ``None`` is
+        a valid kill switch (e.g. when the LLM is not configured).
+        """
+        self._claim_store = store
 
     def project(
         self,
@@ -345,6 +379,43 @@ class KnowledgeProjector:
             except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
                 log.warning(
                     "knowledge.embeddings.failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        # #392: LLM-driven Claim extraction. Both-or-nothing — if the
+        # operator wires the extractor without the store, the LLM call
+        # would just throw the result away, so we gate on both being
+        # set. ``delete_for_version`` runs first so a re-projection
+        # replaces the prior batch atomically (the FK on
+        # ``claims.version_id`` would also cascade on a version delete,
+        # but a re-extraction never deletes the version row). Fire-and-log
+        # per ADR-012 §3 — a Claim-extractor failure leaves the
+        # structural projection (and the cache warm above) intact.
+        if self._claim_extractor is not None and self._claim_store is not None:
+            try:
+                claims = self._claim_extractor.extract(
+                    semantic,
+                    document=document,
+                    version=version,
+                )
+                self._claim_store.delete_for_version(version.id)
+                if claims:
+                    self._claim_store.save_claims(claims)
+                log.info(
+                    "knowledge.claim_extraction.written",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "claim_count": len(claims),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.claim_extraction.failed",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,

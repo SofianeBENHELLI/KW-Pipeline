@@ -10,6 +10,7 @@ from app.services.audit_event_store import (
 )
 from app.services.auth import AuthService, DisabledAuthService, build_auth_service
 from app.services.catalog_store import SQLiteCatalogStore
+from app.services.claim_extractor import ClaimExtractor
 from app.services.claim_store import (
     ClaimStore,
     InMemoryClaimStore,
@@ -641,6 +642,40 @@ def _maybe_build_entity_extractor(
     )
 
 
+def _maybe_build_claim_extractor(
+    settings: Settings | None = None,
+    *,
+    llm: LLMClient | None = None,
+    llm_model: str | None = None,
+) -> ClaimExtractor | None:
+    """Build the LLM-driven Claim extractor if enabled (#392, ADR-031).
+
+    Returns ``None`` unless an LLM provider is configured (Gemini
+    primary, Anthropic fallback per ADR-013 §6) AND the knowledge
+    layer is on. The pre-#392 path (no Claim extraction wired) is
+    preserved when no provider is configured so contributors who
+    don't have either API key can still run the knowledge layer
+    end-to-end against the in-memory graph store.
+
+    Callers may pass a pre-built ``llm`` + ``llm_model`` so the
+    Claim extractor shares one client with the entity extractor and
+    chat service — same retry budget, same prompt cache, single
+    provider config to track.
+    """
+    settings = settings or Settings()
+    if llm is None or llm_model is None:
+        built = _maybe_build_llm(settings)
+        if built is None:
+            return None
+        llm, llm_model = built
+    cap = settings.claim_extractor_max_input_tokens_per_document
+    return ClaimExtractor(
+        llm=llm,
+        model=llm_model,
+        max_input_tokens=cap,
+    )
+
+
 def _maybe_build_embedding_client(
     settings: Settings | None = None,
 ) -> EmbeddingClient | None:
@@ -982,6 +1017,15 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         store=document_relations_store,
         relations=knowledge_relations,
     )
+    # #392: build the Claim extractor before the projector wiring so
+    # we can hand it in alongside the other side-effect deps. When no
+    # LLM is configured ``claim_extractor`` is None and the
+    # post-projection hook stays a no-op (pre-#392 behaviour preserved).
+    claim_extractor = _maybe_build_claim_extractor(
+        settings,
+        llm=llm_client,
+        llm_model=llm_model,
+    )
     # #385: wire the cache onto the projector so post-projection
     # warm fires for every validate. ``None``-safe: when the
     # knowledge layer is disabled, ``knowledge_projector`` is None
@@ -995,6 +1039,11 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         # non-procedural docs short-circuit inside the parser and
         # leave the catalog row state unchanged.
         knowledge_projector.set_process_store(process_store)
+        # #392: wire the Claim extractor + store. Both must be set
+        # for the post-projection LLM pass to fire — see
+        # ``KnowledgeProjector``.
+        knowledge_projector.set_claim_extractor(claim_extractor)
+        knowledge_projector.set_claim_store(claim_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1126,6 +1175,16 @@ def build_persistent_services(
         store=document_relations_store,
         relations=knowledge_relations,
     )
+    # #392: build the Claim extractor before the projector wiring so
+    # we can hand it in alongside the other side-effect deps. Same
+    # both-or-nothing posture as the in-memory path; when no LLM is
+    # configured ``claim_extractor`` is None and the post-projection
+    # hook stays a no-op.
+    claim_extractor = _maybe_build_claim_extractor(
+        settings,
+        llm=llm_client,
+        llm_model=llm_model,
+    )
     # #385: same as build_services — wire the cache onto the
     # projector so post-projection warm fires for every validate
     # in the persistent runtime.
@@ -1135,6 +1194,11 @@ def build_persistent_services(
         # the deterministic SOP parser writes Process rows through
         # the SQLite store on the persistent path.
         knowledge_projector.set_process_store(process_store)
+        # #392: wire the Claim extractor + the SQLite-backed store
+        # so the post-projection LLM pass writes Claims through the
+        # persistent ClaimStore.
+        knowledge_projector.set_claim_extractor(claim_extractor)
+        knowledge_projector.set_claim_store(claim_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
