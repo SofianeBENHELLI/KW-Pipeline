@@ -989,6 +989,12 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # cache-miss path still warms on demand).
     if knowledge_projector is not None:
         knowledge_projector.set_document_relations_cache(document_relations_cache)
+        # #390: wire the process_store onto the projector so the
+        # deterministic SOP parser fires after each successful
+        # projection. Same ``None``-safe posture as the cache wiring;
+        # non-procedural docs short-circuit inside the parser and
+        # leave the catalog row state unchanged.
+        knowledge_projector.set_process_store(process_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1125,6 +1131,10 @@ def build_persistent_services(
     # in the persistent runtime.
     if knowledge_projector is not None:
         knowledge_projector.set_document_relations_cache(document_relations_cache)
+        # #390: same as build_services — wire the process_store so
+        # the deterministic SOP parser writes Process rows through
+        # the SQLite store on the persistent path.
+        knowledge_projector.set_process_store(process_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
