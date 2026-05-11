@@ -269,6 +269,15 @@ export function useExplorerData(apiBaseUrl: string, refreshTick: number): Explor
           clusters,
           isSample: false,
           corpusLabel: `${page.items.length} documents`,
+          // #321 — surface the cursor-loop ceiling: when
+          // ``fetchFullGraph`` walked all ``MAX_GRAPH_PAGES`` pages
+          // and the last page still carried a ``next_cursor``, the
+          // graph view shows only the first ~5,000 nodes the
+          // backend returned. The banner in App.tsx reads this
+          // boolean and tells the user the rest of the corpus is
+          // hidden until they refine. ``null`` graphPage (knowledge
+          // layer disabled) reads as "not truncated".
+          graphTruncated: graphPage?.next_cursor != null,
         };
         setState({ snapshot, mode: "live", error: null, refreshing: false });
       } catch (err: unknown) {

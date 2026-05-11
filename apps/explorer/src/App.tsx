@@ -917,6 +917,22 @@ export default function App(): React.ReactElement {
                 to populate the corpus.
               </div>
             )}
+            {/* #321 — knowledge-graph cursor walk hit its page
+                ceiling, so the graph + relation views are
+                rendering only the first slice of nodes/edges. The
+                catalog rail (documents) is unaffected — it has its
+                own pagination via the Catalog component. Tell the
+                operator so they don't trust the graph view as
+                complete on a large corpus. */}
+            {snapshot.graphTruncated && (
+              <div
+                className="kx-empty-banner"
+                data-testid="kx-graph-truncated-banner"
+                title="Refine clusters or use search to focus on specific documents"
+              >
+                <Icon name="info" size={11} /> Graph truncated — showing first ~5,000 nodes
+              </div>
+            )}
           </Section>
 
           <Section title="HIERARCHY">
