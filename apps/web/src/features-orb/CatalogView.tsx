@@ -2,20 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, listDocuments } from "../api/client";
 import type { components } from "../api/generated/schema";
-import { Btn, Icon } from "../ui/orb";
 
 import {
   type BatchSnapshot,
   pruneSelectionAfterBatch,
   runBatchPipeline,
 } from "./batch";
-import { CatalogRail, type CatalogView as ViewId, viewToStatuses } from "./CatalogRail";
-import { CatalogTable } from "./CatalogTable";
+import {
+  CatalogRail,
+  type CatalogView as ViewId,
+  viewToStatuses,
+} from "./CatalogRail";
 import { OrbChatPanel } from "./ChatPanel";
+import { DocPage } from "./DocPage";
 import { OrbPurgeAllDialog } from "./PurgeDialogs";
-import { ReviewPane } from "./ReviewPane";
 import { OrbSearchPanel } from "./SearchPanel";
-import { OrbShell, type ShellAside } from "./Shell";
+import { OrbShell, type OrbNavItem } from "./Shell";
 
 type ApiDocument = components["schemas"]["Document"];
 
@@ -28,12 +30,14 @@ const VIEW_TITLES: Record<ViewId, string> = {
   failed: "Failed documents",
 };
 
+type SortCol = "filename" | "uploaded" | "status";
+type SortDir = "asc" | "desc";
+
 /**
- * Phase-1/2/3 catalog view — the `/orb` route's entry point. Wires the
- * new shell to the real backend via `listDocuments`. Saved-view filters
- * map onto the existing `status[]` query param; the search input is
- * debounced. Selecting a row opens the review pane (Phase 2); selecting
- * rows via checkbox arms the batch run bar (Phase 3).
+ * The `/orb` route. Variant-A shell + rail + main canvas. Selecting a
+ * row in the rail flips the main canvas from the catalog "no document"
+ * placeholder to <DocPage>, which owns the breadcrumbs, dochead,
+ * Linked-view / Pipeline tabs, and FSM actions.
  */
 export function OrbCatalogView() {
   const [view, setView] = useState<ViewId>("recent");
@@ -46,17 +50,17 @@ export function OrbCatalogView() {
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
   const [batchSnapshot, setBatchSnapshot] = useState<BatchSnapshot | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
-  const [aside, setAside] = useState<ShellAside>(null);
   const [purgeAllOpen, setPurgeAllOpen] = useState(false);
+  const [nav, setNav] = useState<OrbNavItem>("review");
+  const [sort, setSort] = useState<{ col: SortCol; dir: SortDir }>({
+    col: "uploaded",
+    dir: "desc",
+  });
   const abortRef = useRef<AbortController | null>(null);
 
-  const handleAsideSelect = useCallback((documentId: string) => {
-    setSelectedId(documentId);
-    setAside(null);
-  }, []);
-
+  // Debounce the filename filter.
   useEffect(() => {
-    const handle = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
+    const handle = window.setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [query]);
 
@@ -121,114 +125,123 @@ export function OrbCatalogView() {
     }
   }, [batchRunning, batchSelection, documents, refresh]);
 
-  const selectionCount = batchSelection.size;
+  const toggleSort = useCallback((col: SortCol) => {
+    setSort((current) =>
+      current.col === col
+        ? { col, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { col, dir: col === "filename" ? "asc" : "desc" },
+    );
+  }, []);
+
+  const handleNav = (next: OrbNavItem) => {
+    setNav(next);
+    if (next === "admin") window.location.assign("/orb/admin");
+  };
+
   const failures = batchSnapshot?.failures ?? [];
   const progress = batchSnapshot?.progress;
   const title = useMemo(() => VIEW_TITLES[view], [view]);
 
   return (
     <OrbShell
-      rail={<CatalogRail view={view} onView={setView} query={query} onQuery={setQuery} />}
-      aside={aside}
-      onAsideChange={setAside}
-      asideContent={
-        aside === "search" ? (
-          <OrbSearchPanel onSelectResult={handleAsideSelect} />
-        ) : aside === "chat" ? (
-          <OrbChatPanel onSelectCitation={handleAsideSelect} />
-        ) : null
+      activeNav={nav}
+      onNav={handleNav}
+      buildVersion="v0.1.0-preview.2"
+      rail={
+        <CatalogRail
+          documents={documents}
+          loading={loading}
+          view={view}
+          onView={setView}
+          query={query}
+          onQuery={setQuery}
+          counts={{}}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          selection={batchSelection}
+          onToggleBatch={toggleBatch}
+          onClearBatch={clearBatch}
+          onRunBatch={runBatch}
+          batchRunning={batchRunning}
+          batchProgress={progress}
+          sort={sort}
+          onSort={toggleSort}
+        />
       }
     >
-      <div className={selectedId ? "orb-canvas--split" : "orb-canvas--full"}>
-        <div className="orb-catalog">
-          <div className="orb-catalog__head">
-            <h1 className="orb-catalog__title">{title}</h1>
-            <span className="orb-catalog__meta">
-              {documents.length} shown{loading && documents.length > 0 ? " · refreshing" : ""}
-            </span>
-            <span className="orb-catalog__head-spacer" />
-            {selectionCount > 0 && (
-              <div className="orb-catalog__batchbar">
-                <span className="orb-mono orb-catalog__batchbar-count">
-                  {selectionCount} selected
+      {nav === "search" ? (
+        <OrbSearchPanel onSelectResult={(id) => { setSelectedId(id); setNav("review"); }} />
+      ) : nav === "chat" ? (
+        <OrbChatPanel onSelectCitation={(id) => { setSelectedId(id); setNav("review"); }} />
+      ) : selectedId ? (
+        <DocPage
+          documentId={selectedId}
+          onBack={() => setSelectedId(null)}
+          onMutated={() => void refresh()}
+        />
+      ) : error ? (
+        <div className="orb-banner orb-banner--err" role="alert" style={{ borderRadius: 6 }}>
+          Failed to load catalog: {error}
+        </div>
+      ) : (
+        <div>
+          <h1 className="rwA-title">{title}</h1>
+          <p style={{ color: "var(--orb-fg-muted)", fontSize: 13, margin: "8px 0 0" }}>
+            Pick a document from the rail to open the review surface. {documents.length} document(s) match the current view.
+          </p>
+          {failures.length > 0 && (
+            <div className="rwA-batchbanner">
+              <div className="rwA-batchbanner-h">
+                <span className="icon">⚠</span>
+                <b>Batch pipeline</b>
+                <span className="orb-mono rwA-hint">
+                  {Object.values(batchSnapshot?.progress ?? {}).filter((s) => s.stage === "done").length} done · {failures.length} failed
                 </span>
+                <span style={{ flex: 1 }} />
                 <button
                   type="button"
-                  className="orb-btn orb-btn--ghost orb-btn--xs"
-                  onClick={clearBatch}
-                  disabled={batchRunning}
+                  className="rwA-link"
+                  onClick={() => setBatchSnapshot(null)}
                 >
-                  Clear
+                  dismiss
                 </button>
-                <Btn
-                  kind="primary"
-                  size="xs"
-                  icon={<Icon name="bolt" />}
-                  onClick={runBatch}
-                  disabled={batchRunning}
-                >
-                  {batchRunning ? "Running…" : "Run pipeline"}
-                </Btn>
               </div>
-            )}
-          </div>
-          <CatalogTable
-            documents={documents}
-            loading={loading}
-            error={error}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            selection={batchSelection}
-            onToggleBatch={toggleBatch}
-            batchProgress={progress}
-          />
-          {failures.length > 0 && (
-            <div className="orb-catalog__failures" role="status">
-              <strong>{failures.length} document(s) failed during the last batch run:</strong>
-              <ul>
+              <div className="rwA-batchbanner-fail">
                 {failures.map((failure) => (
-                  <li key={failure.document_id}>
-                    <span className="orb-mono orb-catalog__failures-id">{failure.document_id.slice(0, 8)}</span>
-                    <span> {failure.filename} — </span>
-                    <span className="orb-catalog__failures-reason">{failure.reason}</span>
-                  </li>
+                  <div key={failure.document_id} className="orb-mono">
+                    <span style={{ color: "var(--orb-err)" }}>✗</span> {failure.document_id.slice(0, 8)} ·{" "}
+                    <span style={{ color: "var(--orb-fg-muted)" }}>{failure.reason}</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
-          <div className="orb-catalog__footer">
-            <span>
-              View: <strong>{view}</strong>
-              {debouncedQuery ? ` · filtered by "${debouncedQuery}"` : ""}
-            </span>
-            <span className="orb-catalog__footer-spacer" />
+          <div className="rwA-foot">
+            <span>Documents · {documents.length.toLocaleString()}</span>
+            <span>·</span>
+            <span>view {view}</span>
+            {debouncedQuery && (
+              <>
+                <span>·</span>
+                <span>q "{debouncedQuery}"</span>
+              </>
+            )}
+            <span style={{ flex: 1 }} />
             <button
               type="button"
-              className="orb-btn orb-btn--ghost orb-btn--xs"
+              className="rwA-link"
               onClick={() => setPurgeAllOpen(true)}
               style={{ color: "var(--orb-err-fg)" }}
             >
-              Purge all…
+              purge all…
             </button>
-            <span className="orb-mono">GET /documents</span>
+            <span>⌘K commands</span>
+            <span>⌘/ search</span>
+            <span>j/k row · v validate · r reject</span>
           </div>
         </div>
-        {selectedId && (
-          <aside className="orb-canvas__review orb-scroll">
-            <div className="orb-canvas__review-head">
-              <button
-                type="button"
-                className="orb-btn orb-btn--ghost orb-btn--xs"
-                onClick={() => setSelectedId(null)}
-                aria-label="Close review pane"
-              >
-                ← Back to catalog
-              </button>
-            </div>
-            <ReviewPane documentId={selectedId} onMutated={() => void refresh()} />
-          </aside>
-        )}
-      </div>
+      )}
+
       <OrbPurgeAllDialog
         open={purgeAllOpen}
         onClose={() => setPurgeAllOpen(false)}

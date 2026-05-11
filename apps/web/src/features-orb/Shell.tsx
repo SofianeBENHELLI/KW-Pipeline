@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
-import { Btn, Icon, ThemeToggle } from "../ui/orb";
+import { Btn, Chip, Icon, useOrbTheme } from "../ui/orb";
 
-import "./shell.css";
+import "./rwA.css";
 
 interface ShellBanner {
   id: string;
@@ -11,87 +11,127 @@ interface ShellBanner {
   dismiss?: () => void;
 }
 
-export type ShellAside = "search" | "chat" | null;
+export type OrbNavItem = "review" | "graph" | "search" | "chat" | "admin";
 
 export interface OrbShellProps {
   rail: ReactNode;
   children: ReactNode;
   banners?: ShellBanner[];
-  /** Currently-open right-edge slide-out panel, if any. */
-  aside?: ShellAside;
-  onAsideChange?: (next: ShellAside) => void;
-  /** Slot for the slide-out panel content (one of <SearchPanel/> | <ChatPanel/>). */
-  asideContent?: ReactNode;
+  /** Active top-nav tab. */
+  activeNav?: OrbNavItem;
+  onNav?: (next: OrbNavItem) => void;
+  /** Initials displayed in the upper-right avatar (e.g. "SB"). */
+  avatar?: string;
+  /** Optional build/version string shown as a status chip in the top-right. */
+  buildVersion?: string;
+  /** When true, the rail sits on the right edge (mockup `rail-right`). */
+  railRight?: boolean;
 }
 
+const NAV_ITEMS: { id: OrbNavItem; label: string; icon: Parameters<typeof Icon>[0]["name"] }[] = [
+  { id: "review", label: "Review", icon: "doc" },
+  { id: "graph", label: "Graph", icon: "graph" },
+  { id: "search", label: "Search", icon: "spark" },
+  { id: "chat", label: "Chat", icon: "chat" },
+  { id: "admin", label: "Admin", icon: "shield" },
+];
+
 /**
- * Phase-1+ shell. Fixed-position grid: banner stack → topbar →
- * rail+canvas split. Phase 5 added the right-edge `aside` slot toggled
- * by the topbar's search and chat icons.
+ * Variant-A shell — exact port of the mockup top bar (brand mark + nav
+ * tabs + version chip + cog + avatar). The body is a two-column grid
+ * (rail + main canvas) that the catalog and review surfaces fill.
  */
-export function OrbShell({ rail, children, banners = [], aside = null, onAsideChange, asideContent }: OrbShellProps) {
-  const toggleAside = (next: ShellAside) => {
-    onAsideChange?.(aside === next ? null : next);
-  };
+export function OrbShell({
+  rail,
+  children,
+  banners = [],
+  activeNav = "review",
+  onNav,
+  avatar = "SB",
+  buildVersion,
+  railRight = false,
+}: OrbShellProps) {
+  const { toggleTheme, theme } = useOrbTheme();
   return (
-    <div className={`orb-app orb-shell ${aside ? "orb-shell--with-aside" : ""}`.trim()}>
-      <div className="orb-shell__banners">
-        {banners.map((banner) => (
-          <div key={banner.id} className={`orb-banner orb-banner--${banner.tone}`} role={banner.tone === "err" ? "alert" : "status"}>
-            <span className="orb-banner__body">{banner.body}</span>
-            {banner.dismiss && (
-              <button
-                type="button"
-                className="orb-btn orb-btn--ghost orb-btn--xs orb-banner__dismiss"
-                onClick={banner.dismiss}
-              >
-                Dismiss
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+    <div className={`orb-app rwA ${railRight ? "rail-right" : ""}`.trim()}>
+      {banners.length > 0 && (
+        <div className="orb-shell__banners">
+          {banners.map((banner) => (
+            <div
+              key={banner.id}
+              className={`orb-banner orb-banner--${banner.tone}`}
+              role={banner.tone === "err" ? "alert" : "status"}
+            >
+              <span className="orb-banner__body">{banner.body}</span>
+              {banner.dismiss && (
+                <button
+                  type="button"
+                  className="orb-btn orb-btn--ghost orb-btn--xs"
+                  onClick={banner.dismiss}
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
-      <div className="orb-shell__topbar">
-        <span className="orb-shell__brand">
-          <span className="orb-shell__brand-mark">O</span>
-          <span className="orb-shell__brand-name">Orbital</span>
-          <span className="orb-shell__brand-tagline orb-mono">reviewer workbench</span>
+      <div className="rwA-topbar">
+        <span className="rwA-brand">
+          <span className="rwA-mark" aria-hidden="true" />
+          <span className="rwA-brandname">orbital</span>
+          <span className="rwA-brandtag orb-mono">reviewer · kw-pipeline</span>
         </span>
-        <span className="orb-shell__topbar-spacer" />
-        {onAsideChange && (
-          <>
-            <Btn
-              kind={aside === "search" ? "primary" : "ghost"}
-              size="sm"
-              iconOnly
-              icon={<Icon name="search" />}
-              onClick={() => toggleAside("search")}
-              aria-label={aside === "search" ? "Close search panel" : "Open vector search"}
-              title="Vector search"
-            />
-            <Btn
-              kind={aside === "chat" ? "primary" : "ghost"}
-              size="sm"
-              iconOnly
-              icon={<Icon name="chat" />}
-              onClick={() => toggleAside("chat")}
-              aria-label={aside === "chat" ? "Close chat panel" : "Open grounded chat"}
-              title="Grounded chat"
-            />
-          </>
-        )}
-        <ThemeToggle />
+        <nav className="rwA-nav" aria-label="Primary">
+          {NAV_ITEMS.map((item) => {
+            const active = item.id === activeNav;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`rwA-navbtn ${active ? "is-active" : ""}`.trim()}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onNav?.(item.id)}
+              >
+                <Icon name={item.icon} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="rwA-topright">
+          {buildVersion && (
+            <Chip dot color="var(--orb-ok)">
+              <span className="orb-mono">{buildVersion}</span>
+            </Chip>
+          )}
+          <Btn
+            kind="ghost"
+            size="sm"
+            iconOnly
+            icon={<Icon name="spark" />}
+            onClick={toggleTheme}
+            title={`Theme: ${theme}`}
+            aria-label="Toggle theme"
+          />
+          <Btn
+            kind="ghost"
+            size="sm"
+            iconOnly
+            icon={<Icon name="cog" />}
+            title="Settings"
+            aria-label="Open settings"
+          />
+          <span className="rwA-avatar" aria-label={`Signed in as ${avatar}`}>
+            {avatar}
+          </span>
+        </div>
       </div>
 
-      <div className="orb-shell__main">
-        <aside className="orb-shell__rail orb-scroll">{rail}</aside>
-        <main className="orb-shell__canvas orb-scroll">{children}</main>
-        {aside && asideContent && (
-          <aside className="orb-shell__aside orb-scroll" aria-label={aside === "search" ? "Vector search" : "Chat"}>
-            {asideContent}
-          </aside>
-        )}
+      <div className="rwA-fab">
+        <aside className="rwA-rail">{rail}</aside>
+        <main className="rwA-main orb-scroll">{children}</main>
       </div>
     </div>
   );

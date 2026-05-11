@@ -1,28 +1,27 @@
 /**
- * Phase-1 of the Orbital redesign — entry point for the `/orb` route.
- * Components here render against the new `.orb-*` design system in
- * `src/styles/tokens.css` and stay isolated from the legacy `features/`
- * tree until phases 2-7 retire the old surfaces one by one.
+ * Variant-A Orbital redesign (`/orb` route). All components paint
+ * against the `.rwA-*` class set in `rwA.css`, ported verbatim from
+ * the hi-fi mockup (`Orbital Knowledge.zip / orbital-review-a.jsx`).
  */
 
 export { OrbCatalogView } from "./CatalogView";
 export { OrbShell } from "./Shell";
-export type { OrbShellProps } from "./Shell";
+export type { OrbShellProps, OrbNavItem } from "./Shell";
 export { CatalogRail, viewToStatuses } from "./CatalogRail";
 export type { CatalogRailProps, CatalogView } from "./CatalogRail";
-export { CatalogTable } from "./CatalogTable";
-export type { CatalogTableProps } from "./CatalogTable";
-export { ReviewPane } from "./ReviewPane";
-export type { ReviewPaneProps } from "./ReviewPane";
-export { pruneSelectionAfterBatch, runBatchPipeline } from "./batch";
-export type { BatchFailure, BatchProgressEntry, BatchSnapshot, BatchStage } from "./batch";
-export { GraphPanel } from "./GraphPanel";
-export type { GraphPanelProps } from "./GraphPanel";
-export { OrbSearchPanel } from "./SearchPanel";
-export type { OrbSearchPanelProps } from "./SearchPanel";
+export { DocPage } from "./DocPage";
+export type { DocPageProps } from "./DocPage";
+export { LinkedView } from "./LinkedView";
+export type { LinkedViewProps } from "./LinkedView";
+export { PipelineTab } from "./PipelineTab";
+export type { PipelineTabProps, FsmAction } from "./PipelineTab";
 export { OrbChatPanel } from "./ChatPanel";
 export type { OrbChatPanelProps } from "./ChatPanel";
+export { OrbSearchPanel } from "./SearchPanel";
+export type { OrbSearchPanelProps } from "./SearchPanel";
 export { OrbAdminHub } from "./AdminHub";
 export { OrbAdminAudit } from "./AdminAudit";
 export { OrbPurgeDialog, OrbPurgeAllDialog } from "./PurgeDialogs";
 export type { OrbPurgeDialogProps, OrbPurgeAllDialogProps } from "./PurgeDialogs";
+export { pruneSelectionAfterBatch, runBatchPipeline } from "./batch";
+export type { BatchFailure, BatchProgressEntry, BatchSnapshot, BatchStage } from "./batch";
