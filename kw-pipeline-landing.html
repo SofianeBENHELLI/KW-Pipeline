@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KW-Pipeline — Landing</title>
+  <style>
+    :root {
+      --ds-blue-900: #001E2E;
+      --ds-blue-700: #005686;
+      --ds-blue-500: #1F8FBF;
+      --ds-blue-100: #E5F2F8;
+      --ds-bg:      #FFFFFF;
+      --ds-shell:   #F4F6F8;
+      --ds-ink-300: #C9D2DA;
+      --ds-ink-500: #7A8893;
+      --ds-ink-700: #3C4A55;
+      --ds-ink-900: #0E1B26;
+      --ds-radius: 6px;
+      --ds-font: "DassaultSystemes", "Open Sans", -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--ds-font);
+      color: var(--ds-ink-900);
+      background: linear-gradient(180deg, var(--ds-shell) 0%, #ffffff 60%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+    }
+    header {
+      text-align: center;
+      max-width: 760px;
+      margin-bottom: 40px;
+    }
+    .brand {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ds-blue-700);
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0 0 16px 0;
+      font-size: 38px;
+      font-weight: 700;
+      color: var(--ds-blue-900);
+      letter-spacing: -0.01em;
+    }
+    .tagline {
+      margin: 0 auto;
+      font-size: 17px;
+      line-height: 1.55;
+      color: var(--ds-ink-700);
+      max-width: 640px;
+    }
+    main {
+      width: 100%;
+      max-width: 960px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--ds-bg);
+      border: 1px solid var(--ds-ink-300);
+      border-radius: var(--ds-radius);
+      padding: 22px 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .card:hover {
+      border-color: var(--ds-blue-500);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0, 86, 134, 0.10);
+    }
+    .card .label {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ds-ink-500);
+      font-weight: 600;
+    }
+    .card h2 {
+      margin: 0;
+      font-size: 19px;
+      color: var(--ds-blue-900);
+      font-weight: 600;
+    }
+    .card p {
+      margin: 4px 0 0 0;
+      font-size: 14px;
+      color: var(--ds-ink-700);
+      line-height: 1.45;
+    }
+    .card .url {
+      margin-top: auto;
+      padding-top: 10px;
+      font-size: 12px;
+      color: var(--ds-blue-700);
+      word-break: break-all;
+    }
+
+    section.launch {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 36px;
+      padding: 24px;
+      background: var(--ds-blue-100);
+      border: 1px solid var(--ds-blue-500);
+      border-radius: var(--ds-radius);
+    }
+    section.launch h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      color: var(--ds-blue-900);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    section.launch p {
+      margin: 0 0 16px 0;
+      font-size: 14px;
+      color: var(--ds-ink-700);
+    }
+    .launch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 18px;
+      background: var(--ds-blue-700);
+      color: #fff;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--ds-radius);
+      transition: background 0.15s ease;
+    }
+    .btn:hover { background: var(--ds-blue-900); }
+    .btn.secondary {
+      background: #fff;
+      color: var(--ds-blue-700);
+      border: 1px solid var(--ds-blue-500);
+    }
+    .btn.secondary:hover {
+      background: var(--ds-blue-100);
+    }
+    .note {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--ds-ink-500);
+    }
+    footer {
+      margin-top: 48px;
+      font-size: 12px;
+      color: var(--ds-ink-500);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    URLs for the three deploy-aware cards (Orbital, KW Explorer, KW
+    Forge widget) are sourced from the JSON below — kept in sync with
+    the live S3 bundles by ``scripts/_update-demo-deployment.sh``,
+    which the deploy scripts call automatically after each upload.
+    Edit by hand only if the backend hostname or the S3 bucket
+    changes; otherwise let the helper update it.
+  -->
+  <script id="kw-deployments" type="application/json">
+{
+  "backend":  "https://kw-api.benhelli.org",
+  "widget":   "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledgeforge/v0.1.0/index.html",
+  "explorer": "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-explorer/v0.1.0/index.html",
+  "orbital":  "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-orbital/v0.0.0/index.html"
+}
+  </script>
+
+  <header>
+    <span class="brand">Knowledge Pipeline</span>
+    <h1>KW-Pipeline</h1>
+    <p class="tagline">
+      Plateforme d'ingestion documentaire qui transforme tes PDF, DOCX et PPTX en
+      graphe de connaissance gouverné — extraction, sémantique LLM, validation
+      humaine, et exploration via le 3DEXPERIENCE.
+    </p>
+  </header>
+
+  <main>
+    <a class="card" href="https://github.com/SofianeBENHELLI/KW-Pipeline" target="_blank" rel="noopener">
+      <span class="label">Source</span>
+      <h2>Code source · GitHub</h2>
+      <p>Repo monorepo : API FastAPI, frontends React, widgets 3DX, ADR et runbooks.</p>
+      <span class="url">github.com/SofianeBENHELLI/KW-Pipeline</span>
+    </a>
+
+    <a class="card" data-deploy-kind="orbital" href="#" target="_blank" rel="noopener">
+      <span class="label">Workbench</span>
+      <h2>Orbital · Review</h2>
+      <p>App web où tu uploades, déclenches l'extraction et valides chaque version. Lit + écrit. Déployée sur S3 (eu-north-1).</p>
+      <span class="url"></span>
+    </a>
+
+    <a class="card" data-deploy-kind="explorer" href="#" target="_blank" rel="noopener">
+      <span class="label">Read-only</span>
+      <h2>KW Explorer</h2>
+      <p>Vue d'ensemble du corpus, chunks et graphe. Widget 3DDashboard publié sur S3 (eu-north-1).</p>
+      <span class="url"></span>
+    </a>
+
+    <a class="card" data-deploy-kind="widget" href="#" target="_blank" rel="noopener">
+      <span class="label">3DEXPERIENCE</span>
+      <h2>KW Forge · Widget</h2>
+      <p>Widget 3DDashboard publié sur S3 (eu-north-1). À ajouter dans un dashboard 3DX.</p>
+      <span class="url"></span>
+    </a>
+
+    <a class="card" href="https://r1132101374767-eu1-ifwe.3dexperience.3ds.com/#dashboard:5621b53d-9657-4a46-8d52-b3d8ddbe79ee/tabId:AMHdApKA08xaXiIwQG1p" target="_blank" rel="noopener">
+      <span class="label">Demo environment</span>
+      <h2>3DDashboard · Demo</h2>
+      <p>Tenant 3DEXPERIENCE de démonstration avec les widgets KW Forge et KW Explorer déjà installés.</p>
+      <span class="url">r1132101374767-eu1-ifwe.3dexperience.3ds.com</span>
+    </a>
+  </main>
+
+  <section class="launch">
+    <h3>Lancer en local</h3>
+    <p>
+      Le backend tourne sur <code>:8000</code>, Orbital sur <code>:5173</code>.
+      Choisis une des deux méthodes ci-dessous.
+    </p>
+
+    <h4 style="margin:18px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 1 — App launcher (Safari recommandé)</h4>
+    <div class="launch-grid">
+      <a class="btn" href="file:///Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Launch%20KW%20Backend.app">▶ Lancer le backend (API)</a>
+      <a class="btn secondary" href="file:///Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Launch%20KW%20Frontend.app">▶ Lancer le frontend (Orbital)</a>
+    </div>
+    <p class="note">
+      La première fois, macOS bloque l'app non signée : <strong>clic-droit sur le .app dans Finder → Ouvrir → Ouvrir</strong> (une seule fois). Ensuite le bouton fonctionne.
+    </p>
+
+    <h4 style="margin:24px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 2 — Copier la commande puis coller dans Terminal</h4>
+    <div class="launch-grid">
+      <button class="btn" type="button" onclick="copyCmd(this, '/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Demo Backend.command')">📋 Copier la commande backend</button>
+      <button class="btn secondary" type="button" onclick="copyCmd(this, '/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Demo Frontend.command')">📋 Copier la commande frontend</button>
+    </div>
+    <p class="note">
+      Ouvre Terminal (<kbd>Cmd+Space</kbd> → "Terminal") et colle (<kbd>Cmd+V</kbd>) puis <kbd>Entrée</kbd>.
+    </p>
+
+    <h4 style="margin:24px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 3 — Commande npm directe (fallback)</h4>
+    <div class="launch-grid">
+      <button class="btn secondary" type="button" onclick="copyRaw(this, 'cd \'/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/apps/web\' &amp;&amp; npm run dev')">📋 Copier <code>npm run dev</code> (Orbital)</button>
+    </div>
+    <p class="note">
+      Si les méthodes ci-dessus échouent : colle dans Terminal et lance le serveur Vite à la main. L'URL <code>http://localhost:5173/</code> sera disponible quand tu vois <code>VITE ready</code>.
+    </p>
+  </section>
+
+  <script>
+    // Wire deploy-aware cards from the inline JSON block. Each card
+    // carrying ``data-deploy-kind="widget|explorer|orbital"`` gets its
+    // href set to the matching URL, and the empty ``.url`` span gets
+    // a humanised label (host + first path segment, no scheme, no
+    // trailing ``/index.html``). The same JSON block is updated by
+    // ``scripts/_update-demo-deployment.sh`` after each deploy, so
+    // these cards stay in sync with the live S3 bundles.
+    const KW_DEPLOYMENTS = JSON.parse(
+      document.getElementById("kw-deployments").textContent.trim(),
+    );
+    function humaniseUrl(u) {
+      return u.replace(/^https?:\/\//, "").replace(/\/index\.html$/, "/");
+    }
+    for (const card of document.querySelectorAll("[data-deploy-kind]")) {
+      const kind = card.getAttribute("data-deploy-kind");
+      const url = KW_DEPLOYMENTS[kind];
+      if (!url) continue;
+      card.href = url;
+      const label = card.querySelector(".url");
+      if (label) label.textContent = humaniseUrl(url);
+    }
+
+    function copyCmd(btn, path) {
+      const cmd = '"' + path.replace(/"/g, '\\"') + '"';
+      const original = btn.textContent;
+      navigator.clipboard.writeText(cmd).then(() => {
+        btn.textContent = '✓ Copié — colle dans Terminal';
+        setTimeout(() => { btn.textContent = original; }, 2500);
+      }).catch(() => {
+        btn.textContent = '✗ Échec — copie manuellement : ' + cmd;
+      });
+    }
+    function copyRaw(btn, cmd) {
+      const original = btn.innerHTML;
+      navigator.clipboard.writeText(cmd).then(() => {
+        btn.textContent = '✓ Copié — colle dans Terminal';
+        setTimeout(() => { btn.innerHTML = original; }, 2500);
+      }).catch(() => {
+        btn.textContent = '✗ Échec — copie manuellement : ' + cmd;
+      });
+    }
+  </script>
+
+  <footer>
+    KW-Pipeline · SofianeBENHELLI · servi en local
+  </footer>
+</body>
+</html>
