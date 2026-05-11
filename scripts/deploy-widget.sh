@@ -134,6 +134,11 @@ echo
 echo "→ verifying $URL"
 if curl -fsI "$URL" >/dev/null 2>&1; then
   echo "✓ deploy ok"
+  # 5. Update the repo-root demo.html so its "Production deploys"
+  # tile points at this version. Best-effort — the helper exits 0
+  # when ``demo.html`` is missing (contributors shipping a backend-only
+  # PR don't need the dashboard).
+  "$SCRIPT_DIR/_update-demo-deployment.sh" widget "$URL" || true
   echo
   echo "Register this URL in 3DEXPERIENCE → Run Your App:"
   echo
