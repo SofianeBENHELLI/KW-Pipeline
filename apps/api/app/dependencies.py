@@ -10,6 +10,11 @@ from app.services.audit_event_store import (
 )
 from app.services.auth import AuthService, DisabledAuthService, build_auth_service
 from app.services.catalog_store import SQLiteCatalogStore
+from app.services.claim_store import (
+    ClaimStore,
+    InMemoryClaimStore,
+    SQLiteClaimStore,
+)
 from app.services.confidence_scorer import ConfidenceScorer
 from app.services.corpus_norms import (
     CorpusNormsProvider,
@@ -301,6 +306,12 @@ class PipelineServices:
     # ``POST /admin/taxonomy/import_yaml`` route writes through
     # this store.
     taxonomy_store: TaxonomyStore = field(default_factory=InMemoryTaxonomyStore)
+    # Atomic Claim/Fact store (#368, ADR-031). Always present — the
+    # in-memory default is the test/demo affordance; persistent
+    # builds wire :class:`SQLiteClaimStore`. Read by
+    # ``GET /knowledge/claims``; future LLM extractor wiring writes
+    # through this store via ``save_claims``.
+    claim_store: ClaimStore = field(default_factory=InMemoryClaimStore)
     # Resolved absolute path the taxonomy was read from, surfaced in
     # the route response so operators can verify which file the API
     # is reading. ``None`` when no taxonomy is configured.
@@ -921,6 +932,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy_store: TaxonomyStore = InMemoryTaxonomyStore()
     taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
+    claim_store: ClaimStore = InMemoryClaimStore()
     # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
     # scorer is constructed unless the kill switch is on. The lazy
     # provider sources samples from the catalog so unknown buckets
@@ -1006,6 +1018,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
+        claim_store=claim_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
@@ -1051,6 +1064,7 @@ def build_persistent_services(
     llm_model = llm_pair[1] if llm_pair else None
     taxonomy_store: TaxonomyStore = SQLiteTaxonomyStore(root / "catalog.sqlite3")
     taxonomy, taxonomy_source_path = _bootstrap_taxonomy(settings, taxonomy_store)
+    claim_store: ClaimStore = SQLiteClaimStore(root / "catalog.sqlite3")
     # HITL slice 1 wiring (persistent path): SQLite-backed corpus
     # norms + sidecar store. Both reuse the catalog database file so
     # the schema migrations land beside ``document_versions`` and a
@@ -1138,6 +1152,7 @@ def build_persistent_services(
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
+        claim_store=claim_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,

@@ -1074,6 +1074,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Claims
+         * @description List atomic claims about a subject entity (#368, ADR-031).
+         *
+         *     Returns the claims (subject–predicate–object atoms with
+         *     provenance back to the source chunks) that the future LLM
+         *     extractor pass has emitted for ``subject_entity_id``. The
+         *     v0.1 wire shape is gated by ``schema_version`` so a future
+         *     v0.2 evolution lands without silently flowing through to
+         *     v0.1 readers.
+         *
+         *     Pagination follows the same opaque-cursor convention as the
+         *     rest of the catalog read paths. ``next_cursor`` is ``None``
+         *     when no more rows exist behind the current page.
+         *
+         *     Read-only at this slice — write happens via the future
+         *     extractor wiring (filed as a follow-up to this PR). An empty
+         *     ``items`` list is a valid response (no claims yet for the
+         *     subject) and is returned as HTTP 200, mirroring the rest of
+         *     the knowledge-layer read surface.
+         */
+        get: operations["list_knowledge_claims"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/explore/search": {
         parameters: {
             query?: never;
@@ -2157,6 +2194,99 @@ export interface components {
             snippet: string | null;
             /** Version Id */
             version_id: string;
+        };
+        /**
+         * Claim
+         * @description One atomic assertion extracted from a validated document.
+         *
+         *     ``subject_entity_id`` is a soft reference to the entity-id
+         *     convention emitted by
+         *     :func:`app.services.knowledge.entity_extractor` — a deterministic
+         *     ``entity-<sha256[:16]>`` hash. There is no centralised entities
+         *     table today, so the field is a free-text string and the store
+         *     layer adds no FK; a future "entities" table can introduce one
+         *     without changing the wire.
+         *
+         *     ``predicate`` is a free-text string (e.g. ``is_a``,
+         *     ``has_property``, ``located_in``) — keeping it open lets the v0.1
+         *     extractor emit any verb the LLM produces. A future controlled
+         *     vocabulary lives at the schema layer (a ``Literal[...]`` swap)
+         *     when the consumer set stabilises.
+         *
+         *     ``object_value`` and ``object_entity_id`` are mutually exclusive.
+         *     A literal object ("ISO 9001 was published in 2015") sets
+         *     ``object_value="2015"``; an entity object ("Acme acquired
+         *     Beta") sets ``object_entity_id="entity-<hash>"``. The
+         *     ``model_validator`` below enforces XOR.
+         *
+         *     ``confidence`` is a value in [0, 1] reflecting the extractor's
+         *     certainty in the triple — the same band as the
+         *     :class:`EntityExtractor` confidence field so consumers can apply
+         *     a single threshold across both surfaces.
+         *
+         *     ``provenance_chunk_ids`` is the list of section / chunk ids the
+         *     triple was sourced from. The list is always non-empty; a claim
+         *     with no provenance is unverifiable and the extractor must skip
+         *     it. Stored on disk as a JSON-encoded array per ADR-031 (SQLite
+         *     is the truth; the JSON column avoids a N:M join table for the
+         *     v1 read API).
+         *
+         *     ``extracted_at`` is set server-side by the store on save — the
+         *     extractor hands the claim in without it (the operator workflow
+         *     has no notion of "when did the LLM run"). The store's
+         *     ``save_claims`` populates it before INSERT.
+         */
+        Claim: {
+            /** Confidence */
+            confidence: number;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Extracted At
+             * Format: date-time
+             */
+            extracted_at: string;
+            /** Id */
+            id: string;
+            /** Object Entity Id */
+            object_entity_id: string | null;
+            /** Object Value */
+            object_value: string | null;
+            /** Predicate */
+            predicate: string;
+            /** Provenance Chunk Ids */
+            provenance_chunk_ids: string[];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Subject Entity Id */
+            subject_entity_id: string;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ClaimsListResponse
+         * @description Response envelope for ``GET /knowledge/claims``.
+         *
+         *     ``next_cursor`` follows the same opaque-cursor pattern as the
+         *     rest of the catalog read paths — the codec lives in
+         *     :mod:`app.services.catalog_store` and clients must treat the
+         *     string as opaque.
+         */
+        ClaimsListResponse: {
+            /** Items */
+            items: components["schemas"]["Claim"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
         };
         /**
          * ContributingChunkPair
@@ -5212,6 +5342,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_claims: {
+        parameters: {
+            query: {
+                subject_entity_id: string;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimsListResponse"];
                 };
             };
             /** @description Validation Error */
