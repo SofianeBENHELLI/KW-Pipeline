@@ -38,6 +38,7 @@ export function OrbitalApp() {
     return params.get("document");
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [missingDocId, setMissingDocId] = useState<string | null>(null);
   const admin = useAdminConfig(getApiBaseUrl());
   const forceAutoActive = !!admin.config?.hitl.force_auto_corpus;
 
@@ -78,10 +79,23 @@ export function OrbitalApp() {
           <CatalogScreen
             onOpenDocument={openDoc}
             forceAutoActive={forceAutoActive}
+            deepLinkMissing={
+              missingDocId
+                ? { id: missingDocId, onDismiss: () => setMissingDocId(null) }
+                : null
+            }
           />
         )}
         {nav === "review" && selectedId && (
-          <Workspace initialDocumentId={selectedId} onBackToCatalog={backToCatalog} />
+          <Workspace
+            initialDocumentId={selectedId}
+            onBackToCatalog={backToCatalog}
+            onDocumentMissing={(id) => {
+              setMissingDocId(id);
+              setSelectedId(null);
+              setNav("review");
+            }}
+          />
         )}
         {nav === "graph" && (
           <GraphPage documentId={selectedId} onOpenDocument={openDoc} />

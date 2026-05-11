@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Icon } from "./atoms";
+import { useOrbTheme } from "./useTheme";
 
 export type OrbNavId = "review" | "graph" | "search" | "chat" | "admin";
 
@@ -32,10 +33,11 @@ export function TopBar({
   onNav,
   onOpenSettings,
   onClickBrand,
-  buildVersion = "v0.1.0-preview.4",
+  buildVersion = "v0.1.0-preview.5",
   avatar = "SB",
   rightExtras,
 }: TopBarProps) {
+  const { theme, toggle } = useOrbTheme();
   return (
     <div className="rwA-topbar">
       <div className="rwA-brand">
@@ -82,6 +84,14 @@ export function TopBar({
           <span className="dot" style={{ background: "var(--orb-ok)" }}></span>
           {buildVersion}
         </span>
+        <button
+          className="orb-btn orb-btn--ghost orb-btn--icon"
+          title={`Theme: ${theme} — click to toggle`}
+          onClick={toggle}
+          aria-label="Toggle theme"
+        >
+          <Icon name="spark" />
+        </button>
         <button
           className="orb-btn orb-btn--ghost orb-btn--icon"
           title="Settings"

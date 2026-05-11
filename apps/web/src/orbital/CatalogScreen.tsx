@@ -7,6 +7,7 @@ import { latestVersion } from "../domain/document";
 import { Btn, Icon, StatusBadge } from "./atoms";
 import { runBatch, type BatchEntry, type BatchFailure } from "./batch";
 import { PurgeAllDialog, PurgeDialog } from "./PurgeDialog";
+import { UploadZone } from "./UploadZone";
 
 /**
  * `OrbBannersAndCatalog` artboard from the mockup, ported verbatim. Flat
@@ -189,6 +190,8 @@ export function CatalogScreen({
 
       <div style={{ padding: "22px 24px" }}>
         <h1 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 600 }}>Document catalog — table view</h1>
+
+        <UploadZone onUploaded={() => void refresh()} onOpenDocument={onOpenDocument} />
 
         <div className="cat-toolbar">
           <input

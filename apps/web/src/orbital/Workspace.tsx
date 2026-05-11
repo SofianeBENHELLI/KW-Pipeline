@@ -8,6 +8,7 @@ import {
   getDocumentGraph,
   getExtraction,
   getMarkdown,
+  getProjectionStatus,
   getSemantic,
   listDocuments,
   rejectVersion,
@@ -61,9 +62,10 @@ type FsmAction = "extract" | "semantic" | "validate" | "reject";
 export interface WorkspaceProps {
   initialDocumentId: string;
   onBackToCatalog: () => void;
+  onDocumentMissing?: (id: string) => void;
 }
 
-export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps) {
+export function Workspace({ initialDocumentId, onBackToCatalog, onDocumentMissing }: WorkspaceProps) {
   const [view, setView] = useState<ViewId>("recent");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -91,6 +93,8 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
   const [extractTab, setExtractTab] = useState<"extraction.json" | "page-spans" | "tables">("extraction.json");
   const [mdTab, setMdTab] = useState<"preview" | "source" | "diff">("preview");
   const [purgeOpen, setPurgeOpen] = useState(false);
+  const [projectionStatus, setProjectionStatus] = useState<"IN_PROGRESS" | "COMPLETED" | "FAILED" | "NONE">("NONE");
+  const projectionAbortRef = useRef<AbortController | null>(null);
 
   const inFlightRef = useRef<Set<FsmAction>>(new Set());
   const docAbortRef = useRef<AbortController | null>(null);
@@ -163,15 +167,56 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
         err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
       setDocError(message);
       setDoc(null);
+      if (err instanceof ApiError && err.status === 404) onDocumentMissing?.(docId);
     } finally {
       if (!controller.signal.aborted) setDocLoading(false);
     }
-  }, [docId]);
+  }, [docId, onDocumentMissing]);
 
   useEffect(() => {
     fetchDoc();
     return () => docAbortRef.current?.abort();
   }, [fetchDoc]);
+
+  // Poll projection status for the current version while it's pending.
+  useEffect(() => {
+    projectionAbortRef.current?.abort();
+    const version = doc ? latestVersion(doc) : null;
+    if (!version) {
+      setProjectionStatus("NONE");
+      return;
+    }
+    const controller = new AbortController();
+    projectionAbortRef.current = controller;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const result = await getProjectionStatus(version.id, { signal: controller.signal });
+        if (cancelled) return;
+        if (!result) {
+          setProjectionStatus("NONE");
+          return;
+        }
+        const status = result.status as string;
+        if (status === "COMPLETED" || status === "FAILED") {
+          setProjectionStatus(status as "COMPLETED" | "FAILED");
+          return;
+        }
+        setProjectionStatus("IN_PROGRESS");
+        attempts += 1;
+        if (attempts < 12) window.setTimeout(tick, 2500);
+      } catch {
+        // ignore — polling is best-effort
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [doc]);
 
   /* ───── FSM transitions ───── */
   const runAction = async (action: FsmAction) => {
@@ -473,9 +518,26 @@ export function Workspace({ initialDocumentId, onBackToCatalog }: WorkspaceProps
 
   const latest = latestVersion(doc)!;
   const projectionDone = graph && graph.nodes.length > 0;
-  const projectionLabel = projectionDone ? "COMPLETED" : graph ? "EMPTY" : "PENDING";
+  const projectionLabel =
+    projectionStatus === "IN_PROGRESS"
+      ? "PROJECTING"
+      : projectionStatus === "FAILED"
+        ? "FAILED"
+        : projectionDone
+          ? "COMPLETED"
+          : graph
+            ? "EMPTY"
+            : "PENDING";
   const projectionColor =
-    projectionLabel === "COMPLETED" ? "var(--orb-ok)" : projectionLabel === "EMPTY" ? "var(--orb-warn)" : "var(--orb-fg-faint)";
+    projectionLabel === "COMPLETED"
+      ? "var(--orb-ok)"
+      : projectionLabel === "PROJECTING"
+        ? "var(--orb-info)"
+        : projectionLabel === "FAILED"
+          ? "var(--orb-err)"
+          : projectionLabel === "EMPTY"
+            ? "var(--orb-warn)"
+            : "var(--orb-fg-faint)";
 
   return (
     <div className="orb-app rwA" style={{ gridTemplateRows: "1fr" }}>
