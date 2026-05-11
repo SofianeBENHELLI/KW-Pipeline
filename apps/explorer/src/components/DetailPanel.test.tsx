@@ -17,6 +17,7 @@ import {
   type ExplorerChunk,
   type ExplorerDocEdge,
   type ChunkConceptLink,
+  type ConceptEdge,
   SAMPLE_SNAPSHOT,
 } from "../state/explorer-data";
 
@@ -327,5 +328,128 @@ describe("DetailPanel (explorer)", () => {
     );
     expect(screen.queryByTestId("kx-doc-concepts-more")).toBeNull();
     expect(screen.queryByTestId("kx-related-docs-more")).toBeNull();
+  });
+
+  // E (#321 cont.) — extend the truncation pattern from PR #397 to the
+  // chunk-detail and concept-detail surfaces. The same helper component
+  // (``<TruncatedList>``) drives all of them.
+
+  it("chunk-detail RELATED CONCEPTS surface count + cap with +N more", () => {
+    // The focus chunk is wired to all 9 concepts via chunkConcept; the
+    // chunk-detail surface reads ``conceptsForChunk`` to build its
+    // RELATED CONCEPTS list, so 9 > 6 trips the cap.
+    const { snapshot } = buildLargeSnapshot({
+      conceptCount: 9,
+      relatedCount: 0,
+      clusterSize: 1,
+    });
+    const focusChunk = snapshot.chunks[0];
+    render(
+      <DetailPanel
+        snapshot={snapshot}
+        node={{ kind: "chunk", id: focusChunk.id, chunk: focusChunk }}
+        onAction={noopAction}
+        onSelectId={noopSelectId}
+      />,
+    );
+    expect(screen.getByText("RELATED CONCEPTS · 9")).toBeInTheDocument();
+    const tags = screen.getByTestId("kx-chunk-concepts");
+    expect(
+      within(tags).getAllByRole("button").filter((b) =>
+        /^Concept \d+$/.test(b.textContent ?? ""),
+      ),
+    ).toHaveLength(6);
+    const more = screen.getByTestId("kx-chunk-concepts-more");
+    expect(more).toHaveTextContent("+3 more");
+    fireEvent.click(more);
+    expect(
+      within(tags).getAllByRole("button").filter((b) =>
+        /^Concept \d+$/.test(b.textContent ?? ""),
+      ),
+    ).toHaveLength(9);
+  });
+
+  it("cluster DOCUMENTS section header now surfaces the count too", () => {
+    const { snapshot } = buildLargeSnapshot({
+      conceptCount: 0,
+      relatedCount: 0,
+      clusterSize: 5,
+    });
+    render(
+      <DetailPanel
+        snapshot={snapshot}
+        node={{ kind: "cluster", id: "ops", cluster: "ops" }}
+        onAction={noopAction}
+        onSelectId={noopSelectId}
+      />,
+    );
+    // 5 docs in the cluster — under the cap, so no +N more, but the
+    // header now matches the concepts/related sections by including
+    // the count.
+    expect(screen.getByText("DOCUMENTS · 5")).toBeInTheDocument();
+    expect(screen.queryByTestId("kx-cluster-docs-more")).toBeNull();
+  });
+
+  it("concept-detail RELATED CONCEPTS surface count + cap with +N more", () => {
+    // Build a focus concept with 8 related-concept edges. The
+    // concept-detail surface walks ``conceptEdges`` to assemble its
+    // RELATED CONCEPTS list, so 8 > 6 trips the cap.
+    const focus: ExplorerConcept = {
+      id: "concept-focus",
+      name: "Focus concept",
+      kind: "topic",
+      freq: 1,
+      confidence: 0.9,
+      syn: [],
+    };
+    const peers: ExplorerConcept[] = Array.from(
+      { length: 8 },
+      (_, i): ExplorerConcept => ({
+        id: `peer-${i}`,
+        name: `Peer ${i}`,
+        kind: "topic",
+        freq: 1,
+        confidence: 0.9,
+        syn: [],
+      }),
+    );
+    const conceptEdges: ConceptEdge[] = peers.map(
+      (p): ConceptEdge => [focus.id, p.id, "related"],
+    );
+    const snapshot: ExplorerSnapshot = {
+      documents: [],
+      docEdges: [],
+      chunks: [],
+      concepts: [focus, ...peers],
+      chunkConcept: [],
+      conceptEdges,
+      docContent: {},
+      clusters: SAMPLE_SNAPSHOT.clusters,
+      isSample: false,
+      corpusLabel: "Test corpus",
+    };
+    render(
+      <DetailPanel
+        snapshot={snapshot}
+        node={{ kind: "concept", id: focus.id, concept: focus }}
+        onAction={noopAction}
+        onSelectId={noopSelectId}
+      />,
+    );
+    expect(screen.getByText("RELATED CONCEPTS · 8")).toBeInTheDocument();
+    const tags = screen.getByTestId("kx-concept-related");
+    expect(
+      within(tags).getAllByRole("button").filter((b) =>
+        /^Peer \d+$/.test(b.textContent ?? ""),
+      ),
+    ).toHaveLength(6);
+    const more = screen.getByTestId("kx-concept-related-more");
+    expect(more).toHaveTextContent("+2 more");
+    fireEvent.click(more);
+    expect(
+      within(tags).getAllByRole("button").filter((b) =>
+        /^Peer \d+$/.test(b.textContent ?? ""),
+      ),
+    ).toHaveLength(8);
   });
 });

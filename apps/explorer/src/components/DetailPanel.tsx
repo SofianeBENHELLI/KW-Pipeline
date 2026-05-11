@@ -413,14 +413,25 @@ export const DetailPanel: React.FC<Props> = ({
           <div className="kx-summary">{c.summary}</div>
         </div>
         <div className="kx-section">
-          <div className="kx-sec-h">RELATED CONCEPTS</div>
-          <div className="kx-tags">
-            {concepts.map((k) => (
-              <button key={k.id} className="kx-tag" onClick={() => onSelectId(k.id, "concept")}>
-                <Icon name="concept" size={10} />
-                {k.name}
-              </button>
-            ))}
+          <div className="kx-sec-h">
+            RELATED CONCEPTS{concepts.length > 0 && ` · ${concepts.length}`}
+          </div>
+          <div className="kx-tags" data-testid="kx-chunk-concepts">
+            <TruncatedList
+              items={concepts}
+              initialCount={6}
+              testIdPrefix="kx-chunk-concepts"
+              renderItem={(k) => (
+                <button
+                  key={k.id}
+                  className="kx-tag"
+                  onClick={() => onSelectId(k.id, "concept")}
+                >
+                  <Icon name="concept" size={10} />
+                  {k.name}
+                </button>
+              )}
+            />
             {concepts.length === 0 && <span className="kx-mute">No concepts linked</span>}
           </div>
         </div>
@@ -499,14 +510,25 @@ export const DetailPanel: React.FC<Props> = ({
           </ul>
         </div>
         <div className="kx-section">
-          <div className="kx-sec-h">RELATED CONCEPTS</div>
-          <div className="kx-tags">
-            {related.map((r) => (
-              <button key={r.id} className="kx-tag" onClick={() => onSelectId(r.id, "concept")}>
-                <Icon name="concept" size={10} />
-                {r.name}
-              </button>
-            ))}
+          <div className="kx-sec-h">
+            RELATED CONCEPTS{related.length > 0 && ` · ${related.length}`}
+          </div>
+          <div className="kx-tags" data-testid="kx-concept-related">
+            <TruncatedList
+              items={related}
+              initialCount={6}
+              testIdPrefix="kx-concept-related"
+              renderItem={(r) => (
+                <button
+                  key={r.id}
+                  className="kx-tag"
+                  onClick={() => onSelectId(r.id, "concept")}
+                >
+                  <Icon name="concept" size={10} />
+                  {r.name}
+                </button>
+              )}
+            />
             {related.length === 0 && <span className="kx-mute">No related concepts</span>}
           </div>
         </div>
@@ -548,7 +570,9 @@ export const DetailPanel: React.FC<Props> = ({
           <DetailRow label="CHUNKS" value={docs.reduce((a, d) => a + d.chunks, 0)} mono />
         </div>
         <div className="kx-section">
-          <div className="kx-sec-h">DOCUMENTS</div>
+          <div className="kx-sec-h">
+            DOCUMENTS{docs.length > 0 && ` · ${docs.length}`}
+          </div>
           <ul className="kx-list" data-testid="kx-cluster-docs">
             <TruncatedList
               items={docs}
