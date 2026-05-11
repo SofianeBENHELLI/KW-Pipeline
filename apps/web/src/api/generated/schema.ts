@@ -1463,6 +1463,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/topics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Topics
+         * @description List LLM-extracted document-level topics (#411, ADR-031).
+         *
+         *     Returns the document themes (label / summary / keywords /
+         *     confidence + supporting chunk ids) that the future
+         *     :class:`~app.services.topic_extractor.TopicExtractor` pass
+         *     has emitted. The v0.1 wire shape is gated by
+         *     ``schema_version`` so a future v0.2 evolution lands without
+         *     silently flowing through to v0.1 readers.
+         *
+         *     Distinct from the deterministic chunk-cluster ``Topic`` that
+         *     lives in the knowledge graph — this read returns
+         *     :class:`~app.schemas.document_topic.DocumentTopic` rows from
+         *     the SQLite governance store.
+         *
+         *     With ``document_id`` set, returns only that document's
+         *     topics (the Explorer / Orbital per-document view). Without
+         *     it, returns every topic in the store (the Atlas / corpus-
+         *     wide overview).
+         *
+         *     Pagination follows the same opaque-cursor convention as the
+         *     rest of the catalog read paths. ``next_cursor`` is ``None``
+         *     when no more rows exist behind the current page.
+         *
+         *     Read-only at this slice — write happens via the future
+         *     extractor wiring (filed as a follow-up to this PR). An empty
+         *     ``items`` list is a valid response (no topics yet) and is
+         *     returned as HTTP 200, mirroring the rest of the
+         *     knowledge-layer read surface.
+         */
+        get: operations["list_knowledge_topics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -2552,6 +2599,84 @@ export interface components {
         DocumentScopesResponse: {
             /** Scopes */
             scopes: components["schemas"]["Scope"][];
+        };
+        /**
+         * DocumentTopic
+         * @description One LLM-extracted document-level theme.
+         *
+         *     ``label`` is a short human-readable name (e.g. ``"Microservices
+         *     architecture"``); ``summary`` is one or two sentences explaining
+         *     what the theme covers in this document. Both fields are bounded
+         *     so the v1 read API can render them inline without truncation
+         *     games on the consumer side.
+         *
+         *     ``keywords`` is a small list of single-word identifiers (3–8 in
+         *     practice) that the extractor associates with the theme. The
+         *     schema doesn't enforce an upper bound — the extractor is the
+         *     right place to police the size, and trimming on read would
+         *     silently lose data.
+         *
+         *     ``supporting_chunk_ids`` is the list of section / chunk ids the
+         *     theme was sourced from. Non-empty by Pydantic ``min_length=1`` —
+         *     a theme without provenance is unverifiable and the extractor
+         *     must skip it. Stored on disk as a JSON-encoded array per ADR-031
+         *     (SQLite is the truth; the JSON column avoids a N:M join table
+         *     for the v1 read API).
+         *
+         *     ``extracted_at`` is set server-side by the store on save — the
+         *     extractor hands the topic in without it (the operator workflow
+         *     has no notion of "when did the LLM run"). The store's
+         *     ``save_topics`` populates it before INSERT.
+         */
+        DocumentTopic: {
+            /** Confidence */
+            confidence: number;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Extracted At
+             * Format: date-time
+             */
+            extracted_at: string;
+            /** Id */
+            id: string;
+            /** Keywords */
+            keywords: string[];
+            /** Label */
+            label: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Summary */
+            summary: string;
+            /** Supporting Chunk Ids */
+            supporting_chunk_ids: string[];
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * DocumentTopicsListResponse
+         * @description Response envelope for ``GET /knowledge/topics``.
+         *
+         *     ``next_cursor`` follows the same opaque-cursor pattern as the
+         *     rest of the catalog read paths — the codec lives in
+         *     :mod:`app.services.catalog_store` and clients must treat the
+         *     string as opaque.
+         */
+        DocumentTopicsListResponse: {
+            /** Items */
+            items: components["schemas"]["DocumentTopic"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
         };
         /**
          * DocumentVersion
@@ -5906,6 +6031,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxonomyResponse"];
+                };
+            };
+        };
+    };
+    list_knowledge_topics: {
+        parameters: {
+            query?: {
+                document_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTopicsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

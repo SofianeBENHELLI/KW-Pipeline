@@ -624,6 +624,65 @@ def _migrate_0013_processes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_processes_version_id ON processes (version_id)")
 
 
+def _migrate_0014_document_topics(conn: sqlite3.Connection) -> None:
+    """LLM-extracted document-level topic data model (#411, ADR-031).
+
+    A :class:`~app.schemas.document_topic.DocumentTopic` is a
+    document-level theme produced by the LLM
+    :class:`~app.services.topic_extractor.TopicExtractor` — distinct
+    from the deterministic chunk-cluster ``Topic`` that lives in the
+    Neo4j graph layer (the latter is a graph node; this is governance
+    / audit data per the ADR-031 split).
+
+    One table, ``document_topics``. ``version_id`` carries an
+    ``ON DELETE CASCADE`` FK into ``document_versions(id)`` (matches
+    the convention established by ``0012_claims`` and ``0013_processes``)
+    so purging a version cleans its topics automatically.
+    ``supporting_chunk_ids_json`` is a JSON-encoded ``list[str]``
+    column (SQLite has no native array type; the store-layer
+    round-trips through ``json.dumps`` / ``json.loads``).
+    ``keywords_json`` is the same shape for the topic's keyword
+    list; both are pre-locked for v0.1 readability.
+
+    ``schema_version`` (matches
+    :data:`DOCUMENT_TOPIC_SCHEMA_VERSION` in the schema module)
+    gates future evolution: a v0.2 reader can refuse to deserialise
+    a v0.1 row without ambiguity.
+
+    Two indexes cover the hot read paths surfaced by the read API:
+
+    * ``idx_document_topics_document_id`` — "list every topic for
+      this document family" (the Explorer / Atlas surface).
+    * ``idx_document_topics_version_id`` — "every topic produced by
+      this version", which the future TopicExtractor will hit on
+      each re-extraction to invalidate stale topics.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_topics (
+            id                          TEXT PRIMARY KEY,
+            document_id                 TEXT NOT NULL,
+            version_id                  TEXT NOT NULL,
+            label                       TEXT NOT NULL,
+            summary                     TEXT NOT NULL,
+            keywords_json               TEXT NOT NULL DEFAULT '[]',
+            confidence                  REAL NOT NULL,
+            schema_version              TEXT NOT NULL,
+            extracted_at                TEXT NOT NULL,
+            supporting_chunk_ids_json   TEXT NOT NULL,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_topics_document_id "
+        "ON document_topics (document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_topics_version_id ON document_topics (version_id)"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
@@ -638,6 +697,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0011_document_relations", _migrate_0011_document_relations),
     ("0012_claims", _migrate_0012_claims),
     ("0013_processes", _migrate_0013_processes),
+    ("0014_document_topics", _migrate_0014_document_topics),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.

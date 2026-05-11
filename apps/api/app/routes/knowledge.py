@@ -19,6 +19,7 @@ from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
 from app.schemas.claim import ClaimsListResponse
 from app.schemas.document import Document
+from app.schemas.document_topic import DocumentTopicsListResponse
 from app.schemas.knowledge import (
     ChatRequest,
     ChatResponse,
@@ -61,6 +62,10 @@ from app.services.catalog_store import InvalidCursor, _encode_cursor
 from app.services.claim_store import (
     DEFAULT_CLAIMS_PAGE_LIMIT,
     MAX_CLAIMS_PAGE_LIMIT,
+)
+from app.services.document_topic_store import (
+    DEFAULT_TOPICS_PAGE_LIMIT,
+    MAX_TOPICS_PAGE_LIMIT,
 )
 from app.services.knowledge.atlas import (
     DEFAULT_BRIDGE_DOCUMENTS,
@@ -842,6 +847,66 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         except InvalidCursor as exc:
             raise HTTPException(status_code=400, detail=f"Invalid cursor: {exc}") from exc
         return ClaimsListResponse(items=items, next_cursor=next_cursor)
+
+    @router.get(
+        "/knowledge/topics",
+        operation_id="list_knowledge_topics",
+        response_model=DocumentTopicsListResponse,
+    )
+    def list_knowledge_topics(
+        document_id: str | None = Query(default=None, max_length=200),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(
+            default=DEFAULT_TOPICS_PAGE_LIMIT,
+            ge=1,
+            le=MAX_TOPICS_PAGE_LIMIT,
+        ),
+        _user: User = Depends(require_viewer),
+    ) -> Any:
+        """List LLM-extracted document-level topics (#411, ADR-031).
+
+        Returns the document themes (label / summary / keywords /
+        confidence + supporting chunk ids) that the future
+        :class:`~app.services.topic_extractor.TopicExtractor` pass
+        has emitted. The v0.1 wire shape is gated by
+        ``schema_version`` so a future v0.2 evolution lands without
+        silently flowing through to v0.1 readers.
+
+        Distinct from the deterministic chunk-cluster ``Topic`` that
+        lives in the knowledge graph — this read returns
+        :class:`~app.schemas.document_topic.DocumentTopic` rows from
+        the SQLite governance store.
+
+        With ``document_id`` set, returns only that document's
+        topics (the Explorer / Orbital per-document view). Without
+        it, returns every topic in the store (the Atlas / corpus-
+        wide overview).
+
+        Pagination follows the same opaque-cursor convention as the
+        rest of the catalog read paths. ``next_cursor`` is ``None``
+        when no more rows exist behind the current page.
+
+        Read-only at this slice — write happens via the future
+        extractor wiring (filed as a follow-up to this PR). An empty
+        ``items`` list is a valid response (no topics yet) and is
+        returned as HTTP 200, mirroring the rest of the
+        knowledge-layer read surface.
+        """
+        try:
+            if document_id is not None:
+                items, next_cursor = services.document_topic_store.list_for_document(
+                    document_id,
+                    cursor=cursor,
+                    limit=limit,
+                )
+            else:
+                items, next_cursor = services.document_topic_store.list_all(
+                    cursor=cursor,
+                    limit=limit,
+                )
+        except InvalidCursor as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid cursor: {exc}") from exc
+        return DocumentTopicsListResponse(items=items, next_cursor=next_cursor)
 
     # ─── EPIC-C C.3 catalog view (ADR-025 §3) ─────────────────────────
     # Appended at the end of the file by convention so the parallel
