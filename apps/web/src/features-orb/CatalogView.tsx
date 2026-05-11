@@ -12,6 +12,7 @@ import {
 import { CatalogRail, type CatalogView as ViewId, viewToStatuses } from "./CatalogRail";
 import { CatalogTable } from "./CatalogTable";
 import { OrbChatPanel } from "./ChatPanel";
+import { OrbPurgeAllDialog } from "./PurgeDialogs";
 import { ReviewPane } from "./ReviewPane";
 import { OrbSearchPanel } from "./SearchPanel";
 import { OrbShell, type ShellAside } from "./Shell";
@@ -46,6 +47,7 @@ export function OrbCatalogView() {
   const [batchSnapshot, setBatchSnapshot] = useState<BatchSnapshot | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [aside, setAside] = useState<ShellAside>(null);
+  const [purgeAllOpen, setPurgeAllOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const handleAsideSelect = useCallback((documentId: string) => {
@@ -200,6 +202,14 @@ export function OrbCatalogView() {
               {debouncedQuery ? ` · filtered by "${debouncedQuery}"` : ""}
             </span>
             <span className="orb-catalog__footer-spacer" />
+            <button
+              type="button"
+              className="orb-btn orb-btn--ghost orb-btn--xs"
+              onClick={() => setPurgeAllOpen(true)}
+              style={{ color: "var(--orb-err-fg)" }}
+            >
+              Purge all…
+            </button>
             <span className="orb-mono">GET /documents</span>
           </div>
         </div>
@@ -219,6 +229,16 @@ export function OrbCatalogView() {
           </aside>
         )}
       </div>
+      <OrbPurgeAllDialog
+        open={purgeAllOpen}
+        onClose={() => setPurgeAllOpen(false)}
+        onConfirmed={() => {
+          setSelectedId(null);
+          setBatchSelection(new Set());
+          setBatchSnapshot(null);
+          void refresh();
+        }}
+      />
     </OrbShell>
   );
 }

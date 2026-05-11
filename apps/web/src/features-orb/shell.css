@@ -462,6 +462,12 @@
   color: var(--orb-fg-dim);
 }
 
+.orb-review__danger-zone {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--orb-rule);
+}
+
 /* ---- Batch operations (Phase 3) ---- */
 
 .orb-catalog__batchbar {
@@ -795,3 +801,59 @@
   min-width: 140px;
 }
 .orb-admin__filter select { font: inherit; }
+
+/* ---- Modal shell (Phase 7) ---- */
+
+.orb-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 12, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.orb-modal {
+  width: 540px;
+  max-width: calc(100vw - 32px);
+  background: var(--orb-bg-elev);
+  border: 1px solid var(--orb-border-strong);
+  border-radius: var(--orb-r-md);
+  box-shadow: var(--orb-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+
+.orb-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--orb-border);
+}
+.orb-modal__head h2 { margin: 0; font-size: var(--orb-fs-md); font-weight: 600; }
+
+.orb-modal__body {
+  padding: 16px;
+  overflow: auto;
+  font-size: var(--orb-fs-sm);
+  line-height: 1.5;
+}
+
+.orb-modal__body p { margin: 0 0 10px; }
+
+.orb-modal__body--danger {
+  border-color: var(--orb-err);
+}
+
+.orb-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--orb-border);
+  background: var(--orb-bg-sunk);
+}

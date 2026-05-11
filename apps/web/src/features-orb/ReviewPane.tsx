@@ -21,6 +21,7 @@ import { Btn, Card, Mono, OrbScopeChip, OrbStatusBadge, SectionHeading } from ".
 import { MetaRow } from "../ui/orb/atoms";
 
 import { GraphPanel } from "./GraphPanel";
+import { OrbPurgeDialog } from "./PurgeDialogs";
 
 type ReviewAction = "extract" | "semantic" | "validate" | "reject";
 
@@ -70,6 +71,7 @@ export function ReviewPane({ documentId, onMutated }: ReviewPaneProps) {
   const [actionState, setActionState] = useState<ActionState>({ busy: null, error: null });
   const [reviewerNote, setReviewerNote] = useState("");
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
+  const [purgeOpen, setPurgeOpen] = useState(false);
   const inFlightRef = useRef<Set<ReviewAction>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
 
@@ -316,6 +318,26 @@ export function ReviewPane({ documentId, onMutated }: ReviewPaneProps) {
           {actionState.error}
         </div>
       )}
+
+      <div className="orb-review__danger-zone">
+        <Btn kind="ghost" size="xs" onClick={() => setPurgeOpen(true)}>
+          Purge document…
+        </Btn>
+      </div>
+
+      <OrbPurgeDialog
+        open={purgeOpen}
+        onClose={() => setPurgeOpen(false)}
+        onConfirmed={() => {
+          // Doc no longer exists locally — bubble up so the catalog
+          // refreshes and the review pane closes.
+          onMutated?.(doc);
+        }}
+        documentId={doc.id}
+        filename={doc.original_filename}
+        versionCount={doc.versions.length}
+      />
+
       {/* Quietly surface that semantic data exists for future Phase-4 hooks */}
       {semantic && (
         <div className="orb-review__footnote orb-mono">

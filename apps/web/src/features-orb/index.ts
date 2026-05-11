@@ -24,3 +24,5 @@ export { OrbChatPanel } from "./ChatPanel";
 export type { OrbChatPanelProps } from "./ChatPanel";
 export { OrbAdminHub } from "./AdminHub";
 export { OrbAdminAudit } from "./AdminAudit";
+export { OrbPurgeDialog, OrbPurgeAllDialog } from "./PurgeDialogs";
+export type { OrbPurgeDialogProps, OrbPurgeAllDialogProps } from "./PurgeDialogs";
