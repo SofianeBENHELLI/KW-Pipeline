@@ -12,7 +12,7 @@
 #     (467685081786) — or any role with s3:PutObject on the bucket.
 #   - Node 20+ and npm available so we can run `npm install` + build.
 #
-# Required env var:
+# Required env vars:
 #   KW_API_BASE_URL   — backend URL the deployed bundle calls. Without
 #                       this, the build falls back to http://localhost:8000
 #                       and the deployed widget can never reach a real
@@ -20,10 +20,20 @@
 #                       3DDashboard, which obviously fails). The script
 #                       refuses to deploy without it set unless
 #                       --allow-localhost-fallback is passed for testing.
+#   KW_ORBITAL_URL    — deployed Orbital tile URL the widget links to
+#                       when an operator clicks "open in Orbital" on a
+#                       document row. Without this, the build falls
+#                       back to http://localhost:5173 (the Vite dev
+#                       server), which obviously fails when the bundle
+#                       runs from inside 3DDashboard. Same
+#                       --allow-localhost-fallback escape hatch as
+#                       KW_API_BASE_URL.
 #
 # Usage:
-#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-widget.sh
-#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-widget.sh v0.2.0
+#   KW_API_BASE_URL=https://kw-api.example.org \
+#   KW_ORBITAL_URL=https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-orbital/v0.0.0/index.html \
+#     scripts/deploy-widget.sh
+#   ... scripts/deploy-widget.sh v0.2.0   # explicit version
 #   scripts/deploy-widget.sh --allow-localhost-fallback   # dev-only
 #
 # The script is idempotent — re-running it overwrites the same prefix.
@@ -62,6 +72,25 @@ if [ -z "${KW_API_BASE_URL:-}" ]; then
   fi
 fi
 
+# KW_ORBITAL_URL is the second load-bearing env var: the widget's
+# document rows link to "open in Orbital", and without this the
+# bundle bakes in http://localhost:5173 — clicking the link from
+# inside 3DDashboard goes nowhere. Same fail-fast posture as
+# KW_API_BASE_URL above.
+if [ -z "${KW_ORBITAL_URL:-}" ]; then
+  if [ "$ALLOW_LOCALHOST" = "true" ]; then
+    echo "⚠ KW_ORBITAL_URL not set; building with the http://localhost:5173 fallback (--allow-localhost-fallback was passed)." >&2
+    echo "  Document → Orbital links from the deployed widget will only work when Vite is running locally." >&2
+  else
+    echo "✗ KW_ORBITAL_URL must be set so the widget knows where Orbital is deployed." >&2
+    echo "  Example:" >&2
+    echo "    KW_ORBITAL_URL=https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-orbital/v0.0.0/index.html scripts/deploy-widget.sh" >&2
+    echo "" >&2
+    echo "  Pass --allow-localhost-fallback for a dev-only sanity build that links to http://localhost:5173." >&2
+    exit 1
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WIDGET_DIR="$REPO_ROOT/apps/widget"
@@ -94,6 +123,7 @@ fi
 
 echo "→ Deploying $PREFIX@$VERSION to s3://$BUCKET/ in $REGION"
 echo "  KW_API_BASE_URL: ${KW_API_BASE_URL:-<localhost fallback>}"
+echo "  KW_ORBITAL_URL:  ${KW_ORBITAL_URL:-<localhost fallback>}"
 echo
 
 # 1. Build the production bundle.
