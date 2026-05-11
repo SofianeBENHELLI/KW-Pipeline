@@ -816,6 +816,19 @@ export default function App(): React.ReactElement {
                 testIdPrefix="kx-search-local-concepts"
                 onPick={(k) => {
                   selectById(k.id, "concept");
+                  // Mirror PR #396's topic→evidence-chunk routing
+                  // for the server-backed SearchResults: when a
+                  // concept is picked, also surface the first
+                  // chunk that mentions it in DocViewer so the
+                  // user lands on source evidence in addition to
+                  // the concept-bubble surface. The same pattern
+                  // already drives the DetailPanel "evidence"
+                  // intent above (action.kind === "evidence").
+                  const evidence = chunksForConcept(snapshot, k.id)[0];
+                  if (evidence) {
+                    setOpenDocId(evidence.doc);
+                    setHighlightChunk(evidence.id);
+                  }
                   setSearch("");
                 }}
                 render={(k) => (
