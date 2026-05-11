@@ -417,6 +417,19 @@ export interface ExplorerSnapshot {
   isSample: boolean;
   /** Display name shown in the header (corpus name). */
   corpusLabel: string;
+  /**
+   * #321 — when true, the knowledge-graph cursor walk hit its
+   * page ceiling (``MAX_GRAPH_PAGES`` in ``use-explorer-data.ts``)
+   * and the rendered graph reflects only the first slice of nodes
+   * + edges the backend returned. The Explorer surfaces this fact
+   * with a banner so operators on a runaway corpus aren't left
+   * wondering whether their data is missing or just hidden.
+   *
+   * Optional so existing call sites that build an ExplorerSnapshot
+   * literal (sample corpus, tests) don't have to set the field;
+   * undefined reads as "not truncated".
+   */
+  graphTruncated?: boolean;
 }
 
 export const SAMPLE_SNAPSHOT: ExplorerSnapshot = {

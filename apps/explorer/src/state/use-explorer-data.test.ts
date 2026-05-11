@@ -140,6 +140,70 @@ describe("useExplorerData", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("flags graphTruncated when the graph cursor walk hits MAX_GRAPH_PAGES", async () => {
+    // Backend keeps returning a non-null ``next_cursor`` indefinitely
+    // — i.e. the catalog is large enough that the 25-page ceiling
+    // (5,000 nodes) trips before the walk drains. The hook should
+    // surface ``graphTruncated: true`` on the snapshot so the App's
+    // banner can warn the operator.
+    mockRoutedFetch([
+      {
+        match: /\/documents\?/,
+        body: { items: [makeApiDoc("doc-1", "spec.pdf")], next_cursor: null },
+      },
+      {
+        // Always return a non-null ``next_cursor`` so the walk never
+        // resolves naturally and we exhaust the page ceiling.
+        match: /\/knowledge\/graph/,
+        body: {
+          schema_version: "v0.2",
+          nodes: [],
+          edges: [],
+          next_cursor: "more",
+        },
+      },
+      { match: /\/knowledge\/taxonomy/, status: 404, body: { detail: "no" } },
+      { match: /\/extraction/, status: 404, body: { detail: "no" } },
+      { match: /\/semantic/, status: 404, body: { detail: "no" } },
+    ]);
+
+    const { result } = renderHook(() => useExplorerData("http://test", 0));
+
+    await waitFor(() => expect(result.current.mode).toBe("live"));
+    expect(result.current.snapshot.graphTruncated).toBe(true);
+  });
+
+  it("leaves graphTruncated falsy when the graph fits in fewer than MAX_GRAPH_PAGES", async () => {
+    // First (and only) page comes back with ``next_cursor: null``,
+    // so the walk exits naturally after one fetch and the snapshot's
+    // ``graphTruncated`` stays falsy.
+    mockRoutedFetch([
+      {
+        match: /\/documents\?/,
+        body: { items: [makeApiDoc("doc-1", "spec.pdf")], next_cursor: null },
+      },
+      {
+        match: /\/knowledge\/graph/,
+        body: {
+          schema_version: "v0.2",
+          nodes: [],
+          edges: [],
+          next_cursor: null,
+        },
+      },
+      { match: /\/knowledge\/taxonomy/, status: 404, body: { detail: "no" } },
+      { match: /\/extraction/, status: 404, body: { detail: "no" } },
+      { match: /\/semantic/, status: 404, body: { detail: "no" } },
+    ]);
+
+    const { result } = renderHook(() => useExplorerData("http://test", 0));
+
+    await waitFor(() => expect(result.current.mode).toBe("live"));
+    // ``undefined`` / ``false`` both read as "not truncated"; the
+    // App banner only renders on truthy.
+    expect(result.current.snapshot.graphTruncated).toBeFalsy();
+  });
+
   it("re-runs the orchestrator when refreshTick changes", async () => {
     const fetchSpy = mockRoutedFetch([
       { match: /\/documents/, body: { items: [], next_cursor: null } },
