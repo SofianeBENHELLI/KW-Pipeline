@@ -51,14 +51,21 @@ const ORBITAL_URL_SETTINGS_KEY = "orbitalUrl";
 const FALLBACK_BASE_URL = "http://localhost:8000";
 const FALLBACK_ORBITAL_URL = "http://localhost:5173";
 
+// Webpack's ``EnvironmentPlugin`` (see webpack.config.js) substitutes
+// these expressions with string literals at build time — defaulting
+// to ``""`` when the env var is unset, which the ``|| undefined`` then
+// collapses to the FALLBACK_BASE_URL path below. The previous
+// ``typeof process !== "undefined"`` guard was load-bearing only when
+// no DefinePlugin was wired; under webpack 5's lazy ``process`` shim
+// the guard left the substitution working *by accident* on every
+// platform that happened to ship a shim, and silently fell back to
+// ``http://localhost:8000`` on those that didn't. With the explicit
+// EnvironmentPlugin in place, the simpler form below is the one
+// source of truth.
 const buildTimeBaseUrl: string | undefined =
-  typeof process !== "undefined" && process.env
-    ? process.env.KW_API_BASE_URL
-    : undefined;
+  process.env.KW_API_BASE_URL || undefined;
 const buildTimeOrbitalUrl: string | undefined =
-  typeof process !== "undefined" && process.env
-    ? process.env.KW_ORBITAL_URL
-    : undefined;
+  process.env.KW_ORBITAL_URL || undefined;
 
 function safeGetWidgetValue(key: string): string | null {
   try {

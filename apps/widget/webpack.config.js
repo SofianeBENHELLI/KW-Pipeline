@@ -9,6 +9,7 @@
  * the widget can be built on any machine without registry access.
  */
 const path = require("path");
+const webpack = require("webpack");
 const CopyPlugin = require("copy-webpack-plugin");
 
 module.exports = (_env, argv) => {
@@ -64,6 +65,22 @@ module.exports = (_env, argv) => {
         patterns: [
           { from: path.resolve(__dirname, "src/index.html"), to: "index.html" },
         ],
+      }),
+      // Bake build-time env vars into the bundle so the deployed
+      // widget calls the right backend. ``api/client.ts`` reads
+      // ``process.env.KW_API_BASE_URL`` / ``process.env.KW_ORBITAL_URL``
+      // at module load — without this plugin those expressions stay
+      // verbatim in the bundle, ``process`` is undefined in the
+      // browser, the lookup throws, the catch returns ``undefined``,
+      // and the FALLBACK_BASE_URL (http://localhost:8000) wins. The
+      // result is a "deployed" widget that silently calls localhost
+      // from inside 3DDashboard. Empty-string defaults so dev builds
+      // (``npm run build`` / dev server, no env exported) still work
+      // — the falsy lookup falls through to the same localhost
+      // fallback, matching pre-fix behaviour.
+      new webpack.EnvironmentPlugin({
+        KW_API_BASE_URL: "",
+        KW_ORBITAL_URL: "",
       }),
     ],
     devServer: {
