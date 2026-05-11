@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     # adjacent to this module. Forward-referencing the type keeps
     # the projector's runtime imports unchanged.
     from app.services.document_relations_cache import DocumentRelationsCache
+    from app.services.process_store import ProcessStore
 
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.knowledge import (
@@ -117,6 +118,7 @@ class KnowledgeProjector:
         topic_clustering_service: TopicClusteringService | None = None,
         embedding_client: EmbeddingClient | None = None,
         document_relations_cache: DocumentRelationsCache | None = None,
+        process_store: ProcessStore | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -144,6 +146,13 @@ class KnowledgeProjector:
         # behaviour exactly (the route's cache-miss path still warms
         # on demand).
         self._document_relations_cache = document_relations_cache
+        # #390: when set, the projector runs the deterministic SOP
+        # parser after the structural projection completes and
+        # writes any detected :class:`Process` payload through this
+        # store. ``None`` (default) preserves the pre-#390 behaviour
+        # exactly — non-procedural docs continue to extract as
+        # chunks without a Process row appearing.
+        self._process_store = process_store
 
     def set_document_relations_cache(
         self,
@@ -162,6 +171,22 @@ class KnowledgeProjector:
         default when knowledge layer is disabled).
         """
         self._document_relations_cache = cache
+
+    def set_process_store(self, store: ProcessStore | None) -> None:
+        """Wire the Process store after construction (#390).
+
+        Mirrors :meth:`set_document_relations_cache`: the store is
+        built alongside the projector in
+        :func:`app.dependencies.build_services` /
+        :func:`build_persistent_services`, and this setter lets the
+        wiring attach it without breaking the projector's
+        constructor signature for the existing test suite that
+        builds ``KnowledgeProjector(graph_store=...)`` directly.
+
+        Pass ``None`` to disable the SOP write (used by tests + as
+        the default when callers don't want Process emission).
+        """
+        self._process_store = store
 
     def project(
         self,
@@ -237,6 +262,51 @@ class KnowledgeProjector:
                 "chunk_relation_count": len(relations),
             },
         )
+
+        # #390: run the deterministic SOP parser and write any
+        # detected Process payload through the wired store. Fire-
+        # and-log per ADR-012 §3 — a parser hiccup leaves the
+        # structural projection intact; the next re-projection
+        # catches up. ``None`` (store not wired) preserves the
+        # pre-#390 behaviour exactly. The import is local so the
+        # projector's runtime imports stay unchanged for callers
+        # that never enable SOP extraction.
+        if self._process_store is not None:
+            try:
+                from app.services.sop_extractor import extract_process
+
+                process = extract_process(
+                    semantic,
+                    document=document,
+                    version=version,
+                )
+                if process is not None:
+                    # Re-projection: replace the prior Process row
+                    # for this version atomically. ``save_process``
+                    # is itself a replace-by-id, but a version
+                    # whose new extraction yields a different id
+                    # would otherwise leak the old row — clear by
+                    # version_id first to keep the contract clean.
+                    self._process_store.delete_for_version(version.id)
+                    self._process_store.save_process(process)
+                    log.info(
+                        "knowledge.process_extraction.written",
+                        extra={
+                            "document_id": document.id,
+                            "version_id": version.id,
+                            "process_id": process.id,
+                            "step_count": len(process.steps),
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.process_extraction.failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
         # #385: warm the document_relations cache for every pair this
         # document now bridges. Fire-and-log per ADR-012 §3 — a cache
