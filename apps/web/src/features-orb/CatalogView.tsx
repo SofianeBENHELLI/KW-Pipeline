@@ -11,8 +11,10 @@ import {
 } from "./batch";
 import { CatalogRail, type CatalogView as ViewId, viewToStatuses } from "./CatalogRail";
 import { CatalogTable } from "./CatalogTable";
+import { OrbChatPanel } from "./ChatPanel";
 import { ReviewPane } from "./ReviewPane";
-import { OrbShell } from "./Shell";
+import { OrbSearchPanel } from "./SearchPanel";
+import { OrbShell, type ShellAside } from "./Shell";
 
 type ApiDocument = components["schemas"]["Document"];
 
@@ -43,7 +45,13 @@ export function OrbCatalogView() {
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
   const [batchSnapshot, setBatchSnapshot] = useState<BatchSnapshot | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [aside, setAside] = useState<ShellAside>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const handleAsideSelect = useCallback((documentId: string) => {
+    setSelectedId(documentId);
+    setAside(null);
+  }, []);
 
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
@@ -117,7 +125,18 @@ export function OrbCatalogView() {
   const title = useMemo(() => VIEW_TITLES[view], [view]);
 
   return (
-    <OrbShell rail={<CatalogRail view={view} onView={setView} query={query} onQuery={setQuery} />}>
+    <OrbShell
+      rail={<CatalogRail view={view} onView={setView} query={query} onQuery={setQuery} />}
+      aside={aside}
+      onAsideChange={setAside}
+      asideContent={
+        aside === "search" ? (
+          <OrbSearchPanel onSelectResult={handleAsideSelect} />
+        ) : aside === "chat" ? (
+          <OrbChatPanel onSelectCitation={handleAsideSelect} />
+        ) : null
+      }
+    >
       <div className={selectedId ? "orb-canvas--split" : "orb-canvas--full"}>
         <div className="orb-catalog">
           <div className="orb-catalog__head">

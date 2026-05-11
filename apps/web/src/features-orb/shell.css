@@ -76,6 +76,18 @@
   overflow: hidden;
 }
 
+.orb-shell--with-aside .orb-shell__main {
+  grid-template-columns: 280px 1fr 360px;
+}
+
+.orb-shell__aside {
+  border-left: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .orb-shell__rail {
   border-right: 1px solid var(--orb-border);
   background: var(--orb-bg-sunk);
@@ -602,3 +614,103 @@
 }
 .orb-graph__edge:last-child { border-bottom: 0; }
 .orb-graph__edge-kind { color: var(--orb-fg-dim); }
+
+/* ---- Aside panels (Phase 5: search + chat) ---- */
+
+.orb-aside {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.orb-aside__head {
+  padding: 10px var(--orb-pad);
+  border-bottom: 1px solid var(--orb-border);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.orb-aside__title {
+  font-size: var(--orb-fs-md);
+  font-weight: 600;
+}
+
+.orb-aside__meta {
+  color: var(--orb-fg-dim);
+  font-size: var(--orb-fs-xs);
+  margin-left: auto;
+}
+
+.orb-aside__body {
+  padding: var(--orb-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  flex: 1;
+}
+
+.orb-aside__hit {
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.orb-aside__hit:hover { background: var(--orb-bg-hov); }
+
+.orb-aside__hit-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  margin-bottom: 4px;
+}
+
+.orb-aside__hit-snippet {
+  margin: 0;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.orb-aside__modes {
+  display: flex;
+  gap: 4px;
+}
+
+.orb-aside__answer {
+  padding: 12px 14px;
+}
+
+.orb-aside__answer-body {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  font-size: var(--orb-fs-sm);
+  line-height: 1.5;
+}
+
+.orb-aside__citations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.orb-aside__citation {
+  width: 100%;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-rule);
+  border-radius: var(--orb-r-xs);
+  padding: 6px 8px;
+  text-align: left;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-muted);
+  cursor: pointer;
+}
+.orb-aside__citation:hover { background: var(--orb-bg-hov); }

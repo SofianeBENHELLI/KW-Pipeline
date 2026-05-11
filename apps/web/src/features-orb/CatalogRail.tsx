@@ -34,20 +34,21 @@ export function CatalogRail({ view, onView, query, onQuery, counts }: CatalogRai
   return (
     <div className="orb-rail">
       <div className="orb-rail__head">
-        <label className="orb-rail__search" aria-label="Filter documents by filename">
-          <span className="orb-rail__search-icon">
-            <Icon name="search" aria-hidden />
+        <div className="orb-rail__search">
+          <span className="orb-rail__search-icon" aria-hidden>
+            <Icon name="search" />
           </span>
           <Input
             type="search"
             placeholder="Filter filename…"
+            aria-label="Filter documents by filename"
             value={query}
             onChange={(event) => onQuery(event.target.value)}
           />
-          <span className="orb-rail__search-kbd">
+          <span className="orb-rail__search-kbd" aria-hidden>
             <Kbd>/</Kbd>
           </span>
-        </label>
+        </div>
       </div>
       <div className="orb-rail__group-label">
         <SectionHeading>Saved views</SectionHeading>

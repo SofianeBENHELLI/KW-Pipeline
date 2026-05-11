@@ -18,3 +18,7 @@ export { pruneSelectionAfterBatch, runBatchPipeline } from "./batch";
 export type { BatchFailure, BatchProgressEntry, BatchSnapshot, BatchStage } from "./batch";
 export { GraphPanel } from "./GraphPanel";
 export type { GraphPanelProps } from "./GraphPanel";
+export { OrbSearchPanel } from "./SearchPanel";
+export type { OrbSearchPanelProps } from "./SearchPanel";
+export { OrbChatPanel } from "./ChatPanel";
+export type { OrbChatPanelProps } from "./ChatPanel";
