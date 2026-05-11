@@ -12,3 +12,5 @@ export { CatalogRail, viewToStatuses } from "./CatalogRail";
 export type { CatalogRailProps, CatalogView } from "./CatalogRail";
 export { CatalogTable } from "./CatalogTable";
 export type { CatalogTableProps } from "./CatalogTable";
+export { ReviewPane } from "./ReviewPane";
+export type { ReviewPaneProps } from "./ReviewPane";

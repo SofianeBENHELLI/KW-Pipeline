@@ -5,6 +5,7 @@ import type { components } from "../api/generated/schema";
 
 import { CatalogRail, type CatalogView as ViewId, viewToStatuses } from "./CatalogRail";
 import { CatalogTable } from "./CatalogTable";
+import { ReviewPane } from "./ReviewPane";
 import { OrbShell } from "./Shell";
 
 type ApiDocument = components["schemas"]["Document"];
@@ -72,37 +73,54 @@ export function OrbCatalogView() {
 
   return (
     <OrbShell rail={<CatalogRail view={view} onView={setView} query={query} onQuery={setQuery} />}>
-      <div className="orb-catalog">
-        <div className="orb-catalog__head">
-          <h1 className="orb-catalog__title">
-            {view === "recent"
-              ? "Recent documents"
-              : view === "review"
-                ? "Awaiting review"
-                : view === "validated"
-                  ? "Validated documents"
-                  : "Failed documents"}
-          </h1>
-          <span className="orb-catalog__meta">
-            {documents.length} shown
-            {loading && documents.length > 0 ? " · refreshing" : ""}
-          </span>
+      <div className={selectedId ? "orb-canvas--split" : "orb-canvas--full"}>
+        <div className="orb-catalog">
+          <div className="orb-catalog__head">
+            <h1 className="orb-catalog__title">
+              {view === "recent"
+                ? "Recent documents"
+                : view === "review"
+                  ? "Awaiting review"
+                  : view === "validated"
+                    ? "Validated documents"
+                    : "Failed documents"}
+            </h1>
+            <span className="orb-catalog__meta">
+              {documents.length} shown
+              {loading && documents.length > 0 ? " · refreshing" : ""}
+            </span>
+          </div>
+          <CatalogTable
+            documents={documents}
+            loading={loading}
+            error={error}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+          <div className="orb-catalog__footer">
+            <span>
+              View: <strong>{view}</strong>
+              {debouncedQuery ? ` · filtered by "${debouncedQuery}"` : ""}
+            </span>
+            <span className="orb-catalog__footer-spacer" />
+            <span className="orb-mono">GET /documents</span>
+          </div>
         </div>
-        <CatalogTable
-          documents={documents}
-          loading={loading}
-          error={error}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-        />
-        <div className="orb-catalog__footer">
-          <span>
-            View: <strong>{view}</strong>
-            {debouncedQuery ? ` · filtered by "${debouncedQuery}"` : ""}
-          </span>
-          <span className="orb-catalog__footer-spacer" />
-          <span className="orb-mono">GET /documents</span>
-        </div>
+        {selectedId && (
+          <aside className="orb-canvas__review orb-scroll">
+            <div className="orb-canvas__review-head">
+              <button
+                type="button"
+                className="orb-btn orb-btn--ghost orb-btn--xs"
+                onClick={() => setSelectedId(null)}
+                aria-label="Close review pane"
+              >
+                ← Back to catalog
+              </button>
+            </div>
+            <ReviewPane documentId={selectedId} onMutated={() => void refresh()} />
+          </aside>
+        )}
       </div>
     </OrbShell>
   );
