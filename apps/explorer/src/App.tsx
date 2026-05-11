@@ -37,6 +37,7 @@ import { Icon, NAVY2 } from "./components/icons";
 import { SearchResults, type SearchHit } from "./components/SearchResults";
 import { SettingsModal } from "./components/SettingsModal";
 import { LineageModal } from "./components/LineageModal";
+import { TruncatedList } from "./components/TruncatedList";
 import { RelationEvidenceDrawer } from "./components/RelationEvidenceDrawer";
 import {
   clearSessionTrigger,
@@ -582,10 +583,15 @@ export default function App(): React.ReactElement {
       c.label.toLowerCase().includes(q) ||
       c.summary.toLowerCase().includes(q) ||
       c.kind.toLowerCase().includes(q);
+    // #321 — keep the full filtered arrays so the local-fallback
+    // popover can surface the true match count in each header and
+    // the ``<TruncatedList>`` below can offer "+N more" instead of
+    // silently capping at four. The cap is applied at render time,
+    // not here.
     return {
-      docs: snapshot.documents.filter(docMatch).slice(0, 4),
-      concepts: snapshot.concepts.filter(conceptMatch).slice(0, 4),
-      chunks: snapshot.chunks.filter(chunkMatch).slice(0, 4),
+      docs: snapshot.documents.filter(docMatch),
+      concepts: snapshot.concepts.filter(conceptMatch),
+      chunks: snapshot.chunks.filter(chunkMatch),
     };
   }, [search, snapshot]);
 
@@ -772,10 +778,24 @@ export default function App(): React.ReactElement {
                 <span className="kx-mute">
                   Vector search disabled — showing local matches.
                 </span>
+                {/* #321 — surface the same operator remediation hint
+                    the server-backed SearchResults disabled state shows,
+                    so an operator who lands on this fallback knows what
+                    to flip to wire the real semantic search instead of
+                    assuming local-only is the design. */}
+                <span
+                  className="kx-mute kx-search-disabled-hint"
+                  data-testid="kx-search-disabled-hint"
+                >
+                  Set <code>KW_KNOWLEDGE_LAYER_ENABLED=true</code> and{" "}
+                  <code>VOYAGE_API_KEY</code> to enable.
+                </span>
               </div>
               <SearchSection
                 title="DOCUMENTS"
                 items={searchResults.docs}
+                initialCount={4}
+                testIdPrefix="kx-search-local-docs"
                 onPick={(d) => {
                   selectById(d.id, "doc");
                   setSearch("");
@@ -792,6 +812,8 @@ export default function App(): React.ReactElement {
               <SearchSection
                 title="CONCEPTS"
                 items={searchResults.concepts}
+                initialCount={4}
+                testIdPrefix="kx-search-local-concepts"
                 onPick={(k) => {
                   selectById(k.id, "concept");
                   setSearch("");
@@ -806,6 +828,8 @@ export default function App(): React.ReactElement {
               <SearchSection
                 title="CHUNKS"
                 items={searchResults.chunks}
+                initialCount={4}
+                testIdPrefix="kx-search-local-chunks"
                 onPick={(c) => {
                   selectById(c.id, "chunk");
                   setSearch("");
@@ -1578,18 +1602,49 @@ interface SearchSectionProps<T> {
   items: T[];
   onPick: (item: T) => void;
   render: (item: T) => React.ReactNode;
+  /**
+   * #321 — when set, the section caps its initial render at this
+   * many rows and shows a ``+N more`` button (via ``<TruncatedList>``)
+   * for the remainder. The header also surfaces the true total in
+   * ``TITLE · N`` form so the user knows how many matches exist
+   * even before expanding. Omit to render the full list with a
+   * bare title (the pre-#321 behaviour).
+   */
+  initialCount?: number;
+  /** Optional testid prefix for the "+N more" button. */
+  testIdPrefix?: string;
 }
 
-function SearchSection<T extends object>({ title, items, onPick, render }: SearchSectionProps<T>): React.ReactElement | null {
+function SearchSection<T extends object>({
+  title,
+  items,
+  onPick,
+  render,
+  initialCount,
+  testIdPrefix,
+}: SearchSectionProps<T>): React.ReactElement | null {
   if (!items.length) return null;
+  const renderRow = (it: T, i: number): React.ReactNode => (
+    <div key={i} className="kx-search-row" onClick={() => onPick(it)}>
+      {render(it)}
+    </div>
+  );
   return (
     <div className="kx-search-sec">
-      <div className="kx-search-h">{title}</div>
-      {items.map((it, i) => (
-        <div key={i} className="kx-search-row" onClick={() => onPick(it)}>
-          {render(it)}
-        </div>
-      ))}
+      <div className="kx-search-h">
+        {title}
+        {initialCount !== undefined && ` · ${items.length}`}
+      </div>
+      {initialCount === undefined ? (
+        items.map(renderRow)
+      ) : (
+        <TruncatedList
+          items={items}
+          initialCount={initialCount}
+          renderItem={renderRow}
+          testIdPrefix={testIdPrefix}
+        />
+      )}
     </div>
   );
 }

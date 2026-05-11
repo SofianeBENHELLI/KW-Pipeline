@@ -14,11 +14,12 @@
  * either local state or graph history without re-typing the contract.
  */
 
-import React, { type ReactNode } from "react";
+import React from "react";
 
 import { confColor } from "./GraphCanvas";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import { RelationEvidenceDrawer } from "./RelationEvidenceDrawer";
+import { TruncatedList } from "./TruncatedList";
 import {
   CLUSTERS,
   DOC_TYPES,
@@ -93,67 +94,6 @@ const ConfBar: React.FC<{ value: number }> = ({ value }) => (
     </span>
   </div>
 );
-
-/**
- * Renders a list, capped at ``initialCount`` items, with an inline
- * "+N more" affordance that expands to the full list on click.
- *
- * #321 — surfaces silent ``.slice()`` truncations on the doc /
- * cluster detail surfaces so users on large corpora can tell when
- * a list has been hidden rather than guessing whether the doc
- * really has only N concepts. Local-only state (no parent props
- * to plumb through) so this can drop in next to existing
- * ``.map()`` calls without rewiring the surrounding DetailPanel
- * branches.
- *
- * Lists at-or-below the cap render exactly as before — no button,
- * no extra DOM nodes — so the existing tests that assert "no extra
- * affordances on small fixtures" continue to pass.
- */
-interface TruncatedListProps<T> {
-  items: T[];
-  initialCount: number;
-  renderItem: (item: T, index: number) => ReactNode;
-  /**
-   * data-testid prefix for both the wrapper and the "+N more"
-   * button so tests can target a specific instance when several
-   * truncated lists share one panel.
-   */
-  testIdPrefix?: string;
-  /** Word used in the affordance (singular). Defaults to ``"more"``. */
-  noun?: string;
-}
-
-function TruncatedList<T>({
-  items,
-  initialCount,
-  renderItem,
-  testIdPrefix,
-  noun = "more",
-}: TruncatedListProps<T>): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false);
-  const total = items.length;
-  const visible = expanded || total <= initialCount ? items : items.slice(0, initialCount);
-  const hidden = total - visible.length;
-  return (
-    <>
-      {visible.map((item, index) => (
-        <React.Fragment key={index}>{renderItem(item, index)}</React.Fragment>
-      ))}
-      {hidden > 0 && (
-        <button
-          type="button"
-          className="kx-truncated-more"
-          onClick={() => setExpanded(true)}
-          data-testid={testIdPrefix ? `${testIdPrefix}-more` : "kx-truncated-more"}
-          aria-label={`Show ${hidden} ${noun}`}
-        >
-          +{hidden} {noun}
-        </button>
-      )}
-    </>
-  );
-}
 
 export const DetailPanel: React.FC<Props> = ({
   snapshot,
