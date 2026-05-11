@@ -8,6 +8,7 @@
  * during development.
  */
 const path = require("path");
+const webpack = require("webpack");
 const CopyPlugin = require("copy-webpack-plugin");
 
 module.exports = (_env, argv) => {
@@ -58,6 +59,21 @@ module.exports = (_env, argv) => {
         patterns: [
           { from: path.resolve(__dirname, "src/index.html"), to: "index.html" },
         ],
+      }),
+      // Bake build-time env var into the bundle so the deployed
+      // explorer calls the right backend. ``api/client.ts`` reads
+      // ``process.env.KW_API_BASE_URL`` at module load — without
+      // this plugin the expression stays verbatim in the bundle,
+      // ``process`` is undefined in the browser, the lookup throws,
+      // the catch returns ``undefined``, and the FALLBACK_BASE_URL
+      // (http://localhost:8000) wins. The result is a "deployed"
+      // explorer that silently calls localhost from inside
+      // 3DDashboard. Empty-string default so dev builds (``npm run
+      // build`` / dev server, no env exported) still work — the
+      // falsy lookup falls through to the same localhost fallback,
+      // matching pre-fix behaviour.
+      new webpack.EnvironmentPlugin({
+        KW_API_BASE_URL: "",
       }),
     ],
     devServer: {
