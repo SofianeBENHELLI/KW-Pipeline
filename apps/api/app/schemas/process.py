@@ -13,7 +13,7 @@ catalog tables, not in the Neo4j graph layer. The wire shape here
 is the contract every persistence backend
 (:class:`InMemoryProcessStore` / :class:`SQLiteProcessStore`)
 round-trips and the read API
-(``GET /processes`` / ``GET /processes/{id}``) returns.
+(``GET /knowledge/processes`` / ``GET /knowledge/processes/{id}``) returns.
 """
 
 from __future__ import annotations
@@ -56,6 +56,14 @@ class ProcessStep(BaseModel):
     tool X". A future tool-calling integration (AURA #16) will
     join against a real ``tools`` table; until then, the string is
     stored as-is and treated as opaque.
+
+    ``source_reference_ids`` carries the chunk ids the extractor
+    used to derive this step. Pre-locked here for AURA citation
+    compatibility (ADR-029): when the companion surfaces a
+    ProcessStep as a citation source, it constructs one
+    :class:`Citation` per id in this list. Defaults to empty for
+    back-compat with extractors that haven't been updated yet; the
+    SOP-aware parser (#390) populates it.
     """
 
     step_number: int = Field(ge=1)
@@ -64,21 +72,22 @@ class ProcessStep(BaseModel):
     preconditions: list[str] = Field(default_factory=list)
     outcomes: list[str] = Field(default_factory=list)
     referenced_tool_id: str | None = None
+    source_reference_ids: list[str] = Field(default_factory=list)
 
 
 class ProcessSummary(BaseModel):
     """Metadata-only Process row for the list view.
 
     The full :class:`Process` payload includes ``steps``, which is
-    unbounded in size. ``GET /processes`` returns summaries (no
+    unbounded in size. ``GET /knowledge/processes`` returns summaries (no
     steps) so the list response stays cheap even when the catalog
     holds large playbooks; consumers fetch a single Process via
-    ``GET /processes/{id}`` to get the ordered step bodies.
+    ``GET /knowledge/processes/{id}`` to get the ordered step bodies.
     """
 
     id: str
     title: str = Field(min_length=1, max_length=500)
-    owning_document_id: str
+    document_id: str
     version_id: str
     schema_version: ProcessSchemaVersion = PROCESS_SCHEMA_VERSION
     created_at: datetime
@@ -87,11 +96,14 @@ class ProcessSummary(BaseModel):
 class Process(BaseModel):
     """Top-level Process — metadata + ordered steps.
 
-    ``id`` is server-generated at extraction time. ``owning_document_id``
+    ``id`` is server-generated at extraction time. ``document_id``
     and ``version_id`` link the Process back to the SOP it was
     extracted from so a re-extraction can replace the prior Process
     row deterministically (see
     :meth:`app.services.process_store.ProcessStore.delete_for_version`).
+    Field naming matches ``Citation`` / ``GroundedAnswer``
+    (ADR-029) so a Process surfaced as a citation source needs no
+    rename layer.
 
     ``steps`` is sorted by :attr:`ProcessStep.step_number` ASC on
     every read — both backends honour this ordering so consumers
@@ -107,7 +119,7 @@ class Process(BaseModel):
 
     id: str
     title: str = Field(min_length=1, max_length=500)
-    owning_document_id: str
+    document_id: str
     version_id: str
     schema_version: ProcessSchemaVersion = PROCESS_SCHEMA_VERSION
     steps: list[ProcessStep] = Field(default_factory=list)
@@ -115,7 +127,7 @@ class Process(BaseModel):
 
 
 class ProcessListResponse(BaseModel):
-    """Response shape for ``GET /processes``.
+    """Response shape for ``GET /knowledge/processes``.
 
     Mirrors the cursor-pagination envelope used by the rest of the
     knowledge surface: ``items`` carries the page; ``next_cursor``

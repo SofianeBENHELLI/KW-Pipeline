@@ -1231,6 +1231,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/processes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Processes
+         * @description Paginated list of extracted Process summaries (#369, ADR-031).
+         *
+         *     Returns metadata-only :class:`ProcessSummary` rows so the list
+         *     view stays cheap regardless of how many steps a Playbook
+         *     carries. Clients fetch the full :class:`Process` body
+         *     (including ordered steps) via ``GET /knowledge/processes/{id}``.
+         *
+         *     Cursor codec is shared with the document list — opaque
+         *     base64 over ``(created_at, id)``. Page size defaults to the
+         *     same per-list ceiling used by the catalog (50, capped at
+         *     200) so clients tune one knob across the surface.
+         */
+        get: operations["list_processes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/processes/{process_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Process
+         * @description Return one Process with its ordered steps (#369, ADR-031).
+         *
+         *     Steps come back sorted by ``step_number`` ASC — both store
+         *     backends honour that ordering so callers don't have to
+         *     re-sort. ``404`` when ``process_id`` is unknown.
+         */
+        get: operations["get_process"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/projection_status/{version_id}": {
         parameters: {
             query?: never;
@@ -1426,60 +1480,6 @@ export interface paths {
          *     leak risk on the operator-facing dashboard surface.
          */
         get: operations["metrics"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/processes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Processes
-         * @description Paginated list of extracted Process summaries (#369, ADR-031).
-         *
-         *     Returns metadata-only :class:`ProcessSummary` rows so the list
-         *     view stays cheap regardless of how many steps a Playbook
-         *     carries. Clients fetch the full :class:`Process` body
-         *     (including ordered steps) via ``GET /processes/{id}``.
-         *
-         *     Cursor codec is shared with the document list — opaque
-         *     base64 over ``(created_at, id)``. Page size defaults to the
-         *     same per-list ceiling used by the catalog (50, capped at
-         *     200) so clients tune one knob across the surface.
-         */
-        get: operations["list_processes"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/processes/{process_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Process
-         * @description Return one Process with its ordered steps (#369, ADR-031).
-         *
-         *     Steps come back sorted by ``step_number`` ASC — both store
-         *     backends honour that ordering so callers don't have to
-         *     re-sort. ``404`` when ``process_id`` is unknown.
-         */
-        get: operations["get_process"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3345,11 +3345,14 @@ export interface components {
          * Process
          * @description Top-level Process — metadata + ordered steps.
          *
-         *     ``id`` is server-generated at extraction time. ``owning_document_id``
+         *     ``id`` is server-generated at extraction time. ``document_id``
          *     and ``version_id`` link the Process back to the SOP it was
          *     extracted from so a re-extraction can replace the prior Process
          *     row deterministically (see
          *     :meth:`app.services.process_store.ProcessStore.delete_for_version`).
+         *     Field naming matches ``Citation`` / ``GroundedAnswer``
+         *     (ADR-029) so a Process surfaced as a citation source needs no
+         *     rename layer.
          *
          *     ``steps`` is sorted by :attr:`ProcessStep.step_number` ASC on
          *     every read — both backends honour this ordering so consumers
@@ -3368,10 +3371,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Document Id */
+            document_id: string;
             /** Id */
             id: string;
-            /** Owning Document Id */
-            owning_document_id: string;
             /**
              * Schema Version
              * @default v0.1
@@ -3387,7 +3390,7 @@ export interface components {
         };
         /**
          * ProcessListResponse
-         * @description Response shape for ``GET /processes``.
+         * @description Response shape for ``GET /knowledge/processes``.
          *
          *     Mirrors the cursor-pagination envelope used by the rest of the
          *     knowledge surface: ``items`` carries the page; ``next_cursor``
@@ -3431,6 +3434,14 @@ export interface components {
          *     tool X". A future tool-calling integration (AURA #16) will
          *     join against a real ``tools`` table; until then, the string is
          *     stored as-is and treated as opaque.
+         *
+         *     ``source_reference_ids`` carries the chunk ids the extractor
+         *     used to derive this step. Pre-locked here for AURA citation
+         *     compatibility (ADR-029): when the companion surfaces a
+         *     ProcessStep as a citation source, it constructs one
+         *     :class:`Citation` per id in this list. Defaults to empty for
+         *     back-compat with extractors that haven't been updated yet; the
+         *     SOP-aware parser (#390) populates it.
          */
         ProcessStep: {
             /** Body */
@@ -3441,6 +3452,8 @@ export interface components {
             preconditions: string[];
             /** Referenced Tool Id */
             referenced_tool_id: string | null;
+            /** Source Reference Ids */
+            source_reference_ids: string[];
             /** Step Number */
             step_number: number;
             /** Title */
@@ -3451,10 +3464,10 @@ export interface components {
          * @description Metadata-only Process row for the list view.
          *
          *     The full :class:`Process` payload includes ``steps``, which is
-         *     unbounded in size. ``GET /processes`` returns summaries (no
+         *     unbounded in size. ``GET /knowledge/processes`` returns summaries (no
          *     steps) so the list response stays cheap even when the catalog
          *     holds large playbooks; consumers fetch a single Process via
-         *     ``GET /processes/{id}`` to get the ordered step bodies.
+         *     ``GET /knowledge/processes/{id}`` to get the ordered step bodies.
          */
         ProcessSummary: {
             /**
@@ -3462,10 +3475,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Document Id */
+            document_id: string;
             /** Id */
             id: string;
-            /** Owning Document Id */
-            owning_document_id: string;
             /**
              * Schema Version
              * @default v0.1
@@ -5685,6 +5698,69 @@ export interface operations {
             };
         };
     };
+    list_processes: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_process: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                process_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Process"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     knowledge_projection_status: {
         parameters: {
             query?: never;
@@ -5850,69 +5926,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetricsResponse"];
-                };
-            };
-        };
-    };
-    list_processes: {
-        parameters: {
-            query?: {
-                cursor?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProcessListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_process: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                process_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Process"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -553,17 +553,23 @@ def _migrate_0013_processes(conn: sqlite3.Connection) -> None:
 
     Two tables:
 
-    * ``processes`` — one row per extracted Process. ``owning_document_id``
+    * ``processes`` — one row per extracted Process. ``document_id``
       and ``version_id`` link the Process back to the SOP it was
       extracted from so a re-extraction can replace the prior
-      Process row deterministically. ``schema_version`` (matches
-      :data:`PROCESS_SCHEMA_VERSION` in the schema module) gates
-      future evolution: a v0.2 reader can refuse to deserialise a
-      v0.1 row without ambiguity.
+      Process row deterministically. The ``version_id`` carries an
+      ``ON DELETE CASCADE`` FK into ``document_versions(id)``
+      (matches the convention established by ``0012_claims``) so
+      purging a version cleans its Processes automatically.
+      ``schema_version`` (matches :data:`PROCESS_SCHEMA_VERSION` in
+      the schema module) gates future evolution: a v0.2 reader can
+      refuse to deserialise a v0.1 row without ambiguity.
     * ``process_steps`` — one row per ordered step. ``preconditions_json``
-      and ``outcomes_json`` are JSON-encoded ``list[str]`` columns
-      (SQLite has no native array type; the store-layer round-trips
-      through ``json.dumps`` / ``json.loads``). ``referenced_tool_id``
+      / ``outcomes_json`` / ``source_reference_ids_json`` are
+      JSON-encoded ``list[str]`` columns (SQLite has no native array
+      type; the store-layer round-trips through ``json.dumps`` /
+      ``json.loads``). ``source_reference_ids`` carries the chunk
+      ids the extractor used to derive the step — pre-locked here
+      for AURA citation compatibility (ADR-029, #370). ``referenced_tool_id``
       is forward-compatible — there is no tools table today; the
       string is stored as-is so a future tool-calling integration
       (AURA #16) can light up without a schema migration.
@@ -579,8 +585,8 @@ def _migrate_0013_processes(conn: sqlite3.Connection) -> None:
 
     Both indexes cover the hot read paths surfaced by the read API:
 
-    * ``idx_processes_owning_document_id`` — "list every process for
-      this document family" (the audit / explorer view).
+    * ``idx_processes_document_id`` — "list every process for this
+      document family" (the audit / explorer view).
     * ``idx_processes_version_id`` — "every process produced by this
       version", which the future SOP-aware parser will hit on each
       re-extraction to invalidate stale Processes.
@@ -590,32 +596,31 @@ def _migrate_0013_processes(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS processes (
             id                  TEXT PRIMARY KEY,
             title               TEXT NOT NULL,
-            owning_document_id  TEXT NOT NULL,
+            document_id         TEXT NOT NULL,
             version_id          TEXT NOT NULL,
             schema_version      TEXT NOT NULL,
-            created_at          TEXT NOT NULL
+            created_at          TEXT NOT NULL,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id) ON DELETE CASCADE
         )
         """
     )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS process_steps (
-            process_id          TEXT NOT NULL,
-            step_number         INTEGER NOT NULL,
-            title               TEXT NOT NULL,
-            body                TEXT NOT NULL,
-            preconditions_json  TEXT NOT NULL,
-            outcomes_json       TEXT NOT NULL,
-            referenced_tool_id  TEXT,
+            process_id                  TEXT NOT NULL,
+            step_number                 INTEGER NOT NULL,
+            title                       TEXT NOT NULL,
+            body                        TEXT NOT NULL,
+            preconditions_json          TEXT NOT NULL,
+            outcomes_json               TEXT NOT NULL,
+            referenced_tool_id          TEXT,
+            source_reference_ids_json   TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (process_id, step_number),
             FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
         )
         """
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_processes_owning_document_id "
-        "ON processes (owning_document_id)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_processes_document_id ON processes (document_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_processes_version_id ON processes (version_id)")
 
 

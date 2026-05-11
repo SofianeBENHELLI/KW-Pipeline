@@ -3186,19 +3186,19 @@
         "type": "object"
       },
       "Process": {
-        "description": "Top-level Process — metadata + ordered steps.\n\n``id`` is server-generated at extraction time. ``owning_document_id``\nand ``version_id`` link the Process back to the SOP it was\nextracted from so a re-extraction can replace the prior Process\nrow deterministically (see\n:meth:`app.services.process_store.ProcessStore.delete_for_version`).\n\n``steps`` is sorted by :attr:`ProcessStep.step_number` ASC on\nevery read — both backends honour this ordering so consumers\ndon't have to re-sort. An empty ``steps`` list is a valid shape\n(e.g. a Process whose extractor recognised the document as\nprocedural but couldn't segment it) but the typical case is\none or more steps.\n\n``created_at`` is set server-side by the store on save; clients\nthat pass a value have it overridden so the store remains the\nsingle source of truth for the timestamp.",
+        "description": "Top-level Process — metadata + ordered steps.\n\n``id`` is server-generated at extraction time. ``document_id``\nand ``version_id`` link the Process back to the SOP it was\nextracted from so a re-extraction can replace the prior Process\nrow deterministically (see\n:meth:`app.services.process_store.ProcessStore.delete_for_version`).\nField naming matches ``Citation`` / ``GroundedAnswer``\n(ADR-029) so a Process surfaced as a citation source needs no\nrename layer.\n\n``steps`` is sorted by :attr:`ProcessStep.step_number` ASC on\nevery read — both backends honour this ordering so consumers\ndon't have to re-sort. An empty ``steps`` list is a valid shape\n(e.g. a Process whose extractor recognised the document as\nprocedural but couldn't segment it) but the typical case is\none or more steps.\n\n``created_at`` is set server-side by the store on save; clients\nthat pass a value have it overridden so the store remains the\nsingle source of truth for the timestamp.",
         "properties": {
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "id": {
-            "title": "Id",
+          "document_id": {
+            "title": "Document Id",
             "type": "string"
           },
-          "owning_document_id": {
-            "title": "Owning Document Id",
+          "id": {
+            "title": "Id",
             "type": "string"
           },
           "schema_version": {
@@ -3228,7 +3228,7 @@
         "required": [
           "id",
           "title",
-          "owning_document_id",
+          "document_id",
           "version_id",
           "schema_version",
           "steps",
@@ -3238,7 +3238,7 @@
         "type": "object"
       },
       "ProcessListResponse": {
-        "description": "Response shape for ``GET /processes``.\n\nMirrors the cursor-pagination envelope used by the rest of the\nknowledge surface: ``items`` carries the page; ``next_cursor``\nis opaque and ``None`` at end-of-stream. ``schema_version``\npins the version of the Process wire shape so clients can\nreject incompatible payloads without inspecting individual\nitems.",
+        "description": "Response shape for ``GET /knowledge/processes``.\n\nMirrors the cursor-pagination envelope used by the rest of the\nknowledge surface: ``items`` carries the page; ``next_cursor``\nis opaque and ``None`` at end-of-stream. ``schema_version``\npins the version of the Process wire shape so clients can\nreject incompatible payloads without inspecting individual\nitems.",
         "properties": {
           "items": {
             "items": {
@@ -3274,7 +3274,7 @@
         "type": "object"
       },
       "ProcessStep": {
-        "description": "One ordered step inside a :class:`Process`.\n\n``step_number`` is 1-indexed (matches how operators write\n\"Step 1\", \"Step 2\" in source SOPs) and unique within a Process.\nThe compound PK ``(process_id, step_number)`` at the storage\nlayer enforces that invariant; this schema enforces ``ge=1`` so\na malformed payload never reaches the store.\n\n``preconditions`` and ``outcomes`` are free-text bullets — the\nrule of thumb is \"what must be true before this step can run\"\nand \"what is true after\". Both default to empty lists rather\nthan ``None`` because a step without preconditions is a real\ncase (the first step typically has none) and the empty-list\nshape keeps the wire contract uniform for generated clients.\n\n``referenced_tool_id`` is forward-compatible: there is no tools\ntable today, so the field is just a free-text identifier the\nextractor can populate when a step explicitly says \"invoke\ntool X\". A future tool-calling integration (AURA #16) will\njoin against a real ``tools`` table; until then, the string is\nstored as-is and treated as opaque.",
+        "description": "One ordered step inside a :class:`Process`.\n\n``step_number`` is 1-indexed (matches how operators write\n\"Step 1\", \"Step 2\" in source SOPs) and unique within a Process.\nThe compound PK ``(process_id, step_number)`` at the storage\nlayer enforces that invariant; this schema enforces ``ge=1`` so\na malformed payload never reaches the store.\n\n``preconditions`` and ``outcomes`` are free-text bullets — the\nrule of thumb is \"what must be true before this step can run\"\nand \"what is true after\". Both default to empty lists rather\nthan ``None`` because a step without preconditions is a real\ncase (the first step typically has none) and the empty-list\nshape keeps the wire contract uniform for generated clients.\n\n``referenced_tool_id`` is forward-compatible: there is no tools\ntable today, so the field is just a free-text identifier the\nextractor can populate when a step explicitly says \"invoke\ntool X\". A future tool-calling integration (AURA #16) will\njoin against a real ``tools`` table; until then, the string is\nstored as-is and treated as opaque.\n\n``source_reference_ids`` carries the chunk ids the extractor\nused to derive this step. Pre-locked here for AURA citation\ncompatibility (ADR-029): when the companion surfaces a\nProcessStep as a citation source, it constructs one\n:class:`Citation` per id in this list. Defaults to empty for\nback-compat with extractors that haven't been updated yet; the\nSOP-aware parser (#390) populates it.",
         "properties": {
           "body": {
             "title": "Body",
@@ -3305,6 +3305,13 @@
             ],
             "title": "Referenced Tool Id"
           },
+          "source_reference_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Reference Ids",
+            "type": "array"
+          },
           "step_number": {
             "minimum": 1.0,
             "title": "Step Number",
@@ -3323,25 +3330,26 @@
           "body",
           "preconditions",
           "outcomes",
-          "referenced_tool_id"
+          "referenced_tool_id",
+          "source_reference_ids"
         ],
         "title": "ProcessStep",
         "type": "object"
       },
       "ProcessSummary": {
-        "description": "Metadata-only Process row for the list view.\n\nThe full :class:`Process` payload includes ``steps``, which is\nunbounded in size. ``GET /processes`` returns summaries (no\nsteps) so the list response stays cheap even when the catalog\nholds large playbooks; consumers fetch a single Process via\n``GET /processes/{id}`` to get the ordered step bodies.",
+        "description": "Metadata-only Process row for the list view.\n\nThe full :class:`Process` payload includes ``steps``, which is\nunbounded in size. ``GET /knowledge/processes`` returns summaries (no\nsteps) so the list response stays cheap even when the catalog\nholds large playbooks; consumers fetch a single Process via\n``GET /knowledge/processes/{id}`` to get the ordered step bodies.",
         "properties": {
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "id": {
-            "title": "Id",
+          "document_id": {
+            "title": "Document Id",
             "type": "string"
           },
-          "owning_document_id": {
-            "title": "Owning Document Id",
+          "id": {
+            "title": "Id",
             "type": "string"
           },
           "schema_version": {
@@ -3364,7 +3372,7 @@
         "required": [
           "id",
           "title",
-          "owning_document_id",
+          "document_id",
           "version_id",
           "schema_version",
           "created_at"
@@ -7354,6 +7362,105 @@
         "summary": "Get Knowledge Neighborhood"
       }
     },
+    "/knowledge/processes": {
+      "get": {
+        "description": "Paginated list of extracted Process summaries (#369, ADR-031).\n\nReturns metadata-only :class:`ProcessSummary` rows so the list\nview stays cheap regardless of how many steps a Playbook\ncarries. Clients fetch the full :class:`Process` body\n(including ordered steps) via ``GET /knowledge/processes/{id}``.\n\nCursor codec is shared with the document list — opaque\nbase64 over ``(created_at, id)``. Page size defaults to the\nsame per-list ceiling used by the catalog (50, capped at\n200) so clients tune one knob across the surface.",
+        "operationId": "list_processes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Processes"
+      }
+    },
+    "/knowledge/processes/{process_id}": {
+      "get": {
+        "description": "Return one Process with its ordered steps (#369, ADR-031).\n\nSteps come back sorted by ``step_number`` ASC — both store\nbackends honour that ordering so callers don't have to\nre-sort. ``404`` when ``process_id`` is unknown.",
+        "operationId": "get_process",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "process_id",
+            "required": true,
+            "schema": {
+              "title": "Process Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Process"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Process"
+      }
+    },
     "/knowledge/projection_status/{version_id}": {
       "get": {
         "description": "Return the in-process tracker entry for ``version_id``.\n\nReviewer UIs poll this after validate to know when the graph\nis fully populated. ``404`` means the tracker has nothing\nrecorded — either the projection never ran (knowledge layer\ndisabled, version not validated yet) or the entry's TTL\npruned. Either way the UI should fall back to whatever the\ngraph endpoints return.",
@@ -7598,105 +7705,6 @@
           }
         },
         "summary": "Metrics"
-      }
-    },
-    "/processes": {
-      "get": {
-        "description": "Paginated list of extracted Process summaries (#369, ADR-031).\n\nReturns metadata-only :class:`ProcessSummary` rows so the list\nview stays cheap regardless of how many steps a Playbook\ncarries. Clients fetch the full :class:`Process` body\n(including ordered steps) via ``GET /processes/{id}``.\n\nCursor codec is shared with the document list — opaque\nbase64 over ``(created_at, id)``. Page size defaults to the\nsame per-list ceiling used by the catalog (50, capped at\n200) so clients tune one knob across the surface.",
-        "operationId": "list_processes",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProcessListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Processes"
-      }
-    },
-    "/processes/{process_id}": {
-      "get": {
-        "description": "Return one Process with its ordered steps (#369, ADR-031).\n\nSteps come back sorted by ``step_number`` ASC — both store\nbackends honour that ordering so callers don't have to\nre-sort. ``404`` when ``process_id`` is unknown.",
-        "operationId": "get_process",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "process_id",
-            "required": true,
-            "schema": {
-              "title": "Process Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Process"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Process"
       }
     },
     "/ready": {

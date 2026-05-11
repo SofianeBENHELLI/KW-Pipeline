@@ -1031,7 +1031,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         )
 
     @router.get(
-        "/processes",
+        "/knowledge/processes",
         operation_id="list_processes",
         response_model=ProcessListResponse,
     )
@@ -1049,7 +1049,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         Returns metadata-only :class:`ProcessSummary` rows so the list
         view stays cheap regardless of how many steps a Playbook
         carries. Clients fetch the full :class:`Process` body
-        (including ordered steps) via ``GET /processes/{id}``.
+        (including ordered steps) via ``GET /knowledge/processes/{id}``.
 
         Cursor codec is shared with the document list — opaque
         base64 over ``(created_at, id)``. Page size defaults to the
@@ -1069,7 +1069,7 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         return ProcessListResponse(items=items, next_cursor=next_cursor)
 
     @router.get(
-        "/processes/{process_id}",
+        "/knowledge/processes/{process_id}",
         operation_id="get_process",
         response_model=Process,
     )

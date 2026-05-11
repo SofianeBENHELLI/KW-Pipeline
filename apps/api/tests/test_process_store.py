@@ -11,7 +11,7 @@ Covers:
   against both backends.
 * Schema validation: ``step_number >= 1``, sortedness preserved,
   defaults for ``preconditions`` / ``outcomes``.
-* Routes: ``GET /processes`` paginates, ``GET /processes/{id}``
+* Routes: ``GET /knowledge/processes`` paginates, ``GET /knowledge/processes/{id}``
   returns the full body, 404 when missing.
 """
 
@@ -39,12 +39,54 @@ from app.services.process_store import (
     SQLiteProcessStore,
 )
 
+# SQLite ``process.version_id`` FK depends on parents existing. Seed
+# the minimum set in any test that talks to the SQLite store.
+_SEEDED_VERSION_IDS = ("version-1", "version-2")
+
+
+def _seed_sqlite_schema(db_path: Path) -> None:
+    """Seed ``documents`` + ``document_versions`` rows the FK depends on.
+
+    Mirrors the helper in ``tests/test_claim_store.py`` (PR #393);
+    both stores reference ``document_versions(id)`` with
+    ``ON DELETE CASCADE``.
+    """
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO documents (id, original_filename, latest_version_id, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            ("doc-1", "fixture.txt", "version-1", "2026-05-05T12:00:00+00:00"),
+        )
+        for vid in _SEEDED_VERSION_IDS:
+            conn.execute(
+                "INSERT INTO document_versions ("
+                "  id, document_id, version_number, filename, content_type, file_size,"
+                "  sha256, storage_uri, status, created_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    vid,
+                    "doc-1",
+                    1,
+                    "fixture.txt",
+                    "text/plain",
+                    10,
+                    "0" * 64,
+                    "memory://0",
+                    "STORED",
+                    "2026-05-05T12:00:00+00:00",
+                ),
+            )
+    finally:
+        conn.close()
+
 
 def _make_process(
     *,
     process_id: str = "process-1",
     title: str = "Onboard new hire",
-    owning_document_id: str = "doc-1",
+    document_id: str = "doc-1",
     version_id: str = "version-1",
     step_count: int = 3,
 ) -> Process:
@@ -68,7 +110,7 @@ def _make_process(
     return Process(
         id=process_id,
         title=title,
-        owning_document_id=owning_document_id,
+        document_id=document_id,
         version_id=version_id,
         steps=steps,
         created_at=datetime.now(UTC),
@@ -107,33 +149,36 @@ def test_migration_0013_creates_indexes(tmp_path: Path) -> None:
     finally:
         db.close()
     names = {row[0] for row in idx_rows}
-    assert "idx_processes_owning_document_id" in names
+    assert "idx_processes_document_id" in names
     assert "idx_processes_version_id" in names
 
 
 def test_migration_0013_step_pk_enforces_uniqueness(tmp_path: Path) -> None:
     """The compound PK ``(process_id, step_number)`` rejects duplicate steps."""
     build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
     db = sqlite3.connect(tmp_path / "catalog.sqlite3")
     db.execute("PRAGMA foreign_keys = ON")
     try:
         db.execute(
-            "INSERT INTO processes (id, title, owning_document_id, version_id, "
+            "INSERT INTO processes (id, title, document_id, version_id, "
             "schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("p1", "t", "d1", "v1", "v0.1", "2026-01-01T00:00:00+00:00"),
+            ("p1", "t", "doc-1", "version-1", "v0.1", "2026-01-01T00:00:00+00:00"),
         )
         db.execute(
             "INSERT INTO process_steps (process_id, step_number, title, body, "
-            "preconditions_json, outcomes_json, referenced_tool_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("p1", 1, "step1", "body", "[]", "[]", None),
+            "preconditions_json, outcomes_json, referenced_tool_id, "
+            "source_reference_ids_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", 1, "step1", "body", "[]", "[]", None, "[]"),
         )
         with pytest.raises(sqlite3.IntegrityError):
             db.execute(
                 "INSERT INTO process_steps (process_id, step_number, title, body, "
-                "preconditions_json, outcomes_json, referenced_tool_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("p1", 1, "dup", "body", "[]", "[]", None),
+                "preconditions_json, outcomes_json, referenced_tool_id, "
+                "source_reference_ids_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("p1", 1, "dup", "body", "[]", "[]", None, "[]"),
             )
     finally:
         db.close()
@@ -142,19 +187,21 @@ def test_migration_0013_step_pk_enforces_uniqueness(tmp_path: Path) -> None:
 def test_migration_0013_step_cascade_on_process_delete(tmp_path: Path) -> None:
     """Deleting the parent ``processes`` row cascades to ``process_steps``."""
     build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
     db = sqlite3.connect(tmp_path / "catalog.sqlite3")
     db.execute("PRAGMA foreign_keys = ON")
     try:
         db.execute(
-            "INSERT INTO processes (id, title, owning_document_id, version_id, "
+            "INSERT INTO processes (id, title, document_id, version_id, "
             "schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("p1", "t", "d1", "v1", "v0.1", "2026-01-01T00:00:00+00:00"),
+            ("p1", "t", "doc-1", "version-1", "v0.1", "2026-01-01T00:00:00+00:00"),
         )
         db.execute(
             "INSERT INTO process_steps (process_id, step_number, title, body, "
-            "preconditions_json, outcomes_json, referenced_tool_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("p1", 1, "step1", "body", "[]", "[]", None),
+            "preconditions_json, outcomes_json, referenced_tool_id, "
+            "source_reference_ids_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", 1, "step1", "body", "[]", "[]", None, "[]"),
         )
         db.commit()
         db.execute("DELETE FROM processes WHERE id = ?", ("p1",))
@@ -168,6 +215,40 @@ def test_migration_0013_step_cascade_on_process_delete(tmp_path: Path) -> None:
     assert leftover == 0
 
 
+def test_sqlite_store_rejects_process_with_unknown_version_id(tmp_path: Path) -> None:
+    """``processes.version_id`` carries an FK into ``document_versions(id)``;
+    inserting a Process with an unknown version must raise."""
+    build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
+    store = SQLiteProcessStore(tmp_path / "catalog.sqlite3")
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_process(_make_process(version_id="ghost-version"))
+
+
+def test_sqlite_store_cascade_deletes_processes_when_parent_version_deleted(
+    tmp_path: Path,
+) -> None:
+    """Deleting a parent ``document_versions`` row cascades to
+    ``processes`` (and via the inner cascade, to ``process_steps``)."""
+    build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
+    store = SQLiteProcessStore(tmp_path / "catalog.sqlite3")
+    store.save_process(_make_process(process_id="p-v1", version_id="version-1"))
+    store.save_process(_make_process(process_id="p-v2", version_id="version-2"))
+
+    db = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    try:
+        db.execute("PRAGMA foreign_keys = ON")
+        db.execute("DELETE FROM document_versions WHERE id = ?", ("version-1",))
+        db.commit()
+    finally:
+        db.close()
+
+    # Only the version-2 process survives.
+    assert store.get("p-v1") is None
+    assert store.get("p-v2") is not None
+
+
 # ─── Store contract parity ─────────────────────────────────────────
 
 
@@ -175,10 +256,10 @@ def test_migration_0013_step_cascade_on_process_delete(tmp_path: Path) -> None:
 def store(request: pytest.FixtureRequest, tmp_path: Path) -> ProcessStore:
     if request.param == "inmemory":
         return InMemoryProcessStore()
-    # SQLite store needs the schema in place — boot the persistent
-    # services to trigger every migration and then point the store
-    # at the same database file.
+    # SQLite store needs the schema + parent rows for the
+    # ``processes.version_id`` FK to resolve.
     build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
     return SQLiteProcessStore(tmp_path / "catalog.sqlite3")
 
 
@@ -194,7 +275,7 @@ def test_store_round_trips_a_process_with_multiple_steps(store: ProcessStore) ->
     assert fetched is not None
     assert fetched.id == process.id
     assert fetched.title == process.title
-    assert fetched.owning_document_id == process.owning_document_id
+    assert fetched.document_id == process.document_id
     assert fetched.version_id == process.version_id
     assert fetched.schema_version == PROCESS_SCHEMA_VERSION
     assert len(fetched.steps) == 3
@@ -219,6 +300,64 @@ def test_store_save_returns_steps_in_step_number_order(store: ProcessStore) -> N
     fetched = store.get(process.id)
     assert fetched is not None
     assert [s.step_number for s in fetched.steps] == [1, 2, 3]
+
+
+def test_store_round_trips_referenced_tool_id_per_step(store: ProcessStore) -> None:
+    """Some steps carry a ``referenced_tool_id`` (forward-compat
+    field for the future tool-calling integration); others don't.
+    Verify both shapes survive the round trip rather than
+    assuming the field is opaque."""
+    steps = [
+        ProcessStep(
+            step_number=1,
+            title="Open ticket",
+            body="Run the create-ticket tool.",
+            preconditions=[],
+            outcomes=["ticket-id stored"],
+            referenced_tool_id="tools.crm.create_ticket",
+        ),
+        ProcessStep(
+            step_number=2,
+            title="Wait for triage",
+            body="Manual step — no tool.",
+            preconditions=["ticket-id stored"],
+            outcomes=["triage decision recorded"],
+            referenced_tool_id=None,
+        ),
+    ]
+    process = _make_process(step_count=0).model_copy(update={"steps": steps})
+    store.save_process(process)
+
+    fetched = store.get(process.id)
+    assert fetched is not None
+    assert fetched.steps[0].referenced_tool_id == "tools.crm.create_ticket"
+    assert fetched.steps[1].referenced_tool_id is None
+
+
+def test_store_round_trips_source_reference_ids_per_step(store: ProcessStore) -> None:
+    """``source_reference_ids`` carries the chunk ids the extractor
+    used to derive each step (ADR-029, AURA citation field). Default
+    empty stays empty; explicit values survive both directions."""
+    steps = [
+        ProcessStep(
+            step_number=1,
+            title="With provenance",
+            body="Derived from two chunks.",
+            source_reference_ids=["chunk-a", "chunk-b"],
+        ),
+        ProcessStep(
+            step_number=2,
+            title="No provenance yet",
+            body="Pre-populated from a non-SOP-aware extractor.",
+        ),
+    ]
+    process = _make_process(step_count=0).model_copy(update={"steps": steps})
+    store.save_process(process)
+
+    fetched = store.get(process.id)
+    assert fetched is not None
+    assert fetched.steps[0].source_reference_ids == ["chunk-a", "chunk-b"]
+    assert fetched.steps[1].source_reference_ids == []
 
 
 def test_store_save_overwrites_existing_process(store: ProcessStore) -> None:
@@ -261,7 +400,9 @@ def test_store_list_paginates(store: ProcessStore) -> None:
         store.save_process(
             _make_process(
                 process_id=f"p{index}",
-                version_id=f"v{index}",
+                # All processes share the same seeded version — pagination
+                # is over the ``processes`` row stream, not per-version.
+                version_id="version-1",
                 title=f"Process {index}",
             )
         )
@@ -291,7 +432,7 @@ def test_store_list_returns_only_summaries(store: ProcessStore) -> None:
     assert not hasattr(summary, "steps")
     assert summary.id == process.id
     assert summary.title == process.title
-    assert summary.owning_document_id == process.owning_document_id
+    assert summary.document_id == process.document_id
     assert summary.version_id == process.version_id
     assert summary.schema_version == PROCESS_SCHEMA_VERSION
 
@@ -304,11 +445,11 @@ def test_store_list_empty_returns_empty_page_and_no_cursor(store: ProcessStore) 
 
 def test_store_delete_for_version_removes_owned_processes(store: ProcessStore) -> None:
     """``delete_for_version`` drops every Process for the version."""
-    store.save_process(_make_process(process_id="p1", version_id="vA"))
-    store.save_process(_make_process(process_id="p2", version_id="vA"))
-    store.save_process(_make_process(process_id="p3", version_id="vB"))
+    store.save_process(_make_process(process_id="p1", version_id="version-1"))
+    store.save_process(_make_process(process_id="p2", version_id="version-1"))
+    store.save_process(_make_process(process_id="p3", version_id="version-2"))
 
-    deleted = store.delete_for_version("vA")
+    deleted = store.delete_for_version("version-1")
     assert deleted == 2
     assert store.get("p1") is None
     assert store.get("p2") is None
@@ -326,10 +467,11 @@ def test_store_delete_for_version_cascades_step_rows_in_sqlite(
     """SQLite-specific: the FK CASCADE actually drops step rows on
     ``delete_for_version``."""
     build_persistent_services(tmp_path)
+    _seed_sqlite_schema(tmp_path / "catalog.sqlite3")
     sqlite_store = SQLiteProcessStore(tmp_path / "catalog.sqlite3")
-    sqlite_store.save_process(_make_process(process_id="p1", version_id="vA"))
+    sqlite_store.save_process(_make_process(process_id="p1", version_id="version-1"))
 
-    sqlite_store.delete_for_version("vA")
+    sqlite_store.delete_for_version("version-1")
 
     db = sqlite3.connect(tmp_path / "catalog.sqlite3")
     try:
@@ -386,14 +528,14 @@ def test_route_get_processes_paginates() -> None:
         )
     client = TestClient(create_app(services))
 
-    response = client.get("/processes?limit=2")
+    response = client.get("/knowledge/processes?limit=2")
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["schema_version"] == PROCESS_SCHEMA_VERSION
     assert len(body["items"]) == 2
     assert body["next_cursor"]
 
-    response_two = client.get(f"/processes?cursor={body['next_cursor']}&limit=2")
+    response_two = client.get(f"/knowledge/processes?cursor={body['next_cursor']}&limit=2")
     assert response_two.status_code == 200
     body_two = response_two.json()
     assert len(body_two["items"]) == 1
@@ -403,7 +545,7 @@ def test_route_get_processes_paginates() -> None:
 def test_route_get_processes_returns_empty_envelope_when_store_empty() -> None:
     services = build_services()
     client = TestClient(create_app(services))
-    response = client.get("/processes")
+    response = client.get("/knowledge/processes")
     assert response.status_code == 200
     body = response.json()
     assert body["items"] == []
@@ -413,7 +555,7 @@ def test_route_get_processes_returns_empty_envelope_when_store_empty() -> None:
 def test_route_get_processes_400_for_invalid_cursor() -> None:
     services = build_services()
     client = TestClient(create_app(services))
-    response = client.get("/processes?cursor=not-a-real-cursor")
+    response = client.get("/knowledge/processes?cursor=not-a-real-cursor")
     assert response.status_code == 400
 
 
@@ -421,12 +563,12 @@ def test_route_get_process_returns_full_body_with_steps() -> None:
     process = _make_process(step_count=3)
     client = _client_with_process(process)
 
-    response = client.get(f"/processes/{process.id}")
+    response = client.get(f"/knowledge/processes/{process.id}")
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["id"] == process.id
     assert body["title"] == process.title
-    assert body["owning_document_id"] == process.owning_document_id
+    assert body["document_id"] == process.document_id
     assert body["version_id"] == process.version_id
     assert body["schema_version"] == PROCESS_SCHEMA_VERSION
     assert len(body["steps"]) == 3
@@ -443,7 +585,7 @@ def test_route_get_process_returns_full_body_with_steps() -> None:
 def test_route_get_process_404_when_missing() -> None:
     services = build_services()
     client = TestClient(create_app(services))
-    response = client.get("/processes/does-not-exist")
+    response = client.get("/knowledge/processes/does-not-exist")
     assert response.status_code == 404
 
 

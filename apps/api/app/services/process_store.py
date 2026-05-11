@@ -199,14 +199,14 @@ class SQLiteProcessStore:
                 connection.execute(
                     """
                     INSERT INTO processes
-                        (id, title, owning_document_id, version_id,
+                        (id, title, document_id, version_id,
                          schema_version, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         process.id,
                         process.title,
-                        process.owning_document_id,
+                        process.document_id,
                         process.version_id,
                         process.schema_version,
                         when,
@@ -218,8 +218,8 @@ class SQLiteProcessStore:
                         INSERT INTO process_steps
                             (process_id, step_number, title, body,
                              preconditions_json, outcomes_json,
-                             referenced_tool_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                             referenced_tool_id, source_reference_ids_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             process.id,
@@ -229,6 +229,7 @@ class SQLiteProcessStore:
                             json.dumps(step.preconditions),
                             json.dumps(step.outcomes),
                             step.referenced_tool_id,
+                            json.dumps(step.source_reference_ids),
                         ),
                     )
                 connection.execute("COMMIT")
@@ -240,7 +241,7 @@ class SQLiteProcessStore:
         with self._connect() as connection:
             process_row = connection.execute(
                 """
-                SELECT id, title, owning_document_id, version_id,
+                SELECT id, title, document_id, version_id,
                        schema_version, created_at
                 FROM processes
                 WHERE id = ?
@@ -252,7 +253,8 @@ class SQLiteProcessStore:
             step_rows = connection.execute(
                 """
                 SELECT step_number, title, body, preconditions_json,
-                       outcomes_json, referenced_tool_id
+                       outcomes_json, referenced_tool_id,
+                       source_reference_ids_json
                 FROM process_steps
                 WHERE process_id = ?
                 ORDER BY step_number ASC
@@ -279,7 +281,7 @@ class SQLiteProcessStore:
         params.append(int(limit) + 1)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         query = (
-            "SELECT id, title, owning_document_id, version_id, "
+            "SELECT id, title, document_id, version_id, "
             "schema_version, created_at "
             f"FROM processes {where} "
             "ORDER BY created_at ASC, id ASC LIMIT ?"
@@ -320,7 +322,7 @@ def _to_summary(process: Process) -> ProcessSummary:
     return ProcessSummary(
         id=process.id,
         title=process.title,
-        owning_document_id=process.owning_document_id,
+        document_id=process.document_id,
         version_id=process.version_id,
         schema_version=process.schema_version,
         created_at=process.created_at,
@@ -342,13 +344,14 @@ def _row_to_process(
             preconditions=json.loads(row["preconditions_json"]),
             outcomes=json.loads(row["outcomes_json"]),
             referenced_tool_id=row["referenced_tool_id"],
+            source_reference_ids=json.loads(row["source_reference_ids_json"]),
         )
         for row in step_rows
     ]
     return Process(
         id=process_row["id"],
         title=process_row["title"],
-        owning_document_id=process_row["owning_document_id"],
+        document_id=process_row["document_id"],
         version_id=process_row["version_id"],
         schema_version=process_row["schema_version"],
         steps=steps,
@@ -360,7 +363,7 @@ def _row_to_summary(row: sqlite3.Row) -> ProcessSummary:
     return ProcessSummary(
         id=row["id"],
         title=row["title"],
-        owning_document_id=row["owning_document_id"],
+        document_id=row["document_id"],
         version_id=row["version_id"],
         schema_version=row["schema_version"],
         created_at=datetime.fromisoformat(row["created_at"]),
