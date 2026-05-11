@@ -714,3 +714,84 @@
   cursor: pointer;
 }
 .orb-aside__citation:hover { background: var(--orb-bg-hov); }
+
+/* ---- Admin surfaces (Phase 6) ---- */
+
+.orb-admin {
+  padding: 20px var(--orb-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1100px;
+}
+
+.orb-admin__title {
+  margin: 0;
+  font-size: var(--orb-fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.orb-admin__subtitle {
+  margin: 0;
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-admin__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.orb-admin__card {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  align-items: flex-start;
+}
+
+.orb-admin__card-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--orb-r-sm);
+  background: var(--orb-bg-sunk);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--orb-fg-muted);
+}
+
+.orb-admin__card-body { flex: 1; min-width: 0; }
+.orb-admin__card-body h2 { margin: 0 0 4px; font-size: var(--orb-fs-md); font-weight: 600; }
+.orb-admin__card-body p { margin: 0 0 8px; color: var(--orb-fg-muted); font-size: var(--orb-fs-sm); line-height: 1.4; }
+
+.orb-admin__card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  text-decoration: none;
+  font-weight: 500;
+}
+.orb-admin__card-cta:hover { color: var(--orb-info); }
+
+.orb-admin__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+}
+
+.orb-admin__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  min-width: 140px;
+}
+.orb-admin__filter select { font: inherit; }

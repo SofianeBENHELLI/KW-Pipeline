@@ -22,3 +22,5 @@ export { OrbSearchPanel } from "./SearchPanel";
 export type { OrbSearchPanelProps } from "./SearchPanel";
 export { OrbChatPanel } from "./ChatPanel";
 export type { OrbChatPanelProps } from "./ChatPanel";
+export { OrbAdminHub } from "./AdminHub";
+export { OrbAdminAudit } from "./AdminAudit";

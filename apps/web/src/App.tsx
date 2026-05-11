@@ -18,10 +18,17 @@ import {
 import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
-// Phase 1 of the Orbital redesign: lazy-loaded preview at `/orb`.
-// See docs/roadmap/orbital-redesign.md.
+// Orbital redesign preview routes (`/orb*`). The legacy reviewer
+// workbench keeps serving every other path; see
+// docs/roadmap/orbital-redesign.md for the phased rollout.
 const OrbCatalogView = lazy(() =>
   import("./features-orb").then((m) => ({ default: m.OrbCatalogView })),
+);
+const OrbAdminHub = lazy(() =>
+  import("./features-orb").then((m) => ({ default: m.OrbAdminHub })),
+);
+const OrbAdminAudit = lazy(() =>
+  import("./features-orb").then((m) => ({ default: m.OrbAdminAudit })),
 );
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
@@ -421,14 +428,31 @@ export default function App() {
           </Suspense>
         }
       />
-      {/* Phase 1 of the Orbital redesign — opt-in preview at /orb. The
-          legacy reviewer workbench (`*`) keeps serving the rest of the
-          UI until later phases retire it (docs/roadmap/orbital-redesign.md). */}
+      {/* Phase 1+ of the Orbital redesign — opt-in preview at /orb*.
+          The legacy reviewer workbench (`*`) keeps serving the rest of
+          the UI until later phases retire it
+          (docs/roadmap/orbital-redesign.md). */}
       <Route
         path="/orb"
         element={
           <Suspense fallback={<div className="kw-loading">Loading Orbital preview…</div>}>
             <OrbCatalogView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/orb/admin"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading admin hub…</div>}>
+            <OrbAdminHub />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/orb/admin/audit"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading audit log…</div>}>
+            <OrbAdminAudit />
           </Suspense>
         }
       />
