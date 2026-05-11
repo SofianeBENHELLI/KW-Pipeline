@@ -463,6 +463,25 @@ class Settings(BaseSettings):
             "since claim extraction is a section-local pass."
         ),
     )
+    topic_extractor_max_input_tokens_per_document: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "KW_TOPIC_EXTRACTOR_MAX_INPUT_TOKENS_PER_DOCUMENT",
+        ),
+        description=(
+            "Per-document input-token cap for the LLM-driven Topic "
+            "extractor (#411, ADR-031). When set to a positive value "
+            "and the assembled prompt body exceeds the cap, every "
+            "section's text is truncated proportionally so every "
+            "section is still represented in the prompt (truncation "
+            "is preferred over skip so a long doc still gets some "
+            "topic surface). ``0`` (the default) disables the cap. "
+            "Applies as a per-document budget rather than per-section "
+            "(unlike the Claim extractor) because topic extraction is "
+            "a one-shot, document-level pass — the LLM needs the whole "
+            "context to identify top-level themes vs passing mentions."
+        ),
+    )
     anthropic_timeout_seconds: float = Field(
         default=60.0,
         validation_alias=AliasChoices("KW_ANTHROPIC_TIMEOUT_SECONDS"),
