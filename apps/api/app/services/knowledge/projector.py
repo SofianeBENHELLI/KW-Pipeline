@@ -76,7 +76,9 @@ if TYPE_CHECKING:
     from app.services.claim_extractor import ClaimExtractor
     from app.services.claim_store import ClaimStore
     from app.services.document_relations_cache import DocumentRelationsCache
+    from app.services.document_topic_store import DocumentTopicStore
     from app.services.process_store import ProcessStore
+    from app.services.topic_extractor import TopicExtractor
 
 from app.schemas.document import Document, DocumentVersion
 from app.schemas.knowledge import (
@@ -123,6 +125,8 @@ class KnowledgeProjector:
         process_store: ProcessStore | None = None,
         claim_extractor: ClaimExtractor | None = None,
         claim_store: ClaimStore | None = None,
+        topic_extractor: TopicExtractor | None = None,
+        document_topic_store: DocumentTopicStore | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -165,6 +169,15 @@ class KnowledgeProjector:
         # pre-#392 behaviour exactly.
         self._claim_extractor = claim_extractor
         self._claim_store = claim_store
+        # #411: LLM-driven document-level Topic extractor + the
+        # SQLite-backed DocumentTopic store. Same both-or-nothing
+        # posture as the Claim pair above. Distinct from the
+        # deterministic chunk-cluster ``Topic`` produced by
+        # ``TopicClusteringService`` (which feeds graph layout +
+        # ``same_topic_as`` edges); these are document-level themes
+        # for the operator-facing topic UX.
+        self._topic_extractor = topic_extractor
+        self._document_topic_store = document_topic_store
 
     def set_document_relations_cache(
         self,
@@ -221,6 +234,29 @@ class KnowledgeProjector:
         a valid kill switch (e.g. when the LLM is not configured).
         """
         self._claim_store = store
+
+    def set_topic_extractor(self, extractor: TopicExtractor | None) -> None:
+        """Wire the LLM Topic extractor after construction (#411).
+
+        Mirrors :meth:`set_claim_extractor` so the wiring layer can
+        attach the extractor without breaking the projector's
+        constructor signature for the existing tests that build
+        ``KnowledgeProjector(graph_store=...)`` directly.
+
+        The post-projection hook only fires when BOTH this and the
+        DocumentTopic store are set — see
+        :meth:`set_document_topic_store`.
+        """
+        self._topic_extractor = extractor
+
+    def set_document_topic_store(self, store: DocumentTopicStore | None) -> None:
+        """Wire the DocumentTopic store after construction (#411).
+
+        See :meth:`set_topic_extractor`. Both must be wired for the
+        post-projection extraction hook to run; either ``None`` is a
+        valid kill switch (e.g. when the LLM is not configured).
+        """
+        self._document_topic_store = store
 
     def project(
         self,
@@ -416,6 +452,45 @@ class KnowledgeProjector:
             except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
                 log.warning(
                     "knowledge.claim_extraction.failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        # #411: LLM-driven document-level Topic extraction. Same
+        # both-or-nothing posture as the Claim hook above — when the
+        # operator wires the extractor without the store, the LLM call
+        # would just throw the result away, so we gate on both. The
+        # ``delete_for_version`` runs first so a re-projection
+        # replaces the prior batch atomically (the FK on
+        # ``document_topics.version_id`` would also cascade on a
+        # version delete, but a re-extraction never deletes the
+        # version row). Fire-and-log per ADR-012 §3 — a Topic-extractor
+        # failure leaves the structural projection (and the cache
+        # warm + claim hook above) intact.
+        if self._topic_extractor is not None and self._document_topic_store is not None:
+            try:
+                topics = self._topic_extractor.extract(
+                    semantic,
+                    document=document,
+                    version=version,
+                )
+                self._document_topic_store.delete_for_version(version.id)
+                if topics:
+                    self._document_topic_store.save_topics(topics)
+                log.info(
+                    "knowledge.topic_extraction.written",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "topic_count": len(topics),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.topic_extraction.failed",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,

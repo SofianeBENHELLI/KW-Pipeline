@@ -93,6 +93,7 @@ from app.services.taxonomy_store import (
     TaxonomyStore,
     import_yaml_into_store,
 )
+from app.services.topic_extractor import TopicExtractor
 from app.services.validation_metadata_store import (
     InMemoryValidationMetadataStore,
     SQLiteValidationMetadataStore,
@@ -692,6 +693,41 @@ def _maybe_build_claim_extractor(
     )
 
 
+def _maybe_build_topic_extractor(
+    settings: Settings | None = None,
+    *,
+    llm: LLMClient | None = None,
+    llm_model: str | None = None,
+) -> TopicExtractor | None:
+    """Build the LLM-driven document Topic extractor if enabled
+    (#411, ADR-031).
+
+    Returns ``None`` unless an LLM provider is configured (Gemini
+    primary, Anthropic fallback per ADR-013 §6) AND the knowledge
+    layer is on. The pre-#411 path (no Topic extraction wired) is
+    preserved when no provider is configured so contributors who
+    don't have either API key can still run the knowledge layer
+    end-to-end against the in-memory graph store.
+
+    Callers may pass a pre-built ``llm`` + ``llm_model`` so the
+    Topic extractor shares one client with the entity / claim
+    extractors and the chat service — same retry budget, same prompt
+    cache, single provider config to track.
+    """
+    settings = settings or Settings()
+    if llm is None or llm_model is None:
+        built = _maybe_build_llm(settings)
+        if built is None:
+            return None
+        llm, llm_model = built
+    cap = settings.topic_extractor_max_input_tokens_per_document
+    return TopicExtractor(
+        llm=llm,
+        model=llm_model,
+        max_input_tokens=cap,
+    )
+
+
 def _maybe_build_embedding_client(
     settings: Settings | None = None,
 ) -> EmbeddingClient | None:
@@ -1043,6 +1079,14 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         llm=llm_client,
         llm_model=llm_model,
     )
+    # #411: same gating as the Claim extractor — only present when
+    # the LLM provider is configured. ``None`` keeps the projector
+    # hook a no-op (pre-#411 behaviour preserved).
+    topic_extractor = _maybe_build_topic_extractor(
+        settings,
+        llm=llm_client,
+        llm_model=llm_model,
+    )
     # #385: wire the cache onto the projector so post-projection
     # warm fires for every validate. ``None``-safe: when the
     # knowledge layer is disabled, ``knowledge_projector`` is None
@@ -1061,6 +1105,10 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         # ``KnowledgeProjector``.
         knowledge_projector.set_claim_extractor(claim_extractor)
         knowledge_projector.set_claim_store(claim_store)
+        # #411: wire the Topic extractor + DocumentTopic store.
+        # Same both-or-nothing posture as the Claim pair.
+        knowledge_projector.set_topic_extractor(topic_extractor)
+        knowledge_projector.set_document_topic_store(document_topic_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1204,6 +1252,14 @@ def build_persistent_services(
         llm=llm_client,
         llm_model=llm_model,
     )
+    # #411: same as in build_services — only present when the LLM
+    # provider is configured. ``None`` keeps the projector hook a
+    # no-op (pre-#411 behaviour preserved).
+    topic_extractor = _maybe_build_topic_extractor(
+        settings,
+        llm=llm_client,
+        llm_model=llm_model,
+    )
     # #385: same as build_services — wire the cache onto the
     # projector so post-projection warm fires for every validate
     # in the persistent runtime.
@@ -1218,6 +1274,11 @@ def build_persistent_services(
         # persistent ClaimStore.
         knowledge_projector.set_claim_extractor(claim_extractor)
         knowledge_projector.set_claim_store(claim_store)
+        # #411: wire the Topic extractor + the SQLite-backed
+        # DocumentTopic store so the post-projection LLM pass
+        # writes Topics through the persistent store.
+        knowledge_projector.set_topic_extractor(topic_extractor)
+        knowledge_projector.set_document_topic_store(document_topic_store)
     return PipelineServices(
         storage=storage,
         documents=documents,
