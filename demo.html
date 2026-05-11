@@ -19,6 +19,8 @@
         --ds-ink-900: #0E1B26;
         --ds-success: #1F7A4A;
         --ds-success-soft: #E5F4EC;
+        --ds-warning: #B26A00;
+        --ds-warning-soft: #FBEFD8;
         --ds-danger:  #B3261E;
         --ds-danger-soft: #F8E2E0;
         --ds-radius: 4px;
@@ -90,6 +92,16 @@
         margin: 0 0 12px;
         font-weight: 700;
       }
+      .card h2 .mode-pill {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: var(--ds-radius-pill);
+        background: var(--ds-blue-100);
+        color: var(--ds-blue-700);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+      }
       .status-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -115,18 +127,21 @@
         background: var(--ds-ink-500);
         flex: 0 0 auto;
       }
-      .dot.ok  { background: var(--ds-success); box-shadow: 0 0 0 3px rgba(31, 122, 74, 0.15); }
-      .dot.err { background: var(--ds-danger);  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.15); }
+      .dot.ok    { background: var(--ds-success); box-shadow: 0 0 0 3px rgba(31, 122, 74, 0.15); }
+      .dot.err   { background: var(--ds-danger);  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.15); }
+      .dot.warn  { background: var(--ds-warning); box-shadow: 0 0 0 3px rgba(178, 106, 0, 0.15); }
       .service-title { font-weight: 700; color: var(--ds-ink-900); }
       .service-state {
         font-size: 12px; color: var(--ds-ink-700);
         font-family: var(--ds-mono);
       }
-      .service-state.err { color: var(--ds-danger); }
+      .service-state.err  { color: var(--ds-danger); }
+      .service-state.warn { color: var(--ds-warning); }
       .service-url {
         font-size: 11px;
         font-family: var(--ds-mono);
         color: var(--ds-ink-500);
+        word-break: break-all;
       }
       a.btn {
         display: inline-flex;
@@ -267,29 +282,90 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <h1>KW-Pipeline — demo dashboard</h1>
-          <p class="subtitle">Two-step demo · live status · all the URLs in one place</p>
+          <p class="subtitle">Live status · all the URLs in one place · production + local dev</p>
         </div>
       </header>
 
-      <!-- ── Live status ─────────────────────────────────────────── -->
+      <!--
+        URLs are sourced from the inline JSON below. The deploy scripts
+        (``scripts/deploy-{widget,explorer,orbital}.sh``) update the
+        matching field after each successful S3 upload via
+        ``scripts/_update-demo-deployment.sh``, so this dashboard
+        stays in sync with the live bundles without manual edits.
+        Edit any URL by hand if you ever change the backend hostname
+        or the S3 bucket.
+      -->
+      <script id="kw-deployments" type="application/json">
+{
+  "backend":  "https://kw-api.benhelli.org",
+  "widget":   "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledgeforge/v0.1.0/index.html",
+  "explorer": "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-explorer/v0.1.0/index.html",
+  "orbital":  "https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-orbital/v0.0.0/index.html"
+}
+      </script>
+
+      <!-- ── Production status ───────────────────────────────────── -->
       <section class="card">
-        <h2>Live status</h2>
+        <h2>Production deploys <span class="mode-pill">live</span></h2>
         <div class="status-grid">
           <div class="service">
             <div class="service-head">
-              <span class="dot" id="be-dot"></span>
+              <span class="dot" id="prod-be-dot"></span>
               <span class="service-title">Backend</span>
             </div>
-            <div class="service-state" id="be-state">Checking…</div>
+            <div class="service-state" id="prod-be-state">Checking…</div>
+            <div class="service-url" id="prod-be-url"></div>
+            <a class="btn btn--ghost" id="prod-be-docs" target="_blank" rel="noopener">Open API docs ↗</a>
+          </div>
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="prod-widget-dot"></span>
+              <span class="service-title">Widget (3DX KnowledgeForge)</span>
+            </div>
+            <div class="service-state" id="prod-widget-state">Checking…</div>
+            <div class="service-url" id="prod-widget-url"></div>
+            <a class="btn" id="prod-widget-open" target="_blank" rel="noopener">Open ↗</a>
+          </div>
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="prod-explorer-dot"></span>
+              <span class="service-title">Explorer (3DX Knowledge Explorer)</span>
+            </div>
+            <div class="service-state" id="prod-explorer-state">Checking…</div>
+            <div class="service-url" id="prod-explorer-url"></div>
+            <a class="btn" id="prod-explorer-open" target="_blank" rel="noopener">Open ↗</a>
+          </div>
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="prod-orbital-dot"></span>
+              <span class="service-title">Orbital (admin / reviewer)</span>
+            </div>
+            <div class="service-state" id="prod-orbital-state">Checking…</div>
+            <div class="service-url" id="prod-orbital-url"></div>
+            <a class="btn" id="prod-orbital-open" target="_blank" rel="noopener">Open ↗</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Local dev status ────────────────────────────────────── -->
+      <section class="card">
+        <h2>Local dev <span class="mode-pill" style="background: var(--ds-warning-soft); color: var(--ds-warning);">localhost</span></h2>
+        <div class="status-grid">
+          <div class="service">
+            <div class="service-head">
+              <span class="dot" id="dev-be-dot"></span>
+              <span class="service-title">Backend (uvicorn)</span>
+            </div>
+            <div class="service-state" id="dev-be-state">Checking…</div>
             <div class="service-url">http://127.0.0.1:8000</div>
             <a class="btn btn--ghost" href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">Open API docs ↗</a>
           </div>
           <div class="service">
             <div class="service-head">
-              <span class="dot" id="fe-dot"></span>
-              <span class="service-title">Widget preview</span>
+              <span class="dot" id="dev-fe-dot"></span>
+              <span class="service-title">Widget preview (Vite)</span>
             </div>
-            <div class="service-state" id="fe-state">Checking…</div>
+            <div class="service-state" id="dev-fe-state">Checking…</div>
             <div class="service-url">http://127.0.0.1:5174</div>
             <a class="btn" href="http://127.0.0.1:5174" target="_blank" rel="noopener">Open widget ↗</a>
           </div>
@@ -298,7 +374,7 @@
 
       <!-- ── Two-step launch ────────────────────────────────────── -->
       <section class="card">
-        <h2>Two-step launch</h2>
+        <h2>Two-step launch (local dev)</h2>
 
         <div class="step">
           <span class="step-num">1</span>
@@ -339,66 +415,41 @@
         </div>
       </section>
 
-      <!-- ── Backend endpoints ──────────────────────────────────── -->
+      <!-- ── Deploy commands ─────────────────────────────────────── -->
       <section class="card">
-        <h2>Backend endpoints (port 8000)</h2>
-        <div class="links">
-          <a class="link-row" href="http://127.0.0.1:8000/health" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">Health</div>
-              <div class="link-meta">GET /health</div>
+        <h2>Redeploy (S3)</h2>
+        <div class="step">
+          <span class="step-num">W</span>
+          <div class="step-body">
+            <div class="step-title">Widget</div>
+            <div class="cmd-row">
+              <span class="cmd-label">Terminal</span>
+              <button class="copy" data-copy="KW_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-widget.sh">Copy</button>
             </div>
-            <span class="link-arrow">→</span>
-          </a>
-          <a class="link-row" href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">Swagger UI</div>
-              <div class="link-meta">/docs</div>
-            </div>
-            <span class="link-arrow">→</span>
-          </a>
-          <a class="link-row" href="http://127.0.0.1:8000/redoc" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">ReDoc</div>
-              <div class="link-meta">/redoc</div>
-            </div>
-            <span class="link-arrow">→</span>
-          </a>
-          <a class="link-row" href="http://127.0.0.1:8000/openapi.json" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">OpenAPI spec</div>
-              <div class="link-meta">/openapi.json</div>
-            </div>
-            <span class="link-arrow">→</span>
-          </a>
-          <a class="link-row" href="http://127.0.0.1:8000/documents?limit=25" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">Documents (latest 25)</div>
-              <div class="link-meta">GET /documents</div>
-            </div>
-            <span class="link-arrow">→</span>
-          </a>
-          <a class="link-row" href="http://127.0.0.1:8000/knowledge/graph?limit=200" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">Knowledge graph (page 1)</div>
-              <div class="link-meta">GET /knowledge/graph</div>
-            </div>
-            <span class="link-arrow">→</span>
-          </a>
+            <pre class="cmd">KW_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-widget.sh</pre>
+          </div>
         </div>
-      </section>
-
-      <!-- ── Frontend ───────────────────────────────────────────── -->
-      <section class="card">
-        <h2>Frontend (port 5174)</h2>
-        <div class="links">
-          <a class="link-row" href="http://127.0.0.1:5174" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">3DX KnowledgeForge widget</div>
-              <div class="link-meta">apps/widget/src — fluid layout, resize the window to test reflow</div>
+        <div class="step">
+          <span class="step-num">E</span>
+          <div class="step-body">
+            <div class="step-title">Explorer</div>
+            <div class="cmd-row">
+              <span class="cmd-label">Terminal</span>
+              <button class="copy" data-copy="KW_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-explorer.sh">Copy</button>
             </div>
-            <span class="link-arrow">→</span>
-          </a>
+            <pre class="cmd">KW_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-explorer.sh</pre>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">O</span>
+          <div class="step-body">
+            <div class="step-title">Orbital</div>
+            <div class="cmd-row">
+              <span class="cmd-label">Terminal</span>
+              <button class="copy" data-copy="VITE_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-orbital.sh">Copy</button>
+            </div>
+            <pre class="cmd">VITE_API_BASE_URL=https://kw-api.benhelli.org scripts/deploy-orbital.sh</pre>
+          </div>
         </div>
       </section>
 
@@ -427,17 +478,10 @@
             </div>
             <span class="link-arrow">↗</span>
           </a>
-          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/apps/widget/docs/widget-spec.md" target="_blank" rel="noopener">
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/docs/runbook/workstation-deploy.md" target="_blank" rel="noopener">
             <div>
-              <div class="link-name">Widget spec</div>
-              <div class="link-meta">apps/widget/docs/widget-spec.md</div>
-            </div>
-            <span class="link-arrow">↗</span>
-          </a>
-          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/blob/main/apps/widget/docs/ui-rebuild-plan.md" target="_blank" rel="noopener">
-            <div>
-              <div class="link-name">UI rebuild plan</div>
-              <div class="link-meta">apps/widget/docs/ui-rebuild-plan.md</div>
+              <div class="link-name">Workstation deploy runbook</div>
+              <div class="link-meta">docs/runbook/workstation-deploy.md</div>
             </div>
             <span class="link-arrow">↗</span>
           </a>
@@ -445,6 +489,13 @@
             <div>
               <div class="link-name">Issues</div>
               <div class="link-meta">backlog & bugs</div>
+            </div>
+            <span class="link-arrow">↗</span>
+          </a>
+          <a class="link-row" href="https://github.com/SofianeBENHELLI/KW-Pipeline/pulls" target="_blank" rel="noopener">
+            <div>
+              <div class="link-name">Pull requests</div>
+              <div class="link-meta">in-flight changes</div>
             </div>
             <span class="link-arrow">↗</span>
           </a>
@@ -459,29 +510,48 @@
     </div>
 
     <script>
+      // ── Deployment URLs (populated from inline JSON) ──────────
+      const DEPLOYMENTS = JSON.parse(
+        document.getElementById("kw-deployments").textContent.trim(),
+      );
+
+      // ── Wire up production "Open" buttons + URL labels ─────────
+      function wireProd(prefix, url) {
+        document.getElementById(`${prefix}-url`).textContent = url;
+        const opener = document.getElementById(`${prefix}-open`);
+        if (opener) opener.href = url;
+      }
+      wireProd("prod-widget", DEPLOYMENTS.widget);
+      wireProd("prod-explorer", DEPLOYMENTS.explorer);
+      wireProd("prod-orbital", DEPLOYMENTS.orbital);
+      // Backend special-case: URL label + docs button.
+      document.getElementById("prod-be-url").textContent = DEPLOYMENTS.backend;
+      document.getElementById("prod-be-docs").href = `${DEPLOYMENTS.backend}/docs`;
+
       // ── Live status pings ─────────────────────────────────────
       const POLL_MS = 5000;
 
-      // ``mode: "no-cors"`` returns an opaque response we can't read
-      // (status === 0, body inaccessible) but the fetch promise still
-      // *resolves* iff the connection succeeded. That's exactly the
-      // signal we want — "is the server up" — without needing the
-      // backend or vite to whitelist the page's `null` origin (which
-      // is what the browser sends for `file://` pages).
+      // ``mode: "no-cors"`` returns an opaque response (status === 0,
+      // body inaccessible) but the fetch promise still resolves iff
+      // the connection succeeded — exactly the "is the server up"
+      // signal we want without needing the target to whitelist the
+      // page's ``null`` origin (which is what the browser sends for
+      // ``file://`` pages).
       async function probe(url) {
         try {
           const t0 = performance.now();
           await fetch(url, { cache: "no-store", mode: "no-cors" });
           const ms = Math.round(performance.now() - t0);
           return { ok: true, ms };
-        } catch (err) {
+        } catch {
           return { ok: false, msg: "unreachable" };
         }
       }
 
       function paint(prefix, result) {
-        const dot = document.getElementById(prefix + "-dot");
-        const state = document.getElementById(prefix + "-state");
+        const dot = document.getElementById(`${prefix}-dot`);
+        const state = document.getElementById(`${prefix}-state`);
+        if (!dot || !state) return;
         if (result.ok) {
           dot.className = "dot ok";
           state.className = "service-state";
@@ -494,14 +564,20 @@
       }
 
       async function tick() {
-        const [be, fe] = await Promise.all([
+        const [prodBe, prodWidget, prodExplorer, prodOrbital, devBe, devFe] = await Promise.all([
+          probe(`${DEPLOYMENTS.backend}/health`),
+          probe(DEPLOYMENTS.widget),
+          probe(DEPLOYMENTS.explorer),
+          probe(DEPLOYMENTS.orbital),
           probe("http://127.0.0.1:8000/health"),
-          // The Vite dev server doesn't expose JSON; a 200 on the root
-          // is enough to confirm it's alive.
           probe("http://127.0.0.1:5174/"),
         ]);
-        paint("be", be);
-        paint("fe", fe);
+        paint("prod-be", prodBe);
+        paint("prod-widget", prodWidget);
+        paint("prod-explorer", prodExplorer);
+        paint("prod-orbital", prodOrbital);
+        paint("dev-be", devBe);
+        paint("dev-fe", devFe);
       }
 
       tick();
@@ -521,7 +597,6 @@
               btn.classList.remove("copied");
             }, 1500);
           } catch {
-            // Fallback: select-all so user can ⌘-C.
             const range = document.createRange();
             range.selectNodeContents(btn.previousElementSibling);
             const sel = window.getSelection();
