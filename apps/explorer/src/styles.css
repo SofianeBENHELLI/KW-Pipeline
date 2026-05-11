@@ -725,6 +725,27 @@ body {
 }
 .kx-tag:hover { border-color: var(--navy); color: var(--navy); }
 
+/* #321 — "+N more" affordance for ``<TruncatedList>``. Sits inline
+   with whatever list it terminates (tag rows, doc rows, list items)
+   and adapts its display so flex containers / ul-li containers both
+   render it without extra wrapping. The dashed border keeps it
+   visually subordinate to the actual content rows so it reads as
+   an action, not a result. */
+.kx-truncated-more {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px;
+  font: inherit; font-size: 11px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.kx-truncated-more:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+
 .kx-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .kx-list li {
   display: grid;
