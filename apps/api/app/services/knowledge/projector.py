@@ -406,7 +406,7 @@ class KnowledgeProjector:
                 if claims:
                     self._claim_store.save_claims(claims)
                 log.info(
-                    "knowledge.claims.written",
+                    "knowledge.claim_extraction.written",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,
@@ -415,7 +415,7 @@ class KnowledgeProjector:
                 )
             except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
                 log.warning(
-                    "knowledge.claims.failed",
+                    "knowledge.claim_extraction.failed",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,

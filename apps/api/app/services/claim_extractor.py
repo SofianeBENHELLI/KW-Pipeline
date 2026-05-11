@@ -190,6 +190,9 @@ class ClaimExtractor:
 
         claims: list[Claim] = []
         next_claim_index = 0
+        sections_called = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
         for section in semantic.sections:
             section_text = (section.text or "").strip()
             if not section_text:
@@ -204,7 +207,7 @@ class ClaimExtractor:
             # taking a tokenizer dep at this layer.
             if self._max_input_tokens > 0 and len(section_text) > self._max_input_tokens:
                 log.warning(
-                    "knowledge.claims.section_skipped_token_cap",
+                    "knowledge.claim_extraction.section_skipped_token_cap",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,
@@ -215,14 +218,35 @@ class ClaimExtractor:
                 )
                 continue
 
-            section_claims, next_claim_index = self._extract_section(
+            section_claims, next_claim_index, usage = self._extract_section(
                 section=section,
                 document=document,
                 version=version,
                 start_index=next_claim_index,
             )
             claims.extend(section_claims)
+            sections_called += 1
+            # ``usage`` is the per-call dict the LLM client returns
+            # alongside the parsed tool input. Keys mirror the wire
+            # contract used by ``EntityExtractor`` so dashboards can
+            # aggregate billing across both extractors.
+            total_input_tokens += int(usage.get("input_tokens") or 0)
+            total_output_tokens += int(usage.get("output_tokens") or 0)
 
+        # Per-batch billing telemetry. Operators dashboarding LLM
+        # spend (#26 audit consumers) read this alongside the
+        # equivalent ``knowledge.entity_extraction.completed`` event.
+        log.info(
+            "knowledge.claim_extraction.completed",
+            extra={
+                "document_id": document.id,
+                "version_id": version.id,
+                "claim_count": len(claims),
+                "section_count": sections_called,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+            },
+        )
         return claims
 
     def _extract_section(
@@ -232,12 +256,14 @@ class ClaimExtractor:
         document: Document,
         version: DocumentVersion,
         start_index: int,
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[Claim], int, dict[str, int]]:
         """Run one LLM call for ``section`` and parse the response.
 
-        Returns the parsed claims plus the next available claim
-        index (so the caller can keep id minting deterministic across
-        sections within the same version).
+        Returns the parsed claims, the next available claim index
+        (so the caller can keep id minting deterministic across
+        sections within the same version), and the per-call usage
+        dict (``input_tokens`` / ``output_tokens``) the caller
+        accumulates for billing telemetry.
         """
         user_prompt = self._build_user_prompt(
             section=section,
@@ -246,7 +272,7 @@ class ClaimExtractor:
         )
 
         try:
-            tool_input, _usage = self._llm.complete_with_tool(
+            tool_input, usage = self._llm.complete_with_tool(
                 system=_SYSTEM_PROMPT,
                 user=user_prompt,
                 tool_schema=_CLAIM_TOOL_SCHEMA,
@@ -256,7 +282,7 @@ class ClaimExtractor:
             # batch. Log and move on; the projector hook also wraps
             # the whole pass for the catastrophic case.
             log.warning(
-                "knowledge.claims.llm_failed",
+                "knowledge.claim_extraction.llm_failed",
                 extra={
                     "document_id": document.id,
                     "version_id": version.id,
@@ -264,19 +290,19 @@ class ClaimExtractor:
                     "error_type": type(exc).__name__,
                 },
             )
-            return [], start_index
+            return [], start_index, {}
 
         raw_claims = tool_input.get("claims") or []
         if not isinstance(raw_claims, list):
             log.warning(
-                "knowledge.claims.malformed_response",
+                "knowledge.claim_extraction.malformed_response",
                 extra={
                     "document_id": document.id,
                     "version_id": version.id,
                     "section_id": section.id,
                 },
             )
-            return [], start_index
+            return [], start_index, usage
 
         claims: list[Claim] = []
         index = start_index
@@ -291,7 +317,7 @@ class ClaimExtractor:
             provenance = raw.get("provenance_chunk_ids") or []
             if not isinstance(provenance, list) or not provenance:
                 log.warning(
-                    "knowledge.claims.dropped_no_provenance",
+                    "knowledge.claim_extraction.dropped_no_provenance",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,
@@ -330,7 +356,7 @@ class ClaimExtractor:
                 )
             except (KeyError, ValueError, TypeError, ValidationError) as exc:
                 log.warning(
-                    "knowledge.claims.dropped_malformed",
+                    "knowledge.claim_extraction.dropped_malformed",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,
@@ -343,7 +369,7 @@ class ClaimExtractor:
             claims.append(claim)
             index += 1
 
-        return claims, index
+        return claims, index, usage
 
     @staticmethod
     def _build_user_prompt(

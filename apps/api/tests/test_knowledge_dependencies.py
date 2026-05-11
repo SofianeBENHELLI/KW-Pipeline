@@ -318,6 +318,7 @@ def test_claim_extractor_wired_when_llm_configured(monkeypatch: pytest.MonkeyPat
     services = build_services()
     assert services.knowledge_projector is not None
     assert isinstance(
-        services.knowledge_projector._claim_extractor, _ClaimExtractor  # type: ignore[attr-defined]
+        services.knowledge_projector._claim_extractor,
+        _ClaimExtractor,  # type: ignore[attr-defined]
     )
     assert services.knowledge_projector._claim_store is services.claim_store  # type: ignore[attr-defined]
