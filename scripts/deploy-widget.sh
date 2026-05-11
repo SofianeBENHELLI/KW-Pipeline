@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Deploy the 3DX Knowledge Explorer widget to S3.
+# Deploy the 3DX KnowledgeForge ingestion widget to S3.
 #
-# Builds the production bundle in apps/explorer/dist/ and syncs it to
-# s3://3dx-kwforge-widgets/3dx-knowledge-explorer/<version>/. The XHTML
+# Mirrors scripts/deploy-explorer.sh. Builds the production bundle in
+# apps/widget/dist/ and syncs it to
+# s3://3dx-kwforge-widgets/3dx-knowledgeforge/<version>/. The XHTML
 # entry gets a forced "text/html" Content-Type so older browsers
 # don't choke on "application/xhtml+xml".
 #
@@ -21,9 +22,9 @@
 #                       --allow-localhost-fallback is passed for testing.
 #
 # Usage:
-#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-explorer.sh
-#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-explorer.sh v0.2.0
-#   scripts/deploy-explorer.sh --allow-localhost-fallback   # dev-only
+#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-widget.sh
+#   KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-widget.sh v0.2.0
+#   scripts/deploy-widget.sh --allow-localhost-fallback   # dev-only
 #
 # The script is idempotent — re-running it overwrites the same prefix.
 # To publish a new version without dropping the previous one, bump the
@@ -52,9 +53,9 @@ if [ -z "${KW_API_BASE_URL:-}" ]; then
     echo "⚠ KW_API_BASE_URL not set; building with the http://localhost:8000 fallback (--allow-localhost-fallback was passed)." >&2
     echo "  This bundle will only work when 3DDashboard runs on the same host as the API." >&2
   else
-    echo "✗ KW_API_BASE_URL must be set so the explorer bundle knows which backend to call." >&2
+    echo "✗ KW_API_BASE_URL must be set so the widget bundle knows which backend to call." >&2
     echo "  Example:" >&2
-    echo "    KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-explorer.sh" >&2
+    echo "    KW_API_BASE_URL=https://kw-api.example.org scripts/deploy-widget.sh" >&2
     echo "" >&2
     echo "  Pass --allow-localhost-fallback for a dev-only sanity build that hits http://localhost:8000." >&2
     exit 1
@@ -63,16 +64,16 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-EXPLORER_DIR="$REPO_ROOT/apps/explorer"
+WIDGET_DIR="$REPO_ROOT/apps/widget"
 BUCKET="3dx-kwforge-widgets"
 REGION="eu-north-1"
-PREFIX="3dx-knowledge-explorer"
+PREFIX="3dx-knowledgeforge"
 
 # Resolve the version: argv[1] wins; otherwise read package.json.
 if [ "${1-}" != "" ]; then
   VERSION="$1"
 else
-  VERSION="v$(node -p "require('$EXPLORER_DIR/package.json').version")"
+  VERSION="v$(node -p "require('$WIDGET_DIR/package.json').version")"
 fi
 
 # Sanity checks.
@@ -96,15 +97,15 @@ echo "  KW_API_BASE_URL: ${KW_API_BASE_URL:-<localhost fallback>}"
 echo
 
 # 1. Build the production bundle.
-cd "$EXPLORER_DIR"
-if [ ! -x "$EXPLORER_DIR/node_modules/.bin/webpack" ]; then
-  echo "→ installing apps/explorer deps (one-time, ~30s)…"
+cd "$WIDGET_DIR"
+if [ ! -x "$WIDGET_DIR/node_modules/.bin/webpack" ]; then
+  echo "→ installing apps/widget deps (one-time, ~30s)…"
   npm install --silent --no-fund --no-audit
 fi
 echo "→ building production bundle…"
 npm run --silent build
 
-if [ ! -f "$EXPLORER_DIR/dist/index.html" ] || [ ! -f "$EXPLORER_DIR/dist/main.js" ]; then
+if [ ! -f "$WIDGET_DIR/dist/index.html" ] || [ ! -f "$WIDGET_DIR/dist/main.js" ]; then
   echo "✗ build did not produce dist/index.html and dist/main.js." >&2
   exit 1
 fi
@@ -113,7 +114,7 @@ fi
 # already guesses MIME from the extension via Python's ``mimetypes``
 # module by default for ``s3 sync`` — there's no flag to pass.
 echo "→ syncing dist/ to s3://$BUCKET/$PREFIX/$VERSION/"
-aws s3 sync "$EXPLORER_DIR/dist/" \
+aws s3 sync "$WIDGET_DIR/dist/" \
   "s3://$BUCKET/$PREFIX/$VERSION/" \
   --region "$REGION" \
   --cache-control "no-cache" \
@@ -121,7 +122,7 @@ aws s3 sync "$EXPLORER_DIR/dist/" \
 
 # 3. Force text/html on the XHTML entry.
 echo "→ uploading index.html with Content-Type: text/html"
-aws s3 cp "$EXPLORER_DIR/dist/index.html" \
+aws s3 cp "$WIDGET_DIR/dist/index.html" \
   "s3://$BUCKET/$PREFIX/$VERSION/index.html" \
   --region "$REGION" \
   --content-type "text/html" \
