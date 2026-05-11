@@ -46,6 +46,7 @@ from app.schemas.knowledge_relations import (
     AggregatedRelationEvidence,
     RelationEvidence,
 )
+from app.schemas.process import Process, ProcessListResponse
 from app.schemas.scope import ScopeRef
 from app.schemas.taxonomy import TaxonomyCategory, TaxonomyResponse
 from app.services.auth import (
@@ -86,6 +87,10 @@ from app.services.knowledge.graph_store import (
 )
 from app.services.knowledge.neighborhood import NeighborhoodNotFound
 from app.services.knowledge.relations import RelationNotFound
+from app.services.process_store import (
+    DEFAULT_PROCESS_PAGE_LIMIT,
+    MAX_PROCESS_PAGE_LIMIT,
+)
 from app.settings import Settings
 
 from ._helpers import MIN_GRAPH_PAGE_LIMIT
@@ -1024,6 +1029,67 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
             completed_at=entry.completed_at,
             error=entry.error,
         )
+
+    @router.get(
+        "/knowledge/processes",
+        operation_id="list_processes",
+        response_model=ProcessListResponse,
+    )
+    def list_processes(
+        cursor: str | None = Query(default=None),
+        limit: int = Query(
+            default=DEFAULT_PROCESS_PAGE_LIMIT,
+            ge=1,
+            le=MAX_PROCESS_PAGE_LIMIT,
+        ),
+        _user: User = Depends(require_viewer),
+    ) -> ProcessListResponse:
+        """Paginated list of extracted Process summaries (#369, ADR-031).
+
+        Returns metadata-only :class:`ProcessSummary` rows so the list
+        view stays cheap regardless of how many steps a Playbook
+        carries. Clients fetch the full :class:`Process` body
+        (including ordered steps) via ``GET /knowledge/processes/{id}``.
+
+        Cursor codec is shared with the document list — opaque
+        base64 over ``(created_at, id)``. Page size defaults to the
+        same per-list ceiling used by the catalog (50, capped at
+        200) so clients tune one knob across the surface.
+        """
+        try:
+            items, next_cursor = services.process_store.list(
+                cursor=cursor,
+                limit=limit,
+            )
+        except InvalidCursor as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid cursor: {exc}",
+            ) from exc
+        return ProcessListResponse(items=items, next_cursor=next_cursor)
+
+    @router.get(
+        "/knowledge/processes/{process_id}",
+        operation_id="get_process",
+        response_model=Process,
+    )
+    def get_process(
+        process_id: str,
+        _user: User = Depends(require_viewer),
+    ) -> Process:
+        """Return one Process with its ordered steps (#369, ADR-031).
+
+        Steps come back sorted by ``step_number`` ASC — both store
+        backends honour that ordering so callers don't have to
+        re-sort. ``404`` when ``process_id`` is unknown.
+        """
+        process = services.process_store.get(process_id)
+        if process is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No process recorded for {process_id!r}.",
+            )
+        return process
 
     return router
 

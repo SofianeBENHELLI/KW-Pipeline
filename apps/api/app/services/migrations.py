@@ -540,6 +540,90 @@ def _migrate_0011_document_relations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0013_processes(conn: sqlite3.Connection) -> None:
+    """First-class Playbook/Process data model (#369, ADR-031).
+
+    Procedural knowledge ("how do I do X") is governance-shaped — it
+    belongs alongside ``documents`` / ``document_versions`` /
+    ``semantic_documents`` in SQLite, not in the Neo4j graph layer.
+    Per ADR-031 the source-of-truth split is "what was uploaded,
+    parsed, validated, governed → SQLite; how does it relate →
+    Neo4j"; a Process is governance about a document, so it lives
+    in the catalog.
+
+    Two tables:
+
+    * ``processes`` — one row per extracted Process. ``document_id``
+      and ``version_id`` link the Process back to the SOP it was
+      extracted from so a re-extraction can replace the prior
+      Process row deterministically. The ``version_id`` carries an
+      ``ON DELETE CASCADE`` FK into ``document_versions(id)``
+      (matches the convention established by ``0012_claims``) so
+      purging a version cleans its Processes automatically.
+      ``schema_version`` (matches :data:`PROCESS_SCHEMA_VERSION` in
+      the schema module) gates future evolution: a v0.2 reader can
+      refuse to deserialise a v0.1 row without ambiguity.
+    * ``process_steps`` — one row per ordered step. ``preconditions_json``
+      / ``outcomes_json`` / ``source_reference_ids_json`` are
+      JSON-encoded ``list[str]`` columns (SQLite has no native array
+      type; the store-layer round-trips through ``json.dumps`` /
+      ``json.loads``). ``source_reference_ids`` carries the chunk
+      ids the extractor used to derive the step — pre-locked here
+      for AURA citation compatibility (ADR-029, #370). ``referenced_tool_id``
+      is forward-compatible — there is no tools table today; the
+      string is stored as-is so a future tool-calling integration
+      (AURA #16) can light up without a schema migration.
+
+    The compound primary key ``(process_id, step_number)`` keeps two
+    steps from sharing a number within the same Process and gives the
+    store layer the "ordered step rows for a process" read for free
+    via ``ORDER BY step_number ASC``. ``ON DELETE CASCADE`` on the
+    ``process_id`` foreign key means deleting the parent Process
+    drops every step in one statement — used by
+    ``ProcessStore.delete_for_version`` when a re-extraction needs to
+    replace an existing Process atomically.
+
+    Both indexes cover the hot read paths surfaced by the read API:
+
+    * ``idx_processes_document_id`` — "list every process for this
+      document family" (the audit / explorer view).
+    * ``idx_processes_version_id`` — "every process produced by this
+      version", which the future SOP-aware parser will hit on each
+      re-extraction to invalidate stale Processes.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processes (
+            id                  TEXT PRIMARY KEY,
+            title               TEXT NOT NULL,
+            document_id         TEXT NOT NULL,
+            version_id          TEXT NOT NULL,
+            schema_version      TEXT NOT NULL,
+            created_at          TEXT NOT NULL,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS process_steps (
+            process_id                  TEXT NOT NULL,
+            step_number                 INTEGER NOT NULL,
+            title                       TEXT NOT NULL,
+            body                        TEXT NOT NULL,
+            preconditions_json          TEXT NOT NULL,
+            outcomes_json               TEXT NOT NULL,
+            referenced_tool_id          TEXT,
+            source_reference_ids_json   TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (process_id, step_number),
+            FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_processes_document_id ON processes (document_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_processes_version_id ON processes (version_id)")
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
@@ -553,6 +637,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0010_taxonomy", _migrate_0010_taxonomy),
     ("0011_document_relations", _migrate_0011_document_relations),
     ("0012_claims", _migrate_0012_claims),
+    ("0013_processes", _migrate_0013_processes),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.
