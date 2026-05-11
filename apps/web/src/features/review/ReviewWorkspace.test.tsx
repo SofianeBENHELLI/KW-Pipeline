@@ -637,3 +637,110 @@ describe("ReviewWorkspace — refresh indicator", () => {
     ).toBeInTheDocument();
   });
 });
+
+// #408 — Semantic output panel renders the three readable sub-panels
+// (Sections / Assets / Warnings) instead of the previous count-only
+// <dl>. The component-level tests for each list live in
+// SemanticSectionList.test.tsx / SemanticAssetList.test.tsx /
+// SemanticWarningList.test.tsx; this integration check just verifies
+// they're wired into the workspace with the right counts in headers.
+describe("ReviewWorkspace — semantic output sub-panels (#408)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders Sections / Assets / Warnings sub-panels with content + counts", async () => {
+    const richSemantic: ApiSemanticDocument = {
+      ...FIXTURE_SEMANTIC,
+      sections: [
+        {
+          id: "sec-1",
+          heading: "Introduction",
+          text: "Welcome to the spec.",
+          source_reference_ids: ["src-1"],
+        },
+        {
+          id: "sec-2",
+          heading: "Background",
+          text: "Historical context.",
+          source_reference_ids: [],
+        },
+      ],
+      assets: [
+        {
+          id: "asset-1",
+          type: "requirement",
+          text: "System SHALL log every audit event.",
+          confidence: 0.92,
+          review_status: "needs_review",
+          source_reference_ids: ["src-1"],
+        },
+      ],
+      warnings: ["Section 'Background' has low confidence (0.55)."],
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.endsWith("/extraction")) {
+        return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+      }
+      if (url.endsWith("/semantic")) {
+        return Promise.resolve(makeJsonResponse(richSemantic));
+      }
+      return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+    });
+
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+
+    // The three sub-panels render with their counts in the headings.
+    await waitFor(() => {
+      expect(screen.getByText(/Sections · 2/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Assets · 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Warnings · 1/i)).toBeInTheDocument();
+
+    // Section content is readable (was invisible before #408).
+    expect(screen.getByText("Introduction")).toBeInTheDocument();
+    expect(screen.getByText(/Welcome to the spec/i)).toBeInTheDocument();
+
+    // Asset content is readable.
+    expect(screen.getByTestId("sem-asset-type")).toHaveTextContent("requirement");
+    expect(screen.getByTestId("sem-asset-text")).toHaveTextContent(
+      /System SHALL log every audit event/i,
+    );
+    expect(screen.getByTestId("sem-asset-confidence")).toHaveTextContent("92%");
+    expect(screen.getByTestId("sem-asset-status")).toHaveTextContent(/needs review/i);
+
+    // Warning content is readable.
+    expect(screen.getByTestId("sem-warning-row")).toHaveTextContent(
+      /low confidence/i,
+    );
+
+    // Validation row stays in its dedicated slot.
+    expect(screen.getByTestId("sem-validation")).toHaveTextContent("needs_review");
+  });
+
+  it("shows the explicit empty-state copy on each sub-panel for an empty semantic", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.endsWith("/extraction")) {
+        return Promise.resolve(makeJsonResponse(FIXTURE_EXTRACTION));
+      }
+      if (url.endsWith("/semantic")) {
+        return Promise.resolve(makeJsonResponse(FIXTURE_SEMANTIC));
+      }
+      return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+    });
+
+    render(<ReviewWorkspace document={makeDocument("NEEDS_REVIEW")} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sem-sections-empty")).toHaveTextContent(
+        /No sections extracted/i,
+      );
+    });
+    expect(screen.getByTestId("sem-assets-empty")).toHaveTextContent(
+      /No assets extracted/i,
+    );
+    expect(screen.getByTestId("sem-warnings-empty")).toHaveTextContent(
+      /No warnings/i,
+    );
+  });
+});
