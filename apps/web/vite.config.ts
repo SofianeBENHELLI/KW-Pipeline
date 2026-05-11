@@ -17,6 +17,15 @@ function isGraphVendor(id: string): boolean {
 }
 
 export default defineConfig({
+  // Emit relative asset paths (``./assets/foo.js`` instead of
+  // ``/assets/foo.js``) so the production bundle resolves its
+  // chunks correctly when deployed under any URL prefix — e.g.
+  // S3 at ``s3://bucket/3dx-knowledge-orbital/v0.0.0/`` where
+  // an absolute ``/assets/...`` reference would 404 against the
+  // bucket root. Relative paths also work for ``npm run preview``
+  // and Cloudflare Pages-style root deployments, so this is a
+  // strictly more portable default than the Vite stock ``"/"``.
+  base: "./",
   plugins: [
     react(),
     visualizer({
