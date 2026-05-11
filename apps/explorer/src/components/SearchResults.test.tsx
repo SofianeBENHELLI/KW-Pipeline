@@ -87,7 +87,18 @@ const POPULATED: ExploreSearchResponse = {
       label: "Compliance",
       keywords: ["audit", "review"],
       score: 0.81,
-      evidence_chunks: [],
+      evidence_chunks: [
+        {
+          chunk_id: "c-1",
+          document_id: "d-1",
+          version_id: "v-1",
+          section_id: "s-1",
+          snippet: "Reviewer must validate every claim.",
+          score: 0.91,
+          validation_status: null,
+          is_source_backed: true,
+        },
+      ],
     },
   ],
   entities: [],
@@ -286,7 +297,7 @@ describe("SearchResults", () => {
     });
   });
 
-  it("clicking a topic hit invokes onPick with the topic_id", () => {
+  it("clicking a topic hit invokes onPick with the strongest evidence chunk", () => {
     const onPick = vi.fn();
     render(
       renderResults({
@@ -295,7 +306,48 @@ describe("SearchResults", () => {
       }),
     );
     fireEvent.click(screen.getByText("Compliance"));
-    expect(onPick).toHaveBeenCalledWith({ kind: "topic", id: "t-1" });
+    // The hit envelope carries the first evidence chunk's id +
+    // parent document id so the parent can route the user to the
+    // source paragraph in DocViewer rather than the previous no-op.
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "topic",
+      id: "t-1",
+      chunkId: "c-1",
+      documentId: "d-1",
+    });
+  });
+
+  it("clicking a topic with no evidence still fires onPick (soft no-op envelope)", () => {
+    // Topics surfaced via embedding similarity alone may have an
+    // empty ``evidence_chunks`` list. The hit envelope omits
+    // chunkId/documentId in that case, and the parent handler is
+    // expected to clear the search and stop without crashing.
+    const noEvidence: ExploreSearchResponse = {
+      ...POPULATED,
+      topics: [
+        {
+          topic_id: "t-bare",
+          label: "Bare topic",
+          keywords: [],
+          score: 0.55,
+          evidence_chunks: [],
+        },
+      ],
+    };
+    const onPick = vi.fn();
+    render(
+      renderResults({
+        snapshot: snapshot({ state: "data", response: noEvidence }),
+        onPick,
+      }),
+    );
+    fireEvent.click(screen.getByText("Bare topic"));
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "topic",
+      id: "t-bare",
+      chunkId: undefined,
+      documentId: undefined,
+    });
   });
 
   it("toggle invokes onToggleValidated with the new value", () => {

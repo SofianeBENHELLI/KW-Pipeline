@@ -38,6 +38,15 @@ export interface SearchHit {
   id: string;
   /** Used to drive the existing DetailPanel selection. */
   documentId?: string;
+  /**
+   * For topic hits: the strongest contributing chunk's id, so the
+   * parent can navigate the user to the source evidence on click. Set
+   * from ``topic.evidence_chunks[0].chunk_id`` when present, otherwise
+   * left undefined and the parent is expected to fall back to
+   * ``documentId`` (or no-op when both are missing — e.g. a topic
+   * surfaced via embedding alone with no contributing chunks).
+   */
+  chunkId?: string;
 }
 
 export interface SearchResultsProps {
@@ -291,23 +300,38 @@ function TopicSection({
   return (
     <div className="kx-search-sec" data-testid="kx-search-section-topics">
       <div className="kx-search-h">TOPICS · {items.length}</div>
-      {items.map((t) => (
-        <button
-          key={t.topic_id}
-          type="button"
-          className="kx-search-row kx-search-row--btn"
-          onClick={() => onPick({ kind: "topic", id: t.topic_id })}
-          data-testid="kx-search-row-topic"
-        >
-          <span className="kx-search-row-score kx-mono">{formatScore(t.score)}</span>
-          <span className="kx-search-row-title">{t.label}</span>
-          {t.keywords.length > 0 && (
-            <span className="kx-search-row-keywords kx-mute">
-              {t.keywords.slice(0, 3).join(" · ")}
-            </span>
-          )}
-        </button>
-      ))}
+      {items.map((t) => {
+        // Surface the topic's strongest contributing chunk so the
+        // parent can navigate to source evidence on click. Topics
+        // with no ``evidence_chunks`` (e.g. surfaced via embedding
+        // similarity alone) leave both ids undefined and the parent
+        // falls back to a soft no-op.
+        const evidence = t.evidence_chunks[0];
+        return (
+          <button
+            key={t.topic_id}
+            type="button"
+            className="kx-search-row kx-search-row--btn"
+            onClick={() =>
+              onPick({
+                kind: "topic",
+                id: t.topic_id,
+                chunkId: evidence?.chunk_id,
+                documentId: evidence?.document_id,
+              })
+            }
+            data-testid="kx-search-row-topic"
+          >
+            <span className="kx-search-row-score kx-mono">{formatScore(t.score)}</span>
+            <span className="kx-search-row-title">{t.label}</span>
+            {t.keywords.length > 0 && (
+              <span className="kx-search-row-keywords kx-mute">
+                {t.keywords.slice(0, 3).join(" · ")}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
