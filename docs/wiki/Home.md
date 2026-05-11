@@ -17,6 +17,7 @@ This wiki is the entry point for newcomers. Prefer the in-repo docs for anything
 - **[Overview](Overview)** — what the system does, in three minutes.
 - **[Architecture](Architecture)** — the core pipeline and the optional knowledge layer side-by-side.
 - **[Knowledge Layer](Knowledge-Layer)** — graph projection, LLM entity extraction, audit guarantees.
+- **[Orbital Features](Orbital-Features)** — every Orbital surface, user value + technical detail.
 - **[Operating Modes](Operating-Modes)** — env vars, `docker compose up`, integration / LLM tests.
 - **[Decisions](Decisions)** — fast index of every ADR with one-line summaries.
 - **[Roadmap](Roadmap)** — what shipped, what's next, what's deferred.
