@@ -1,0 +1,313 @@
+/* Phase-1 Orbital shell layout. Lives next to the .orb-* atom styles in
+   src/styles/tokens.css; uses only the design-token CSS variables so
+   light/dark/density modes flow through unchanged. */
+
+.orb-shell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: var(--orb-bg);
+  color: var(--orb-fg);
+}
+
+.orb-shell__banners {
+  display: flex;
+  flex-direction: column;
+}
+
+.orb-shell__banners:empty {
+  display: none;
+}
+
+.orb-shell__topbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--orb-pad);
+  border-bottom: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  gap: 10px;
+}
+
+.orb-shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.orb-shell__brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--orb-accent-bg);
+  color: var(--orb-accent-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--orb-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.orb-shell__brand-name {
+  font-size: var(--orb-fs-md);
+}
+
+.orb-shell__brand-tagline {
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  font-family: var(--orb-font-mono);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding-left: 10px;
+  margin-left: 4px;
+  border-left: 1px solid var(--orb-rule);
+}
+
+.orb-shell__topbar-spacer { flex: 1; }
+
+.orb-shell__main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.orb-shell__rail {
+  border-right: 1px solid var(--orb-border);
+  background: var(--orb-bg-sunk);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.orb-shell__canvas {
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+
+.orb-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px var(--orb-pad);
+  border-bottom: 1px solid var(--orb-border);
+  font-size: var(--orb-fs-sm);
+}
+.orb-banner--info { background: var(--orb-info-bg); color: var(--orb-info-fg); border-color: var(--orb-info); }
+.orb-banner--warn { background: var(--orb-warn-bg); color: var(--orb-warn-fg); border-color: var(--orb-warn); }
+.orb-banner--err  { background: var(--orb-err-bg);  color: var(--orb-err-fg);  border-color: var(--orb-err); }
+.orb-banner__body { flex: 1; }
+.orb-banner__dismiss {
+  margin-left: auto;
+}
+
+/* ---- Catalog rail ---- */
+
+.orb-rail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.orb-rail__head {
+  padding: 12px var(--orb-pad) 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orb-rail__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.orb-rail__search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--orb-fg-dim);
+  pointer-events: none;
+}
+
+.orb-rail__search .orb-input { padding-left: 26px; padding-right: 28px; }
+
+.orb-rail__search-kbd {
+  position: absolute;
+  right: 6px;
+  pointer-events: none;
+}
+
+.orb-rail__views {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px;
+  margin-top: 4px;
+}
+
+.orb-rail__view {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--orb-row-h);
+  padding: 0 10px;
+  border-radius: var(--orb-r-sm);
+  background: transparent;
+  border: none;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.orb-rail__view:hover { background: var(--orb-bg-hov); color: var(--orb-fg); }
+.orb-rail__view.is-active {
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg);
+  font-weight: 500;
+}
+
+.orb-rail__view-count {
+  font-family: var(--orb-font-mono);
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+}
+
+.orb-rail__group-label {
+  padding: 12px var(--orb-pad) 4px;
+}
+
+/* ---- Catalog table ---- */
+
+.orb-catalog {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.orb-catalog__head {
+  padding: 14px var(--orb-pad) 6px;
+  border-bottom: 1px solid var(--orb-border);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.orb-catalog__title {
+  font-size: var(--orb-fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.orb-catalog__meta {
+  color: var(--orb-fg-dim);
+  font-size: var(--orb-fs-sm);
+  font-family: var(--orb-font-mono);
+}
+
+.orb-catalog__head-spacer { flex: 1; }
+
+.orb-catalog__table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-catalog__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--orb-bg-elev);
+  text-align: left;
+  font-weight: 600;
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--orb-border);
+}
+
+.orb-catalog__table th button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.orb-catalog__table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--orb-rule);
+  vertical-align: middle;
+}
+
+.orb-catalog__row { transition: background .08s; }
+.orb-catalog__row:hover { background: var(--orb-bg-hov); }
+.orb-catalog__row.is-selected td { background: var(--orb-bg-sel); }
+
+.orb-catalog__filename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--orb-fg);
+  max-width: 540px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-catalog__filename-id {
+  font-family: var(--orb-font-mono);
+  font-size: var(--orb-fs-xs);
+  color: var(--orb-fg-dim);
+}
+
+.orb-catalog__cell-versions {
+  font-family: var(--orb-font-mono);
+  color: var(--orb-fg-muted);
+}
+
+.orb-catalog__cell-scopes {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.orb-catalog__empty,
+.orb-catalog__loading,
+.orb-catalog__error {
+  padding: 24px var(--orb-pad);
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-catalog__error {
+  color: var(--orb-err-fg);
+  background: var(--orb-err-bg);
+}
+
+.orb-catalog__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--orb-pad);
+  border-top: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+}
+
+.orb-catalog__footer-spacer { flex: 1; }

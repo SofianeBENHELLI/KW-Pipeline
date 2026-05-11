@@ -18,6 +18,11 @@ import {
 import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
+// Phase 1 of the Orbital redesign: lazy-loaded preview at `/orb`.
+// See docs/roadmap/orbital-redesign.md.
+const OrbCatalogView = lazy(() =>
+  import("./features-orb").then((m) => ({ default: m.OrbCatalogView })),
+);
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
 import { PurgeDialog } from "./features/purge/PurgeDialog";
@@ -413,6 +418,17 @@ export default function App() {
         element={
           <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
             <AdminAuditView />
+          </Suspense>
+        }
+      />
+      {/* Phase 1 of the Orbital redesign — opt-in preview at /orb. The
+          legacy reviewer workbench (`*`) keeps serving the rest of the
+          UI until later phases retire it (docs/roadmap/orbital-redesign.md). */}
+      <Route
+        path="/orb"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading Orbital preview…</div>}>
+            <OrbCatalogView />
           </Suspense>
         }
       />
