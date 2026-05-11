@@ -14,7 +14,7 @@
  * either local state or graph history without re-typing the contract.
  */
 
-import React from "react";
+import React, { type ReactNode } from "react";
 
 import { confColor } from "./GraphCanvas";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
@@ -94,6 +94,67 @@ const ConfBar: React.FC<{ value: number }> = ({ value }) => (
   </div>
 );
 
+/**
+ * Renders a list, capped at ``initialCount`` items, with an inline
+ * "+N more" affordance that expands to the full list on click.
+ *
+ * #321 — surfaces silent ``.slice()`` truncations on the doc /
+ * cluster detail surfaces so users on large corpora can tell when
+ * a list has been hidden rather than guessing whether the doc
+ * really has only N concepts. Local-only state (no parent props
+ * to plumb through) so this can drop in next to existing
+ * ``.map()`` calls without rewiring the surrounding DetailPanel
+ * branches.
+ *
+ * Lists at-or-below the cap render exactly as before — no button,
+ * no extra DOM nodes — so the existing tests that assert "no extra
+ * affordances on small fixtures" continue to pass.
+ */
+interface TruncatedListProps<T> {
+  items: T[];
+  initialCount: number;
+  renderItem: (item: T, index: number) => ReactNode;
+  /**
+   * data-testid prefix for both the wrapper and the "+N more"
+   * button so tests can target a specific instance when several
+   * truncated lists share one panel.
+   */
+  testIdPrefix?: string;
+  /** Word used in the affordance (singular). Defaults to ``"more"``. */
+  noun?: string;
+}
+
+function TruncatedList<T>({
+  items,
+  initialCount,
+  renderItem,
+  testIdPrefix,
+  noun = "more",
+}: TruncatedListProps<T>): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false);
+  const total = items.length;
+  const visible = expanded || total <= initialCount ? items : items.slice(0, initialCount);
+  const hidden = total - visible.length;
+  return (
+    <>
+      {visible.map((item, index) => (
+        <React.Fragment key={index}>{renderItem(item, index)}</React.Fragment>
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          className="kx-truncated-more"
+          onClick={() => setExpanded(true)}
+          data-testid={testIdPrefix ? `${testIdPrefix}-more` : "kx-truncated-more"}
+          aria-label={`Show ${hidden} ${noun}`}
+        >
+          +{hidden} {noun}
+        </button>
+      )}
+    </>
+  );
+}
+
 export const DetailPanel: React.FC<Props> = ({
   snapshot,
   node,
@@ -166,11 +227,13 @@ export const DetailPanel: React.FC<Props> = ({
     ]
       .map((id) => conceptById(snapshot, id))
       .filter((x): x is ExplorerConcept => Boolean(x));
+    // #321 — keep the full related-doc list here so the section
+    // header can surface the true count and ``<TruncatedList>``
+    // below can offer "+N more" instead of silently capping.
     const related = snapshot.docEdges
       .filter((e) => e.a === d.id || e.b === d.id)
       .map((e) => docById(snapshot, e.a === d.id ? e.b : e.a))
-      .filter((x): x is ExplorerDocument => Boolean(x))
-      .slice(0, 5);
+      .filter((x): x is ExplorerDocument => Boolean(x));
     const versionCount = d.versionCount ?? d.versions?.length ?? 1;
     const latestVersion = d.latestVersion ?? d.versions?.[d.versions.length - 1]?.versionNumber ?? 1;
     return (
@@ -202,56 +265,74 @@ export const DetailPanel: React.FC<Props> = ({
           <DetailRow label="CONFIDENCE" value={<ConfBar value={d.confidence} />} />
         </div>
         <div className="kx-section">
-          <div className="kx-sec-h">MAIN CONCEPTS</div>
-          <div className="kx-tags">
-            {concepts.slice(0, 6).map((k) => (
-              <button key={k.id} className="kx-tag" onClick={() => onSelectId(k.id, "concept")}>
-                <Icon name="concept" size={10} />
-                {k.name}
-              </button>
-            ))}
+          <div className="kx-sec-h">
+            MAIN CONCEPTS{concepts.length > 0 && ` · ${concepts.length}`}
+          </div>
+          <div className="kx-tags" data-testid="kx-doc-concepts">
+            <TruncatedList
+              items={concepts}
+              initialCount={6}
+              testIdPrefix="kx-doc-concepts"
+              renderItem={(k) => (
+                <button
+                  key={k.id}
+                  className="kx-tag"
+                  onClick={() => onSelectId(k.id, "concept")}
+                >
+                  <Icon name="concept" size={10} />
+                  {k.name}
+                </button>
+              )}
+            />
             {concepts.length === 0 && <span className="kx-mute">No concepts extracted</span>}
           </div>
         </div>
         <div className="kx-section">
-          <div className="kx-sec-h">RELATED DOCUMENTS</div>
+          <div className="kx-sec-h">
+            RELATED DOCUMENTS{related.length > 0 && ` · ${related.length}`}
+          </div>
           <ul className="kx-list" data-testid="kx-related-docs">
-            {related.map((rd) => (
-              <li key={rd.id} className="kx-related-row">
-                <button
-                  type="button"
-                  className="kx-related-open"
-                  onClick={() => onSelectId(rd.id, "doc")}
-                  data-testid="kx-related-open"
-                >
-                  <span
-                    className="kx-doc-chip kx-sm"
-                    style={{ background: DOC_TYPES[rd.type]?.color ?? "#888" }}
+            <TruncatedList
+              items={related}
+              initialCount={5}
+              testIdPrefix="kx-related-docs"
+              renderItem={(rd) => (
+                <li key={rd.id} className="kx-related-row">
+                  <button
+                    type="button"
+                    className="kx-related-open"
+                    onClick={() => onSelectId(rd.id, "doc")}
+                    data-testid="kx-related-open"
                   >
-                    {DOC_TYPES[rd.type]?.short ?? "DOC"}
-                  </span>
-                  <span className="kx-list-t">{rd.title}</span>
-                  <Icon name="chevron-right" size={12} stroke={NAVY2} />
-                </button>
-                <button
-                  type="button"
-                  className="kx-related-evidence"
-                  title="Show why these documents are linked"
-                  aria-label={`Show evidence linking ${d.title} and ${rd.title}`}
-                  data-testid="kx-related-evidence-btn"
-                  onClick={() =>
-                    setEvidencePair({
-                      sourceDocumentId: d.id,
-                      sourceTitle: d.title,
-                      targetDocumentId: rd.id,
-                      targetTitle: rd.title,
-                    })
-                  }
-                >
-                  Evidence
-                </button>
-              </li>
-            ))}
+                    <span
+                      className="kx-doc-chip kx-sm"
+                      style={{ background: DOC_TYPES[rd.type]?.color ?? "#888" }}
+                    >
+                      {DOC_TYPES[rd.type]?.short ?? "DOC"}
+                    </span>
+                    <span className="kx-list-t">{rd.title}</span>
+                    <Icon name="chevron-right" size={12} stroke={NAVY2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="kx-related-evidence"
+                    title="Show why these documents are linked"
+                    aria-label={`Show evidence linking ${d.title} and ${rd.title}`}
+                    data-testid="kx-related-evidence-btn"
+                    onClick={() =>
+                      setEvidencePair({
+                        sourceDocumentId: d.id,
+                        sourceTitle: d.title,
+                        targetDocumentId: rd.id,
+                        targetTitle: rd.title,
+                      })
+                    }
+                  >
+                    Evidence
+                  </button>
+                </li>
+              )}
+            />
             {related.length === 0 && <li className="kx-mute">No related documents</li>}
           </ul>
         </div>
@@ -528,16 +609,21 @@ export const DetailPanel: React.FC<Props> = ({
         </div>
         <div className="kx-section">
           <div className="kx-sec-h">DOCUMENTS</div>
-          <ul className="kx-list">
-            {docs.slice(0, 8).map((d) => (
-              <li key={d.id} onClick={() => onSelectId(d.id, "doc")}>
-                <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}>
-                  {DOC_TYPES[d.type]?.short ?? "DOC"}
-                </span>
-                <span className="kx-list-t">{d.title}</span>
-                <Icon name="chevron-right" size={12} stroke={NAVY2} />
-              </li>
-            ))}
+          <ul className="kx-list" data-testid="kx-cluster-docs">
+            <TruncatedList
+              items={docs}
+              initialCount={8}
+              testIdPrefix="kx-cluster-docs"
+              renderItem={(d) => (
+                <li key={d.id} onClick={() => onSelectId(d.id, "doc")}>
+                  <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}>
+                    {DOC_TYPES[d.type]?.short ?? "DOC"}
+                  </span>
+                  <span className="kx-list-t">{d.title}</span>
+                  <Icon name="chevron-right" size={12} stroke={NAVY2} />
+                </li>
+              )}
+            />
           </ul>
         </div>
       </div>
