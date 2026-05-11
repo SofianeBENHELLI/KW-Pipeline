@@ -747,12 +747,21 @@ export default function App(): React.ReactElement {
                   selectById(hit.documentId, "doc");
                 } else if (hit.kind === "chunk") {
                   selectById(hit.id, "chunk");
+                } else if (hit.kind === "topic") {
+                  // Topic hits open the strongest contributing chunk
+                  // so the user lands on source evidence — concept
+                  // ≠ topic in the seeded model, so we route through
+                  // the chunk path (which highlights the paragraph
+                  // in DocViewer) rather than the concept path.
+                  // Topics without evidence chunks fall back to the
+                  // parent document; topics with neither are a soft
+                  // no-op (rare — embedding-only matches).
+                  if (hit.chunkId) {
+                    selectById(hit.chunkId, "chunk");
+                  } else if (hit.documentId) {
+                    selectById(hit.documentId, "doc");
+                  }
                 }
-                // Topic hits don't map to the existing DetailPanel
-                // node kinds (concept ≠ topic in the seeded model);
-                // selecting one is a no-op pending #318 (relation
-                // inspector / topic detail). Closing the popover
-                // is still useful as feedback.
                 setSearch("");
               }}
             />
