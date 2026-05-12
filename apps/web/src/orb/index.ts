@@ -176,3 +176,7 @@ export type {
   GraphStatus,
   UseKnowledgeGraphResult,
 } from "./hooks/useKnowledgeGraph";
+
+// PR 7 — Search + Chat
+export { SearchPanel } from "./search/SearchPanel";
+export { ChatPanel } from "./search/ChatPanel";
