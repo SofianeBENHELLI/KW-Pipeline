@@ -72,8 +72,16 @@ describe("<KnowledgeForgeApp />", () => {
   });
 
   it("renders the per-section coming-soon placeholders for PR-stubbed routes", () => {
+    // /kf/catalog renders the real CatalogView since PR 5 — assert
+    // its title instead of the coming-soon stub.
+    {
+      const { unmount } = renderAt("/kf/catalog");
+      expect(
+        screen.getByRole("heading", { name: "Catalog" }),
+      ).toBeInTheDocument();
+      unmount();
+    }
     for (const [path, expectedTitle] of [
-      ["/kf/catalog", /Catalog/],
       ["/kf/graph", /Graph/],
       ["/kf/search", /Search/],
       ["/kf/chat", /Chat/],
