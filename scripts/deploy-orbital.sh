@@ -155,13 +155,36 @@ aws s3 cp "$ORBITAL_DIR/dist/index.html" \
   --content-type "text/html" \
   --cache-control "no-cache"
 
-# 4. Verify the entry is reachable.
+# 4. Mirror the upload to ``$PREFIX/latest/`` so the canonical
+# always-newest URL stays in sync without anyone having to redeploy
+# the widget on every iteration. Versioned tags
+# ($PREFIX/v0.X.Y/index.html) stay immutable for rollback debugging.
+# Preview deploys skip this — the preview prefix has its own
+# ``-next/`` lane and shouldn't pollute the production ``latest/``.
+if [ "${KW_ORBITAL_PREVIEW:-false}" != "true" ]; then
+  echo "→ syncing dist/ to s3://$BUCKET/$PREFIX/latest/ (always-newest alias)"
+  aws s3 sync "$ORBITAL_DIR/dist/" \
+    "s3://$BUCKET/$PREFIX/latest/" \
+    --region "$REGION" \
+    --cache-control "no-cache" \
+    --exclude "index.html" \
+    --exclude "stats.html" \
+    --delete
+  aws s3 cp "$ORBITAL_DIR/dist/index.html" \
+    "s3://$BUCKET/$PREFIX/latest/index.html" \
+    --region "$REGION" \
+    --content-type "text/html" \
+    --cache-control "no-cache"
+fi
+
+# 5. Verify the entry is reachable.
 URL="https://$BUCKET.s3.$REGION.amazonaws.com/$PREFIX/$VERSION/index.html"
+LATEST_URL="https://$BUCKET.s3.$REGION.amazonaws.com/$PREFIX/latest/index.html"
 echo
 echo "→ verifying $URL"
 if curl -fsI "$URL" >/dev/null 2>&1; then
   echo "✓ deploy ok"
-  # 5. Update the repo-root demo.html so its "Production deploys"
+  # 6. Update the repo-root demo.html so its "Production deploys"
   # tile points at this version. Best-effort — the helper exits 0
   # when ``demo.html`` is missing. Preview deploys skip this so the
   # public landing page keeps pointing at the live production bundle
@@ -175,6 +198,9 @@ if curl -fsI "$URL" >/dev/null 2>&1; then
   echo "Open Orbital at:"
   echo
   echo "  $URL"
+  if [ "${KW_ORBITAL_PREVIEW:-false}" != "true" ]; then
+    echo "  $LATEST_URL  (always-newest alias)"
+  fi
   echo
 else
   echo "✗ HEAD $URL did not return 200. Check bucket policy + propagation." >&2
