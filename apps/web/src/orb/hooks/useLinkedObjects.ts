@@ -34,8 +34,33 @@ export interface LinkedChunk {
   id: string;
   text: string;
   page: number | null;
+  /**
+   * Stable id of the section this chunk belongs to. Used by the
+   * document viewer to group chunks under their section heading
+   * instead of rendering one big undifferentiated stream of spans.
+   */
+  sectionId: string | null;
+  /** Section heading the backend captured on this chunk. */
+  sectionHeading: string | null;
   topicId: string | null;
   entityIds: string[];
+}
+
+/**
+ * One section in the document viewer's left-pane structure. Sections
+ * come from grouping chunks by `section_id`; the heading is taken
+ * from the chunks' `heading` property, which the backend writes from
+ * the parser's section title.
+ */
+export interface LinkedSection {
+  /** Stable id (matches `chunk.sectionId`). */
+  id: string;
+  /** Heading text. May be null/empty when the parser couldn't extract one. */
+  heading: string | null;
+  /** Lowest page number this section spans (drives ordering). */
+  page: number | null;
+  /** Chunk ids in section order. */
+  chunkIds: string[];
 }
 
 /** One topic. */
@@ -58,6 +83,8 @@ export interface LinkedObjects {
   topics: LinkedTopic[];
   entities: LinkedEntity[];
   chunks: LinkedChunk[];
+  /** Document sections in order. Drives the doc viewer structure. */
+  sections: LinkedSection[];
   /** chunk id → topic id (or null when none). */
   chunkToTopic: ReadonlyMap<string, string | null>;
   /** chunk id → set of entity ids. */
@@ -72,6 +99,7 @@ const EMPTY: LinkedObjects = Object.freeze({
   topics: [],
   entities: [],
   chunks: [],
+  sections: [],
   chunkToTopic: new Map(),
   chunkToEntities: new Map(),
   topicToChunks: new Map(),
@@ -154,10 +182,49 @@ export function projectGraph(
   topics.sort((a, b) => a.label.localeCompare(b.label));
   entities.sort((a, b) => a.label.localeCompare(b.label));
 
+  // Group chunks by section so the document viewer can render
+  // sections-with-headings instead of one undifferentiated chunk
+  // stream. Chunks without a `section_id` collapse into a synthetic
+  // "untitled" section keyed by the empty string — keeps the rendering
+  // contract uniform for every doc, even when the parser couldn't
+  // identify section breaks.
+  const sectionMap = new Map<string, LinkedSection>();
+  for (const chunk of chunks) {
+    const sectionId = chunk.sectionId ?? "";
+    let entry = sectionMap.get(sectionId);
+    if (!entry) {
+      entry = {
+        id: sectionId,
+        heading: chunk.sectionHeading,
+        page: chunk.page ?? null,
+        chunkIds: [],
+      };
+      sectionMap.set(sectionId, entry);
+    }
+    entry.chunkIds.push(chunk.id);
+    if (
+      chunk.page != null &&
+      (entry.page == null || chunk.page < entry.page)
+    ) {
+      entry.page = chunk.page;
+    }
+    // Prefer the first non-null heading we see for this section id.
+    if (!entry.heading && chunk.sectionHeading) {
+      entry.heading = chunk.sectionHeading;
+    }
+  }
+  const sections = [...sectionMap.values()].sort((a, b) => {
+    const ap = a.page ?? Number.POSITIVE_INFINITY;
+    const bp = b.page ?? Number.POSITIVE_INFINITY;
+    if (ap !== bp) return ap - bp;
+    return (a.heading ?? "").localeCompare(b.heading ?? "");
+  });
+
   return {
     topics,
     entities,
     chunks,
+    sections,
     chunkToTopic,
     chunkToEntities,
     topicToChunks,
@@ -229,10 +296,26 @@ function pickStringArrayProp(
 }
 
 function buildChunk(node: ApiGraphNode): LinkedChunk {
+  // The backend's projector writes `text_preview` on chunk nodes as
+  // a 200-char preview of the chunk body. Fall back to the legacy
+  // `text` / `snippet` / `content` keys for older projections, then
+  // to the node label as a last resort.
   const text =
-    pickStringProp(node, "text", "snippet", "content") ?? node.label ?? "";
+    pickStringProp(node, "text_preview", "text", "snippet", "content") ??
+    node.label ??
+    "";
   const page = pickNumberProp(node, "page", "page_number");
-  return { id: node.id, text, page, topicId: null, entityIds: [] };
+  const sectionId = pickStringProp(node, "section_id");
+  const sectionHeading = pickStringProp(node, "heading", "section_heading");
+  return {
+    id: node.id,
+    text,
+    page,
+    sectionId,
+    sectionHeading,
+    topicId: null,
+    entityIds: [],
+  };
 }
 
 function buildTopic(node: ApiGraphNode): LinkedTopic {
