@@ -1089,7 +1089,17 @@ class Neo4jGraphStore:
             return [dict(record) for record in session.run(cypher, params)]
 
 
-_NODE_RESERVED_KEYS = frozenset({"id", "kind", "label"})
+# ``id`` / ``kind`` / ``label`` are pulled out of the flat keyset and
+# placed on the GraphNode directly. ``embedding`` is also stripped:
+# Phase-3 chunk vectors live on the Neo4j node (so the vector index
+# can use them for similarity search) but they are 1024+ dimensional
+# float lists per chunk and the graph response model declares
+# ``GraphPropertyValue = str | int | float | bool | list[str] | None``,
+# which doesn't include ``list[float]``. Without this guard the
+# GraphNode validator raises a wall of pydantic errors that ship to
+# the frontend (#441), and even when validation succeeds the response
+# bloats by megabytes the frontend doesn't render anyway.
+_NODE_RESERVED_KEYS = frozenset({"id", "kind", "label", "embedding"})
 _EDGE_RESERVED_KEYS = frozenset({"id", "kind"})
 
 
