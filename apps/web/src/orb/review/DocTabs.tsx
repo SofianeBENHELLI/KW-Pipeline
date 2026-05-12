@@ -1,19 +1,23 @@
 /**
- * DocTabs — Linked / Review / Pipeline strip beneath the document
- * header. Per design §3.3:
+ * DocTabs — Linked / Pipeline strip beneath the document header.
+ * Per design §3.3 (the prototype canvas):
  *
- *   [Linked view*]  [Review]  [Pipeline]    contextual hint →
+ *   [Linked view*]  [Pipeline & FSM]    contextual hint →
  *
  * The asterisk denotes the default-on tab (Linked View). The right-side
  * hint switches text per active tab so the surface always tells the
  * reviewer "what does hovering / clicking do here".
+ *
+ * Note on naming: the URL still accepts `?tab=review` as a legacy
+ * alias (mapped to `pipeline`) so any links saved between the
+ * three-tab interim and this two-tab cutover keep working.
  */
 
 import type { ReactElement } from "react";
 
 import { OrbI } from "../index";
 
-export type DocTab = "linked" | "review" | "pipeline";
+export type DocTab = "linked" | "pipeline";
 
 interface TabDef {
   id: DocTab;
@@ -30,16 +34,10 @@ const TABS: TabDef[] = [
     hint: "hover any object — its source span(s) highlight in the document, and vice-versa",
   },
   {
-    id: "review",
-    label: "Review",
-    icon: OrbI.check,
-    hint: "lifecycle · extraction · semantic · versions",
-  },
-  {
     id: "pipeline",
-    label: "Pipeline",
+    label: "Pipeline & FSM",
     icon: OrbI.bolt,
-    hint: "every state transition with actor + timestamp",
+    hint: "lifecycle · extraction · semantic · versions",
   },
 ];
 

@@ -164,13 +164,20 @@ describe("<ReviewWorkspace />", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it("defaults to the Linked view tab and switches to Pipeline on click", async () => {
+  it("defaults to the Linked view tab and switches to Pipeline & FSM on click", async () => {
     renderWorkspace("/kf/review/doc-a");
     await waitFor(() =>
       expect(screen.getByTestId("kf-tab-linked")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("tab", { name: /^Pipeline$/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Pipeline & FSM/ }));
     expect(screen.getByTestId("kf-tab-pipeline")).toBeInTheDocument();
+  });
+
+  it("legacy `?tab=review` URL still lands on the merged Pipeline & FSM body", async () => {
+    renderWorkspace("/kf/review/doc-a?tab=review");
+    await waitFor(() =>
+      expect(screen.getByTestId("kf-tab-pipeline")).toBeInTheDocument(),
+    );
   });
 
   it("the view filter syncs to ?view= in the URL", async () => {
