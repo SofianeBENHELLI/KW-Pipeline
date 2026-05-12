@@ -90,3 +90,50 @@ export type {
   LinkedTopic,
   UseLinkedObjectsResult,
 } from "./hooks/useLinkedObjects";
+
+// PR 4 — FSM + Review/Pipeline tabs + batch
+export { FsmActions } from "./review/FsmActions";
+export type { FsmActionsProps } from "./review/FsmActions";
+export { DocumentDetailCard } from "./review/DocumentDetailCard";
+export type { DocumentDetailCardProps } from "./review/DocumentDetailCard";
+export { VersionList } from "./review/VersionList";
+export type { VersionListProps } from "./review/VersionList";
+export { RawExtractionTabs } from "./review/RawExtractionTabs";
+export type {
+  ExtractionTab,
+  RawExtractionTabsProps,
+} from "./review/RawExtractionTabs";
+export { SemanticMarkdownCard } from "./review/SemanticMarkdownCard";
+export type {
+  SemanticMarkdownCardProps,
+  SemanticTab,
+} from "./review/SemanticMarkdownCard";
+export { ReviewTab } from "./review/ReviewTab";
+export type { ReviewTabProps } from "./review/ReviewTab";
+export { PipelineTab } from "./review/PipelineTab";
+export type { PipelineTabProps } from "./review/PipelineTab";
+export { BatchBanner, batchStageLabel } from "./review/BatchBanner";
+export type { BatchBannerProps } from "./review/BatchBanner";
+
+export { useFsmTransition, computeGates } from "./hooks/useFsmTransition";
+export type {
+  FsmAction,
+  FsmGates,
+  FsmStatus,
+  UseFsmTransitionOptions,
+  UseFsmTransitionResult,
+} from "./hooks/useFsmTransition";
+export { useExtraction } from "./hooks/useExtraction";
+export type {
+  ExtractionStatus,
+  UseExtractionResult,
+} from "./hooks/useExtraction";
+export { useSemantic } from "./hooks/useSemantic";
+export type { SemanticStatus, UseSemanticResult } from "./hooks/useSemantic";
+export { useBatchPipeline } from "./hooks/useBatchPipeline";
+export type {
+  BatchFailure,
+  BatchSnapshot,
+  BatchStage,
+  UseBatchPipelineResult,
+} from "./hooks/useBatchPipeline";

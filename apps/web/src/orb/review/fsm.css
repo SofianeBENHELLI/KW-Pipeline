@@ -1,0 +1,366 @@
+/* Knowledge Forge — Review/Pipeline tab styles + FSM card + batch
+ * banner. Scoped under .orb-app per the project convention.
+ */
+
+/* ── Review tab grid ──────────────────────────────────────────── */
+
+.orb-app .kf-review-tab {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.orb-app .kf-review-tab__fsmcard {
+  grid-column: 1 / -1;
+}
+.orb-app .kf-review-tab__empty {
+  padding: 18px;
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+
+/* ── Card head hint (mono right-side) ─────────────────────────── */
+
+.orb-app .kf-card-hint {
+  color: var(--orb-fg-dim);
+  font-size: 10px;
+}
+
+/* ── FSM card ─────────────────────────────────────────────────── */
+
+.orb-app .kf-fsm {
+  padding: 12px 14px 14px;
+}
+.orb-app .kf-fsm__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.orb-app .kf-fsm__spacer {
+  flex: 1;
+}
+.orb-app .kf-fsm__note {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-sm);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  outline: none;
+  font-family: var(--orb-font-sans);
+}
+.orb-app .kf-fsm__note:focus {
+  border-color: var(--orb-border-strong);
+  background: var(--orb-bg-elev);
+}
+.orb-app .kf-fsm__hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-fsm__hint-icon {
+  color: var(--orb-warn);
+  display: inline-flex;
+}
+.orb-app .kf-fsm__error {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border-radius: var(--orb-r-sm);
+  background: var(--orb-err-bg);
+  color: var(--orb-err-fg);
+  font-size: var(--orb-fs-sm);
+}
+
+/* ── Document detail / Versions ──────────────────────────────── */
+
+.orb-app .kf-detail__body {
+  padding: 6px 14px 14px;
+}
+.orb-app .kf-detail__hash {
+  font-size: 10.5px;
+  word-break: break-all;
+}
+
+.orb-app .kf-versions__body {
+  padding: 4px 14px 12px;
+}
+.orb-app .kf-versions__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--orb-rule);
+  font-size: 11px;
+}
+.orb-app .kf-versions__row.is-cur {
+  color: var(--orb-fg);
+}
+.orb-app .kf-versions__num {
+  width: 30px;
+}
+.orb-app .kf-versions__date {
+  margin-left: auto;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-versions__empty {
+  padding: 8px 0;
+  color: var(--orb-fg-dim);
+  font-size: var(--orb-fs-sm);
+}
+
+/* ── Tab strip + code/markdown blocks ─────────────────────────── */
+
+.orb-app .kf-tabstrip {
+  display: flex;
+  gap: 2px;
+}
+.orb-app .kf-tab {
+  border: 0;
+  background: transparent;
+  padding: 3px 8px;
+  border-radius: var(--orb-r-xs);
+  cursor: pointer;
+  color: var(--orb-fg-dim);
+  font: inherit;
+  font-size: 11px;
+  font-family: var(--orb-font-mono);
+}
+.orb-app .kf-tab.is-active {
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg);
+}
+.orb-app .kf-tab:hover {
+  color: var(--orb-fg);
+}
+
+.orb-app .kf-code {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--orb-fg-muted);
+  background: var(--orb-bg-sunk);
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 0 0 var(--orb-r-md) var(--orb-r-md);
+  white-space: pre;
+}
+.orb-app .kf-code__placeholder {
+  padding: 18px 14px;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-code__placeholder--err {
+  color: var(--orb-err-fg);
+}
+
+.orb-app .kf-md {
+  padding: 12px 16px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--orb-fg);
+  position: relative;
+}
+.orb-app .kf-md__pre {
+  margin: 0;
+  font-family: var(--orb-font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  color: var(--orb-fg);
+}
+.orb-app .kf-md__no-md {
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .kf-md__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60px;
+  background: linear-gradient(to bottom, transparent, var(--orb-bg-elev));
+  pointer-events: none;
+}
+
+/* ── Pipeline tab (timeline) ─────────────────────────────────── */
+
+.orb-app .kf-pipeline__list {
+  list-style: none;
+  margin: 0;
+  padding: 12px 14px 14px;
+}
+.orb-app .kf-pipeline__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--orb-rule);
+}
+.orb-app .kf-pipeline__row:last-child {
+  border-bottom: 0;
+}
+.orb-app .kf-pipeline__bullet {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--orb-fg-faint);
+  margin-top: 8px;
+  flex: 0 0 auto;
+}
+.orb-app .kf-pipeline__row:first-child .kf-pipeline__bullet {
+  background: var(--orb-accent);
+}
+.orb-app .kf-pipeline__main {
+  flex: 1;
+  min-width: 0;
+}
+.orb-app .kf-pipeline__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.orb-app .kf-pipeline__ver {
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-pipeline__filename {
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb-app .kf-pipeline__meta {
+  font-size: 10.5px;
+  color: var(--orb-fg-dim);
+  margin-top: 2px;
+  word-break: break-all;
+}
+.orb-app .kf-pipeline__cur {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg-muted);
+  height: fit-content;
+  margin-top: 8px;
+}
+.orb-app .kf-pipeline__empty {
+  padding: 18px 14px;
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+}
+
+/* ── Batch banner ────────────────────────────────────────────── */
+
+.orb-app .kf-batchbanner {
+  margin-top: 12px;
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-md);
+  background: var(--orb-bg-elev);
+  overflow: hidden;
+}
+.orb-app .kf-batchbanner__h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .kf-batchbanner__icon {
+  color: var(--orb-warn);
+  display: inline-flex;
+}
+.orb-app .kf-batchbanner__counts {
+  color: var(--orb-fg-dim);
+  font-size: 11px;
+}
+.orb-app .kf-batchbanner__dismiss {
+  background: none;
+  border: 0;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  padding: 0;
+}
+.orb-app .kf-batchbanner__dismiss:hover {
+  color: var(--orb-fg);
+}
+.orb-app .kf-batchbanner__fail {
+  padding: 4px 14px 12px;
+  font-size: 11px;
+  line-height: 1.7;
+  border-top: 1px dashed var(--orb-rule);
+}
+
+/* ── Rail row in-flight chip (pulses while extracting/semantic) ── */
+
+.orb-app .kf-rail__prog {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.orb-app .kf-rail__prog::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.orb-app .kf-rail__prog--queued {
+  color: var(--orb-fg-dim);
+  background: var(--orb-bg-sunk);
+}
+.orb-app .kf-rail__prog--extracting {
+  color: var(--orb-info-fg);
+  background: var(--orb-info-bg);
+  animation: kf-pulse 1.2s ease-in-out infinite;
+}
+.orb-app .kf-rail__prog--semantic {
+  color: var(--orb-purple-fg);
+  background: var(--orb-purple-bg);
+  animation: kf-pulse 1.2s ease-in-out infinite;
+}
+.orb-app .kf-rail__prog--done {
+  color: var(--orb-ok-fg);
+  background: var(--orb-ok-bg);
+}
+.orb-app .kf-rail__prog--failed {
+  color: var(--orb-err-fg);
+  background: var(--orb-err-bg);
+}
+@keyframes kf-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-app .kf-rail__prog--extracting,
+  .orb-app .kf-rail__prog--semantic {
+    animation: none;
+  }
+}
