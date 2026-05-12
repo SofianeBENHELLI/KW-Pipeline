@@ -157,3 +157,22 @@ export type {
   ForceAutoBannerProps,
   DeepLinkErrorBannerProps,
 } from "./catalog/Banners";
+
+// PR 6 — Graph view
+export { GraphView } from "./graph/GraphView";
+export { GraphCanvas } from "./graph/GraphCanvas";
+export type { GraphCanvasProps } from "./graph/GraphCanvas";
+export { GraphInspector } from "./graph/GraphInspector";
+export type { GraphInspectorProps } from "./graph/GraphInspector";
+export {
+  applyGraphFilter,
+  neighborsOf,
+  useFilteredGraph,
+  useKnowledgeGraph,
+} from "./hooks/useKnowledgeGraph";
+export type {
+  FilterApplied,
+  GraphFilter,
+  GraphStatus,
+  UseKnowledgeGraphResult,
+} from "./hooks/useKnowledgeGraph";
