@@ -22,13 +22,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
+import { BatchBanner } from "./BatchBanner";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
 import { LinkedView } from "./LinkedView";
+import { PipelineTab } from "./PipelineTab";
+import { ReviewTab } from "./ReviewTab";
 import "./review.css";
 import "./linked.css";
+import "./fsm.css";
 import { latestStatus } from "./format";
+import { useBatchPipeline } from "../hooks/useBatchPipeline";
 import { useDocumentDetail } from "../hooks/useDocumentDetail";
 import { useDocuments, type RailView } from "../hooks/useDocuments";
 import type { ApiDocument } from "../../api/types";
@@ -77,6 +82,9 @@ export function ReviewWorkspace({
 
   // Detail for the active doc.
   const detail = useDocumentDetail(params.docId ?? null);
+
+  // Batch pipeline (rail's "Run pipeline" button → see runBatch below).
+  const batch = useBatchPipeline();
 
   const setQuery = useCallback(
     (q: string) => {
@@ -192,6 +200,18 @@ export function ReviewWorkspace({
         onClearSelection={clearSelection}
         sort={sort}
         onToggleSort={toggleSort}
+        onRunBatch={() => {
+          const ids = selected;
+          const picked = sortedDocs.filter((d) => ids.has(d.id));
+          if (picked.length === 0) return;
+          batch.run(picked).then(() => {
+            // Refresh the catalog page so status badges + FSM gates
+            // reflect the post-batch reality. Don't await — fire and
+            // forget so the banner stays visible.
+            live.refetch();
+            detail.refetch();
+          });
+        }}
       />
 
       <main className="kf-main orb-scroll">
@@ -207,22 +227,23 @@ export function ReviewWorkspace({
           </div>
         )}
         {tab === "review" && (
-          <div className="kf-tab-placeholder" data-testid="kf-tab-review">
-            <h3>Review</h3>
-            <p>
-              FSM action card, reviewer note, raw extraction and semantic
-              markdown cards ship in PR 4 of the redesign.
-            </p>
+          <div data-testid="kf-tab-review">
+            <ReviewTab
+              document={activeDoc}
+              onAfterTransition={() => {
+                detail.refetch();
+                live.refetch();
+              }}
+            />
           </div>
         )}
         {tab === "pipeline" && (
-          <div className="kf-tab-placeholder" data-testid="kf-tab-pipeline">
-            <h3>Pipeline</h3>
-            <p>
-              Lifecycle history timeline ships in PR 4 of the redesign.
-            </p>
+          <div data-testid="kf-tab-pipeline">
+            <PipelineTab document={activeDoc} />
           </div>
         )}
+
+        <BatchBanner snapshot={batch.snapshot} onDismiss={batch.dismiss} />
 
         <footer className="kf-foot orb-mono">
           <span>Documents · {docs.length}</span>
