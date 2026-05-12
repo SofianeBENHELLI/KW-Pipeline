@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from app.schemas.taxonomy import Taxonomy
 from app.services.audit_event_store import (
@@ -696,11 +696,11 @@ def _maybe_build_claim_extractor(
 def _maybe_build_topic_extractor(
     settings: Settings | None = None,
     *,
-    llm: LLMClient | None = None,
-    llm_model: str | None = None,
+    client: Any = None,
+    model: str | None = None,
 ) -> TopicExtractor | None:
     """Build the LLM-driven document Topic extractor if enabled
-    (#411, ADR-031).
+    (#411, ADR-031, #438).
 
     Returns ``None`` unless an LLM provider is configured (Gemini
     primary, Anthropic fallback per ADR-013 §6) AND the knowledge
@@ -709,21 +709,33 @@ def _maybe_build_topic_extractor(
     don't have either API key can still run the knowledge layer
     end-to-end against the in-memory graph store.
 
-    Callers may pass a pre-built ``llm`` + ``llm_model`` so the
-    Topic extractor shares one client with the entity / claim
-    extractors and the chat service — same retry budget, same prompt
-    cache, single provider config to track.
+    #438: TopicExtractor now consumes an ``instructor``-patched
+    client (see :mod:`app.services.knowledge.instructor_client`)
+    instead of the legacy :class:`LLMClient` Protocol. Entity /
+    claim extractors still use the legacy path until they migrate
+    in their own follow-up PRs, so during the transition each
+    extractor constructs its own underlying SDK client. Operationally
+    that's a second connection pool per provider — negligible cost,
+    finite duration.
+
+    Callers may pass a pre-built ``client`` + ``model`` for tests
+    that want to inject a fake instructor client; the production
+    factory builds a fresh one from settings.
     """
     settings = settings or Settings()
-    if llm is None or llm_model is None:
-        built = _maybe_build_llm(settings)
+    if client is None or model is None:
+        from app.services.knowledge.instructor_client import (  # noqa: PLC0415
+            build_instructor_client,
+        )
+
+        built = build_instructor_client(settings)
         if built is None:
             return None
-        llm, llm_model = built
+        client, model = built
     cap = settings.topic_extractor_max_input_tokens_per_document
     return TopicExtractor(
-        llm=llm,
-        model=llm_model,
+        client=client,
+        model=model,
         max_input_tokens=cap,
     )
 
@@ -1081,12 +1093,12 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     )
     # #411: same gating as the Claim extractor — only present when
     # the LLM provider is configured. ``None`` keeps the projector
-    # hook a no-op (pre-#411 behaviour preserved).
-    topic_extractor = _maybe_build_topic_extractor(
-        settings,
-        llm=llm_client,
-        llm_model=llm_model,
-    )
+    # hook a no-op (pre-#411 behaviour preserved). #438: the topic
+    # extractor builds its own instructor-patched client (separate
+    # from ``llm_client`` above which still serves entity / claim
+    # extractors); see :func:`_maybe_build_topic_extractor` for
+    # rationale.
+    topic_extractor = _maybe_build_topic_extractor(settings)
     # #385: wire the cache onto the projector so post-projection
     # warm fires for every validate. ``None``-safe: when the
     # knowledge layer is disabled, ``knowledge_projector`` is None
@@ -1254,12 +1266,9 @@ def build_persistent_services(
     )
     # #411: same as in build_services — only present when the LLM
     # provider is configured. ``None`` keeps the projector hook a
-    # no-op (pre-#411 behaviour preserved).
-    topic_extractor = _maybe_build_topic_extractor(
-        settings,
-        llm=llm_client,
-        llm_model=llm_model,
-    )
+    # no-op (pre-#411 behaviour preserved). #438: the topic extractor
+    # builds its own instructor-patched client from settings.
+    topic_extractor = _maybe_build_topic_extractor(settings)
     # #385: same as build_services — wire the cache onto the
     # projector so post-projection warm fires for every validate
     # in the persistent runtime.
