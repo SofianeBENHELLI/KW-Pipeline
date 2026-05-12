@@ -64,55 +64,41 @@ describe("<KnowledgeForgeApp />", () => {
     ).toBeInTheDocument();
   });
 
-  it("falls back to the 'coming soon' placeholder on unknown sub-paths", () => {
+  it("redirects unknown sub-paths back to the Review Workspace", async () => {
     renderAt("/kf/this/does/not/exist/yet");
-    expect(
-      screen.getByRole("heading", { name: /coming soon/i }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Pick a document from the rail/i),
+      ).toBeInTheDocument(),
+    );
   });
 
-  it("renders the per-section coming-soon placeholders for PR-stubbed routes", () => {
-    // /kf/catalog renders the real CatalogView since PR 5 — assert
-    // its title instead of the coming-soon stub.
+  it("renders the real Knowledge Forge surfaces for every top-tab route", async () => {
     {
       const { unmount } = renderAt("/kf/catalog");
-      expect(
-        screen.getByRole("heading", { name: "Catalog" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
       unmount();
     }
-    // /kf/graph also renders the real GraphView since PR 6.
     {
       const { unmount } = renderAt("/kf/graph");
-      // The toolbar exposes a `Filter` label up-front.
       expect(
         screen.getByRole("toolbar", { name: /Graph filter/ }),
       ).toBeInTheDocument();
       unmount();
     }
-    // /kf/search and /kf/chat render the real panels since PR 7.
     {
       const { unmount } = renderAt("/kf/search");
-      expect(
-        screen.getByRole("heading", { name: "Search" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Search" })).toBeInTheDocument();
       unmount();
     }
     {
       const { unmount } = renderAt("/kf/chat");
-      expect(
-        screen.getByRole("heading", { name: "Chat" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
       unmount();
     }
-    for (const [path, expectedTitle] of [
-      ["/kf/admin", /Admin/],
-      ["/kf/settings", /Settings/],
-    ] as const) {
-      const { unmount } = renderAt(path);
-      expect(
-        screen.getByRole("heading", { name: new RegExp(`${expectedTitle.source} — coming soon`, "i") }),
-      ).toBeInTheDocument();
+    {
+      const { unmount } = renderAt("/kf/admin");
+      expect(screen.getByRole("heading", { name: "Admin" })).toBeInTheDocument();
       unmount();
     }
   });

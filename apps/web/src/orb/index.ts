@@ -180,3 +180,16 @@ export type {
 // PR 7 — Search + Chat
 export { SearchPanel } from "./search/SearchPanel";
 export { ChatPanel } from "./search/ChatPanel";
+
+// PR 8 — Admin / Settings / Purge
+export { AdminHub } from "./admin/AdminHub";
+export { PurgeDialog } from "./admin/PurgeDialog";
+export type { PurgeDialogProps } from "./admin/PurgeDialog";
+export { PurgeAllDialog } from "./admin/PurgeAllDialog";
+export type { PurgeAllDialogProps } from "./admin/PurgeAllDialog";
+export { SettingsModal } from "./admin/SettingsModal";
+export type {
+  SettingsConfigSummary,
+  SettingsModalProps,
+  SettingsTab,
+} from "./admin/SettingsModal";

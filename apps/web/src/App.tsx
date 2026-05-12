@@ -18,24 +18,11 @@ import {
 import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
 import { ChatPanel } from "./features/chat";
-// Orbital redesign preview routes (`/orb*`). The legacy reviewer
-// workbench keeps serving every other path; see
-// docs/roadmap/orbital-redesign.md for the phased rollout.
-const OrbCatalogView = lazy(() =>
-  import("./features-orb").then((m) => ({ default: m.OrbCatalogView })),
-);
-const OrbAdminHub = lazy(() =>
-  import("./features-orb").then((m) => ({ default: m.OrbAdminHub })),
-);
-const OrbAdminAudit = lazy(() =>
-  import("./features-orb").then((m) => ({ default: m.OrbAdminAudit })),
-);
 // Knowledge Forge — full Orbital redesign. New route family `/kf/*`
-// lands incrementally over PRs 1-8; the legacy reviewer workbench
-// (catch-all `*`) keeps serving production until PR 8 flips the
-// default. Internal codename: Orbital. User-visible name: Knowledge
-// Forge — see `apps/web/src/orb/` and the design handoff in
-// /tmp/orbital-redesign for the full spec.
+// shipped over PRs 1-8 (codename Orbital, user-visible Knowledge
+// Forge). The legacy reviewer workbench remains the `*` catch-all
+// until the user signals the cutover; the previous `/orb*` preview
+// (PR #414) was retired in PR 8 of the redesign.
 const KnowledgeForgeApp = lazy(() =>
   import("./orb").then((m) => ({ default: m.KnowledgeForgeApp })),
 );
@@ -437,36 +424,11 @@ export default function App() {
           </Suspense>
         }
       />
-      {/* Phase 1+ of the Orbital redesign — opt-in preview at /orb*.
-          The legacy reviewer workbench (`*`) keeps serving the rest of
-          the UI until later phases retire it
-          (docs/roadmap/orbital-redesign.md). */}
-      <Route
-        path="/orb"
-        element={
-          <Suspense fallback={<div className="kw-loading">Loading Orbital preview…</div>}>
-            <OrbCatalogView />
-          </Suspense>
-        }
-      />
-      <Route
-        path="/orb/admin"
-        element={
-          <Suspense fallback={<div className="kw-loading">Loading admin hub…</div>}>
-            <OrbAdminHub />
-          </Suspense>
-        }
-      />
-      <Route
-        path="/orb/admin/audit"
-        element={
-          <Suspense fallback={<div className="kw-loading">Loading audit log…</div>}>
-            <OrbAdminAudit />
-          </Suspense>
-        }
-      />
-      {/* Knowledge Forge — full redesign per the design handoff. PR 1
-          ships chrome only; PR 8 flips this from opt-in to default. */}
+      {/* Knowledge Forge — full redesign per the design handoff,
+          shipped over PRs 1–8 of the Orbital → Knowledge Forge
+          sprint. The legacy reviewer workbench remains the catch-all
+          until the user signals the cutover; the previous /orb*
+          preview tree was deleted in PR 8 of the redesign. */}
       <Route
         path="/kf/*"
         element={
