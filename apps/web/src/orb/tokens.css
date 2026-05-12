@@ -174,7 +174,15 @@
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "ss01", "cv11";
   letter-spacing: -0.005em;
-  height: 100%;
+  /* The shell mounts inside the host app's `#root` div, which doesn't
+   * propagate a height. Using `height: 100%` collapses the wrapper to
+   * 0 and the chrome paints behind a blank page. `min-height: 100dvh`
+   * (with `100vh` fallback for older browsers) sizes the shell off
+   * the viewport directly so it works regardless of what the host
+   * does with `#root`. `100dvh` honours mobile Safari's dynamic
+   * toolbar. */
+  min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   overflow: hidden;
   position: relative;
