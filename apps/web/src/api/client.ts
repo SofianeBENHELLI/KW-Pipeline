@@ -551,6 +551,33 @@ export async function rejectVersion(
   );
 }
 
+/**
+ * POST /documents/{document_id}/versions/{version_id}/reset_to_review
+ *
+ * Reviewer-override demote: drives a VALIDATED or REJECTED version
+ * back to NEEDS_REVIEW so the team can re-open the file when new
+ * information surfaces. Backend audit event ``review.demoted``
+ * carries the actor + reviewer note. Returns the persisted
+ * SemanticDocument with ``validation_status="needs_review"``.
+ */
+export async function resetVersionToReview(
+  documentId: string,
+  versionId: string,
+  reviewerNote?: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiSemanticDocument> {
+  return unwrap(
+    await http.POST(
+      "/documents/{document_id}/versions/{version_id}/reset_to_review",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        body: { reviewer_note: reviewerNote ?? null },
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
 // ─── Knowledge graph endpoints ───────────────────────────────────────────────
 
 /**

@@ -196,6 +196,67 @@ class ReviewService:
             actor=actor,
         )
 
+    def handle_demote_to_review(
+        self,
+        *,
+        document_id: str,
+        version_id: str,
+        reviewer_note: str | None = None,
+        actor: str | None = None,
+    ) -> SemanticDocument:
+        """Re-open a VALIDATED or REJECTED version for review.
+
+        Mirrors :meth:`handle_validation` / :meth:`handle_rejection`
+        but in the demote direction (FSM edges added to
+        :data:`ALLOWED_TRANSITIONS`):
+
+            VALIDATED → NEEDS_REVIEW
+            REJECTED  → NEEDS_REVIEW
+
+        The persisted :class:`SemanticDocument` has its
+        ``validation_status`` reset to ``needs_review`` to keep the
+        semantic record in sync with the version's lifecycle status.
+        ``actor`` lands on the ``review.demoted`` audit event so
+        "who re-opened doc X" is a SQL filter on the audit table.
+
+        Demote does NOT trigger the knowledge-graph projection or
+        entity-extraction side-effects — those only run on validate.
+        Re-validation after a demote re-fires them, picking up any
+        edits made while the version was back in NEEDS_REVIEW.
+
+        Raises:
+            KeyError: when the document or version cannot be found.
+            IllegalTransition: when the version is not currently
+                VALIDATED or REJECTED.
+        """
+        version = self._documents.get_version(
+            document_id=document_id,
+            version_id=version_id,
+        )
+        if version.status not in (
+            DocumentVersionStatus.VALIDATED,
+            DocumentVersionStatus.REJECTED,
+        ):
+            raise ValueError(
+                f"Version is in {version.status.value}; only VALIDATED "
+                "or REJECTED versions can be demoted to NEEDS_REVIEW."
+            )
+        # Touch the semantic document to confirm it exists; the caller
+        # cares about a 404 here before the FSM transition fires.
+        self._semantic_outputs.get(document_id=document_id, version_id=version_id)
+
+        self._documents.mark_demoted_to_review(
+            document_id=document_id,
+            version_id=version_id,
+            reviewer_note=reviewer_note,
+            actor=actor,
+        )
+        return self._semantic_outputs.record_validation(
+            document_id=document_id,
+            version_id=version_id,
+            status="needs_review",
+        )
+
     def _record_review(
         self,
         *,

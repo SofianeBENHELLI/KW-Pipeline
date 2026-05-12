@@ -213,3 +213,93 @@ class TestReviewActorAttribution:
         rows = services.audit_events.query(event_name="review.validated")
         actors = [row.payload.get("actor") for row in rows]
         assert ANONYMOUS_USER_ID in actors
+
+
+class TestResetToReviewEndpoint:
+    """HTTP-level coverage for the demote route added in #435 — drives a
+    VALIDATED or REJECTED version back to NEEDS_REVIEW."""
+
+    def test_reset_validated_version_back_to_needs_review(self):
+        client = _client()
+        v = _drive_to_needs_review(client)
+        client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={"reviewer_note": "ok"},
+        )
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reset_to_review",
+            json={"reviewer_note": "Re-opening for second look."},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["validation_status"] == "needs_review"
+        version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]
+        assert version["status"] == "NEEDS_REVIEW"
+        assert version["reviewer_note"] == "Re-opening for second look."
+
+    def test_reset_rejected_version_back_to_needs_review(self):
+        client = _client()
+        v = _drive_to_needs_review(client)
+        client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reject",
+            json={"reviewer_note": "wrong doc"},
+        )
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reset_to_review",
+            json={},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["validation_status"] == "needs_review"
+        version = client.get(f"/documents/{v['document_id']}").json()["versions"][0]
+        assert version["status"] == "NEEDS_REVIEW"
+
+    def test_reset_refuses_when_version_is_already_in_needs_review(self):
+        client = _client()
+        v = _drive_to_needs_review(client)
+
+        response = client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reset_to_review",
+            json={},
+        )
+
+        # ReviewService raises ValueError → route handler maps to 409.
+        assert response.status_code == 409
+        assert "VALIDATED or REJECTED" in response.json()["detail"]
+
+    def test_reset_returns_404_for_unknown_version(self):
+        client = _client()
+
+        response = client.post(
+            "/documents/missing-doc/versions/missing-version/reset_to_review",
+            json={},
+        )
+
+        assert response.status_code == 404
+
+    def test_reset_records_actor_in_audit_event(self):
+        services = build_services()
+        client = TestClient(create_app(services=services))
+        v = _drive_to_needs_review(client)
+        client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/validate",
+            json={},
+        )
+
+        client.post(
+            f"/documents/{v['document_id']}/versions/{v['id']}/reset_to_review",
+            json={"reviewer_note": "took another look"},
+        )
+
+        rows = services.audit_events.query(event_name="review.demoted")
+        assert len(rows) >= 1, "expected at least one review.demoted audit row"
+        # Audit row carries the previous status + note + actor (whatever
+        # auth mode the test environment ran in — dev/disabled both
+        # populate the field, so we just assert it's a non-empty string).
+        latest = rows[-1]
+        assert latest.payload["previous_status"] == "VALIDATED"
+        assert latest.payload["reviewer_note"] == "took another look"
+        assert isinstance(latest.payload.get("actor"), str)
+        assert len(latest.payload["actor"]) > 0

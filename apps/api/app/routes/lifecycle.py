@@ -741,6 +741,37 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             actor=current_user.id,
         )
 
+    @router.post(
+        "/documents/{document_id}/versions/{version_id}/reset_to_review",
+        operation_id="reset_version_to_review",
+        response_model=SemanticDocument,
+    )
+    def reset_version_to_review(
+        http_request: Request,
+        document_id: str,
+        version_id: str,
+        request: ReviewRequest = Body(default_factory=ReviewRequest),
+        current_user: User = Depends(require_reviewer),
+    ) -> Any:
+        """Demote a VALIDATED or REJECTED version back to NEEDS_REVIEW.
+
+        Manual reviewer-override path so an operator can re-open a
+        previously-validated or previously-rejected version when new
+        information surfaces. The FSM edges
+        (VALIDATED → NEEDS_REVIEW, REJECTED → NEEDS_REVIEW) live in
+        :data:`ALLOWED_TRANSITIONS`; the audit event
+        ``review.demoted`` records the actor + note.
+        """
+        # D.5: refuse before any review work happens.
+        assert_can_access_document(request=http_request, document_id=document_id, user=current_user)
+        return _dispatch_review(
+            handler=services.review.handle_demote_to_review,
+            document_id=document_id,
+            version_id=version_id,
+            reviewer_note=request.reviewer_note,
+            actor=current_user.id,
+        )
+
     return router
 
 
