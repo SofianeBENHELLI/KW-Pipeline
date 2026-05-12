@@ -82,13 +82,13 @@ LEGAL_TRANSITIONS: list[tuple[DocumentVersionStatus, DocumentVersionStatus]] = [
 # ``FAILED → EXTRACTING`` edge for the retry-extraction surface (and
 # ADR-027 added the FAILED → PURGED edge). The transition is exercised
 # separately. ``VALIDATED`` is also intentionally NOT here: ADR-025 +
-# ADR-027 give it two outgoing edges. ``REJECTED`` /
-# ``DUPLICATE_DETECTED`` / ``SUPERSEDED`` only have the PURGED edge
-# left, so the "no outgoing edges" expectation no longer holds at the
-# FSM level — the test below now asserts they only point at PURGED.
+# ADR-027 give it three outgoing edges (SUPERSEDED, PURGED, NEEDS_REVIEW
+# — the demote escape valve added in #435). ``REJECTED`` was removed
+# from the terminal list when #435 added the REJECTED → NEEDS_REVIEW
+# demote edge — it's no longer a true terminal. ``DUPLICATE_DETECTED``
+# and ``SUPERSEDED`` keep only the PURGED edge.
 TERMINAL_STATES: list[DocumentVersionStatus] = [
     DocumentVersionStatus.DUPLICATE_DETECTED,
-    DocumentVersionStatus.REJECTED,
     DocumentVersionStatus.SUPERSEDED,
 ]
 
