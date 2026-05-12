@@ -26,6 +26,16 @@ interface TileDef {
   external?: boolean;
 }
 
+// #441: ``external: false`` for the legacy admin tiles so React
+// Router handles the click in-process. Previously we used
+// ``<a href>`` for these, which triggered a full-page navigation; on
+// the S3-hosted build that hits the bucket root and returns 403
+// AccessDenied because ``/admin/hitl`` is not an object key. With
+// ``<Link to>`` the SPA router intercepts the click, matches the
+// outer ``/admin/*`` routes in App.tsx, and renders the legacy
+// admin views without a server round-trip. The legacy views still
+// carry their old Bulma styling — porting them into the Knowledge
+// Forge shell is a separate follow-up.
 const TILES: TileDef[] = [
   {
     id: "hitl",
@@ -33,7 +43,6 @@ const TILES: TileDef[] = [
     body: "Bucket capacity bars, queue depth, drift alerts, and the auto-promotion trigger.",
     icon: OrbI.team,
     href: "/admin/hitl",
-    external: true,
   },
   {
     id: "audit",
@@ -41,7 +50,6 @@ const TILES: TileDef[] = [
     body: "Filter-able timeline of every state transition with actor + payload + timestamp.",
     icon: OrbI.shield,
     href: "/admin/audit",
-    external: true,
   },
   {
     id: "archive",
@@ -49,7 +57,6 @@ const TILES: TileDef[] = [
     body: "Soft-deleted documents with restore + purge controls.",
     icon: OrbI.archive,
     href: "/admin/archive",
-    external: true,
   },
   {
     id: "config",

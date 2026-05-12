@@ -10,6 +10,16 @@
   gap: 12px;
   align-items: start;
 }
+/* Grid items default to ``min-width: auto``, which lets a long
+   unwrapped child (a ``<pre>`` JSON dump in RawExtractionTabs, the
+   semantic markdown source) push the column past its 2fr / 1fr
+   share. That overflow then bloats the full-row ``__fsmcard`` and
+   pushes the right-side FSM action buttons (Reject + Validate) off
+   the visible viewport (#441). ``min-width: 0`` restores intended
+   track sizing. */
+.orb-app .kf-review-tab > * {
+  min-width: 0;
+}
 .orb-app .kf-review-tab__fsmcard {
   grid-column: 1 / -1;
 }

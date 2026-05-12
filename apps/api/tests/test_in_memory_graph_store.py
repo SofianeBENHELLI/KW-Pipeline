@@ -15,6 +15,7 @@ from app.services.knowledge.graph_store import (
     DEFAULT_GRAPH_PAGE_LIMIT,
     MAX_GRAPH_PAGE_LIMIT,
     InMemoryGraphStore,
+    _row_to_node,
 )
 
 
@@ -443,3 +444,35 @@ def test_reverse_index_is_drained_when_last_owner_is_deleted():
     assert "ver-1" not in store._version_to_node_ids
     assert "ent-shared" not in store._node_to_versions
     assert "ver-1" not in store._node_to_versions
+
+
+# ─── Neo4j read-path coercion ────────────────────────────────────────
+
+
+def test_row_to_node_strips_embedding_from_properties():
+    """#441: chunk nodes in Neo4j carry the Phase-3 embedding vector
+    on the node record so the vector index can use it for similarity
+    search. The graph response model declares
+    ``GraphPropertyValue = str | int | float | bool | list[str] | None``,
+    which doesn't include ``list[float]`` — without this strip the
+    GraphNode validator raised a wall of pydantic errors that shipped
+    to the frontend. Lock the strip in so a regression surfaces here
+    rather than as a UI crash."""
+    row = {
+        "id": "chunk-x",
+        "kind": "chunk",
+        "label": "Section 1",
+        "document_id": "doc-A",
+        "version_id": "ver-A",
+        "embedding": [0.123, -0.456, 0.789, 0.0],  # the offending field
+        "char_count": 42,
+    }
+    node = _row_to_node(row)
+    assert node.id == "chunk-x"
+    assert node.kind == "chunk"
+    assert "embedding" not in node.properties, (
+        "embedding must be stripped before reaching the wire (#441)."
+    )
+    # Other arbitrary properties pass through unchanged.
+    assert node.properties["document_id"] == "doc-A"
+    assert node.properties["char_count"] == 42
