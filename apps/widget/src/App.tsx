@@ -30,6 +30,43 @@ interface HealthSnapshot {
   version?: string;
 }
 
+/**
+ * Build the "open in Orbital" URL for a given document id.
+ *
+ * Why a helper instead of a one-liner: the previous implementation
+ * (`${orbitalUrl.replace(/\/$/, "")}/?document=…`) appended a slash
+ * before the query string. That works when `orbitalUrl` is the SPA
+ * root (`https://example.com/orbital`), but breaks when it points
+ * directly at a deployed `index.html` — the result becomes
+ * `…/index.html/?document=…`, which to S3 looks like a request for
+ * a key named `index.html/` (trailing slash) and returns 403
+ * AccessDenied.
+ *
+ * This helper uses the URL API so:
+ *   - `https://host/orbital`            → `https://host/orbital?document=X`
+ *   - `https://host/orbital/`           → `https://host/orbital/?document=X`
+ *   - `https://host/orbital/index.html` → `https://host/orbital/index.html?document=X`
+ *
+ * Exported so the widget's vitest can pin the behaviour without
+ * mounting the full App.
+ */
+export function buildOpenInOrbitalUrl(
+  orbitalUrl: string,
+  documentId: string,
+): string {
+  try {
+    const url = new URL(orbitalUrl);
+    url.searchParams.set("document", documentId);
+    return url.toString();
+  } catch {
+    // Fall back to the legacy concat pattern if the configured URL
+    // isn't a parseable URL — keeps the widget useful even when an
+    // operator typos the env var.
+    const sep = orbitalUrl.includes("?") ? "&" : "?";
+    return `${orbitalUrl}${sep}document=${encodeURIComponent(documentId)}`;
+  }
+}
+
 const App: React.FC = () => {
   const [apiBaseUrl, setApiBaseUrl] = useState<string>(() => getApiBaseUrl());
   const [orbitalUrl] = useState<string>(() => getOrbitalUrl());
@@ -170,7 +207,7 @@ const App: React.FC = () => {
               highlightDocumentId={highlightDocId}
               onOpenDocument={(doc) => {
                 window.open(
-                  `${orbitalUrl.replace(/\/$/, "")}/?document=${encodeURIComponent(doc.id)}`,
+                  buildOpenInOrbitalUrl(orbitalUrl, doc.id),
                   "_blank",
                   "noopener,noreferrer",
                 );
