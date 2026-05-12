@@ -1,0 +1,289 @@
+/* Knowledge Forge — Graph view styles. Scoped under .orb-app. */
+
+.orb-app .kf-gv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--orb-bg);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────── */
+
+.orb-app .kf-gv__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  flex-wrap: wrap;
+}
+.orb-app .kf-gv__toolbar-l,
+.orb-app .kf-gv__toolbar-r {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.orb-app .kf-gv__toolbar-h {
+  font-size: 9.5px;
+  color: var(--orb-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.orb-app .kf-gv__toolbar-stat {
+  font-size: 11px;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-gv__filters {
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-border);
+  border-radius: 5px;
+}
+.orb-app .kf-gv__filter {
+  padding: 3px 9px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--orb-fg-muted);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.orb-app .kf-gv__filter:hover {
+  color: var(--orb-fg);
+}
+.orb-app .kf-gv__filter.is-on {
+  background: var(--orb-bg-elev);
+  color: var(--orb-fg);
+  box-shadow: var(--orb-shadow-sm);
+}
+
+/* ── Body / canvas / inspector grid ──────────────────────────── */
+
+.orb-app .kf-gv__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr min-content;
+  min-height: 0;
+}
+.orb-app .kf-gv__canvaswrap {
+  position: relative;
+  background: var(--orb-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+}
+.orb-app .kf-gv__svg {
+  max-width: 100%;
+  max-height: 100%;
+  width: 720px;
+  height: 480px;
+}
+
+.orb-app .kf-gv__state {
+  padding: 28px;
+  color: var(--orb-fg-muted);
+  font-size: var(--orb-fs-sm);
+  text-align: center;
+}
+.orb-app .kf-gv__state--err {
+  color: var(--orb-err-fg);
+}
+.orb-app .kf-gv__state code {
+  font-family: var(--orb-font-mono);
+  font-size: 11px;
+  background: var(--orb-bg-sunk);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ── Canvas internals ────────────────────────────────────────── */
+
+.orb-app .kf-gv__edge {
+  stroke: var(--orb-border-strong);
+  stroke-width: 0.6;
+  opacity: 0.55;
+  transition: stroke 0.12s, opacity 0.12s, stroke-width 0.12s;
+}
+.orb-app .kf-gv__edge.is-hl {
+  stroke: var(--orb-warn);
+  stroke-width: 1.4;
+  opacity: 1;
+}
+.orb-app .kf-gv__node {
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.orb-app .kf-gv__node:hover circle {
+  filter: brightness(1.1);
+}
+.orb-app .kf-gv__node.is-sel {
+  filter: drop-shadow(0 1px 2px rgba(28, 43, 74, 0.25));
+}
+.orb-app .kf-gv__node-label {
+  font-size: 10px;
+  fill: var(--orb-fg);
+}
+
+/* ── Inspector drawer ────────────────────────────────────────── */
+
+.orb-app .kf-gv__inspector {
+  width: 360px;
+  border-left: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.orb-app .kf-gv__inspector-h {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--orb-rule);
+}
+.orb-app .kf-gv__inspector-kind {
+  display: inline-block;
+  font-family: var(--orb-font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+  background: var(--orb-bg-sunk);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-gv__inspector-kind--topic {
+  background: var(--orb-warn-bg);
+  color: var(--orb-warn-fg);
+}
+.orb-app .kf-gv__inspector-kind--entity {
+  background: var(--orb-ok-bg);
+  color: var(--orb-ok-fg);
+}
+.orb-app .kf-gv__inspector-kind--chunk {
+  background: var(--orb-bg-sunk);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-gv__inspector-title {
+  min-width: 0;
+}
+.orb-app .kf-gv__inspector-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--orb-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb-app .kf-gv__inspector-id {
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-gv__inspector-close {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--orb-fg-dim);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.orb-app .kf-gv__inspector-close:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+}
+
+.orb-app .kf-gv__inspector-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--orb-rule);
+  overflow-y: auto;
+}
+.orb-app .kf-gv__inspector-section .orb-section-h {
+  display: block;
+  margin-bottom: 6px;
+}
+.orb-app .kf-gv__inspector-empty {
+  margin: 4px 0 0;
+  color: var(--orb-fg-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+.orb-app .kf-gv__inspector-edge-h {
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.orb-app .kf-gv__props {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+}
+.orb-app .kf-gv__props-row {
+  display: contents;
+}
+.orb-app .kf-gv__props-row dt {
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.orb-app .kf-gv__props-row dd {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--orb-fg);
+  word-break: break-all;
+}
+
+.orb-app .kf-gv__edges-block + .kf-gv__edges-block {
+  margin-top: 8px;
+}
+.orb-app .kf-gv__edges-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.orb-app .kf-gv__edge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.orb-app .kf-gv__edge-kind {
+  background: var(--orb-bg-sunk);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--orb-fg-muted);
+  font-size: 9.5px;
+}
+.orb-app .kf-gv__edge-other {
+  color: var(--orb-fg);
+  word-break: break-all;
+}
+
+.orb-app .kf-gv__inspector-foot {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--orb-rule);
+  background: var(--orb-bg-sunk);
+}

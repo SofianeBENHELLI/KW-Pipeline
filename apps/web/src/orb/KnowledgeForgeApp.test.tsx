@@ -81,8 +81,16 @@ describe("<KnowledgeForgeApp />", () => {
       ).toBeInTheDocument();
       unmount();
     }
+    // /kf/graph also renders the real GraphView since PR 6.
+    {
+      const { unmount } = renderAt("/kf/graph");
+      // The toolbar exposes a `Filter` label up-front.
+      expect(
+        screen.getByRole("toolbar", { name: /Graph filter/ }),
+      ).toBeInTheDocument();
+      unmount();
+    }
     for (const [path, expectedTitle] of [
-      ["/kf/graph", /Graph/],
       ["/kf/search", /Search/],
       ["/kf/chat", /Chat/],
       ["/kf/admin", /Admin/],
