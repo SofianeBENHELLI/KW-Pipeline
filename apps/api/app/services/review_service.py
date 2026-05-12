@@ -243,9 +243,7 @@ class ReviewService:
             )
         # Touch the semantic document to confirm it exists; the caller
         # cares about a 404 here before the FSM transition fires.
-        self._semantic_outputs.get(
-            document_id=document_id, version_id=version_id
-        )
+        self._semantic_outputs.get(document_id=document_id, version_id=version_id)
 
         self._documents.mark_demoted_to_review(
             document_id=document_id,

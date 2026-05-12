@@ -408,13 +408,9 @@ def test_review_service_works_without_projection_status_tracker():
 def test_handle_demote_drives_validated_back_to_needs_review():
     services = build_services()
     document_id, version_id = _land_version_in_needs_review(services)
-    services.review.handle_validation(
-        document_id=document_id, version_id=version_id
-    )
+    services.review.handle_validation(document_id=document_id, version_id=version_id)
     assert (
-        services.documents.get_version(
-            document_id=document_id, version_id=version_id
-        ).status
+        services.documents.get_version(document_id=document_id, version_id=version_id).status
         == DocumentVersionStatus.VALIDATED
     )
 
@@ -426,9 +422,7 @@ def test_handle_demote_drives_validated_back_to_needs_review():
     )
 
     assert result.validation_status == "needs_review"
-    final = services.documents.get_version(
-        document_id=document_id, version_id=version_id
-    )
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
     assert final.status == DocumentVersionStatus.NEEDS_REVIEW
     assert final.reviewer_note == "Re-opening for second look."
 
@@ -436,18 +430,12 @@ def test_handle_demote_drives_validated_back_to_needs_review():
 def test_handle_demote_drives_rejected_back_to_needs_review():
     services = build_services()
     document_id, version_id = _land_version_in_needs_review(services)
-    services.review.handle_rejection(
-        document_id=document_id, version_id=version_id
-    )
+    services.review.handle_rejection(document_id=document_id, version_id=version_id)
 
-    result = services.review.handle_demote_to_review(
-        document_id=document_id, version_id=version_id
-    )
+    result = services.review.handle_demote_to_review(document_id=document_id, version_id=version_id)
 
     assert result.validation_status == "needs_review"
-    final = services.documents.get_version(
-        document_id=document_id, version_id=version_id
-    )
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
     assert final.status == DocumentVersionStatus.NEEDS_REVIEW
 
 
@@ -456,9 +444,7 @@ def test_handle_demote_refuses_when_version_is_in_needs_review():
     document_id, version_id = _land_version_in_needs_review(services)
 
     with pytest.raises(ValueError, match="VALIDATED or REJECTED"):
-        services.review.handle_demote_to_review(
-            document_id=document_id, version_id=version_id
-        )
+        services.review.handle_demote_to_review(document_id=document_id, version_id=version_id)
 
 
 def test_handle_demote_refuses_when_version_is_in_extracted():
@@ -468,9 +454,7 @@ def test_handle_demote_refuses_when_version_is_in_extracted():
         content_type="text/plain",
         content=b"hello",
     )
-    services.extraction_jobs.extract(
-        document_id=version.document_id, version_id=version.id
-    )
+    services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
     extracted = services.documents.get_version(
         document_id=version.document_id, version_id=version.id
     )
@@ -485,12 +469,8 @@ def test_handle_demote_refuses_when_version_is_in_extracted():
 def test_demote_then_revalidate_round_trips():
     services = build_services()
     document_id, version_id = _land_version_in_needs_review(services)
-    services.review.handle_validation(
-        document_id=document_id, version_id=version_id
-    )
-    services.review.handle_demote_to_review(
-        document_id=document_id, version_id=version_id
-    )
+    services.review.handle_validation(document_id=document_id, version_id=version_id)
+    services.review.handle_demote_to_review(document_id=document_id, version_id=version_id)
     # Re-validation succeeds — the FSM now has the version back at
     # NEEDS_REVIEW so handle_validation's precheck passes.
     result = services.review.handle_validation(
@@ -499,8 +479,6 @@ def test_demote_then_revalidate_round_trips():
         reviewer_note="ok on second look",
     )
     assert result.validation_status == "validated"
-    final = services.documents.get_version(
-        document_id=document_id, version_id=version_id
-    )
+    final = services.documents.get_version(document_id=document_id, version_id=version_id)
     assert final.status == DocumentVersionStatus.VALIDATED
     assert final.reviewer_note == "ok on second look"

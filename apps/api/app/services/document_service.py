@@ -428,9 +428,7 @@ class DocumentService:
             IllegalTransition: when the version is not currently
                 VALIDATED or REJECTED.
         """
-        version = self.catalog.get_version(
-            document_id=document_id, version_id=version_id
-        )
+        version = self.catalog.get_version(document_id=document_id, version_id=version_id)
         assert_transition(version.status, DocumentVersionStatus.NEEDS_REVIEW)
         previous = version.status
         updated = self.catalog.update_version_review(
