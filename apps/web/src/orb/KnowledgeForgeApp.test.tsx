@@ -5,11 +5,21 @@
  * "coming soon" fallback, and the pipelineName crumb override.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { KnowledgeForgeApp } from "./KnowledgeForgeApp";
+
+/** Disambiguate icon-rail tiles vs top-bar tabs (both use button + same labels). */
+function railTile(name: string): HTMLElement {
+  const rail = screen.getByRole("navigation", { name: /Primary navigation/i });
+  return within(rail).getByRole("button", { name });
+}
+function topNavTab(name: RegExp | string): HTMLElement {
+  const nav = screen.getByRole("navigation", { name: /Workspace sections/i });
+  return within(nav).getByRole("button", { name });
+}
 
 function makeJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -101,6 +111,74 @@ describe("<KnowledgeForgeApp />", () => {
       expect(screen.getByRole("heading", { name: "Admin" })).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("clicking a top-bar nav tab navigates to the matching route", async () => {
+    renderAt("/kf/review");
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
+    );
+    fireEvent.click(topNavTab(/Graph/));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("toolbar", { name: /Graph filter/ }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("clicking the icon-rail Graph tile navigates to /kf/graph", async () => {
+    renderAt("/kf/review");
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
+    );
+    fireEvent.click(railTile("Graph"));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("toolbar", { name: /Graph filter/ }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("clicking the icon-rail Upload tile navigates to /kf/catalog", async () => {
+    renderAt("/kf/review");
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
+    );
+    fireEvent.click(railTile("Upload"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument(),
+    );
+  });
+
+  it("clicking the icon-rail Activity tile navigates to /kf/admin", async () => {
+    renderAt("/kf/review");
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
+    );
+    fireEvent.click(railTile("Activity"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Admin" })).toBeInTheDocument(),
+    );
+  });
+
+  it("clicking the icon-rail Settings tile opens the settings modal (no nav)", async () => {
+    renderAt("/kf/review");
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
+    );
+    fireEvent.click(railTile("Settings"));
+    await waitFor(() =>
+      expect(screen.getByTestId("kf-settings-modal")).toBeInTheDocument(),
+    );
+    // Workspace is still mounted underneath — settings is an overlay.
+    expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument();
+  });
+
+  it("highlights the matching rail tile based on the current route", async () => {
+    renderAt("/kf/graph");
+    const graphTile = railTile("Graph");
+    expect(graphTile).toHaveAttribute("aria-current", "page");
+    expect(graphTile).toHaveClass("is-active");
   });
 
   it("includes the pipelineName override in the brand crumb when given", () => {

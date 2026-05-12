@@ -14,10 +14,20 @@
  *   PR 8 — `/kf/admin/*`, `/kf/settings`, deletes the `features-orb/`
  *           preview tree + its `/orb*` routes (now redundant with the
  *           full Knowledge Forge surface).
+ *
+ * Post-cutover the icon-rail and top-bar nav are both wired to
+ * react-router; clicking a tile or tab navigates without a
+ * full-page reload.
  */
 import { lazy, Suspense, useState } from "react";
 import type { ReactElement } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import { CatalogView } from "./catalog/CatalogView";
 import { GraphView } from "./graph/GraphView";
@@ -26,6 +36,8 @@ import { ChatPanel } from "./search/ChatPanel";
 import { SearchPanel } from "./search/SearchPanel";
 import { AdminHub } from "./admin/AdminHub";
 import { DxShell } from "./shell/DxShell";
+import type { RailTileId } from "./shell/IconRail";
+import type { TopNavTab } from "./shell/TopBar";
 
 // SettingsModal pulls in MetaRow + admin chrome — lazy so the cold
 // chunk only loads when the user opens it via the cog button or
@@ -47,6 +59,7 @@ export function KnowledgeForgeApp({
   const crumb = pipelineName ? `${pipelineName} · alpha` : "alpha";
   const [settingsOpen, setSettingsOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   // /kf/settings → open the modal AND render the workspace below it
   // so closing the modal returns the user to a real surface, not a
   // blank page.
@@ -56,10 +69,36 @@ export function KnowledgeForgeApp({
   // right item without each route having to forward the prop.
   const activeTab = pickActiveTab(location.pathname);
 
+  /**
+   * Top-bar tab → route mapping. Mirrors the prototype's nav order
+   * (Review · Graph · Search · Chat · Admin) per design §2.2.
+   */
+  const onTabSelect = (tab: TopNavTab) => {
+    navigate(routeForTopTab(tab));
+  };
+
+  /**
+   * Icon-rail tile → route mapping. The rail collapses Activity onto
+   * the Admin hub (the prototype's "Activity" sparkline lives there)
+   * and Upload + Document onto the Catalog surface (the catalog is
+   * the bulk-upload table). Settings opens the modal directly so the
+   * URL doesn't change for what's a transient overlay.
+   */
+  const onRailSelect = (tile: RailTileId) => {
+    if (tile === "settings") {
+      setSettingsOpen(true);
+      return;
+    }
+    const target = routeForRailTile(tile);
+    if (target) navigate(target);
+  };
+
   return (
     <DxShell
       activeTab={activeTab}
-      activeRail={pickActiveRail(activeTab)}
+      activeRail={pickActiveRail(location.pathname, activeTab)}
+      onTabSelect={onTabSelect}
+      onRailSelect={onRailSelect}
       topBar={{
         product: "Knowledge Forge",
         crumb,
@@ -106,17 +145,53 @@ function pickActiveTab(
   return undefined;
 }
 
+/** Top-bar tab labels → route paths. */
+function routeForTopTab(tab: TopNavTab): string {
+  switch (tab) {
+    case "review": return "/kf/review";
+    case "graph":  return "/kf/graph";
+    case "search": return "/kf/search";
+    case "chat":   return "/kf/chat";
+    case "admin":  return "/kf/admin";
+  }
+}
+
 /**
- * Map the top-bar nav tab onto the icon-rail tile. Chat + Admin
- * collapse onto the rail's "settings" / "review" anchors since the
- * rail's vocabulary differs slightly from the top-bar nav.
+ * Icon-rail tile → route path. Returns null for tiles that don't
+ * navigate (the parent handles those, e.g. `settings` opens a modal).
+ *
+ * The mapping intentionally collapses several rail tiles onto the
+ * existing routes:
+ *   - activity → /kf/admin (admin hub holds the activity sparkline)
+ *   - upload   → /kf/catalog (bulk-ops surface includes upload)
+ *   - info     → /kf/review (the "current document" anchor)
+ */
+function routeForRailTile(tile: RailTileId): string | null {
+  switch (tile) {
+    case "activity": return "/kf/admin";
+    case "upload":   return "/kf/catalog";
+    case "review":   return "/kf/review";
+    case "search":   return "/kf/search";
+    case "info":     return "/kf/review";
+    case "graph":    return "/kf/graph";
+    case "settings": return null; // handled separately — opens modal
+  }
+}
+
+/**
+ * Map URL pathname onto the icon-rail tile that should highlight as
+ * "active". Falls back to `review` for the index + unknown routes.
  */
 function pickActiveRail(
+  pathname: string,
   tab: ReturnType<typeof pickActiveTab>,
-): "review" | "graph" | "search" | "settings" {
-  if (tab === "graph") return "graph";
-  if (tab === "search") return "search";
-  if (tab === "admin") return "settings";
+): RailTileId {
+  if (pathname.startsWith("/kf/catalog")) return "upload";
+  if (pathname.startsWith("/kf/graph")) return "graph";
+  if (pathname.startsWith("/kf/search")) return "search";
+  if (pathname.startsWith("/kf/admin")) return "activity";
+  if (pathname.startsWith("/kf/settings")) return "settings";
+  if (tab === "chat") return "search"; // chat lives next to search on the rail
   return "review";
 }
 
