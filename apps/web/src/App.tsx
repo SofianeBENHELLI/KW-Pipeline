@@ -1,5 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 import "./styles.css";
 import {
   SessionExpiredBanner,
@@ -424,11 +432,13 @@ export default function App() {
           </Suspense>
         }
       />
-      {/* Knowledge Forge — full redesign per the design handoff,
-          shipped over PRs 1–8 of the Orbital → Knowledge Forge
-          sprint. The legacy reviewer workbench remains the catch-all
-          until the user signals the cutover; the previous /orb*
-          preview tree was deleted in PR 8 of the redesign. */}
+      {/* Knowledge Forge — full redesign shipped over PRs 1–8 of the
+          Orbital → Knowledge Forge sprint. As of the cutover, the
+          root URL redirects straight onto the new shell so deep
+          links from 3DDashboard / the widget land on the redesign.
+          The legacy reviewer workbench is preserved at /legacy/* as
+          a one-page-refresh escape hatch in case Knowledge Forge
+          surfaces a regression in production. */}
       <Route
         path="/kf/*"
         element={
@@ -437,9 +447,28 @@ export default function App() {
           </Suspense>
         }
       />
-      <Route path="*" element={<ReviewerWorkbench />} />
+      <Route path="/legacy/*" element={<ReviewerWorkbench />} />
+      {/* Default landing → Knowledge Forge. Preserve any `?document=…`
+          deep-link query string so widgets that bookmark /?document=X
+          keep working — Knowledge Forge's review route picks the
+          param up the same way. */}
+      <Route path="*" element={<RootRedirect />} />
     </Routes>
   );
+}
+
+/**
+ * Forward the root URL (and every other unmatched path) onto the
+ * Knowledge Forge shell at /kf/review, preserving any `?document=…`
+ * deep-link query string the widget / external bookmarks shipped
+ * with. Done as a component (not a `<Navigate to=…>` literal) so the
+ * forwarded URL can be computed at render time from
+ * `window.location.search`.
+ */
+function RootRedirect(): ReactElement {
+  const search =
+    typeof window !== "undefined" ? window.location.search : "";
+  return <Navigate to={`/kf/review${search}`} replace />;
 }
 
 function ReviewerWorkbench() {
