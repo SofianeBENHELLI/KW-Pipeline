@@ -29,19 +29,34 @@ const FIXTURE: ApiKnowledgeGraphProjection = {
       id: "c1",
       kind: "chunk",
       label: "chunk-1",
-      properties: { text: "Net new ARR closed at $8.4M.", page: 1 },
+      properties: {
+        text: "Net new ARR closed at $8.4M.",
+        page: 1,
+        section_id: "sec-summary",
+        heading: "Summary",
+      },
     },
     {
       id: "c2",
       kind: "chunk",
       label: "chunk-2",
-      properties: { text: "Expansion dragged plan by $0.4M.", page: 1 },
+      properties: {
+        text: "Expansion dragged plan by $0.4M.",
+        page: 1,
+        section_id: "sec-summary",
+        heading: "Summary",
+      },
     },
     {
       id: "c3",
       kind: "chunk",
       label: "chunk-3",
-      properties: { text: "Renewal cohort slipped four contracts.", page: 2 },
+      properties: {
+        text: "Renewal cohort slipped four contracts.",
+        page: 2,
+        section_id: "sec-drift",
+        heading: "Drift drivers",
+      },
     },
     {
       id: "t1",
@@ -127,6 +142,54 @@ describe("projectGraph", () => {
   it("returns empty arrays for null payload", () => {
     const out = projectGraph(null);
     expect(out.chunks).toEqual([]);
+    expect(out.sections).toEqual([]);
+  });
+
+  it("groups chunks into sections, ordered by first page", () => {
+    const out = projectGraph(FIXTURE);
+    expect(out.sections.map((s) => s.id)).toEqual(["sec-summary", "sec-drift"]);
+    const summary = out.sections.find((s) => s.id === "sec-summary")!;
+    const drift = out.sections.find((s) => s.id === "sec-drift")!;
+    expect(summary.heading).toBe("Summary");
+    expect(summary.chunkIds.sort()).toEqual(["c1", "c2"]);
+    expect(summary.page).toBe(1);
+    expect(drift.heading).toBe("Drift drivers");
+    expect(drift.chunkIds).toEqual(["c3"]);
+    expect(drift.page).toBe(2);
+  });
+
+  it("collapses chunks without section_id into one untitled section", () => {
+    const out = projectGraph({
+      document_id: "x",
+      version_id: "v",
+      generated_at: "x",
+      schema_version: "v0.2",
+      nodes: [
+        {
+          id: "loose1",
+          kind: "chunk",
+          label: "x",
+          properties: { text: "a" },
+        },
+        {
+          id: "loose2",
+          kind: "chunk",
+          label: "y",
+          properties: { text: "b" },
+        },
+      ],
+      edges: [],
+    });
+    expect(out.sections).toHaveLength(1);
+    expect(out.sections[0].id).toBe("");
+    expect(out.sections[0].chunkIds.sort()).toEqual(["loose1", "loose2"]);
+  });
+
+  it("hydrates sectionId + sectionHeading on each chunk", () => {
+    const out = projectGraph(FIXTURE);
+    const c1 = out.chunks.find((c) => c.id === "c1")!;
+    expect(c1.sectionId).toBe("sec-summary");
+    expect(c1.sectionHeading).toBe("Summary");
   });
 });
 

@@ -143,22 +143,45 @@ export function LinkedView({
         <div className="kf-lv__pane-h">
           <span className="orb-section-h">Document viewer</span>
           <span className="orb-mono kf-lv__hint">
-            {filename ?? "document"} · {data.chunks.length} chunks
+            {filename ?? "document"} · {data.sections.length} section
+            {data.sections.length === 1 ? "" : "s"} ·{" "}
+            {data.chunks.length} chunks
           </span>
         </div>
         <div className="kf-lv__paper orb-scroll">
           <article className="kf-lv__page">
             <h2 className="kf-lv__page-h1">{filename ?? "Document"}</h2>
-            <div className="kf-lv__page-body">
-              {data.chunks.map((c) => (
-                <LvSpan
-                  key={c.id}
-                  chunk={c}
-                  highlit={isChunkHighlit(c.id)}
-                  onHover={(h) => setHover(h)}
-                />
-              ))}
-            </div>
+            {data.sections.map((section) => {
+              const chunksInSection = section.chunkIds
+                .map((id) => data.chunks.find((c) => c.id === id))
+                .filter((c): c is LinkedChunk => Boolean(c));
+              return (
+                <section
+                  key={section.id || "untitled"}
+                  className="kf-lv__section"
+                  data-testid={`kf-lv-section-${section.id || "untitled"}`}
+                >
+                  {section.heading && (
+                    <h3 className="kf-lv__section-h">{section.heading}</h3>
+                  )}
+                  {section.page != null && (
+                    <div className="kf-lv__section-page orb-mono">
+                      page {section.page}
+                    </div>
+                  )}
+                  <div className="kf-lv__page-body">
+                    {chunksInSection.map((c) => (
+                      <LvSpan
+                        key={c.id}
+                        chunk={c}
+                        highlit={isChunkHighlit(c.id)}
+                        onHover={(h) => setHover(h)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </article>
         </div>
       </div>
