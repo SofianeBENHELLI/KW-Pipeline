@@ -1,0 +1,690 @@
+/* Knowledge Forge (Orbital) — design tokens.
+ *
+ * Direct port of `design_handoff_orbital/prototype/tokens.css`. Every
+ * selector is scoped under `.orb-app` so this stylesheet cannot collide
+ * with the legacy `apps/web/src/styles/tokens.css`. The shell's
+ * outermost element (`<DxShell>`) is `<div className="orb-app">` with
+ * `data-theme` and `data-density` attributes — both light/dark themes
+ * and density variants are switchable per-tree without a reload.
+ *
+ * Internal codename: Orbital. User-visible product name: Knowledge Forge.
+ */
+
+.orb-app {
+  /* 3DEXPERIENCE-aligned font stack. Open Sans is the closest free
+   * equivalent to Dassault's DIN-ish humanist sans; falls back to Inter
+   * Tight, then system. JetBrains Mono for IDs/timestamps/code. */
+  --orb-font-sans: "Open Sans", "Inter Tight", "Inter", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --orb-font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace,
+    "SF Mono", Menlo, monospace;
+  --orb-font-display: "Open Sans", "Inter Tight", "Inter", sans-serif;
+
+  /* 3DX chrome */
+  --dx-navy:        #1c2b4a;   /* top bar / dark surfaces */
+  --dx-navy-2:      #0d2a4a;
+  --dx-blue:        #005386;   /* 3DS brand blue (logo, primary links) */
+  --dx-blue-2:      #1f7aaf;   /* primary action */
+  --dx-cyan:        #00aeef;   /* selected nav, focus highlight */
+  --dx-cyan-soft:   #e6f4fb;
+  --dx-rail-bg:     #f1f3f5;   /* icon rail */
+  --dx-rail-border: #e1e6ea;
+
+  /* density (overridden by [data-density="cozy|dense"]) */
+  --orb-row-h: 30px;
+  --orb-pad: 14px;
+  --orb-fs-xs: 11px;
+  --orb-fs-sm: 12px;
+  --orb-fs-md: 13px;
+  --orb-fs-lg: 15px;
+  --orb-fs-xl: 18px;
+  --orb-fs-2xl: 24px;
+
+  /* radii */
+  --orb-r-xs: 4px;
+  --orb-r-sm: 6px;
+  --orb-r-md: 8px;
+  --orb-r-lg: 12px;
+}
+
+/* ---- LIGHT (3DEXPERIENCE-aligned) ---- */
+.orb-app[data-theme="light"] {
+  --orb-bg: #f4f6f8;
+  --orb-bg-elev: #ffffff;
+  --orb-bg-sunk: #eef1f4;
+  --orb-bg-hov: #e9eef3;
+  --orb-bg-sel: #e0ecf5;
+
+  --orb-border: #dbe2e8;
+  --orb-border-strong: #b6c1cc;
+  --orb-rule: #e5eaef;
+
+  --orb-fg: #1a2733;
+  --orb-fg-muted: #4a5a6a;
+  --orb-fg-dim: #7a8896;
+  --orb-fg-faint: #a8b3bf;
+
+  /* Accent = 3DS blue */
+  --orb-accent: #005386;
+  --orb-accent-bg: #1f7aaf;
+  --orb-accent-fg: #ffffff;
+
+  /* semantic — Dassault uses blue-leaning hues, less saturated */
+  --orb-info: #1f7aaf;
+  --orb-info-bg: #e6f1f9;
+  --orb-info-fg: #0d4a78;
+
+  --orb-ok: #2b8a3e;
+  --orb-ok-bg: #e7f3ea;
+  --orb-ok-fg: #1c5f2b;
+
+  --orb-warn: #c47a14;
+  --orb-warn-bg: #fcf2dc;
+  --orb-warn-fg: #7d4a05;
+
+  --orb-err: #c4423a;
+  --orb-err-bg: #fae9e7;
+  --orb-err-fg: #8e2820;
+
+  --orb-purple: #6b47b8;
+  --orb-purple-bg: #efeaf8;
+  --orb-purple-fg: #4a2f8e;
+
+  --orb-shadow-sm: 0 1px 0 rgba(28, 43, 74, 0.04),
+    0 1px 2px rgba(28, 43, 74, 0.06);
+  --orb-shadow-md: 0 2px 6px rgba(28, 43, 74, 0.07),
+    0 8px 20px rgba(28, 43, 74, 0.08);
+  --orb-shadow-lg: 0 12px 40px rgba(28, 43, 74, 0.16),
+    0 4px 12px rgba(28, 43, 74, 0.08);
+}
+
+/* ---- DARK (3DX dark — navy-tinted, not pure black) ---- */
+.orb-app[data-theme="dark"] {
+  --orb-bg: #0f1a2e;
+  --orb-bg-elev: #15233d;
+  --orb-bg-sunk: #0a1426;
+  --orb-bg-hov: #1c2c4a;
+  --orb-bg-sel: #243759;
+
+  --orb-border: #233454;
+  --orb-border-strong: #345078;
+  --orb-rule: #1a2842;
+
+  --orb-fg: #eef3f8;
+  --orb-fg-muted: #9eb1c6;
+  --orb-fg-dim: #6c81a0;
+  --orb-fg-faint: #45587a;
+
+  --orb-accent: #00aeef;
+  --orb-accent-bg: #00aeef;
+  --orb-accent-fg: #0f1a2e;
+
+  --orb-info: #6ea2ff;
+  --orb-info-bg: #15233f;
+  --orb-info-fg: #a8c4ff;
+
+  --orb-ok: #4ec38a;
+  --orb-ok-bg: #14271e;
+  --orb-ok-fg: #82dbac;
+
+  --orb-warn: #e3a14a;
+  --orb-warn-bg: #2d2113;
+  --orb-warn-fg: #f3c280;
+
+  --orb-err: #ef6a60;
+  --orb-err-bg: #2c1614;
+  --orb-err-fg: #f59a92;
+
+  --orb-purple: #a78bef;
+  --orb-purple-bg: #221a3a;
+  --orb-purple-fg: #c6b3ff;
+
+  --orb-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+  --orb-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4),
+    0 12px 28px rgba(0, 0, 0, 0.5);
+  --orb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- DENSITY ---- */
+.orb-app[data-density="cozy"] {
+  --orb-row-h: 36px;
+  --orb-pad: 18px;
+  --orb-fs-xs: 12px;
+  --orb-fs-sm: 13px;
+  --orb-fs-md: 14px;
+  --orb-fs-lg: 16px;
+}
+.orb-app[data-density="dense"] {
+  --orb-row-h: 26px;
+  --orb-pad: 11px;
+  --orb-fs-xs: 10px;
+  --orb-fs-sm: 11px;
+  --orb-fs-md: 12px;
+  --orb-fs-lg: 14px;
+}
+
+/* ---- TYPE / RESET inside artboards ---- */
+.orb-app {
+  font-family: var(--orb-font-sans);
+  font-size: var(--orb-fs-md);
+  color: var(--orb-fg);
+  background: var(--orb-bg);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.005em;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.orb-app * {
+  box-sizing: border-box;
+}
+.orb-app .orb-mono {
+  font-family: var(--orb-font-mono);
+  font-feature-settings: normal;
+}
+
+/* tabular numerics everywhere — this is a data app */
+.orb-app,
+.orb-app input,
+.orb-app button,
+.orb-app textarea {
+  font-variant-numeric: tabular-nums;
+}
+
+/* scrollbars */
+.orb-app .orb-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.orb-app .orb-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.orb-app .orb-scroll::-webkit-scrollbar-thumb {
+  background: var(--orb-border);
+  border-radius: 4px;
+}
+.orb-app .orb-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--orb-border-strong);
+}
+
+/* ----- atoms ----- */
+.orb-app .orb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-border);
+  font-size: var(--orb-fs-xs);
+  font-weight: 500;
+  color: var(--orb-fg-muted);
+  white-space: nowrap;
+}
+.orb-app .orb-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.orb-app .orb-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.orb-app .orb-status .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.orb-app .orb-status--stored {
+  color: var(--orb-fg-dim);
+  background: var(--orb-bg-sunk);
+}
+.orb-app .orb-status--extracting {
+  color: var(--orb-info-fg);
+  background: var(--orb-info-bg);
+}
+.orb-app .orb-status--extracted {
+  color: var(--orb-info-fg);
+  background: var(--orb-info-bg);
+}
+.orb-app .orb-status--semantic {
+  color: var(--orb-purple-fg);
+  background: var(--orb-purple-bg);
+}
+.orb-app .orb-status--review {
+  color: var(--orb-warn-fg);
+  background: var(--orb-warn-bg);
+}
+.orb-app .orb-status--validated {
+  color: var(--orb-ok-fg);
+  background: var(--orb-ok-bg);
+}
+.orb-app .orb-status--rejected {
+  color: var(--orb-err-fg);
+  background: var(--orb-err-bg);
+}
+.orb-app .orb-status--failed {
+  color: var(--orb-err-fg);
+  background: var(--orb-err-bg);
+}
+.orb-app .orb-status--duplicate {
+  color: var(--orb-fg-muted);
+  background: var(--orb-bg-hov);
+}
+
+.orb-app .orb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--orb-r-sm);
+  background: var(--orb-bg-elev);
+  border: 1px solid var(--orb-border);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  font-weight: 500;
+  color: var(--orb-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, transform 0.06s;
+}
+.orb-app .orb-btn:hover {
+  background: var(--orb-bg-hov);
+}
+.orb-app .orb-btn:active {
+  transform: translateY(0.5px);
+}
+.orb-app .orb-btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.orb-app .orb-btn--primary {
+  background: var(--orb-accent-bg);
+  color: var(--orb-accent-fg);
+  border-color: var(--orb-accent-bg);
+}
+.orb-app .orb-btn--primary:hover {
+  background: var(--orb-accent);
+  border-color: var(--orb-accent);
+}
+.orb-app .orb-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.orb-app .orb-btn--ghost:hover {
+  background: var(--orb-bg-hov);
+}
+.orb-app .orb-btn--danger {
+  background: var(--orb-err);
+  color: white;
+  border-color: var(--orb-err);
+}
+.orb-app .orb-btn--xs {
+  height: 22px;
+  padding: 0 7px;
+  font-size: var(--orb-fs-xs);
+  border-radius: var(--orb-r-xs);
+}
+.orb-app .orb-btn--icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.orb-app .orb-input {
+  height: 28px;
+  padding: 0 9px;
+  background: var(--orb-bg-elev);
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-sm);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  width: 100%;
+}
+.orb-app .orb-input:focus {
+  border-color: var(--orb-border-strong);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--orb-fg) 8%, transparent);
+}
+.orb-app .orb-input::placeholder {
+  color: var(--orb-fg-faint);
+}
+
+.orb-app .orb-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-border);
+  border-bottom-width: 2px;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  color: var(--orb-fg-muted);
+  line-height: 1.2;
+}
+
+.orb-app .orb-card {
+  background: var(--orb-bg-elev);
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-md);
+}
+
+.orb-app .orb-rule {
+  height: 1px;
+  background: var(--orb-rule);
+}
+.orb-app .orb-vrule {
+  width: 1px;
+  background: var(--orb-rule);
+  align-self: stretch;
+}
+
+.orb-app .orb-section-h {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--orb-fg-dim);
+  font-family: var(--orb-font-mono);
+}
+
+.orb-app .orb-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--orb-rule);
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .orb-meta-row .k {
+  color: var(--orb-fg-dim);
+  width: 110px;
+  flex: 0 0 110px;
+  font-family: var(--orb-font-mono);
+  font-size: var(--orb-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.orb-app .orb-meta-row .v {
+  color: var(--orb-fg);
+  flex: 1;
+  word-break: break-all;
+}
+
+/* ============================================================
+   3DEXPERIENCE chrome — top bar + icon rail
+   Used to wrap top-level artboards so they read as a 3DX app.
+   ============================================================ */
+.orb-app .dx-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 44px 1fr;
+  background: var(--orb-bg);
+  color: var(--orb-fg);
+  font-family: var(--orb-font-sans);
+}
+.orb-app .dx-topbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  background: var(--orb-bg-elev);
+  border-bottom: 1px solid var(--orb-border);
+  height: 44px;
+}
+.orb-app .dx-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.orb-app .dx-brand-logo {
+  width: 26px;
+  height: 26px;
+  background: var(--dx-blue);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex: 0 0 auto;
+}
+.orb-app .dx-brand-logo svg {
+  width: 16px;
+  height: 16px;
+}
+.orb-app .dx-brand-name {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  color: var(--orb-fg);
+}
+.orb-app .dx-brand-sep {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--orb-fg-faint);
+  margin: 0 4px;
+  flex: 0 0 auto;
+}
+.orb-app .dx-brand-crumb {
+  font-size: 12.5px;
+  color: var(--orb-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.orb-app .dx-brand-crumb .dim {
+  color: var(--orb-fg-dim);
+}
+.orb-app .dx-topbar-center {
+  display: flex;
+  justify-content: center;
+}
+.orb-app .dx-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orb-app .dx-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--orb-ok-bg);
+  color: var(--orb-ok-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.orb-app .dx-status-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--orb-ok);
+}
+.orb-app .dx-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--orb-fg-muted);
+  cursor: pointer;
+}
+.orb-app .dx-icon-btn:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+}
+.orb-app .dx-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.orb-app .dx-nav {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.orb-app .dx-navbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  border-radius: var(--orb-r-sm);
+  cursor: pointer;
+}
+.orb-app .dx-navbtn:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+}
+.orb-app .dx-navbtn.is-active {
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg);
+}
+
+.orb-app .dx-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--orb-bg-sel);
+  border: 1px solid var(--orb-border);
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--orb-fg-muted);
+}
+
+.orb-app .dx-body {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  min-height: 0;
+}
+.orb-app .dx-rail {
+  background: var(--dx-rail-bg);
+  border-right: 1px solid var(--dx-rail-border);
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+.orb-app[data-theme="dark"] .dx-rail {
+  background: var(--orb-bg-sunk);
+  border-right-color: var(--orb-border);
+}
+.orb-app .dx-rail-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: var(--orb-fg-dim);
+  position: relative;
+}
+.orb-app .dx-rail-btn:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg-muted);
+}
+.orb-app .dx-rail-btn.is-active {
+  color: var(--dx-cyan);
+  background: var(--dx-cyan-soft);
+}
+.orb-app[data-theme="dark"] .dx-rail-btn.is-active {
+  background: rgba(0, 174, 239, 0.14);
+}
+.orb-app .dx-rail-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.orb-app .dx-rail-divider {
+  width: 22px;
+  height: 1px;
+  background: var(--dx-rail-border);
+  margin: 6px 0;
+}
+.orb-app .dx-rail-spacer {
+  flex: 1;
+}
+
+.orb-app .dx-content {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* PR 1 placeholder — replaced by ReviewWorkspace in PR 2 */
+.orb-app .dx-placeholder {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 32px;
+  color: var(--orb-fg-muted);
+  text-align: center;
+  gap: 12px;
+}
+.orb-app .dx-placeholder h2 {
+  margin: 0;
+  font-size: var(--orb-fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--orb-fg);
+}
+.orb-app .dx-placeholder p {
+  margin: 0;
+  font-size: var(--orb-fs-sm);
+  max-width: 480px;
+  line-height: 1.55;
+}
+.orb-app .dx-placeholder .orb-kbd-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* honor reduced-motion globally */
+@media (prefers-reduced-motion: reduce) {
+  .orb-app *,
+  .orb-app *::before,
+  .orb-app *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
