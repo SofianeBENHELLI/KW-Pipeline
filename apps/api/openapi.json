@@ -6643,6 +6643,64 @@
         "summary": "Reject Version"
       }
     },
+    "/documents/{document_id}/versions/{version_id}/reset_to_review": {
+      "post": {
+        "description": "Demote a VALIDATED or REJECTED version back to NEEDS_REVIEW.\n\nManual reviewer-override path so an operator can re-open a\npreviously-validated or previously-rejected version when new\ninformation surfaces. The FSM edges\n(VALIDATED → NEEDS_REVIEW, REJECTED → NEEDS_REVIEW) live in\n:data:`ALLOWED_TRANSITIONS`; the audit event\n``review.demoted`` records the actor + note.",
+        "operationId": "reset_version_to_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Version To Review"
+      }
+    },
     "/documents/{document_id}/versions/{version_id}/retry-extraction": {
       "post": {
         "description": "Retry extraction for a previously-FAILED version (#87, ADR-006 PR-2).\n\nReturns the fresh ``RawExtraction`` (200) on success in inline\nmode, an :class:`ExtractionJobSnapshot` (202) in async mode, or\n``422`` with the new failure reason on an inline re-fail. ``404``\nif the version doesn't exist, ``409`` if the version isn't in\n``FAILED`` (review states stay frozen — retry never bypasses the\ngate), ``503`` if the async queue is full.",

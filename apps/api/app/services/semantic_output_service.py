@@ -283,13 +283,15 @@ class SemanticOutputService:
         self,
         document_id: str,
         version_id: str,
-        status: Literal["validated", "rejected"],
+        status: Literal["validated", "rejected", "needs_review"],
     ) -> SemanticDocument:
         """Update the persisted SemanticDocument to reflect a reviewer's decision.
 
         The DocumentVersion lifecycle status is updated separately via
-        ``DocumentService.mark_validated/mark_rejected``; this method keeps the
-        persisted semantic JSON's ``validation_status`` in sync."""
+        ``DocumentService.mark_validated/mark_rejected/mark_demoted_to_review``;
+        this method keeps the persisted semantic JSON's ``validation_status``
+        in sync. ``"needs_review"`` covers the demote path
+        (VALIDATED/REJECTED → NEEDS_REVIEW)."""
         semantic = self.get(document_id=document_id, version_id=version_id)
         semantic.validation_status = status
         self.documents.catalog.save_semantic_document(version_id, semantic)

@@ -1,6 +1,6 @@
 /**
- * useFsmTransition — gated wrapper around the four version-level FSM
- * actions (extract / semantic / validate / reject).
+ * useFsmTransition — gated wrapper around the version-level FSM
+ * actions (extract / semantic / validate / reject / demote).
  *
  * Each action checks the version's current `status` against the `from`
  * set the design handoff §3.5 calls out, fires the matching client
@@ -11,6 +11,11 @@
  * The hook does NOT trigger a refetch — the consuming page does that
  * via the `onAfter` callback (typically `useDocumentDetail.refetch`).
  * Decoupled so this hook stays a pure dispatch helper.
+ *
+ * The `demote` action drives a previously-VALIDATED or
+ * previously-REJECTED version back to NEEDS_REVIEW so the operator
+ * can re-open the file when new information surfaces (#435 — backend
+ * `POST /reset_to_review`).
  */
 
 import { useState } from "react";
@@ -20,10 +25,16 @@ import {
   extractVersion,
   generateSemantic,
   rejectVersion,
+  resetVersionToReview,
   validateVersion,
 } from "../../api/client";
 
-export type FsmAction = "extract" | "semantic" | "validate" | "reject";
+export type FsmAction =
+  | "extract"
+  | "semantic"
+  | "validate"
+  | "reject"
+  | "demote";
 
 export type FsmStatus = "idle" | "running" | "ok" | "error";
 
@@ -32,6 +43,8 @@ export interface FsmGates {
   semantic: boolean;
   validate: boolean;
   reject: boolean;
+  /** True when the current status is VALIDATED or REJECTED. */
+  demote: boolean;
 }
 
 /** Compute which FSM buttons are enabled for the given current status. */
@@ -39,10 +52,9 @@ export function computeGates(status: string | null | undefined): FsmGates {
   return {
     extract: status === "STORED" || status === "FAILED",
     semantic: status === "EXTRACTED",
-    validate:
-      status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
-    reject:
-      status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
+    validate: status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
+    reject: status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
+    demote: status === "VALIDATED" || status === "REJECTED",
   };
 }
 
@@ -52,7 +64,7 @@ export interface UseFsmTransitionResult {
   activeAction: FsmAction | null;
   error: Error | null;
   gates: FsmGates;
-  /** Dispatch one of the four actions. */
+  /** Dispatch one of the FSM actions. */
   run: (action: FsmAction, reviewerNote?: string) => Promise<void>;
 }
 
@@ -91,6 +103,8 @@ export function useFsmTransition(
         await validateVersion(documentId, versionId, reviewerNote);
       } else if (action === "reject") {
         await rejectVersion(documentId, versionId, reviewerNote);
+      } else if (action === "demote") {
+        await resetVersionToReview(documentId, versionId, reviewerNote);
       }
       setStatus("ok");
       onAfter?.(action);

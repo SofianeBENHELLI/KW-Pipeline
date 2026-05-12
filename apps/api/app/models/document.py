@@ -110,11 +110,23 @@ ALLOWED_TRANSITIONS: dict[DocumentVersionStatus, frozenset[DocumentVersionStatus
     # versions are no longer in motion.
     DocumentVersionStatus.DUPLICATE_DETECTED: frozenset({DocumentVersionStatus.PURGED}),
     # ADR-025: VALIDATED → SUPERSEDED is the only legal exit edge,
-    # plus ADR-027 § 3's terminal → PURGED transition.
+    # plus ADR-027 § 3's terminal → PURGED transition. The reviewer
+    # demote path (VALIDATED → NEEDS_REVIEW) was added so operators
+    # can re-open a previously-validated version when new information
+    # surfaces — every demote lands a ``review.demoted`` audit row
+    # carrying the actor + reason.
     DocumentVersionStatus.VALIDATED: frozenset(
-        {DocumentVersionStatus.SUPERSEDED, DocumentVersionStatus.PURGED}
+        {
+            DocumentVersionStatus.NEEDS_REVIEW,
+            DocumentVersionStatus.SUPERSEDED,
+            DocumentVersionStatus.PURGED,
+        }
     ),
-    DocumentVersionStatus.REJECTED: frozenset({DocumentVersionStatus.PURGED}),
+    # REJECTED can also be re-opened if the original rejection
+    # turns out to be wrong — same audit-event contract as VALIDATED.
+    DocumentVersionStatus.REJECTED: frozenset(
+        {DocumentVersionStatus.NEEDS_REVIEW, DocumentVersionStatus.PURGED}
+    ),
     DocumentVersionStatus.SUPERSEDED: frozenset({DocumentVersionStatus.PURGED}),
     # ADR-006 PR-2: a FAILED version can be re-queued (async retry) in
     # addition to the original direct ``FAILED → EXTRACTING`` retry path.

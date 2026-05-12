@@ -39,6 +39,8 @@ const DISABLED_REASONS: Record<FsmAction, string> = {
     "Available only when the version is in NEEDS_REVIEW or SEMANTIC_READY.",
   reject:
     "Available only when the version is in NEEDS_REVIEW or SEMANTIC_READY.",
+  demote:
+    "Re-open is available only on a VALIDATED or REJECTED version — drives it back to NEEDS_REVIEW.",
 };
 
 export function FsmActions({
@@ -102,6 +104,31 @@ export function FsmActions({
         >
           {inflight("validate") ? "Validating…" : "Validate"}
         </Btn>
+      </div>
+
+      {/* Demote button is only meaningful when the version is in a
+          terminal review state (VALIDATED / REJECTED). Render it as
+          a separate row so the prominent forward actions stay tidy
+          and the operator can see at a glance that the version is
+          re-openable. The button stays mounted but disabled when
+          the gate is closed so the affordance discoverability is
+          consistent across statuses. */}
+      <div className="kf-fsm__demote">
+        <Btn
+          kind="ghost"
+          icon={OrbI.refresh}
+          xs
+          disabled={!gates.demote || status === "running"}
+          onClick={() => onRun("demote", note || undefined)}
+          title={buttonTitle("demote")}
+          aria-busy={inflight("demote")}
+          data-testid="kf-fsm-demote"
+        >
+          {inflight("demote") ? "Re-opening…" : "Re-open for review"}
+        </Btn>
+        <span className="kf-fsm__demote-hint orb-mono">
+          demote VALIDATED or REJECTED → NEEDS_REVIEW
+        </span>
       </div>
 
       <textarea

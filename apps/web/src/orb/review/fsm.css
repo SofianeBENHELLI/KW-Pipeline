@@ -79,6 +79,19 @@
   color: var(--orb-err-fg);
   font-size: var(--orb-fs-sm);
 }
+.orb-app .kf-fsm__demote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--orb-rule);
+}
+.orb-app .kf-fsm__demote-hint {
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  letter-spacing: 0.04em;
+}
 
 /* ── Document detail / Versions ──────────────────────────────── */
 

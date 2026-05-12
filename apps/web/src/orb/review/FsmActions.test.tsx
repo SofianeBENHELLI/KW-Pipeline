@@ -8,10 +8,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FsmActions } from "./FsmActions";
 
-const ALL_OFF = { extract: false, semantic: false, validate: false, reject: false };
+const ALL_OFF = {
+  extract: false,
+  semantic: false,
+  validate: false,
+  reject: false,
+  demote: false,
+};
 
 describe("<FsmActions />", () => {
-  it("renders all four buttons even when disabled", () => {
+  it("renders all five buttons even when disabled", () => {
     render(
       <FsmActions
         gates={ALL_OFF}
@@ -25,6 +31,28 @@ describe("<FsmActions />", () => {
     expect(screen.getByTestId("kf-fsm-semantic")).toBeDisabled();
     expect(screen.getByTestId("kf-fsm-validate")).toBeDisabled();
     expect(screen.getByTestId("kf-fsm-reject")).toBeDisabled();
+    expect(screen.getByTestId("kf-fsm-demote")).toBeDisabled();
+  });
+
+  it("the demote button enables when the gate opens (VALIDATED / REJECTED)", () => {
+    const onRun = vi.fn();
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, demote: true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={onRun}
+      />,
+    );
+    const button = screen.getByTestId("kf-fsm-demote");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveTextContent(/Re-open for review/);
+    fireEvent.change(screen.getByLabelText("Reviewer note"), {
+      target: { value: "second look" },
+    });
+    fireEvent.click(button);
+    expect(onRun).toHaveBeenCalledWith("demote", "second look");
   });
 
   it("clicking Validate fires onRun with the typed reviewer note", () => {

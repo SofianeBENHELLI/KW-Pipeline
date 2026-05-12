@@ -403,6 +403,56 @@ class DocumentService:
             actor=actor,
         )
 
+    def mark_demoted_to_review(
+        self,
+        document_id: str,
+        version_id: str,
+        reviewer_note: str | None = None,
+        *,
+        actor: str | None = None,
+    ) -> DocumentVersion:
+        """Demote a VALIDATED or REJECTED version back to NEEDS_REVIEW.
+
+        Adds the reviewer override path (#435 / Knowledge Forge cutover):
+        a previously-validated or previously-rejected version can be
+        re-opened for review when new information surfaces. The FSM
+        edges (VALIDATED → NEEDS_REVIEW, REJECTED → NEEDS_REVIEW) are
+        defined in :data:`ALLOWED_TRANSITIONS`; ``assert_transition``
+        enforces them at write time.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4) and
+        lands on the ``review.demoted`` audit event so "who re-opened
+        doc X" is a SQL filter on the audit table.
+
+        Raises:
+            IllegalTransition: when the version is not currently
+                VALIDATED or REJECTED.
+        """
+        version = self.catalog.get_version(
+            document_id=document_id, version_id=version_id
+        )
+        assert_transition(version.status, DocumentVersionStatus.NEEDS_REVIEW)
+        previous = version.status
+        updated = self.catalog.update_version_review(
+            document_id=document_id,
+            version_id=version_id,
+            status=DocumentVersionStatus.NEEDS_REVIEW,
+            reviewer_note=reviewer_note,
+            reviewed_at=datetime.now(UTC),
+        )
+        _log_status_changed(updated, previous=previous)
+        log.info(
+            "review.demoted",
+            extra={
+                "document_id": document_id,
+                "version_id": version_id,
+                "previous_status": previous.value,
+                "reviewer_note": reviewer_note,
+                "actor": actor,
+            },
+        )
+        return updated
+
     def mark_superseded(
         self,
         document_id: str,

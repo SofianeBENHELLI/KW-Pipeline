@@ -892,6 +892,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/versions/{version_id}/reset_to_review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Version To Review
+         * @description Demote a VALIDATED or REJECTED version back to NEEDS_REVIEW.
+         *
+         *     Manual reviewer-override path so an operator can re-open a
+         *     previously-validated or previously-rejected version when new
+         *     information surfaces. The FSM edges
+         *     (VALIDATED → NEEDS_REVIEW, REJECTED → NEEDS_REVIEW) live in
+         *     :data:`ALLOWED_TRANSITIONS`; the audit event
+         *     ``review.demoted`` records the actor + note.
+         */
+        post: operations["reset_version_to_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/retry-extraction": {
         parameters: {
             query?: never;
@@ -5373,6 +5400,42 @@ export interface operations {
         };
     };
     reject_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SemanticDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_version_to_review: {
         parameters: {
             query?: never;
             header?: never;
