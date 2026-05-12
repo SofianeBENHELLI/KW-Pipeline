@@ -24,6 +24,16 @@ dependencies = [
   # never called in the default suite. Refuses to construct without
   # `GEMINI_API_KEY`, so this dep is dormant unless a deployment opts in.
   "google-genai>=0.3",
+  # `instructor` (MIT) wraps the Anthropic / Gemini SDKs to enforce a
+  # Pydantic `response_model` on every structured-output call: it
+  # generates the JSON schema from the model, parses the tool result
+  # back into Pydantic, and re-prompts on validation failure. Used by
+  # `TopicExtractor` (#438) — the legacy `LLMClient.complete_with_tool`
+  # path stays in place for entity / claim extractors until they
+  # migrate in their own follow-up PRs. instructor patches the
+  # underlying SDK clients we already pull (`anthropic`, `google-genai`)
+  # — no extra HTTP stack.
+  "instructor>=1.7",
   # Bolt driver for the optional knowledge layer (ADR-012). Tiny package;
   # `Neo4jGraphStore` is lazy-imported, so unit tests against the in-memory
   # fake do not exercise it. The driver is dormant until KW_NEO4J_URI is set.
