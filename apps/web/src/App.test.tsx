@@ -7,10 +7,14 @@ import type { ApiDocument, ListDocumentsResponse } from "./api/types";
 
 // Wrap the App in a MemoryRouter so the top-level <Routes> tree
 // added in D.9 has a routing context. ``initialEntries=["/"]`` keeps
-// every legacy test on the reviewer workbench (catch-all route).
+// every legacy test on the reviewer workbench. Since the cutover (PR
+// flipping `/` to `/kf/review`), the legacy surface lives at
+// /legacy/* — this helper points there so the existing assertions
+// keep validating the legacy code path. New surfaces have their own
+// tests under src/orb/.
 function renderApp() {
   return render(
-    <MemoryRouter initialEntries={["/"]}>
+    <MemoryRouter initialEntries={["/legacy"]}>
       <App />
     </MemoryRouter>,
   );

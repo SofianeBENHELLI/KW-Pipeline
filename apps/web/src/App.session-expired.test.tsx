@@ -113,11 +113,12 @@ function renderApp(): void {
   // The provider + router are wired in main.tsx; tests have to wrap
   // manually because they bypass the bootstrapper. ``MemoryRouter``
   // gives the top-level <Routes> tree (added in D.9) its required
-  // routing context — every test stays on the catch-all reviewer
-  // workbench at "/" because the legacy assertions target it.
+  // routing context. Since the Knowledge Forge cutover, the legacy
+  // reviewer lives at /legacy/* — we point the test there so the
+  // session-expired assertions keep validating the legacy code path.
   render(
     <SessionGuardProvider>
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={["/legacy"]}>
         <App />
       </MemoryRouter>
     </SessionGuardProvider>,
