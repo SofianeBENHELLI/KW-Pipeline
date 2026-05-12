@@ -25,7 +25,9 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
+import { LinkedView } from "./LinkedView";
 import "./review.css";
+import "./linked.css";
 import { latestStatus } from "./format";
 import { useDocumentDetail } from "../hooks/useDocumentDetail";
 import { useDocuments, type RailView } from "../hooks/useDocuments";
@@ -197,12 +199,11 @@ export function ReviewWorkspace({
         <DocTabs active={tab} onChange={setTab} />
 
         {tab === "linked" && (
-          <div className="kf-tab-placeholder" data-testid="kf-tab-linked">
-            <h3>Linked view</h3>
-            <p>
-              Document spans ↔ Topics / Entities / Chunks cross-highlight
-              ships in PR 3 of the redesign.
-            </p>
+          <div data-testid="kf-tab-linked">
+            <LinkedView
+              documentId={params.docId ?? null}
+              filename={activeDoc?.original_filename}
+            />
           </div>
         )}
         {tab === "review" && (

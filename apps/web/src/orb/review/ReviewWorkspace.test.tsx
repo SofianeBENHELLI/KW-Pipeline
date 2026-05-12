@@ -95,6 +95,21 @@ describe("<ReviewWorkspace />", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (input: RequestInfo | URL): Promise<Response> => {
         const url = urlOf(input);
+        if (url.match(/\/documents\/doc-a\/graph$/)) {
+          // Linked View hits this on tab=linked. Return an empty
+          // projection so the panel renders the empty state instead of
+          // throwing on undefined nodes.
+          return Promise.resolve(
+            makeJsonResponse({
+              document_id: "doc-a",
+              version_id: "ver-a",
+              generated_at: "2026-05-12T09:00:00Z",
+              schema_version: "v0.2",
+              nodes: [],
+              edges: [],
+            }),
+          );
+        }
         if (url.match(/\/documents\/doc-a$/)) {
           return Promise.resolve(makeJsonResponse(DOC_A));
         }

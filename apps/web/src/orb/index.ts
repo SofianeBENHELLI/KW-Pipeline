@@ -77,3 +77,16 @@ export {
   scopeKindToChipScope,
   splitIsoTimestamp,
 } from "./review/format";
+
+// PR 3 — Linked View
+export { LinkedView } from "./review/LinkedView";
+export type { LinkedViewProps, ObjKind } from "./review/LinkedView";
+export { useLinkedObjects, projectGraph } from "./hooks/useLinkedObjects";
+export type {
+  LinkedChunk,
+  LinkedEntity,
+  LinkedObjects,
+  LinkedObjectsStatus,
+  LinkedTopic,
+  UseLinkedObjectsResult,
+} from "./hooks/useLinkedObjects";
