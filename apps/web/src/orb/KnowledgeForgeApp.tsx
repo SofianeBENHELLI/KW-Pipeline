@@ -21,6 +21,8 @@ import { Kbd } from "./atoms/Kbd";
 import { CatalogView } from "./catalog/CatalogView";
 import { GraphView } from "./graph/GraphView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
+import { ChatPanel } from "./search/ChatPanel";
+import { SearchPanel } from "./search/SearchPanel";
 import { DxShell } from "./shell/DxShell";
 
 import "./tokens.css";
@@ -73,8 +75,8 @@ export function KnowledgeForgeApp({
         {/* Stubs for PRs 5-8 so the top-bar nav doesn't 404. */}
         <Route path="catalog/*" element={<CatalogView />} />
         <Route path="graph/*" element={<GraphView />} />
-        <Route path="search/*" element={<ComingSoon title="Search" />} />
-        <Route path="chat/*" element={<ComingSoon title="Chat" />} />
+        <Route path="search/*" element={<SearchPanel />} />
+        <Route path="chat/*" element={<ChatPanel />} />
         <Route path="admin/*" element={<ComingSoon title="Admin" />} />
         <Route path="settings/*" element={<ComingSoon title="Settings" />} />
         <Route path="*" element={<ComingSoon title="Knowledge Forge" />} />

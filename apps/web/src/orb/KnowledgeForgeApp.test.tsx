@@ -90,9 +90,22 @@ describe("<KnowledgeForgeApp />", () => {
       ).toBeInTheDocument();
       unmount();
     }
+    // /kf/search and /kf/chat render the real panels since PR 7.
+    {
+      const { unmount } = renderAt("/kf/search");
+      expect(
+        screen.getByRole("heading", { name: "Search" }),
+      ).toBeInTheDocument();
+      unmount();
+    }
+    {
+      const { unmount } = renderAt("/kf/chat");
+      expect(
+        screen.getByRole("heading", { name: "Chat" }),
+      ).toBeInTheDocument();
+      unmount();
+    }
     for (const [path, expectedTitle] of [
-      ["/kf/search", /Search/],
-      ["/kf/chat", /Chat/],
       ["/kf/admin", /Admin/],
       ["/kf/settings", /Settings/],
     ] as const) {
