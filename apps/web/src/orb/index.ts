@@ -137,3 +137,23 @@ export type {
   BatchStage,
   UseBatchPipelineResult,
 } from "./hooks/useBatchPipeline";
+
+// PR 5 — Catalog + banners
+export { CatalogTable, ALL_COLUMNS } from "./catalog/CatalogTable";
+export type {
+  CatalogTableProps,
+  ColumnDef,
+  ColumnId,
+} from "./catalog/CatalogTable";
+export { CatalogView } from "./catalog/CatalogView";
+export {
+  BannerStack,
+  ForceAutoBanner,
+  DeepLinkErrorBanner,
+  SessionExpiredBanner,
+} from "./catalog/Banners";
+export type {
+  BannerStackProps,
+  ForceAutoBannerProps,
+  DeepLinkErrorBannerProps,
+} from "./catalog/Banners";

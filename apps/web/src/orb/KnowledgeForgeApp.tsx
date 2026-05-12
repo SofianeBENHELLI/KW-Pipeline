@@ -18,6 +18,7 @@ import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { Kbd } from "./atoms/Kbd";
+import { CatalogView } from "./catalog/CatalogView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { DxShell } from "./shell/DxShell";
 
@@ -69,7 +70,7 @@ export function KnowledgeForgeApp({
         <Route path="review" element={<ReviewWorkspace />} />
         <Route path="review/:docId" element={<ReviewWorkspace />} />
         {/* Stubs for PRs 5-8 so the top-bar nav doesn't 404. */}
-        <Route path="catalog/*" element={<ComingSoon title="Catalog" />} />
+        <Route path="catalog/*" element={<CatalogView />} />
         <Route path="graph/*" element={<ComingSoon title="Graph" />} />
         <Route path="search/*" element={<ComingSoon title="Search" />} />
         <Route path="chat/*" element={<ComingSoon title="Chat" />} />
