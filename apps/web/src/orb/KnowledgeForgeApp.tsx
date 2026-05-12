@@ -3,33 +3,33 @@
  *
  * Internal codename: Orbital. User-visible product: **Knowledge Forge**.
  *
- * PR 1 ships the chrome only — top bar, icon rail, and a placeholder
- * panel announcing the redesign. Subsequent PRs replace `<Placeholder>`
- * with the real workspace tree:
- *   PR 2 — `/kf/review`, `/kf/review/:docId`
- *   PR 3 — Linked View tab inside `/kf/review/:docId`
- *   PR 4 — Review + Pipeline tabs + batch operations
- *   PR 5 — `/kf/catalog`
- *   PR 6 — `/kf/graph`
- *   PR 7 — `/kf/search`, `/kf/chat`
- *   PR 8 — `/kf/admin/*`, `/kf/settings`
+ * PR roadmap:
+ *   PR 1 — chrome only (DxShell + atoms + /kf placeholder).
+ *   PR 2 — Review Workspace skeleton at `/kf/review[/:docId]` (this PR).
+ *   PR 3 — Linked View tab inside Review Workspace.
+ *   PR 4 — Review + Pipeline tabs + batch operations.
+ *   PR 5 — `/kf/catalog`.
+ *   PR 6 — `/kf/graph`.
+ *   PR 7 — `/kf/search`, `/kf/chat`.
+ *   PR 8 — `/kf/admin/*`, `/kf/settings`. Flips `/` redirect, narrows
+ *           the legacy catch-all, and deletes `features-orb/`.
  */
 import type { ReactElement } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 
 import { Kbd } from "./atoms/Kbd";
+import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { DxShell } from "./shell/DxShell";
 
 import "./tokens.css";
 
-function Placeholder(): ReactElement {
+function ComingSoon({ title }: { title: string }): ReactElement {
   return (
-    <div className="dx-placeholder">
-      <h2>Knowledge Forge — coming online</h2>
+    <div className="dx-placeholder" data-testid={`kf-coming-soon-${title.toLowerCase()}`}>
+      <h2>{title} — coming soon</h2>
       <p>
-        The reviewer workspace, knowledge graph, search, chat, and admin
-        surfaces ship in subsequent PRs. The shell, design tokens, and
-        atom library are wired and ready.
+        This surface ships in a later PR of the Knowledge Forge redesign.
+        For now the chrome is wired so deep links don&apos;t 404.
       </p>
       <div className="orb-kbd-row">
         <Kbd>R</Kbd>
@@ -64,9 +64,18 @@ export function KnowledgeForgeApp({
       }}
     >
       <Routes>
-        <Route index element={<Placeholder />} />
-        {/* PRs 2-8 register additional `/kf/*` routes here. */}
-        <Route path="*" element={<Placeholder />} />
+        {/* `/kf` opens straight on the Review Workspace once PR 2 lands. */}
+        <Route index element={<Navigate to="/kf/review" replace />} />
+        <Route path="review" element={<ReviewWorkspace />} />
+        <Route path="review/:docId" element={<ReviewWorkspace />} />
+        {/* Stubs for PRs 5-8 so the top-bar nav doesn't 404. */}
+        <Route path="catalog/*" element={<ComingSoon title="Catalog" />} />
+        <Route path="graph/*" element={<ComingSoon title="Graph" />} />
+        <Route path="search/*" element={<ComingSoon title="Search" />} />
+        <Route path="chat/*" element={<ComingSoon title="Chat" />} />
+        <Route path="admin/*" element={<ComingSoon title="Admin" />} />
+        <Route path="settings/*" element={<ComingSoon title="Settings" />} />
+        <Route path="*" element={<ComingSoon title="Knowledge Forge" />} />
       </Routes>
     </DxShell>
   );

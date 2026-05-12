@@ -37,3 +37,43 @@ export type { TopBarProps, TopNavTab } from "./shell/TopBar";
 
 export { KnowledgeForgeApp } from "./KnowledgeForgeApp";
 export type { KnowledgeForgeAppProps } from "./KnowledgeForgeApp";
+
+// PR 2 — Review Workspace
+export { ReviewWorkspace, sortDocs } from "./review/ReviewWorkspace";
+export type { ReviewWorkspaceProps } from "./review/ReviewWorkspace";
+export { DocRail, DEFAULT_VIEWS } from "./review/DocRail";
+export type {
+  DocRailProps,
+  RailSort,
+  RailSortColumn,
+  RailSortDir,
+  RailViewDef,
+} from "./review/DocRail";
+export { DocHeader } from "./review/DocHeader";
+export type { DocHeaderProps } from "./review/DocHeader";
+export { DocTabs } from "./review/DocTabs";
+export type { DocTab, DocTabsProps } from "./review/DocTabs";
+
+// PR 2 — hooks
+export { useDocuments, viewToStatuses } from "./hooks/useDocuments";
+export type {
+  RailView,
+  UseDocumentsOptions,
+  UseDocumentsResult,
+  UseDocumentsStatus,
+} from "./hooks/useDocuments";
+export { useDocumentDetail } from "./hooks/useDocumentDetail";
+export type {
+  DocumentDetailStatus,
+  UseDocumentDetailResult,
+} from "./hooks/useDocumentDetail";
+
+// PR 2 — formatters
+export {
+  distinctScopeKinds,
+  formatBytes,
+  latestStatus,
+  latestVersion,
+  scopeKindToChipScope,
+  splitIsoTimestamp,
+} from "./review/format";
