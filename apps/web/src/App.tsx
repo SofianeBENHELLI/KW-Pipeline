@@ -30,6 +30,15 @@ const OrbAdminHub = lazy(() =>
 const OrbAdminAudit = lazy(() =>
   import("./features-orb").then((m) => ({ default: m.OrbAdminAudit })),
 );
+// Knowledge Forge — full Orbital redesign. New route family `/kf/*`
+// lands incrementally over PRs 1-8; the legacy reviewer workbench
+// (catch-all `*`) keeps serving production until PR 8 flips the
+// default. Internal codename: Orbital. User-visible name: Knowledge
+// Forge — see `apps/web/src/orb/` and the design handoff in
+// /tmp/orbital-redesign for the full spec.
+const KnowledgeForgeApp = lazy(() =>
+  import("./orb").then((m) => ({ default: m.KnowledgeForgeApp })),
+);
 import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
 import { PurgeDialog } from "./features/purge/PurgeDialog";
@@ -453,6 +462,16 @@ export default function App() {
         element={
           <Suspense fallback={<div className="kw-loading">Loading audit log…</div>}>
             <OrbAdminAudit />
+          </Suspense>
+        }
+      />
+      {/* Knowledge Forge — full redesign per the design handoff. PR 1
+          ships chrome only; PR 8 flips this from opt-in to default. */}
+      <Route
+        path="/kf/*"
+        element={
+          <Suspense fallback={<div className="kw-loading">Loading Knowledge Forge…</div>}>
+            <KnowledgeForgeApp />
           </Suspense>
         }
       />
