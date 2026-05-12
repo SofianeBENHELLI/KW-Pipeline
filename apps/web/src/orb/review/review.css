@@ -1,0 +1,572 @@
+/* Knowledge Forge — Review Workspace styles.
+ *
+ * Scoped under .orb-app (PR 1's tokens.css owns the wrapper) so these
+ * rules can never leak onto the legacy reviewer workbench. The class
+ * prefix `kf-` (Knowledge Forge) replaces the prototype's `rwA-` to
+ * give the production tree its own grep-able namespace.
+ */
+
+/* ── Page shell ────────────────────────────────────────────────── */
+
+.orb-app .kf-review {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.orb-app .kf-review--rail-right {
+  grid-template-columns: 1fr 380px;
+}
+.orb-app .kf-review--rail-right .kf-rail {
+  order: 2;
+  border-left: 1px solid var(--orb-border);
+  border-right: 0;
+}
+
+.orb-app .kf-main {
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 22px;
+  overflow-y: auto;
+  background: var(--orb-bg);
+}
+
+.orb-app .kf-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 0;
+  margin-top: 14px;
+  border-top: 1px solid var(--orb-rule);
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-foot__spacer {
+  flex: 1;
+}
+
+/* ── Rail ──────────────────────────────────────────────────────── */
+
+.orb-app .kf-rail {
+  border-right: 1px solid var(--orb-border);
+  background: var(--orb-bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.orb-app .kf-rail__head {
+  padding: 10px;
+  border-bottom: 1px solid var(--orb-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--orb-bg);
+}
+
+.orb-app .kf-rail__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.orb-app .kf-rail__search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--orb-fg-dim);
+  display: inline-flex;
+  pointer-events: none;
+}
+.orb-app .kf-rail__search-input {
+  width: 100%;
+  height: 28px;
+  padding-left: 30px;
+  padding-right: 32px;
+  background: var(--orb-bg-elev);
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-sm);
+  font: inherit;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.orb-app .kf-rail__search-input:focus {
+  border-color: var(--orb-border-strong);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--orb-fg) 8%, transparent);
+}
+.orb-app .kf-rail__search-input::placeholder {
+  color: var(--orb-fg-faint);
+}
+.orb-app .kf-rail__search-kbd {
+  position: absolute;
+  right: 6px;
+  pointer-events: none;
+}
+
+.orb-app .kf-rail__views {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+}
+.orb-app .kf-rail__view {
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: var(--orb-r-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.orb-app .kf-rail__view:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+}
+.orb-app .kf-rail__view.is-active {
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg);
+}
+.orb-app .kf-rail__view-label {
+  display: block;
+  font-size: var(--orb-fs-sm);
+  font-weight: 500;
+}
+.orb-app .kf-rail__view-count {
+  display: block;
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  margin-top: 1px;
+}
+.orb-app .kf-rail__view.is-active .kf-rail__view-count {
+  color: var(--orb-fg-muted);
+}
+
+/* ── Batch bar ────────────────────────────────────────────────── */
+
+.orb-app .kf-rail__batchbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--orb-bg-sel);
+  border-bottom: 1px solid var(--orb-border);
+  gap: 8px;
+}
+.orb-app .kf-rail__batchbar-l {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orb-app .kf-rail__batchbar-count {
+  font-size: 11px;
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-rail__link {
+  background: none;
+  border: 0;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  padding: 0;
+}
+.orb-app .kf-rail__link:hover {
+  color: var(--orb-fg);
+}
+
+/* ── List header + count strip ────────────────────────────────── */
+
+.orb-app .kf-rail__listhead {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  gap: 8px;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--orb-rule);
+  background: var(--orb-bg-sunk);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.orb-app .kf-rail__sortbtn {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+}
+.orb-app .kf-rail__sortbtn:hover {
+  color: var(--orb-fg);
+  background: var(--orb-bg-hov);
+}
+.orb-app .kf-rail__sortbtn.is-on {
+  color: var(--orb-fg);
+}
+.orb-app .kf-rail__listcount {
+  padding: 4px 10px;
+  font-size: 9.5px;
+  color: var(--orb-fg-dim);
+  border-bottom: 1px solid var(--orb-rule);
+  background: var(--orb-bg);
+  letter-spacing: 0.04em;
+}
+.orb-app .kf-rail__listcount b {
+  color: var(--orb-fg);
+  font-weight: 600;
+}
+
+/* ── List + rows ──────────────────────────────────────────────── */
+
+/* Always-visible scrollbar so users know more rows exist past the
+ * fold (per design §3.2 — "Sticky scrollbar on the rail list."). */
+.orb-app .kf-rail__list {
+  flex: 1;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--orb-border-strong) transparent;
+}
+.orb-app .kf-rail__list::-webkit-scrollbar {
+  width: 10px;
+}
+.orb-app .kf-rail__list::-webkit-scrollbar-track {
+  background: var(--orb-bg-sunk);
+  border-left: 1px solid var(--orb-rule);
+}
+.orb-app .kf-rail__list::-webkit-scrollbar-thumb {
+  background: var(--orb-border-strong);
+  border-radius: 5px;
+  border: 2px solid var(--orb-bg-sunk);
+}
+.orb-app .kf-rail__list::-webkit-scrollbar-thumb:hover {
+  background: var(--orb-fg-dim);
+}
+
+.orb-app .kf-rail__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--orb-rule);
+  cursor: pointer;
+  transition: background 0.08s;
+  outline: none;
+}
+.orb-app .kf-rail__row:hover {
+  background: var(--orb-bg-hov);
+}
+.orb-app .kf-rail__row:focus-visible {
+  background: var(--orb-bg-hov);
+  box-shadow: inset 0 0 0 2px var(--orb-accent);
+}
+.orb-app .kf-rail__row.is-sel {
+  background: var(--orb-bg-sel);
+  box-shadow: inset 2px 0 0 var(--orb-fg);
+}
+
+.orb-app .kf-rail__check {
+  padding-top: 2px;
+  cursor: pointer;
+}
+.orb-app .kf-rail__checkbox {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid var(--orb-border-strong);
+  display: grid;
+  place-items: center;
+  color: transparent;
+}
+.orb-app .kf-rail__checkbox.is-on {
+  background: var(--orb-fg);
+  border-color: var(--orb-fg);
+  color: var(--orb-bg);
+}
+
+.orb-app .kf-rail__rowmain {
+  flex: 1;
+  min-width: 0;
+}
+.orb-app .kf-rail__fname {
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.orb-app .kf-rail__rowmeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-family: var(--orb-font-mono);
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  margin-top: 2px;
+}
+.orb-app .kf-rail__rowmeta .orb-chip {
+  font-family: var(--orb-font-sans);
+}
+
+.orb-app .kf-rail__rowuploaded {
+  flex: 0 0 96px;
+  padding-top: 1px;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  color: var(--orb-fg-muted);
+  line-height: 1.3;
+}
+.orb-app .kf-rail__up-day {
+  color: var(--orb-fg);
+  font-weight: 500;
+}
+.orb-app .kf-rail__up-time {
+  color: var(--orb-fg-dim);
+  font-size: 9.5px;
+}
+.orb-app .kf-rail__rowstatus {
+  flex: 0 0 96px;
+  padding-top: 1px;
+  text-align: right;
+}
+
+/* ── Empty / skeleton ──────────────────────────────────────────── */
+
+.orb-app .kf-rail__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  color: var(--orb-fg-muted);
+  text-align: center;
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .kf-rail__empty p {
+  margin: 0;
+}
+
+.orb-app .kf-rail__row--skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+.orb-app .kf-rail__skel {
+  background: linear-gradient(
+    90deg,
+    var(--orb-bg-sunk) 0%,
+    var(--orb-bg-hov) 50%,
+    var(--orb-bg-sunk) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 3px;
+  animation: kf-shimmer 1.6s ease-in-out infinite;
+}
+.orb-app .kf-rail__skel--bar {
+  width: 60%;
+  height: 11px;
+}
+.orb-app .kf-rail__skel--bar2 {
+  width: 40%;
+  height: 8px;
+  margin-top: 6px;
+}
+.orb-app .kf-rail__skel--col {
+  height: 22px;
+}
+@keyframes kf-shimmer {
+  0%,
+  100% {
+    background-position: 200% 0;
+  }
+  50% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-app .kf-rail__skel {
+    animation: none;
+  }
+}
+
+/* ── Doc header (main pane top strip) ──────────────────────────── */
+
+.orb-app .kf-doch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.orb-app .kf-doch--empty .kf-doch__title {
+  color: var(--orb-fg-muted);
+  font-style: italic;
+}
+
+.orb-app .kf-doch__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-doch__sep {
+  color: var(--orb-fg-faint);
+  display: inline-flex;
+}
+.orb-app .kf-doch__cur {
+  color: var(--orb-fg);
+}
+.orb-app .kf-doch__id {
+  color: var(--orb-fg-muted);
+}
+
+.orb-app .kf-doch__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 4px;
+}
+.orb-app .kf-doch__main {
+  min-width: 0;
+  flex: 1;
+}
+.orb-app .kf-doch__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--orb-fg);
+  word-break: break-word;
+}
+.orb-app .kf-doch__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.orb-app .kf-doch__id-dim {
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-doch__dim {
+  color: var(--orb-fg-dim);
+  font-size: var(--orb-fs-sm);
+}
+
+.orb-app .kf-doch__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--orb-fg-muted);
+  padding: 2px 8px;
+  background: var(--orb-bg-sunk);
+  border-radius: 999px;
+  border: 1px solid var(--orb-border);
+}
+.orb-app .kf-doch__pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.orb-app .kf-doch__actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* ── Doc tabs ──────────────────────────────────────────────────── */
+
+.orb-app .kf-doctabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--orb-rule);
+}
+.orb-app .kf-doctab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.orb-app .kf-doctab:hover {
+  color: var(--orb-fg);
+  background: var(--orb-bg-hov);
+}
+.orb-app .kf-doctab.is-active {
+  background: var(--orb-bg-sel);
+  color: var(--orb-fg);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--orb-warn);
+  border-radius: 4px 4px 0 0;
+}
+.orb-app .kf-doctab__tag {
+  display: inline-block;
+  font-size: 8.5px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--orb-warn-bg);
+  color: var(--orb-warn-fg);
+  letter-spacing: 0.05em;
+  margin-left: 2px;
+}
+.orb-app .kf-doctabs__hint {
+  margin-left: auto;
+  color: var(--orb-fg-dim);
+  font-size: 10px;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Tab body placeholders (PRs 3+4 fill these in) ─────────────── */
+
+.orb-app .kf-tab-placeholder {
+  border: 1px dashed var(--orb-border);
+  background: var(--orb-bg-elev);
+  border-radius: var(--orb-r-md);
+  padding: 32px;
+  text-align: center;
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-tab-placeholder h3 {
+  margin: 0 0 6px;
+  font-size: var(--orb-fs-md);
+  font-weight: 600;
+  color: var(--orb-fg);
+}
+.orb-app .kf-tab-placeholder p {
+  margin: 0;
+  font-size: var(--orb-fs-sm);
+  line-height: 1.55;
+}
