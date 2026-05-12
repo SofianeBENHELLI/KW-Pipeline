@@ -39,13 +39,18 @@ import { useDocuments, type RailView } from "../hooks/useDocuments";
 import type { ApiDocument } from "../../api/types";
 
 const VALID_VIEWS = new Set<RailView>(["recent", "review", "validated", "failed"]);
-const VALID_TABS = new Set<DocTab>(["linked", "review", "pipeline"]);
+const VALID_TABS = new Set<DocTab>(["linked", "pipeline"]);
 
 function parseView(raw: string | null): RailView {
   if (raw && VALID_VIEWS.has(raw as RailView)) return raw as RailView;
   return "recent";
 }
 function parseTab(raw: string | null): DocTab {
+  // Legacy alias: the three-tab interim shipped `?tab=review` pointing
+  // at the FSM card. The two-tab cutover combined it with the
+  // lifecycle-history surface under `?tab=pipeline`. Preserve the
+  // alias so any saved links keep landing on the right body.
+  if (raw === "review") return "pipeline";
   if (raw && VALID_TABS.has(raw as DocTab)) return raw as DocTab;
   return "linked";
 }
@@ -226,8 +231,14 @@ export function ReviewWorkspace({
             />
           </div>
         )}
-        {tab === "review" && (
-          <div data-testid="kf-tab-review">
+        {tab === "pipeline" && (
+          <div data-testid="kf-tab-pipeline">
+            {/* Per design §3.5: a single "Pipeline & FSM" tab that
+                combines the FSM action card, document detail, version
+                list, raw extraction, and semantic markdown. The
+                lifecycle-history timeline that the three-tab interim
+                shipped at `?tab=pipeline` collapses into the Versions
+                card here. */}
             <ReviewTab
               document={activeDoc}
               onAfterTransition={() => {
@@ -235,10 +246,6 @@ export function ReviewWorkspace({
                 live.refetch();
               }}
             />
-          </div>
-        )}
-        {tab === "pipeline" && (
-          <div data-testid="kf-tab-pipeline">
             <PipelineTab document={activeDoc} />
           </div>
         )}
