@@ -26,7 +26,7 @@ import { BatchBanner } from "./BatchBanner";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
-import { LinkedView } from "./LinkedView";
+import { LinkedView, type LinkedViewPdf } from "./LinkedView";
 import { PipelineTab } from "./PipelineTab";
 import { ReviewTab } from "./ReviewTab";
 import "./review.css";
@@ -37,6 +37,34 @@ import { useBatchPipeline } from "../hooks/useBatchPipeline";
 import { useDocumentDetail } from "../hooks/useDocumentDetail";
 import { useDocuments, type RailView } from "../hooks/useDocuments";
 import type { ApiDocument } from "../../api/types";
+
+const _PDF_CONTENT_TYPE = "application/pdf";
+
+/**
+ * Pick the version row the PDF viewer should render in the left pane.
+ *
+ * Returns ``null`` when the document is not a PDF, has no versions
+ * with a populated SHA-256, or hasn't been hashed yet — the LinkedView
+ * branch then falls back to the existing per-section text article.
+ *
+ * Prefers the latest-numbered version with a non-empty hash so a
+ * mid-pipeline upload (status ``UPLOADED`` / ``HASHED`` but not yet
+ * extracted) still renders against its own bytes rather than an older
+ * sibling's.
+ */
+function _pdfMetaFor(doc: ApiDocument | null): LinkedViewPdf | null {
+  if (doc === null) return null;
+  const candidate = [...doc.versions]
+    .sort((a, b) => b.version_number - a.version_number)
+    .find(
+      (v) =>
+        v.content_type === _PDF_CONTENT_TYPE &&
+        typeof v.sha256 === "string" &&
+        v.sha256.length > 0,
+    );
+  if (!candidate) return null;
+  return { versionId: candidate.id, expectedHash: candidate.sha256 };
+}
 
 const VALID_VIEWS = new Set<RailView>(["recent", "review", "validated", "failed"]);
 const VALID_TABS = new Set<DocTab>(["linked", "pipeline"]);
@@ -228,6 +256,7 @@ export function ReviewWorkspace({
             <LinkedView
               documentId={params.docId ?? null}
               filename={activeDoc?.original_filename}
+              pdf={_pdfMetaFor(activeDoc)}
             />
           </div>
         )}

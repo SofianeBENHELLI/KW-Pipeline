@@ -24,6 +24,10 @@ interface PdfViewerPanelProps {
   readonly documentId: string;
   readonly versionId: string;
   readonly expectedHash: string;
+  /** Forwarded to :class:`PdfChunkViewer`; suppresses the built-in
+   *  side panel when the consumer already has its own chunk
+   *  navigation alongside the viewer. */
+  readonly hideBuiltInSidePanel?: boolean;
 }
 
 type BlobState =
@@ -35,6 +39,7 @@ export function PdfViewerPanel({
   documentId,
   versionId,
   expectedHash,
+  hideBuiltInSidePanel = false,
 }: PdfViewerPanelProps) {
   const [state, setState] = useState<BlobState>({ kind: "loading" });
 
@@ -92,6 +97,7 @@ export function PdfViewerPanel({
         versionId={versionId}
         expectedHash={expectedHash}
         pdfBlobUrl={state.url}
+        hideBuiltInSidePanel={hideBuiltInSidePanel}
       />
     </Suspense>
   );
