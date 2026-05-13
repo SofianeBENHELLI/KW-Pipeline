@@ -101,21 +101,23 @@ export function HighlightLayer({
       style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
     >
       {rects.map(({ chunkId, source, rect, summary }, index) => {
-        // Set-membership is OR'd with the singleton match so the
-        // internal pointer-hover on the rect itself coexists with an
-        // external multi-chunk hover (Knowledge Forge LinkedView
-        // hovering a Topic / Entity card → many rects light up).
+        // Distinguish singleton hover (pointer is over THIS rect) from
+        // set-based "cross-highlight" (the right pane lit up N rects
+        // belonging to the hovered Topic / Entity). Both share the
+        // visual ring, but only the singleton reveals the floating
+        // summary tooltip — otherwise hovering a Topic that owns 17
+        // chunks shows 17 overlapping tooltips at once.
+        const isPointerHovered = chunkId === hoveredChunkId;
+        const isCrossHighlit = hoveredChunkIds?.has(chunkId) === true;
         const isSelected =
           chunkId === selectedChunkId ||
           selectedChunkIds?.has(chunkId) === true;
-        const isHovered =
-          chunkId === hoveredChunkId ||
-          hoveredChunkIds?.has(chunkId) === true;
         const classes = [
           "pdf-highlight",
           source === "ai_extraction" ? "is-ai" : "is-parser",
           isSelected ? "is-selected" : "",
-          isHovered ? "is-hovered" : "",
+          isPointerHovered ? "is-hovered" : "",
+          isCrossHighlit ? "is-cross-hl" : "",
         ]
           .filter(Boolean)
           .join(" ");

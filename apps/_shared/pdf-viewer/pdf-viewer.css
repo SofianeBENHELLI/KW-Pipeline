@@ -82,7 +82,11 @@
   border-color: rgba(148, 163, 184, 0.25);
 }
 
-.pdf-highlight.is-hovered {
+.pdf-highlight.is-hovered,
+.pdf-highlight.is-cross-hl {
+  /* Both pointer-hover and external "cross-highlight" share the same
+   * ring so the operator can't tell the two sources apart visually —
+   * what they care about is "this chunk is highlighted right now". */
   background-color: rgba(34, 211, 238, 0.32);
   border-color: rgba(34, 211, 238, 0.6);
 }
@@ -299,6 +303,36 @@
   font-size: 13px;
   color: var(--muted, #71717a);
   text-align: center;
+}
+
+/* ── Coverage view ───────────────────────────────────────────────
+ * Operator audit overlay: every PDF page wears a semi-transparent
+ * red wash, and the extracted rects switch to a green ring. The
+ * visible red is therefore exactly the area pdfplumber did NOT
+ * capture into a chunk — at-a-glance "what did the parser miss".
+ */
+.pdf-page-coverage-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(239, 68, 68, 0.18);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pdf-chunk-viewer.is-coverage .pdf-highlight {
+  /* Green tint takes over from the AI / parser-derived defaults
+   * so the binary "extracted vs not" reading dominates over the
+   * cyan / grey signal differentiation. */
+  background-color: rgba(34, 197, 94, 0.32) !important;
+  border-color: rgba(22, 163, 74, 0.7) !important;
+}
+.pdf-chunk-viewer.is-coverage .pdf-highlight.is-selected,
+.pdf-chunk-viewer.is-coverage .pdf-highlight.is-hovered,
+.pdf-chunk-viewer.is-coverage .pdf-highlight.is-cross-hl {
+  /* Strengthen the green on hover/select so the cross-highlight
+   * still reads in coverage mode. */
+  background-color: rgba(34, 197, 94, 0.5) !important;
+  border-color: rgba(21, 128, 61, 0.9) !important;
 }
 
 .pdf-viewer-loading,
