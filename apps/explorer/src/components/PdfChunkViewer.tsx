@@ -63,9 +63,14 @@ export function PdfChunkViewer({
     const chunksPromise = listDocumentChunks(documentId, versionId, {
       signal: controller.signal,
     });
+    // Match the rest of Explorer's API client: no ``credentials:
+    // "include"``. The backend's CORS config returns the origin
+    // allowlist but not ``Access-Control-Allow-Credentials``, so a
+    // credentialed fetch fails the browser's CORS gate with a
+    // ``Failed to fetch`` that has no usable status code. Auth (#83)
+    // will flip every fetch over together.
     const bytesPromise = fetch(rawFileUrl(documentId, versionId), {
       signal: controller.signal,
-      credentials: "include",
     }).then(async (response) => {
       if (!response.ok) {
         throw new Error(`Failed to load PDF bytes (HTTP ${response.status}).`);

@@ -49,9 +49,16 @@ export function PdfViewerPanel({
     let createdUrl: string | null = null;
 
     const baseUrl = getApiBaseUrl().replace(/\/$/, "");
+    // No ``credentials: "include"`` — the rest of Orbital's API client
+    // is credential-less (the backend's CORS middleware returns the
+    // origin allowlist but not ``Access-Control-Allow-Credentials``).
+    // Adding credentials would trip the credentialed-CORS check and
+    // surface as ``Failed to fetch`` in the browser, with no usable
+    // status code to react to. When auth lands (#83), we'll switch
+    // every fetch in the app over in lock-step.
     fetch(
       `${baseUrl}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/raw`,
-      { signal: controller.signal, credentials: "include" },
+      { signal: controller.signal },
     )
       .then(async (response) => {
         if (!response.ok) {
