@@ -72,6 +72,12 @@ interface PdfChunkViewerProps {
    *  cross-highlight: hovering a rect lights up its parent Topic /
    *  Entity card on the right side. */
   readonly onHoverChunk?: (chunkId: string | null) => void;
+  /** Coverage view: when ``true``, each page renders a semi-
+   *  transparent red backdrop UNDER the rects, and the rects flip to
+   *  a green stroke. The visible red is therefore "what the parser
+   *  did NOT extract into a chunk"; the green is "what it did".
+   *  Operator-driven via the toggle in ``LinkedView``'s header. */
+  readonly coverageMode?: boolean;
 }
 
 type LoadState =
@@ -115,6 +121,7 @@ export function PdfChunkViewer({
   externalHoveredChunkIds = null,
   externalSelectedChunkIds = null,
   onHoverChunk,
+  coverageMode = false,
 }: PdfChunkViewerProps) {
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const selection = useChunkSelection();
@@ -325,11 +332,13 @@ export function PdfChunkViewer({
 
   return (
     <section
-      className={
-        hideBuiltInSidePanel
-          ? "pdf-chunk-viewer is-solo"
-          : "pdf-chunk-viewer"
-      }
+      className={[
+        "pdf-chunk-viewer",
+        hideBuiltInSidePanel ? "is-solo" : "",
+        coverageMode ? "is-coverage" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label="PDF chunk viewer"
     >
       <div className="pdf-pages-pane">
@@ -352,6 +361,7 @@ export function PdfChunkViewer({
                     selection.hoverChunk(id);
                     onHoverChunk?.(id);
                   }}
+                  coverageMode={coverageMode}
                 />
               ),
             )}
@@ -381,6 +391,7 @@ interface PdfPageProps {
   readonly externalSelectedChunkIds: ReadonlySet<string> | null;
   readonly onSelectChunk: (chunkId: string) => void;
   readonly onHoverChunk: (chunkId: string | null) => void;
+  readonly coverageMode: boolean;
 }
 
 /**
@@ -402,6 +413,7 @@ function PdfPage({
   externalSelectedChunkIds,
   onSelectChunk,
   onHoverChunk,
+  coverageMode,
 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
@@ -455,6 +467,13 @@ function PdfPage({
   return (
     <div className="pdf-page-wrap" data-page-number={pageNumber} style={wrapStyle}>
       <canvas ref={canvasRef} className="pdf-page-canvas" />
+      {coverageMode ? (
+        /* Sits between the canvas and the highlight overlay so the
+         * green rects "punch through" a red wash. The visible red is
+         * therefore exactly the area pdfplumber DID NOT capture into
+         * a chunk — operator sees parser blind spots at a glance. */
+        <div className="pdf-page-coverage-backdrop" aria-hidden />
+      ) : null}
       <HighlightLayer
         pageNumber={pageNumber}
         chunks={chunks}

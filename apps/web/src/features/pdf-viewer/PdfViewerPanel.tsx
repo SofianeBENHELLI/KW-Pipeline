@@ -37,6 +37,9 @@ interface PdfViewerPanelProps {
    *  so the consumer can mirror the highlight into its own right-pane
    *  navigation. */
   readonly onHoverChunk?: (chunkId: string | null) => void;
+  /** Coverage view toggle — paints non-extracted PDF area red and
+   *  extracted rects green, so operators see parser blind spots. */
+  readonly coverageMode?: boolean;
 }
 
 type BlobState =
@@ -52,6 +55,7 @@ export function PdfViewerPanel({
   externalHoveredChunkIds = null,
   externalSelectedChunkIds = null,
   onHoverChunk,
+  coverageMode = false,
 }: PdfViewerPanelProps) {
   const [state, setState] = useState<BlobState>({ kind: "loading" });
 
@@ -120,6 +124,7 @@ export function PdfViewerPanel({
         externalHoveredChunkIds={externalHoveredChunkIds}
         externalSelectedChunkIds={externalSelectedChunkIds}
         onHoverChunk={onHoverChunk}
+        coverageMode={coverageMode}
       />
     </Suspense>
   );

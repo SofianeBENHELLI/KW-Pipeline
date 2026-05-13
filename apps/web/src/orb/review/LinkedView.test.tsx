@@ -339,5 +339,67 @@ describe("<LinkedView />", () => {
         expect([...ids]).toEqual(["c3"]);
       });
     });
+
+    describe("coverage toggle", () => {
+      beforeEach(() => window.localStorage.clear());
+
+      it("forwards coverageMode=false by default", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        expect(_lastPdfPanelProps().coverageMode).toBe(false);
+      });
+
+      it("toggling the checkbox flips coverageMode and persists", () => {
+        _pdfViewerPanelMock.mockClear();
+        const { unmount } = render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        const toggle = screen.getByTestId("kf-lv-coverage-toggle");
+        fireEvent.click(within(toggle).getByRole("checkbox"));
+        expect(_lastPdfPanelProps().coverageMode).toBe(true);
+        expect(window.localStorage.getItem("kf:review:coverage-mode")).toBe(
+          "true",
+        );
+
+        // Remount → hydrates from localStorage.
+        unmount();
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        expect(_lastPdfPanelProps().coverageMode).toBe(true);
+      });
+
+      it("does not render the toggle for non-PDF documents", () => {
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="notes.md"
+            pdf={null}
+            fixture={FIXTURE}
+          />,
+        );
+        expect(
+          screen.queryByTestId("kf-lv-coverage-toggle"),
+        ).not.toBeInTheDocument();
+      });
+    });
   });
 });

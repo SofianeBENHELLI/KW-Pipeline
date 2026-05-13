@@ -43,6 +43,29 @@ const _DOC_WIDTH_MIN = 360;
 const _DOC_WIDTH_MAX = 1400;
 const _DOC_WIDTH_DEFAULT = 720;
 
+// Coverage view: persisted operator preference. When on, the PDF
+// viewer paints non-extracted page area red and extracted rects
+// green so parser blind spots are visible at a glance.
+const _COVERAGE_KEY = "kf:review:coverage-mode";
+
+function _readCoverageStored(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(_COVERAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function _writeCoverageStored(value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(_COVERAGE_KEY, value ? "true" : "false");
+  } catch {
+    // best-effort
+  }
+}
+
 // Module-level frozen empty set so ``useMemo`` returns a stable
 // reference when no chunks are highlit — keeps the
 // ``<HighlightLayer>`` props from churning on every render.
@@ -117,6 +140,19 @@ export function LinkedView({
   const linkedStyle = {
     "--kf-lv-doc-w": `${docResize.value}px`,
   } as React.CSSProperties;
+
+  // Coverage-view toggle. Persisted across reloads so an operator
+  // running an audit pass doesn't have to flip it every doc.
+  const [coverageMode, setCoverageMode] = useState<boolean>(
+    _readCoverageStored,
+  );
+  const toggleCoverage = useCallback(() => {
+    setCoverageMode((prev) => {
+      const next = !prev;
+      _writeCoverageStored(next);
+      return next;
+    });
+  }, []);
 
   const isChunkHighlit = (chunkId: string): boolean => {
     if (!hover) return false;
@@ -245,6 +281,21 @@ export function LinkedView({
               </>
             )}
           </span>
+          {pdf ? (
+            <label
+              className="kf-lv__toggle"
+              title="Paint extracted rects green, non-extracted areas red"
+              data-testid="kf-lv-coverage-toggle"
+            >
+              <input
+                type="checkbox"
+                checked={coverageMode}
+                onChange={toggleCoverage}
+                aria-label="Show extraction coverage"
+              />
+              <span>Coverage</span>
+            </label>
+          ) : null}
         </div>
         <div
           className="kf-lv__paper orb-scroll"
@@ -258,6 +309,7 @@ export function LinkedView({
               hideBuiltInSidePanel
               externalHoveredChunkIds={highlightedChunkIds}
               onHoverChunk={handlePdfHoverChunk}
+              coverageMode={coverageMode}
             />
           ) : (
             <article className="kf-lv__page">
