@@ -64,6 +64,13 @@ export type ApiUploadResponse = Schemas["UploadDocumentResponse"];
 // as DUPLICATE_DETECTED — Forge surfaces this before sending bytes.
 export type ApiDocumentHashCheck = Schemas["DocumentHashCheckResponse"];
 
+// ─── PDF viewer chunk locations (Phase 2 of the PDF-viewer plan) ───────────
+
+export type ApiNormalizedRect = Schemas["NormalizedRect"];
+export type ApiChunkLocation = Schemas["ChunkLocation"];
+export type ApiChunkLocationsResponse = Schemas["ChunkLocationsResponse"];
+export type ApiChunkSource = ApiChunkLocation["source"];
+
 // ─── Knowledge graph ─────────────────────────────────────────────────────────
 
 export type ApiGraphNode = Schemas["GraphNode"];

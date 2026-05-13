@@ -792,6 +792,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/versions/{version_id}/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Document Chunks
+         * @description List chunk locations (rects + summary) for the PDF viewer.
+         *
+         *     Powers the Phase 2 split-pane viewer in Orbital: one
+         *     :class:`ChunkLocation` per parser-emitted section, carrying the
+         *     :class:`NormalizedRect` overlays the viewer draws on top of
+         *     EmbedPDF plus the LLM-derived summary signal the side panel
+         *     renders next to each chunk row.
+         *
+         *     Aggregation rules:
+         *
+         *     * One row per section in the persisted :class:`RawExtraction`,
+         *       in reading order.
+         *     * ``rects`` is flattened from every :class:`SourceReference`
+         *       the section owns (today's parser emits one ref per section
+         *       but the API is shape-compatible with a future N:1 split).
+         *     * Document-topic citations are used as the summary signal —
+         *       for each section we pick the highest-confidence topic that
+         *       lists the section in its ``supporting_chunk_ids``. Claims
+         *       and entities are intentionally not joined in v1 (their
+         *       subject-predicate-object shape does not map cleanly to a
+         *       single human-readable summary line; topics do).
+         *     * ``source = "ai_extraction"`` when at least one topic cites
+         *       the section; otherwise ``"parser"`` and ``confidence = 1.0``
+         *       — the parser is deterministic and its presence is not in
+         *       question, only its meaning.
+         *
+         *     D.5 hidden-existence: the scope check fires before any
+         *     catalog read so a caller without scope sees the same 404
+         *     envelope a missing document would return. Purged versions
+         *     surface 410 like every other per-version route.
+         */
+        get: operations["list_document_chunks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/versions/{version_id}/extract": {
         parameters: {
             query?: never;
@@ -2273,6 +2322,69 @@ export interface components {
             warnings: string[];
         };
         /**
+         * ChunkLocation
+         * @description One row in the chunk-locations payload.
+         */
+        ChunkLocation: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Document Hash */
+            document_hash: string;
+            /** Document Id */
+            document_id: string;
+            /** Document Version Id */
+            document_version_id: string;
+            /** Heading */
+            heading: string;
+            /** Page */
+            page: number;
+            /** Pipeline Version */
+            pipeline_version: string;
+            /** Rects */
+            rects: components["schemas"]["NormalizedRect"][];
+            /** Snippet */
+            snippet: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai_extraction" | "parser";
+            /** Summary */
+            summary: string | null;
+            /** Topic Id */
+            topic_id: string | null;
+            /** Topic Label */
+            topic_label: string | null;
+        };
+        /**
+         * ChunkLocationsResponse
+         * @description Envelope returned by ``list_document_chunks``.
+         *
+         *     ``parser_version`` is duplicated at the envelope level so the
+         *     viewer can gate rect-level rendering on it without inspecting
+         *     every item — pre-0.2 versions ship with empty ``rects`` lists.
+         */
+        ChunkLocationsResponse: {
+            /** Document Hash */
+            document_hash: string;
+            /** Document Id */
+            document_id: string;
+            /** Document Version Id */
+            document_version_id: string;
+            /** Items */
+            items: components["schemas"]["ChunkLocation"][];
+            /** Parser Version */
+            parser_version: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+        };
+        /**
          * ChunkSearchResponse
          * @description Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).
          *
@@ -3396,6 +3508,32 @@ export interface components {
             spacy_model: string;
         };
         /**
+         * NormalizedRect
+         * @description A page-relative rectangle used by the PDF viewer to draw overlays.
+         *
+         *     Coordinates are normalised to ``[0, 1]`` with a **top-left origin**,
+         *     regardless of the PDF's native coordinate space (PDF defaults to
+         *     bottom-left; pdfplumber reads top-left). The viewer renders with
+         *     CSS percentage positioning so zoom / resize / rotation stay aligned
+         *     without per-frame recompute.
+         *
+         *     A chunk may have multiple rects across one or more pages — see
+         *     :attr:`SourceReference.rects`. Each rect carries its own ``page`` so
+         *     multi-page chunks render correctly without a parent grouping.
+         */
+        NormalizedRect: {
+            /** Height */
+            height: number;
+            /** Page */
+            page: number;
+            /** Width */
+            width: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /**
          * OrbitalPurgeAllRequest
          * @description Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).
          *
@@ -4198,6 +4336,8 @@ export interface components {
             line_start: number | null;
             /** Page Number */
             page_number: number | null;
+            /** Rects */
+            rects: components["schemas"]["NormalizedRect"][];
             /** Section Id */
             section_id: string;
             /** Snippet */
@@ -5217,6 +5357,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimilarDocumentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_chunks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                page?: number | null;
+                source?: ("ai_extraction" | "parser") | null;
+                min_confidence?: number | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkLocationsResponse"];
                 };
             };
             /** @description Validation Error */
