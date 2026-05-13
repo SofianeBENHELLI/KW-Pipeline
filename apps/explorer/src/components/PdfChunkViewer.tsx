@@ -43,7 +43,19 @@ type LoadState =
   | { kind: "no_rects"; parserVersion: string }
   | { kind: "error"; message: string };
 
-const _PAGE_SCALE = 1.5;
+// Upper bound on the render scale — the lower bound is whatever fits
+// the container width without horizontal overflow; see
+// :func:`_scaleForContainer`. Same shape as Orbital's
+// ``apps/web/src/features/pdf-viewer/PdfChunkViewer.tsx`` so the two
+// adapters render at matching dimensions.
+const _MAX_PAGE_SCALE = 1.5;
+const _PAGE_HORIZONTAL_PADDING = 32;
+
+function _scaleForContainer(pageWidth: number, containerWidth: number): number {
+  if (containerWidth <= 0 || pageWidth <= 0) return _MAX_PAGE_SCALE;
+  const usable = Math.max(containerWidth - _PAGE_HORIZONTAL_PADDING, 200);
+  return Math.min(_MAX_PAGE_SCALE, usable / pageWidth);
+}
 
 export function PdfChunkViewer({
   documentId,
@@ -53,6 +65,10 @@ export function PdfChunkViewer({
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const selection = useChunkSelection();
   const pagesContainerRef = useRef<HTMLDivElement | null>(null);
+  // Declared up-front (above the render effect that depends on it) so
+  // TS doesn't flag a TDZ — the ``ResizeObserver`` effect below keeps
+  // it in sync with the live container width.
+  const [containerWidth, setContainerWidth] = useState(0);
 
   // ─── Fetch chunk-locations + the original PDF bytes in parallel ──────────
   useEffect(() => {
@@ -147,10 +163,14 @@ export function PdfChunkViewer({
       if (!container) return;
       container.innerHTML = "";
 
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         if (cancelled) break;
         const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: _PAGE_SCALE });
+        const nativeViewport = page.getViewport({ scale: 1 });
+        const scale = _scaleForContainer(nativeViewport.width, containerWidth);
+        const viewport = page.getViewport({ scale });
 
         const pageWrap = document.createElement("div");
         pageWrap.className = "pdf-page-wrap";
@@ -160,8 +180,10 @@ export function PdfChunkViewer({
         pageWrap.style.height = `${viewport.height}px`;
 
         const canvas = document.createElement("canvas");
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
         canvas.className = "pdf-page-canvas";
 
         pageWrap.appendChild(canvas);
@@ -169,7 +191,8 @@ export function PdfChunkViewer({
 
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          await page.render({ canvasContext: ctx, viewport }).promise;
+          const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+          await page.render({ canvasContext: ctx, viewport, transform }).promise;
         }
       }
     })().catch((err) => {
@@ -182,7 +205,27 @@ export function PdfChunkViewer({
       cancelled = true;
       cleanupTask?.();
     };
-  }, [load]);
+  }, [load, containerWidth]);
+
+  // ``containerWidth`` is declared up at the top of the component
+  // (TDZ-safe for the render effect's dep array); this effect keeps it
+  // in sync with the live container width. ``ResizeObserver`` fires on
+  // mount and whenever the host pane resizes; rounding to 16-px buckets
+  // keeps small layout jitter from churning the pdfjs render loop.
+  useLayoutEffect(() => {
+    const el = pagesContainerRef.current;
+    if (!el) return;
+    const apply = (raw: number) => {
+      const bucketed = Math.max(0, Math.floor(raw / 16) * 16);
+      setContainerWidth((prev) => (prev === bucketed ? prev : bucketed));
+    };
+    apply(el.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) apply(entry.contentRect.width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // ─── Scroll-to-selected-chunk effect ──────────────────────────────────────
   useLayoutEffect(() => {

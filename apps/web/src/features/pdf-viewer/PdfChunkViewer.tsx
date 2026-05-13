@@ -60,7 +60,30 @@ type LoadState =
   | { kind: "no_rects"; parserVersion: string }
   | { kind: "error"; message: string };
 
-const _PAGE_SCALE = 1.5;
+// Upper bound on the render scale — caps how much pdfjs upscales tiny
+// pages on wide screens. The lower bound is whatever fits the
+// container width without horizontal overflow; see
+// ``_scaleForContainer`` below.
+const _MAX_PAGE_SCALE = 1.5;
+
+// Padding to subtract from the container width before computing the
+// page scale so the rendered page doesn't kiss the pane border (matches
+// the ``.pdf-pages-scroll`` 16px padding on each side).
+const _PAGE_HORIZONTAL_PADDING = 32;
+
+/**
+ * Pick a render scale that fits the page width into the available
+ * container width without overflow, never exceeding ``_MAX_PAGE_SCALE``.
+ *
+ * Called once per (page, container width) — the parent effect re-runs
+ * when the container resizes (via :class:`ResizeObserver`) so the
+ * pages re-render at the new scale.
+ */
+function _scaleForContainer(pageWidth: number, containerWidth: number): number {
+  if (containerWidth <= 0 || pageWidth <= 0) return _MAX_PAGE_SCALE;
+  const usable = Math.max(containerWidth - _PAGE_HORIZONTAL_PADDING, 200);
+  return Math.min(_MAX_PAGE_SCALE, usable / pageWidth);
+}
 
 export function PdfChunkViewer({
   documentId,
@@ -72,6 +95,11 @@ export function PdfChunkViewer({
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const selection = useChunkSelection();
   const pagesContainerRef = useRef<HTMLDivElement | null>(null);
+  // Tracked here (not below the render effect) so the effect's dep
+  // array can reference it without a TDZ — the bucketing logic that
+  // updates this value lives in the ``ResizeObserver`` effect after
+  // the render loop, but the declaration must precede every read.
+  const [containerWidth, setContainerWidth] = useState(0);
 
   // ─── Fetch chunk-locations once per (document, version) ───────────────────
   useEffect(() => {
@@ -147,10 +175,20 @@ export function PdfChunkViewer({
       if (!container) return;
       container.innerHTML = "";
 
+      // Compute scale once per render pass from the container's current
+      // client width. ``ResizeObserver`` (below) bumps ``containerWidth``
+      // when the host pane resizes, which retriggers this effect and
+      // re-renders every page at the new scale. Devicescale (DPR) lifts
+      // the canvas backing-store resolution so the page stays crisp on
+      // retina displays without inflating CSS dimensions.
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         if (cancelled) break;
         const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: _PAGE_SCALE });
+        const nativeViewport = page.getViewport({ scale: 1 });
+        const scale = _scaleForContainer(nativeViewport.width, containerWidth);
+        const viewport = page.getViewport({ scale });
 
         const pageWrap = document.createElement("div");
         pageWrap.className = "pdf-page-wrap";
@@ -160,8 +198,10 @@ export function PdfChunkViewer({
         pageWrap.style.height = `${viewport.height}px`;
 
         const canvas = document.createElement("canvas");
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
         canvas.className = "pdf-page-canvas";
 
         pageWrap.appendChild(canvas);
@@ -169,7 +209,8 @@ export function PdfChunkViewer({
 
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          await page.render({ canvasContext: ctx, viewport }).promise;
+          const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+          await page.render({ canvasContext: ctx, viewport, transform }).promise;
         }
       }
     })().catch((err) => {
@@ -182,7 +223,28 @@ export function PdfChunkViewer({
       cancelled = true;
       cleanupTask?.();
     };
-  }, [load, pdfBlobUrl]);
+  }, [load, pdfBlobUrl, containerWidth]);
+
+  // ``containerWidth`` is declared above the render effect (TDZ-safe);
+  // this effect's job is to keep it in sync with the live pane width.
+  // ``ResizeObserver`` fires on mount and whenever the host pane
+  // resizes (split-pane drag, window resize, sidebar collapse, etc.);
+  // we round to 16-px buckets so a few px of layout jitter doesn't
+  // churn the heavy pdfjs render loop.
+  useLayoutEffect(() => {
+    const el = pagesContainerRef.current;
+    if (!el) return;
+    const apply = (raw: number) => {
+      const bucketed = Math.max(0, Math.floor(raw / 16) * 16);
+      setContainerWidth((prev) => (prev === bucketed ? prev : bucketed));
+    };
+    apply(el.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) apply(entry.contentRect.width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // ─── Scroll-to-selected-chunk effect ──────────────────────────────────────
   // Effect runs after layout so the freshly-rendered page wraps are
@@ -255,7 +317,14 @@ export function PdfChunkViewer({
   }
 
   return (
-    <section className="pdf-chunk-viewer" aria-label="PDF chunk viewer">
+    <section
+      className={
+        hideBuiltInSidePanel
+          ? "pdf-chunk-viewer is-solo"
+          : "pdf-chunk-viewer"
+      }
+      aria-label="PDF chunk viewer"
+    >
       <div className="pdf-pages-pane">
         <div className="pdf-pages-scroll" ref={pagesContainerRef}>
           {/* Render hooks for the overlay layers — pdfjs canvases are
