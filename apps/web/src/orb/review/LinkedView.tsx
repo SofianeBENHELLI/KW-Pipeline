@@ -16,7 +16,7 @@
  * not via a global store (avoid re-render storms on hover)".
  */
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 
 import { Btn, OrbI } from "../index";
@@ -30,6 +30,11 @@ import {
 import { PdfViewerPanel } from "../../features/pdf-viewer";
 
 export type ObjKind = "Topics" | "Entities" | "Chunks";
+
+// Module-level frozen empty set so ``useMemo`` returns a stable
+// reference when no chunks are highlit — keeps the
+// ``<HighlightLayer>`` props from churning on every render.
+const _EMPTY_SET: ReadonlySet<string> = new Set();
 
 /**
  * PDF metadata required to render the actual document bytes in the
@@ -101,6 +106,37 @@ export function LinkedView({
     }
     return false;
   };
+
+  // Set of chunk ids that should highlight in the PDF overlay for the
+  // current hover. Recomputed on every hover transition; the
+  // ``isChunkHighlit`` function above is the row-by-row equivalent for
+  // the text view, while this is the set the PDF view's
+  // ``<HighlightLayer>`` needs to light up many rects at once when
+  // a single Topic / Entity is hovered.
+  const highlightedChunkIds = useMemo<ReadonlySet<string>>(() => {
+    if (!hover) return _EMPTY_SET;
+    if (hover.kind === "Chunks") return new Set([hover.id]);
+    if (hover.kind === "Topics") {
+      return data.topicToChunks.get(hover.id) ?? _EMPTY_SET;
+    }
+    if (hover.kind === "Entities") {
+      return data.entityToChunks.get(hover.id) ?? _EMPTY_SET;
+    }
+    return _EMPTY_SET;
+  }, [hover, data]);
+
+  // Bridge "PDF rect → right-pane card" highlight. The shared viewer
+  // hands us the chunk id under the cursor (or ``null`` on
+  // pointer-leave); we lift that into the same hover state the text
+  // view uses, so the existing ``isObjHighlit`` logic lights up the
+  // chunk's parent Topic + Entities on the right without per-mode
+  // branching.
+  const handlePdfHoverChunk = useCallback(
+    (chunkId: string | null) => {
+      setHover(chunkId ? { kind: "Chunks", id: chunkId } : null);
+    },
+    [setHover],
+  );
 
   const isObjHighlit = (kind: ObjKind, id: string): boolean => {
     if (!hover) return false;
@@ -197,6 +233,8 @@ export function LinkedView({
               versionId={pdf.versionId}
               expectedHash={pdf.expectedHash}
               hideBuiltInSidePanel
+              externalHoveredChunkIds={highlightedChunkIds}
+              onHoverChunk={handlePdfHoverChunk}
             />
           ) : (
             <article className="kf-lv__page">

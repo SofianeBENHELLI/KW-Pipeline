@@ -28,6 +28,15 @@ interface PdfViewerPanelProps {
    *  side panel when the consumer already has its own chunk
    *  navigation alongside the viewer. */
   readonly hideBuiltInSidePanel?: boolean;
+  /** External multi-chunk hover set — forwarded so consumers like
+   *  Knowledge Forge LinkedView can light up every rect that belongs
+   *  to a hovered Topic / Entity. */
+  readonly externalHoveredChunkIds?: ReadonlySet<string> | null;
+  readonly externalSelectedChunkIds?: ReadonlySet<string> | null;
+  /** Fired when the rect-level hover changes (null on pointer-leave),
+   *  so the consumer can mirror the highlight into its own right-pane
+   *  navigation. */
+  readonly onHoverChunk?: (chunkId: string | null) => void;
 }
 
 type BlobState =
@@ -40,6 +49,9 @@ export function PdfViewerPanel({
   versionId,
   expectedHash,
   hideBuiltInSidePanel = false,
+  externalHoveredChunkIds = null,
+  externalSelectedChunkIds = null,
+  onHoverChunk,
 }: PdfViewerPanelProps) {
   const [state, setState] = useState<BlobState>({ kind: "loading" });
 
@@ -105,6 +117,9 @@ export function PdfViewerPanel({
         expectedHash={expectedHash}
         pdfBlobUrl={state.url}
         hideBuiltInSidePanel={hideBuiltInSidePanel}
+        externalHoveredChunkIds={externalHoveredChunkIds}
+        externalSelectedChunkIds={externalSelectedChunkIds}
+        onHoverChunk={onHoverChunk}
       />
     </Suspense>
   );
