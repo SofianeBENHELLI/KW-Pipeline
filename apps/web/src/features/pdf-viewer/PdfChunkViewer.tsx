@@ -45,6 +45,12 @@ interface PdfChunkViewerProps {
    *  and creates the object URL so this component can re-render
    *  without re-downloading the PDF. */
   readonly pdfBlobUrl: string;
+  /** When `true`, the viewer renders the PDF + overlays only — the
+   *  built-in :class:`ChunkSidePanel` is suppressed. Set this when the
+   *  consumer already has its own chunk / topic / entity navigation
+   *  next to the viewer (e.g. the Knowledge Forge LinkedView's right
+   *  pane) so the operator doesn't see two side panels side-by-side. */
+  readonly hideBuiltInSidePanel?: boolean;
 }
 
 type LoadState =
@@ -61,6 +67,7 @@ export function PdfChunkViewer({
   versionId,
   expectedHash,
   pdfBlobUrl,
+  hideBuiltInSidePanel = false,
 }: PdfChunkViewerProps) {
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const selection = useChunkSelection();
@@ -267,13 +274,15 @@ export function PdfChunkViewer({
           ))}
         </div>
       </div>
-      <ChunkSidePanel
-        chunks={chunks}
-        selectedChunkId={selection.selectedChunkId}
-        hoveredChunkId={selection.hoveredChunkId}
-        onSelectChunk={selection.selectChunk}
-        onHoverChunk={selection.hoverChunk}
-      />
+      {hideBuiltInSidePanel ? null : (
+        <ChunkSidePanel
+          chunks={chunks}
+          selectedChunkId={selection.selectedChunkId}
+          hoveredChunkId={selection.hoveredChunkId}
+          onSelectChunk={selection.selectChunk}
+          onHoverChunk={selection.hoverChunk}
+        />
+      )}
     </section>
   );
 }

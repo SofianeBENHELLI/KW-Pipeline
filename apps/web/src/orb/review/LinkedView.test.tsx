@@ -160,4 +160,64 @@ describe("<LinkedView />", () => {
     fireEvent.mouseEnter(screen.getByTestId("kf-lv-obj-Topics-t1"));
     expect(screen.getByText(/cross-highlighting/i)).toBeInTheDocument();
   });
+
+  describe("PDF mode", () => {
+    it("renders the PDF viewer panel instead of the text article when `pdf` is set", () => {
+      render(
+        <LinkedView
+          documentId="doc-1"
+          filename="policy.pdf"
+          pdf={{ versionId: "v-1", expectedHash: "abc123def456" }}
+          fixture={FIXTURE}
+        />,
+      );
+      // Left pane switches from the text-card layout (data-testid
+      // ``kf-lv-text``) to the PDF embed (data-testid ``kf-lv-pdf``).
+      expect(screen.getByTestId("kf-lv-pdf")).toBeInTheDocument();
+      expect(screen.queryByTestId("kf-lv-text")).not.toBeInTheDocument();
+      // The text-article section headings (rendered as ``kf-lv-section-*``
+      // testids) do not appear in PDF mode.
+      expect(screen.queryByTestId("kf-lv-section-s1")).not.toBeInTheDocument();
+      // The right pane (Topics / Entities / Chunks) keeps rendering so
+      // operators do not lose knowledge-object navigation.
+      expect(screen.getByTestId("kf-lv-obj-Topics-t1")).toBeInTheDocument();
+    });
+
+    it("renders the PDF pane even when the linked-objects projection is empty", () => {
+      // A freshly-uploaded PDF that has not been semantically projected
+      // yet should still render the actual bytes in the viewer — the
+      // ``kf-linked-empty`` short-circuit only fires for non-PDF docs.
+      const empty = projectGraph({
+        document_id: "x",
+        version_id: "v",
+        generated_at: "x",
+        schema_version: "v0.2",
+        nodes: [],
+        edges: [],
+      });
+      render(
+        <LinkedView
+          documentId="doc-1"
+          filename="fresh.pdf"
+          pdf={{ versionId: "v-1", expectedHash: "abc123def456" }}
+          fixture={empty}
+        />,
+      );
+      expect(screen.queryByTestId("kf-linked-empty")).not.toBeInTheDocument();
+      expect(screen.getByTestId("kf-lv-pdf")).toBeInTheDocument();
+    });
+
+    it("stays on the text article when `pdf` is null (non-PDF documents)", () => {
+      render(
+        <LinkedView
+          documentId="doc-1"
+          filename="x.md"
+          pdf={null}
+          fixture={FIXTURE}
+        />,
+      );
+      expect(screen.getByTestId("kf-lv-text")).toBeInTheDocument();
+      expect(screen.queryByTestId("kf-lv-pdf")).not.toBeInTheDocument();
+    });
+  });
 });

@@ -27,8 +27,28 @@ import {
   type LinkedObjects,
   type LinkedTopic,
 } from "../hooks/useLinkedObjects";
+import { PdfViewerPanel } from "../../features/pdf-viewer";
 
 export type ObjKind = "Topics" | "Entities" | "Chunks";
+
+/**
+ * PDF metadata required to render the actual document bytes in the
+ * left pane instead of the markdown-style extraction. Derived in
+ * :class:`ReviewWorkspace` from ``activeDoc`` and passed down only
+ * when the active document is a PDF with a populated SHA-256 — every
+ * other content type keeps the existing per-section text article so
+ * non-PDF formats (docx/pptx/text/wiki) are not regressed.
+ *
+ * Cross-highlight between the right pane (Topics / Entities / Chunks)
+ * and the PDF rect overlays is intentionally not wired in this slice
+ * — the shared :mod:`apps/_shared/pdf-viewer` overlay is singleton-
+ * keyed and the right pane lights up sets of chunks, so bridging the
+ * two needs a follow-up that extends the overlay's selection API.
+ */
+export interface LinkedViewPdf {
+  readonly versionId: string;
+  readonly expectedHash: string;
+}
 
 interface Hover {
   kind: ObjKind;
@@ -40,6 +60,11 @@ export interface LinkedViewProps {
   documentId: string | null;
   /** Document filename (rendered in the viewer header). */
   filename?: string;
+  /** When set, the left pane renders the actual PDF bytes via
+   *  :class:`PdfViewerPanel` instead of the per-section text article.
+   *  Driven by ``ReviewWorkspace`` from the active document's latest
+   *  version content type + SHA-256. */
+  pdf?: LinkedViewPdf | null;
   /** Optional fixture override — used by tests to skip the network. */
   fixture?: LinkedObjects;
   /** Loading override (lets tests force the loading branch). */
@@ -49,6 +74,7 @@ export interface LinkedViewProps {
 export function LinkedView({
   documentId,
   filename,
+  pdf,
   fixture,
   loading,
 }: LinkedViewProps): ReactElement {
@@ -115,7 +141,12 @@ export function LinkedView({
     );
   }
 
-  if (isEmpty) {
+  // For non-PDF documents, "empty projection" short-circuits the whole
+  // view — the left pane has nothing to render without sections /
+  // chunks. PDFs render the actual bytes regardless of projection
+  // state, so the empty-state card is only useful as a right-pane
+  // hint, not a full-view replacement.
+  if (isEmpty && !pdf) {
     return (
       <section className="kf-lv kf-lv--state" data-testid="kf-linked-empty">
         <div className="kf-lv__state">
@@ -143,46 +174,66 @@ export function LinkedView({
         <div className="kf-lv__pane-h">
           <span className="orb-section-h">Document viewer</span>
           <span className="orb-mono kf-lv__hint">
-            {filename ?? "document"} · {data.sections.length} section
-            {data.sections.length === 1 ? "" : "s"} ·{" "}
-            {data.chunks.length} chunks
+            {filename ?? "document"}
+            {pdf ? (
+              <> · PDF · hash <code>{pdf.expectedHash.slice(0, 12)}…</code></>
+            ) : (
+              <>
+                {" "}
+                · {data.sections.length} section
+                {data.sections.length === 1 ? "" : "s"} ·{" "}
+                {data.chunks.length} chunks
+              </>
+            )}
           </span>
         </div>
-        <div className="kf-lv__paper orb-scroll">
-          <article className="kf-lv__page">
-            <h2 className="kf-lv__page-h1">{filename ?? "Document"}</h2>
-            {data.sections.map((section) => {
-              const chunksInSection = section.chunkIds
-                .map((id) => data.chunks.find((c) => c.id === id))
-                .filter((c): c is LinkedChunk => Boolean(c));
-              return (
-                <section
-                  key={section.id || "untitled"}
-                  className="kf-lv__section"
-                  data-testid={`kf-lv-section-${section.id || "untitled"}`}
-                >
-                  {section.heading && (
-                    <h3 className="kf-lv__section-h">{section.heading}</h3>
-                  )}
-                  {section.page != null && (
-                    <div className="kf-lv__section-page orb-mono">
-                      page {section.page}
+        <div
+          className="kf-lv__paper orb-scroll"
+          data-testid={pdf ? "kf-lv-pdf" : "kf-lv-text"}
+        >
+          {pdf && documentId ? (
+            <PdfViewerPanel
+              documentId={documentId}
+              versionId={pdf.versionId}
+              expectedHash={pdf.expectedHash}
+              hideBuiltInSidePanel
+            />
+          ) : (
+            <article className="kf-lv__page">
+              <h2 className="kf-lv__page-h1">{filename ?? "Document"}</h2>
+              {data.sections.map((section) => {
+                const chunksInSection = section.chunkIds
+                  .map((id) => data.chunks.find((c) => c.id === id))
+                  .filter((c): c is LinkedChunk => Boolean(c));
+                return (
+                  <section
+                    key={section.id || "untitled"}
+                    className="kf-lv__section"
+                    data-testid={`kf-lv-section-${section.id || "untitled"}`}
+                  >
+                    {section.heading && (
+                      <h3 className="kf-lv__section-h">{section.heading}</h3>
+                    )}
+                    {section.page != null && (
+                      <div className="kf-lv__section-page orb-mono">
+                        page {section.page}
+                      </div>
+                    )}
+                    <div className="kf-lv__page-body">
+                      {chunksInSection.map((c) => (
+                        <LvSpan
+                          key={c.id}
+                          chunk={c}
+                          highlit={isChunkHighlit(c.id)}
+                          onHover={(h) => setHover(h)}
+                        />
+                      ))}
                     </div>
-                  )}
-                  <div className="kf-lv__page-body">
-                    {chunksInSection.map((c) => (
-                      <LvSpan
-                        key={c.id}
-                        chunk={c}
-                        highlit={isChunkHighlit(c.id)}
-                        onHover={(h) => setHover(h)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </article>
+                  </section>
+                );
+              })}
+            </article>
+          )}
         </div>
       </div>
 
