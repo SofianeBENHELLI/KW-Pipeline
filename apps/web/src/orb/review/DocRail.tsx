@@ -78,6 +78,13 @@ export interface DocRailProps {
   /** Sort. */
   sort: RailSort;
   onToggleSort: (col: RailSortColumn) => void;
+  /**
+   * When provided, the rail's header renders a chevron button that
+   * collapses the entire rail column. Pair with the parent's
+   * "expand rail" affordance for the inverse direction. Omit when
+   * collapse isn't supported on the host surface.
+   */
+  onCollapse?: () => void;
 }
 
 export function DocRail({
@@ -98,6 +105,7 @@ export function DocRail({
   totalForView,
   sort,
   onToggleSort,
+  onCollapse,
 }: DocRailProps): ReactElement {
   const sortArrow = (col: RailSortColumn) =>
     sort.col !== col ? "" : sort.dir === "asc" ? " ↑" : " ↓";
@@ -125,6 +133,33 @@ export function DocRail({
           <span className="kf-rail__search-kbd">
             <Kbd>/</Kbd>
           </span>
+          {onCollapse ? (
+            <button
+              type="button"
+              className="kf-rail__collapse"
+              onClick={onCollapse}
+              aria-label="Collapse document rail ([)"
+              title="Collapse rail ([)"
+              data-testid="kf-rail-collapse"
+            >
+              {/* Double-chevron pointing left — the inverse of the
+                * expand affordance in ``ReviewWorkspace``. */}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <polyline points="11 17 6 12 11 7" />
+                <polyline points="18 17 13 12 18 7" />
+              </svg>
+            </button>
+          ) : null}
         </div>
 
         <div className="kf-rail__views" role="tablist" aria-label="Saved views">

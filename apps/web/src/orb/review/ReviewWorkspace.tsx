@@ -338,6 +338,7 @@ export function ReviewWorkspace({
           onClearSelection={clearSelection}
           sort={sort}
           onToggleSort={toggleSort}
+          onCollapse={toggleRail}
           onRunBatch={() => {
             const ids = selected;
             const picked = sortedDocs.filter((d) => ids.has(d.id));
@@ -361,19 +362,21 @@ export function ReviewWorkspace({
       />
 
       <main className="kf-main orb-scroll">
-        <div className="kf-main__head">
+        {railCollapsed ? (
+          /* When the rail is hidden, expose a thin "expand" chevron
+           * pinned to the left edge of the main pane so the operator
+           * can bring the rail back without remembering the keyboard
+           * shortcut. The button itself sits inside ``.kf-main``
+           * which is the leftmost visible column when the rail is
+           * collapsed — semantically still "at the rail's edge". */
           <button
             type="button"
-            className="kf-rail-toggle"
+            className="kf-rail-expand"
             onClick={toggleRail}
-            aria-label={railCollapsed ? "Expand document rail ([)" : "Collapse document rail ([)"}
-            aria-expanded={!railCollapsed}
-            title={railCollapsed ? "Expand document rail ([)" : "Collapse document rail ([)"}
-            data-testid="kf-rail-toggle"
+            aria-label="Expand document rail ([)"
+            title="Expand rail ([)"
+            data-testid="kf-rail-expand"
           >
-            {/* Chevron flips based on collapse state. SVG inline so the
-              * component stays self-contained without adding an icon
-              * import in this file. */}
             <svg
               width="14"
               height="14"
@@ -385,18 +388,12 @@ export function ReviewWorkspace({
               strokeLinejoin="round"
               aria-hidden
             >
-              {railCollapsed ? (
-                <polyline points="9 18 15 12 9 6" />
-              ) : (
-                <polyline points="15 18 9 12 15 6" />
-              )}
+              <polyline points="13 17 18 12 13 7" />
+              <polyline points="6 17 11 12 6 7" />
             </svg>
-            <span className="kf-rail-toggle__label">
-              {railCollapsed ? "Rail" : "Hide rail"}
-            </span>
           </button>
-          <DocHeader document={activeDoc} />
-        </div>
+        ) : null}
+        <DocHeader document={activeDoc} />
         <DocTabs active={tab} onChange={setTab} />
 
         {tab === "linked" && (
