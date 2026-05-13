@@ -10,13 +10,29 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 12px;
-  min-height: 600px;
+  width: 100%;
+  min-height: 480px;
+  /* Fills the parent height when the host gives one (e.g. ``.kf-lv__paper``
+   * in the Knowledge Forge Linked View), so the page list scrolls inside
+   * the pane instead of pushing the page footer off-screen. Falls back to
+   * 80vh when the parent has no height. */
+  height: 100%;
   max-height: 80vh;
+}
+
+/* Collapse the second column when the consumer suppresses the built-in
+ * side panel (Knowledge Forge LinkedView mounts the PDF viewer next to
+ * its own Topics / Entities / Chunks rail and passes ``hideBuiltInSidePanel``
+ * to avoid two side panels side-by-side). The pages pane then fills the
+ * full width of the host instead of leaving 380px of empty space. */
+.pdf-chunk-viewer.is-solo {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .pdf-pages-pane {
   position: relative;
   overflow: hidden;
+  min-width: 0;
   border: 1px solid var(--border, #d4d4d8);
   border-radius: 8px;
   background: var(--surface, #fafafa);
