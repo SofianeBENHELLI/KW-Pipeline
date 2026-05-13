@@ -67,6 +67,12 @@ kw-demo = "app.demo:main"
 # console wrapper and ``scripts/load_demo_dataset.py`` for the actual
 # loader implementation.
 kw-demo-load = "app.demo_loader:main"
+# ``kw-rebackfill`` re-extracts legacy PDF documents (parser_version < 0.2)
+# under the line-level rect-aware parser shipped by Phase 1 of the PDF
+# viewer roadmap. See ``app/rebackfill.py`` for the contract (--dry-run,
+# --document-id, --limit). New uploads do not need this; the CLI is
+# strictly an opt-in upgrade path for rows already in the catalog.
+kw-rebackfill = "app.rebackfill:main"
 
 [project.optional-dependencies]
 test = [
