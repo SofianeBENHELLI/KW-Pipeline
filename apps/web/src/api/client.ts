@@ -456,6 +456,48 @@ export async function getExtraction(
   );
 }
 
+// ─── PDF viewer chunk locations (Phase 2 of the PDF-viewer plan) ───────────
+
+import type { ApiChunkLocationsResponse, ApiChunkSource } from "./types";
+
+/**
+ * GET /documents/{document_id}/versions/{version_id}/chunks
+ *
+ * Returns the chunk-location catalog for the PDF viewer's split-pane —
+ * one row per parser-emitted section with normalised rects, page,
+ * snippet, and topic-derived summary signal.
+ *
+ * Filters mirror the route's query params (page, source, min_confidence);
+ * limit defaults to the server-side ceiling so the viewer typically
+ * fetches every chunk in one round-trip.
+ */
+export async function listDocumentChunks(
+  documentId: string,
+  versionId: string,
+  options: {
+    page?: number;
+    source?: ApiChunkSource;
+    minConfidence?: number;
+    limit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiChunkLocationsResponse> {
+  return unwrap(
+    await http.GET("/documents/{document_id}/versions/{version_id}/chunks", {
+      params: {
+        path: { document_id: documentId, version_id: versionId },
+        query: {
+          page: options.page,
+          source: options.source,
+          min_confidence: options.minConfidence,
+          limit: options.limit,
+        },
+      },
+      signal: options.signal,
+    }),
+  );
+}
+
 // ─── Semantic endpoints ──────────────────────────────────────────────────────
 
 /**

@@ -34,7 +34,15 @@ from app.schemas.document import (
     SimilarDocument,
     SimilarDocumentsResponse,
 )
-from app.schemas.extraction import ExtractionJobSnapshot, RawExtraction
+from app.schemas.chunk_location import (
+    CHUNK_LOCATION_SCHEMA_VERSION,
+    MAX_CHUNK_LOCATIONS_LIMIT,
+    ChunkLocation,
+    ChunkLocationsResponse,
+    ChunkSource,
+)
+from app.schemas.document_topic import DOCUMENT_TOPIC_SCHEMA_VERSION
+from app.schemas.extraction import ExtractionJobSnapshot, NormalizedRect, RawExtraction
 from app.schemas.scope import DocumentScopesResponse, ScopeRef
 from app.schemas.semantic_document import SemanticDocument
 from app.services.auth import (
@@ -553,6 +561,169 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         )
 
     @router.get(
+        "/documents/{document_id}/versions/{version_id}/chunks",
+        operation_id="list_document_chunks",
+        response_model=ChunkLocationsResponse,
+    )
+    def list_document_chunks(
+        request: Request,
+        document_id: str,
+        version_id: str,
+        limit: int = Query(
+            default=MAX_CHUNK_LOCATIONS_LIMIT,
+            ge=1,
+            le=MAX_CHUNK_LOCATIONS_LIMIT,
+        ),
+        page: int | None = Query(default=None, ge=1),
+        source: ChunkSource | None = Query(default=None),
+        min_confidence: float | None = Query(default=None, ge=0.0, le=1.0),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """List chunk locations (rects + summary) for the PDF viewer.
+
+        Powers the Phase 2 split-pane viewer in Orbital: one
+        :class:`ChunkLocation` per parser-emitted section, carrying the
+        :class:`NormalizedRect` overlays the viewer draws on top of
+        EmbedPDF plus the LLM-derived summary signal the side panel
+        renders next to each chunk row.
+
+        Aggregation rules:
+
+        * One row per section in the persisted :class:`RawExtraction`,
+          in reading order.
+        * ``rects`` is flattened from every :class:`SourceReference`
+          the section owns (today's parser emits one ref per section
+          but the API is shape-compatible with a future N:1 split).
+        * Document-topic citations are used as the summary signal —
+          for each section we pick the highest-confidence topic that
+          lists the section in its ``supporting_chunk_ids``. Claims
+          and entities are intentionally not joined in v1 (their
+          subject-predicate-object shape does not map cleanly to a
+          single human-readable summary line; topics do).
+        * ``source = "ai_extraction"`` when at least one topic cites
+          the section; otherwise ``"parser"`` and ``confidence = 1.0``
+          — the parser is deterministic and its presence is not in
+          question, only its meaning.
+
+        D.5 hidden-existence: the scope check fires before any
+        catalog read so a caller without scope sees the same 404
+        envelope a missing document would return. Purged versions
+        surface 410 like every other per-version route.
+        """
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
+
+        try:
+            extraction = services.documents.catalog.get_raw_extraction(version_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        topics_for_version = _topics_for_version(
+            store=services.document_topic_store,
+            document_id=document_id,
+            version_id=version_id,
+        )
+        # Map section_id → highest-confidence topic citing that section.
+        # Sorting once up front lets the per-section lookup pick the
+        # best topic in O(1) without re-sorting per chunk.
+        topics_for_version.sort(key=lambda t: t.confidence, reverse=True)
+        topic_by_chunk: dict[str, Any] = {}
+        for topic in topics_for_version:
+            for chunk_id in topic.supporting_chunk_ids:
+                topic_by_chunk.setdefault(chunk_id, topic)
+
+        # Group source references by section_id once; sections always
+        # carry their refs through ``section.source_reference_ids``.
+        refs_by_id = {ref.id: ref for ref in extraction.source_references}
+
+        pipeline_version = (
+            f"parser={extraction.parser_version};"
+            f"topic={DOCUMENT_TOPIC_SCHEMA_VERSION}"
+        )
+
+        items: list[ChunkLocation] = []
+        for section in extraction.sections:
+            section_rects: list[NormalizedRect] = []
+            section_page: int | None = None
+            for ref_id in section.source_reference_ids:
+                ref = refs_by_id.get(ref_id)
+                if ref is None:
+                    continue
+                section_rects.extend(ref.rects)
+                if section_page is None and ref.page_number is not None:
+                    section_page = ref.page_number
+            # Fall back to the first rect's page when the source
+            # reference has no scalar page_number (older parsers
+            # populated only one or the other).
+            if section_page is None and section_rects:
+                section_page = section_rects[0].page
+            if section_page is None:
+                section_page = 1
+
+            topic = topic_by_chunk.get(section.id)
+            if topic is not None:
+                summary = topic.summary
+                topic_id: str | None = topic.id
+                topic_label: str | None = topic.label
+                row_source: ChunkSource = "ai_extraction"
+                confidence = topic.confidence
+            else:
+                summary = None
+                topic_id = None
+                topic_label = None
+                row_source = "parser"
+                # Parser output is deterministic; surfacing 1.0 keeps
+                # the side panel from rendering a misleading "low
+                # confidence" badge on plain text.
+                confidence = 1.0
+
+            if page is not None and section_page != page:
+                continue
+            if source is not None and row_source != source:
+                continue
+            if min_confidence is not None and confidence < min_confidence:
+                continue
+
+            items.append(
+                ChunkLocation(
+                    chunk_id=section.id,
+                    document_id=document_id,
+                    document_version_id=version_id,
+                    document_hash=version.sha256,
+                    page=section_page,
+                    rects=section_rects,
+                    heading=section.heading,
+                    snippet=section.text[:240],
+                    summary=summary,
+                    topic_id=topic_id,
+                    topic_label=topic_label,
+                    source=row_source,
+                    confidence=confidence,
+                    pipeline_version=pipeline_version,
+                )
+            )
+            if len(items) >= limit:
+                break
+
+        return ChunkLocationsResponse(
+            schema_version=CHUNK_LOCATION_SCHEMA_VERSION,  # explicit for OpenAPI clarity
+            document_id=document_id,
+            document_version_id=version_id,
+            document_hash=version.sha256,
+            parser_version=extraction.parser_version,
+            items=items,
+        )
+
+    @router.get(
         "/documents/{document_id}/scopes",
         operation_id="list_document_scopes",
         response_model=DocumentScopesResponse,
@@ -858,6 +1029,31 @@ def _get_version_including_archived(
         if candidate.id == version_id:
             return candidate
     raise KeyError("Document version not found.")
+
+
+def _topics_for_version(
+    *,
+    store: Any,
+    document_id: str,
+    version_id: str,
+) -> list[Any]:
+    """Fetch every persisted topic for a given (document, version) pair.
+
+    The store's :meth:`list_for_document` is cursor-paginated; we walk
+    the cursor here because the chunk-locations route needs the full
+    set to join against sections. Per-version filtering is done after
+    fetch — the store's read API takes ``document_id`` only, and a
+    version-aware index would be a follow-up if this ever shows up in
+    a flame graph.
+    """
+    collected: list[Any] = []
+    cursor: str | None = None
+    while True:
+        page, cursor = store.list_for_document(document_id, cursor=cursor)
+        collected.extend(t for t in page if t.version_id == version_id)
+        if cursor is None:
+            break
+    return collected
 
 
 def _build_lineage_response(document: Document) -> LineageResponse:

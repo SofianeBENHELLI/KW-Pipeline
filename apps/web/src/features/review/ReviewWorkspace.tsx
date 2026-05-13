@@ -11,6 +11,7 @@ import { documentScopes, latestVersion } from "../../domain/document";
 import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
+import { PdfViewerPanel } from "../pdf-viewer";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import { ReviewActions } from "./ReviewActions";
 import { SemanticAssetList } from "./SemanticAssetList";
@@ -341,6 +342,25 @@ export function ReviewWorkspace({
             <pre>{semantic?.markdown ?? "Markdown preview is not available."}</pre>
           )}
         </article>
+
+        {/* PDF-viewer panel (Phase 2 of the PDF-viewer plan).
+            Only rendered when the latest version's content_type is a
+            PDF; for non-PDF formats the Markdown preview above remains
+            the primary inspection surface. The viewer is React.lazy'd
+            inside ``PdfViewerPanel`` so pdfjs-dist + its worker only
+            ship to the bundle when a reviewer actually opens this tab. */}
+        {version.content_type === "application/pdf" ? (
+          <article className="panel pdf-viewer-panel">
+            <div className="panel-heading">
+              <h3>Original (PDF)</h3>
+            </div>
+            <PdfViewerPanel
+              documentId={documentId}
+              versionId={versionId}
+              expectedHash={version.sha256}
+            />
+          </article>
+        ) : null}
 
         {/* `refreshKey` is the coordination seam with the graph slice
             (issue #133) — `<KnowledgeGraphView>` re-fetches the projection

@@ -13,6 +13,21 @@
  *     production data may include pre-/post- chunks.
  *   * When `DOC_CONTENT[doc.id]` is missing, we fall back to a small
  *     skeleton stub identical to the design's `kx-viewer-stub`.
+ *
+ * Phase 4 wiring (PDF-viewer roadmap):
+ *
+ *   Real backend PDFs (``doc.type === "pdf"`` AND ``doc.versions[*]``
+ *   carries a non-empty sha256) render through
+ *   :class:`PdfChunkViewer` which uses the shared rect-overlay
+ *   primitives from ``apps/_shared/pdf-viewer/``. The fallback path
+ *   below — page cards with paragraph rows and the ``paraChunkId``
+ *   anchor lookup — still serves Explorer's synthetic ``SAMPLE_*``
+ *   corpus and non-PDF document types, where no backend rects
+ *   exist. The branch lives at the top of the component body.
+ *
+ *   Reference: ``apps/_shared/pdf-viewer/README.md`` for the
+ *   consumer contract, Orbital's
+ *   ``apps/web/src/features/pdf-viewer/`` for the Vite-side adapter.
  */
 
 import React from "react";
@@ -26,6 +41,35 @@ import {
   chunkById,
 } from "../state/explorer-data";
 import { Icon, NAVY2 } from "./icons";
+import { PdfChunkViewer } from "./PdfChunkViewer";
+
+/**
+ * Pick the version row the PDF viewer should fetch chunks against.
+ *
+ * Returns ``null`` when the document is not a real backend row (no
+ * versions array; synthetic samples) OR the document is not a PDF.
+ * The caller branches on the return value to decide whether to render
+ * the new rect-based viewer or fall back to the legacy text-card
+ * stack.
+ */
+function _pdfVersionFor(doc: ExplorerDocument | null): {
+  versionId: string;
+  sha256: string;
+} | null {
+  if (doc === null) return null;
+  if (doc.type !== "pdf") return null;
+  const versions = doc.versions;
+  if (!versions || versions.length === 0) return null;
+  // Prefer the latest version row that carries a non-empty sha256 —
+  // the rebackfill CLI keeps the hash stable across re-extractions,
+  // so the hash gate in the viewer matches whatever the backend
+  // returns for the chunks payload.
+  const candidate = [...versions]
+    .sort((a, b) => b.versionNumber - a.versionNumber)
+    .find((v) => typeof v.sha256 === "string" && v.sha256.length > 0);
+  if (!candidate || !candidate.sha256) return null;
+  return { versionId: candidate.id, sha256: candidate.sha256 };
+}
 
 /**
  * Bug B — given a (page, para) location in a ``DocContent``, return
@@ -74,6 +118,20 @@ export const DocViewer: React.FC<DocViewerProps> = ({
           Click a document or chunk in the graph to open the original source here.
         </div>
       </div>
+    );
+  }
+
+  // Phase 4 wiring: real backend PDFs render through the rect-based
+  // viewer in ``apps/_shared/pdf-viewer``. Synthetic samples and
+  // non-PDF formats keep the legacy text-card stack below.
+  const pdfVersion = _pdfVersionFor(doc);
+  if (pdfVersion !== null) {
+    return (
+      <PdfChunkViewer
+        documentId={doc.id}
+        versionId={pdfVersion.versionId}
+        expectedHash={pdfVersion.sha256}
+      />
     );
   }
 

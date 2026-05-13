@@ -1086,6 +1086,175 @@
         "title": "ChatResponse",
         "type": "object"
       },
+      "ChunkLocation": {
+        "description": "One row in the chunk-locations payload.",
+        "properties": {
+          "chunk_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "document_hash": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Document Hash",
+            "type": "string"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Version Id",
+            "type": "string"
+          },
+          "heading": {
+            "maxLength": 400,
+            "title": "Heading",
+            "type": "string"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "pipeline_version": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Pipeline Version",
+            "type": "string"
+          },
+          "rects": {
+            "items": {
+              "$ref": "#/components/schemas/NormalizedRect"
+            },
+            "title": "Rects",
+            "type": "array"
+          },
+          "snippet": {
+            "maxLength": 2000,
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "ai_extraction",
+              "parser"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "topic_label": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Label"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "document_version_id",
+          "document_hash",
+          "page",
+          "rects",
+          "heading",
+          "snippet",
+          "summary",
+          "topic_id",
+          "topic_label",
+          "source",
+          "confidence",
+          "pipeline_version"
+        ],
+        "title": "ChunkLocation",
+        "type": "object"
+      },
+      "ChunkLocationsResponse": {
+        "description": "Envelope returned by ``list_document_chunks``.\n\n``parser_version`` is duplicated at the envelope level so the\nviewer can gate rect-level rendering on it without inspecting\nevery item — pre-0.2 versions ship with empty ``rects`` lists.",
+        "properties": {
+          "document_hash": {
+            "title": "Document Hash",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_version_id": {
+            "title": "Document Version Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChunkLocation"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "parser_version": {
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "document_id",
+          "document_version_id",
+          "document_hash",
+          "parser_version",
+          "items"
+        ],
+        "title": "ChunkLocationsResponse",
+        "type": "object"
+      },
       "ChunkSearchResponse": {
         "description": "Response shape for ``GET /knowledge/search`` (Phase 3, ADR-015).\n\nEmpty ``results`` is a valid response — it means no chunk in the\nindexed set was similar enough (or no chunks have been embedded\nyet). ``query_embedding_dim`` mirrors the dimensionality the\nrequest was scored against, so an operator can spot\nmodel-mismatch errors at a glance.",
         "properties": {
@@ -3173,6 +3342,49 @@
         "title": "NerConfig",
         "type": "object"
       },
+      "NormalizedRect": {
+        "description": "A page-relative rectangle used by the PDF viewer to draw overlays.\n\nCoordinates are normalised to ``[0, 1]`` with a **top-left origin**,\nregardless of the PDF's native coordinate space (PDF defaults to\nbottom-left; pdfplumber reads top-left). The viewer renders with\nCSS percentage positioning so zoom / resize / rotation stay aligned\nwithout per-frame recompute.\n\nA chunk may have multiple rects across one or more pages — see\n:attr:`SourceReference.rects`. Each rect carries its own ``page`` so\nmulti-page chunks render correctly without a parent grouping.",
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "page",
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "NormalizedRect",
+        "type": "object"
+      },
       "OrbitalPurgeAllRequest": {
         "description": "Body for ``POST /admin/orbital/purge_all`` (#292 — bulk override).\n\nThe operator types :data:`ORBITAL_PURGE_ALL_PHRASE` verbatim into\nthe modal — the route 422s on any other value so a misclick can't\nnuke the catalog. Combined with ``?confirm=true`` this gives the\nbulk path two independent gates.",
         "properties": {
@@ -4583,6 +4795,13 @@
             ],
             "title": "Page Number"
           },
+          "rects": {
+            "items": {
+              "$ref": "#/components/schemas/NormalizedRect"
+            },
+            "title": "Rects",
+            "type": "array"
+          },
           "section_id": {
             "title": "Section Id",
             "type": "string"
@@ -4599,7 +4818,8 @@
           "page_number",
           "line_start",
           "line_end",
-          "snippet"
+          "snippet",
+          "rects"
         ],
         "title": "SourceReference",
         "type": "object"
@@ -6342,6 +6562,122 @@
           }
         },
         "summary": "Get Similar Documents"
+      }
+    },
+    "/documents/{document_id}/versions/{version_id}/chunks": {
+      "get": {
+        "description": "List chunk locations (rects + summary) for the PDF viewer.\n\nPowers the Phase 2 split-pane viewer in Orbital: one\n:class:`ChunkLocation` per parser-emitted section, carrying the\n:class:`NormalizedRect` overlays the viewer draws on top of\nEmbedPDF plus the LLM-derived summary signal the side panel\nrenders next to each chunk row.\n\nAggregation rules:\n\n* One row per section in the persisted :class:`RawExtraction`,\n  in reading order.\n* ``rects`` is flattened from every :class:`SourceReference`\n  the section owns (today's parser emits one ref per section\n  but the API is shape-compatible with a future N:1 split).\n* Document-topic citations are used as the summary signal —\n  for each section we pick the highest-confidence topic that\n  lists the section in its ``supporting_chunk_ids``. Claims\n  and entities are intentionally not joined in v1 (their\n  subject-predicate-object shape does not map cleanly to a\n  single human-readable summary line; topics do).\n* ``source = \"ai_extraction\"`` when at least one topic cites\n  the section; otherwise ``\"parser\"`` and ``confidence = 1.0``\n  — the parser is deterministic and its presence is not in\n  question, only its meaning.\n\nD.5 hidden-existence: the scope check fires before any\ncatalog read so a caller without scope sees the same 404\nenvelope a missing document would return. Purged versions\nsurface 410 like every other per-version route.",
+        "operationId": "list_document_chunks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ai_extraction",
+                    "parser"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_confidence",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Confidence"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkLocationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Document Chunks"
       }
     },
     "/documents/{document_id}/versions/{version_id}/extract": {
