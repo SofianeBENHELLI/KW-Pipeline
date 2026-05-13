@@ -9,27 +9,135 @@
 /* ── Page shell ────────────────────────────────────────────────── */
 
 .orb-app .kf-review {
+  /* Three-column grid: rail (resizable) | 6-px drag handle | main pane.
+   * The rail width is driven by the ``--kf-rail-w`` CSS custom
+   * property which ``ReviewWorkspace`` updates on drag — keeps the
+   * grid reactive without re-rendering ``DocRail`` on every pointer
+   * move. The ``is-rail-collapsed`` variant zeroes the rail column
+   * + hides the resize handle. */
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: var(--kf-rail-w, 380px) auto 1fr;
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
-.orb-app .kf-review--rail-right {
-  grid-template-columns: 1fr 380px;
+.orb-app .kf-review.is-rail-collapsed {
+  grid-template-columns: 0 0 1fr;
 }
-.orb-app .kf-review--rail-right .kf-rail {
-  order: 2;
-  border-left: 1px solid var(--orb-border);
-  border-right: 0;
+.orb-app .kf-review.is-rail-collapsed .kf-rail-slot,
+.orb-app .kf-review.is-rail-collapsed .kf-resize {
+  display: none;
+}
+.orb-app .kf-rail-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.orb-app .kf-rail-slot > .kf-rail {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The handle column sits between the rail and the main pane. The
+ * track is 6 px wide for a pointer-friendly hit target; we render a
+ * 1-px rule centred inside it with a stroke that pops on hover and
+ * during drag so the operator sees the active target. */
+.orb-app .kf-resize {
+  width: 6px;
+  margin: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
+}
+.orb-app .kf-resize::before {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--orb-border);
+  transition: background 120ms ease, inset 120ms ease;
+}
+.orb-app .kf-resize:hover::before,
+.orb-app .kf-resize:focus-visible::before {
+  background: var(--orb-fg-dim);
+  inset: 0 1px;
+}
+.orb-app .kf-resize.is-dragging::before {
+  background: var(--dx-cyan, var(--orb-fg-muted));
+  inset: 0;
+}
+.orb-app .kf-resize.is-disabled {
+  display: none;
 }
 
 .orb-app .kf-main {
   min-width: 0;
   min-height: 0;
-  padding: 16px 22px;
-  overflow-y: auto;
+  /* The main pane is a flex column so the LinkedView can fill the
+   * remaining height after the header + tab strip without an
+   * outer-scrollbar regression. Each interior pane handles its own
+   * vertical overflow. */
+  display: flex;
+  flex-direction: column;
+  padding: 16px 22px 0;
+  overflow: hidden;
   background: var(--orb-bg);
+}
+
+/* Header row: rail-collapse toggle + DocHeader on the same baseline. */
+.orb-app .kf-main__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.orb-app .kf-main__head > *:last-child {
+  flex: 1;
+  min-width: 0;
+}
+.orb-app .kf-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--orb-border);
+  border-radius: 6px;
+  background: var(--orb-bg-elev);
+  color: var(--orb-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.orb-app .kf-rail-toggle:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+  border-color: var(--orb-fg-dim);
+}
+.orb-app .kf-rail-toggle__label {
+  letter-spacing: 0.01em;
+}
+
+/* Tab content wrappers ─ each tab handles its own overflow strategy
+ * because LinkedView is flex-fill-with-inner-scroll (the inside
+ * panes scroll, the wrapper does not) while the Pipeline tab is a
+ * stack of cards that scrolls as a block. */
+.orb-app .kf-tab-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.orb-app .kf-tab-body--pipeline {
+  overflow-y: auto;
+}
+.orb-app .kf-foot {
+  flex-shrink: 0;
 }
 
 .orb-app .kf-foot {

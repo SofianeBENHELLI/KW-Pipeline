@@ -221,6 +221,63 @@ describe("<ReviewWorkspace />", () => {
     });
     expect(within(region).getByText("1 selected")).toBeInTheDocument();
   });
+
+  describe("rail collapse + resize", () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("rail-toggle button collapses + restores the rail with persisted state", async () => {
+      const { unmount } = renderWorkspace("/kf/review");
+      await waitFor(() =>
+        expect(screen.getByText("alpha.md")).toBeInTheDocument(),
+      );
+      const root = document.querySelector(".kf-review");
+      expect(root?.classList.contains("is-rail-collapsed")).toBe(false);
+
+      fireEvent.click(screen.getByTestId("kf-rail-toggle"));
+      expect(root?.classList.contains("is-rail-collapsed")).toBe(true);
+      // Collapsed state is persisted so a reload keeps the rail
+      // hidden — operators who prefer a wide canvas don't get reset
+      // every refresh.
+      expect(window.localStorage.getItem("kf:review:rail-collapsed")).toBe(
+        "true",
+      );
+
+      // Mount a fresh component; it should hydrate from localStorage
+      // and start in the collapsed state.
+      unmount();
+      renderWorkspace("/kf/review");
+      await waitFor(() =>
+        expect(screen.getByText("alpha.md")).toBeInTheDocument(),
+      );
+      expect(
+        document.querySelector(".kf-review")?.classList.contains("is-rail-collapsed"),
+      ).toBe(true);
+    });
+
+    it("the [ keyboard shortcut toggles the rail (and only fires outside inputs)", async () => {
+      renderWorkspace("/kf/review");
+      await waitFor(() =>
+        expect(screen.getByText("alpha.md")).toBeInTheDocument(),
+      );
+      const root = document.querySelector(".kf-review") as HTMLElement;
+      expect(root.classList.contains("is-rail-collapsed")).toBe(false);
+
+      // Outside an input: shortcut collapses the rail.
+      fireEvent.keyDown(document, { key: "[" });
+      expect(root.classList.contains("is-rail-collapsed")).toBe(true);
+      fireEvent.keyDown(document, { key: "[" });
+      expect(root.classList.contains("is-rail-collapsed")).toBe(false);
+
+      // Inside the rail's search input: shortcut is swallowed so the
+      // operator can type ``[`` into the filter without flickering
+      // the rail open/closed.
+      const search = screen.getByPlaceholderText(/Filter filename/i);
+      fireEvent.keyDown(search, { key: "[" });
+      expect(root.classList.contains("is-rail-collapsed")).toBe(false);
+    });
+  });
 });
 
 describe("sortDocs", () => {

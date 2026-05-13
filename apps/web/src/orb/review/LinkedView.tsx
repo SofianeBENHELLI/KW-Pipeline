@@ -28,8 +28,20 @@ import {
   type LinkedTopic,
 } from "../hooks/useLinkedObjects";
 import { PdfViewerPanel } from "../../features/pdf-viewer";
+import { ResizeHandle } from "./ResizeHandle";
+import { useResizable } from "./useResizable";
 
 export type ObjKind = "Topics" | "Entities" | "Chunks";
+
+// Inner split between the document viewer (left) and the knowledge-
+// objects rail (right). Value is the document viewer's width in px;
+// the right column takes whatever's left over via ``1fr``. Pixels
+// rather than percent so the drag-handle delta maps 1:1 to client X
+// without needing the container's live width.
+const _DOC_WIDTH_KEY = "kf:review:linked-doc-width";
+const _DOC_WIDTH_MIN = 360;
+const _DOC_WIDTH_MAX = 1400;
+const _DOC_WIDTH_DEFAULT = 720;
 
 // Module-level frozen empty set so ``useMemo`` returns a stable
 // reference when no chunks are highlit — keeps the
@@ -94,6 +106,17 @@ export function LinkedView({
 
   const [objKind, setObjKind] = useState<ObjKind>("Topics");
   const [hover, setHover] = useState<Hover | null>(null);
+
+  // Doc / objects split — drag-resizable, persisted via localStorage.
+  const docResize = useResizable({
+    initial: _DOC_WIDTH_DEFAULT,
+    min: _DOC_WIDTH_MIN,
+    max: _DOC_WIDTH_MAX,
+    storageKey: _DOC_WIDTH_KEY,
+  });
+  const linkedStyle = {
+    "--kf-lv-doc-w": `${docResize.value}px`,
+  } as React.CSSProperties;
 
   const isChunkHighlit = (chunkId: string): boolean => {
     if (!hover) return false;
@@ -204,7 +227,7 @@ export function LinkedView({
         : data.chunks;
 
   return (
-    <section className="kf-lv" aria-label="Linked view">
+    <section className="kf-lv" aria-label="Linked view" style={linkedStyle}>
       {/* ── Document viewer (left) ─────────────────────────────── */}
       <div className="kf-lv__pane kf-lv__pane--doc">
         <div className="kf-lv__pane-h">
@@ -274,6 +297,13 @@ export function LinkedView({
           )}
         </div>
       </div>
+
+      {/* ── Resize handle between doc viewer and objects rail ──── */}
+      <ResizeHandle
+        label="Resize document viewer"
+        onPointerDown={docResize.onPointerDown}
+        isDragging={docResize.isDragging}
+      />
 
       {/* ── Knowledge objects (right) ─────────────────────────── */}
       <div className="kf-lv__pane kf-lv__pane--objs">

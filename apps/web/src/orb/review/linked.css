@@ -7,10 +7,18 @@
  */
 
 .orb-app .kf-lv {
+  /* Three-track grid: doc viewer | resize handle | objects rail.
+   * ``--kf-lv-doc-w`` is set by ``LinkedView`` from the
+   * ``useResizable`` hook value (px); the right column fills the
+   * remainder via ``1fr``. */
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: var(--kf-lv-doc-w, 1fr) auto 1fr;
   gap: 12px;
-  min-height: 540px;
+  /* Fits the available height in ``.kf-main`` so the interior panes
+   * scroll instead of pushing the page footer off-screen. */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .orb-app .kf-lv--state {
