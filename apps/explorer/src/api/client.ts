@@ -14,6 +14,8 @@ import { widget } from "@widget-lab/3ddashboard-utils";
 import { asApiError, withRetry } from "../../../_shared/api-core";
 import type {
   AggregatedRelationEvidence,
+  ChunkLocationsResponse,
+  ChunkSource,
   Document,
   DocumentListResponse,
   ExploreSearchResponse,
@@ -328,6 +330,43 @@ export async function getHealthWithLatency(
   const health = await getHealth(opts);
   const latencyMs = Math.round(performance.now() - start);
   return { health, latencyMs };
+}
+
+/**
+ * GET /documents/{document_id}/versions/{version_id}/chunks
+ *
+ * Returns the chunk-location catalog for the PDF viewer: one row per
+ * parser-emitted section with normalised rects, page, snippet, and a
+ * topic-derived summary signal. See ``apps/_shared/pdf-viewer`` for
+ * the consumer-side primitives that render this payload.
+ *
+ * Filters mirror the backend route's query params (page, source,
+ * min_confidence); ``limit`` defaults to the server-side ceiling so
+ * the viewer typically fetches every chunk in one round-trip.
+ */
+export function listDocumentChunks(
+  documentId: string,
+  versionId: string,
+  opts: {
+    baseUrl?: string;
+    signal?: AbortSignal;
+    page?: number;
+    source?: ChunkSource;
+    minConfidence?: number;
+    limit?: number;
+  } = {},
+): Promise<ChunkLocationsResponse> {
+  const params = new URLSearchParams();
+  if (opts.page !== undefined) params.set("page", String(opts.page));
+  if (opts.source !== undefined) params.set("source", opts.source);
+  if (opts.minConfidence !== undefined)
+    params.set("min_confidence", String(opts.minConfidence));
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  const path =
+    `/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/chunks` +
+    (query ? `?${query}` : "");
+  return request<ChunkLocationsResponse>(path, opts);
 }
 
 export function rawFileUrl(

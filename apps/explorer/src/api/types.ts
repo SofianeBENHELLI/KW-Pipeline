@@ -58,6 +58,19 @@ export interface DocumentListResponse {
 
 // ─── Raw extraction ──────────────────────────────────────────────────────────
 
+// Re-export the PDF-viewer chunk-location types from the shared
+// module so Explorer's hand-written API surface aligns with what
+// Orbital ships — both apps consume the same backend route, the
+// shared mirror is the single source of truth this side of the wire.
+export type {
+  ChunkLocation,
+  ChunkLocationsResponse,
+  ChunkSource,
+  NormalizedRect,
+} from "../../../_shared/pdf-viewer";
+
+import type { NormalizedRect } from "../../../_shared/pdf-viewer";
+
 export interface SourceReference {
   id: string;
   document_version_id: string;
@@ -66,6 +79,12 @@ export interface SourceReference {
   line_start: number | null;
   line_end: number | null;
   snippet: string;
+  // ``rects`` carries the normalised page rectangles emitted by the
+  // PDF parser at ``parser_version >= 0.2`` (PDF-viewer Phase 1). The
+  // field is optional on the wire (defaults to ``[]``) so legacy
+  // payloads still deserialise; consumers that don't render highlights
+  // can ignore it entirely.
+  rects?: NormalizedRect[];
 }
 
 export interface RawSection {
