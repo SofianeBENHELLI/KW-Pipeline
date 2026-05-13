@@ -11,6 +11,27 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class NormalizedRect(BaseModel):
+    """A page-relative rectangle used by the PDF viewer to draw overlays.
+
+    Coordinates are normalised to ``[0, 1]`` with a **top-left origin**,
+    regardless of the PDF's native coordinate space (PDF defaults to
+    bottom-left; pdfplumber reads top-left). The viewer renders with
+    CSS percentage positioning so zoom / resize / rotation stay aligned
+    without per-frame recompute.
+
+    A chunk may have multiple rects across one or more pages — see
+    :attr:`SourceReference.rects`. Each rect carries its own ``page`` so
+    multi-page chunks render correctly without a parent grouping.
+    """
+
+    page: int = Field(ge=1)
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    width: float = Field(gt=0.0, le=1.0)
+    height: float = Field(gt=0.0, le=1.0)
+
+
 class SourceReference(BaseModel):
     """Pointer from extracted or semantic content back to source text."""
 
@@ -21,6 +42,13 @@ class SourceReference(BaseModel):
     line_start: int | None = None
     line_end: int | None = None
     snippet: str
+    # PDF-viewer highlight rectangles (top-left origin, normalised to
+    # [0, 1] against the rendered page size). Empty for legacy parsers
+    # (``parser_version="0.1"``) and for non-PDF content; populated by
+    # the line-level PDF parser from ``parser_version="0.2"`` onwards.
+    # A chunk that spans multiple lines / pages stores one rect per
+    # line, each tagged with its own ``page``.
+    rects: list[NormalizedRect] = Field(default_factory=list)
 
 
 class RawSection(BaseModel):
