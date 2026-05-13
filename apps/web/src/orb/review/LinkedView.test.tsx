@@ -10,12 +10,38 @@
  * loading / empty / error states.
  */
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { LinkedView } from "./LinkedView";
 import { projectGraph } from "../hooks/useLinkedObjects";
 import type { ApiKnowledgeGraphProjection } from "../../api/types";
+
+// The real ``PdfViewerPanel`` fetches ``/raw`` bytes and runs the
+// pdfjs-dist render loop — both useless in jsdom. The PDF-mode cases
+// below replace it with a stub that records every render's props so
+// we can assert the cross-highlight wiring without standing up a
+// real PDF pipeline. The mock is hoisted to module scope by
+// ``vi.mock`` so it is in effect for the whole file.
+const _pdfViewerPanelMock = vi.fn();
+vi.mock("../../features/pdf-viewer", () => ({
+  PdfViewerPanel: (props: Record<string, unknown>) => {
+    _pdfViewerPanelMock(props);
+    return <div data-testid="kf-pdf-viewer-stub" />;
+  },
+}));
+
+function _lastPdfPanelProps(): Record<string, unknown> {
+  expect(_pdfViewerPanelMock).toHaveBeenCalled();
+  const calls = _pdfViewerPanelMock.mock.calls;
+  return calls[calls.length - 1][0];
+}
+
+function _fireHoverChunkFromPdfViewer(chunkId: string | null): void {
+  const props = _lastPdfPanelProps();
+  const onHover = props.onHoverChunk as (id: string | null) => void;
+  act(() => onHover(chunkId));
+}
 
 const PROJECTION: ApiKnowledgeGraphProjection = {
   document_id: "doc-1",
@@ -218,6 +244,100 @@ describe("<LinkedView />", () => {
       );
       expect(screen.getByTestId("kf-lv-text")).toBeInTheDocument();
       expect(screen.queryByTestId("kf-lv-pdf")).not.toBeInTheDocument();
+    });
+
+    describe("cross-highlight wiring", () => {
+      it("feeds an empty hover set to the PDF panel by default", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        const props = _lastPdfPanelProps();
+        const ids = props.externalHoveredChunkIds as ReadonlySet<string>;
+        expect(ids.size).toBe(0);
+        expect(props.hideBuiltInSidePanel).toBe(true);
+      });
+
+      it("hovering a Topic lights up every chunk that belongs to it", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        // Topic ``t1`` owns chunks c1 + c2 in the fixture.
+        fireEvent.mouseEnter(screen.getByTestId("kf-lv-obj-Topics-t1"));
+        const props = _lastPdfPanelProps();
+        const ids = props.externalHoveredChunkIds as ReadonlySet<string>;
+        expect(ids.has("c1")).toBe(true);
+        expect(ids.has("c2")).toBe(true);
+        expect(ids.has("c3")).toBe(false);
+      });
+
+      it("hovering an Entity lights up every chunk that cites it", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        // Entity ``e1`` is cited by c1 only in the fixture. Switch the
+        // right-pane segmented control to Entities so the card is in
+        // the DOM, then hover it.
+        fireEvent.click(screen.getByRole("tab", { name: /Entities/ }));
+        fireEvent.mouseEnter(screen.getByTestId("kf-lv-obj-Entities-e1"));
+        const ids = _lastPdfPanelProps().externalHoveredChunkIds as ReadonlySet<string>;
+        expect(ids.has("c1")).toBe(true);
+        expect(ids.has("c2")).toBe(false);
+      });
+
+      it("PDF rect hover (via onHoverChunk callback) lights up the parent Topic card", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        // Simulate the shared viewer firing its hover callback with
+        // chunk c1 — should light up its parent topic (t1) on the
+        // right pane via the existing ``is-hl`` class.
+        _fireHoverChunkFromPdfViewer("c1");
+        expect(screen.getByTestId("kf-lv-obj-Topics-t1").className).toMatch(/is-hl/);
+        // Clearing the hover removes the highlight.
+        _fireHoverChunkFromPdfViewer(null);
+        expect(screen.getByTestId("kf-lv-obj-Topics-t1").className).not.toMatch(/is-hl/);
+      });
+
+      it("hovering a Chunk card lights up just that chunk in the PDF", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        // Switch to the Chunks tab so the Chunk cards are in the DOM.
+        fireEvent.click(screen.getByRole("tab", { name: /Chunks/ }));
+        fireEvent.mouseEnter(screen.getByTestId("kf-lv-obj-Chunks-c3"));
+        const ids = _lastPdfPanelProps().externalHoveredChunkIds as ReadonlySet<string>;
+        expect([...ids]).toEqual(["c3"]);
+      });
     });
   });
 });

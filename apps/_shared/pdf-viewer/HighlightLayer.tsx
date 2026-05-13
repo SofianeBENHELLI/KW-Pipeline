@@ -27,6 +27,24 @@ interface HighlightLayerProps {
   readonly chunks: ChunkLocation[];
   readonly selectedChunkId: string | null;
   readonly hoveredChunkId: string | null;
+  /**
+   * Multi-chunk hover set. When provided, every chunk whose id is in
+   * the set renders with the "hovered" visual — useful for the
+   * Knowledge Forge cross-highlight where hovering one Topic / Entity
+   * card on the right pane should light up *all* of that object's
+   * supporting chunks in the PDF. Coexists with the singleton
+   * ``hoveredChunkId``: a rect is considered hovered when **either**
+   * matches, so the internal pointer-hover on the rect itself keeps
+   * working while an external set drives multi-rect highlight.
+   */
+  readonly hoveredChunkIds?: ReadonlySet<string> | null;
+  /**
+   * Multi-chunk selection set. Same precedence rules as
+   * ``hoveredChunkIds`` — coexists with the singleton form so an
+   * external "selected topic" can light up its rects without
+   * disrupting the rect-click flow.
+   */
+  readonly selectedChunkIds?: ReadonlySet<string> | null;
   readonly onSelectChunk: (chunkId: string) => void;
   readonly onHoverChunk: (chunkId: string | null) => void;
 }
@@ -63,6 +81,8 @@ export function HighlightLayer({
   chunks,
   selectedChunkId,
   hoveredChunkId,
+  hoveredChunkIds,
+  selectedChunkIds,
   onSelectChunk,
   onHoverChunk,
 }: HighlightLayerProps) {
@@ -81,8 +101,16 @@ export function HighlightLayer({
       style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
     >
       {rects.map(({ chunkId, source, rect, summary }, index) => {
-        const isSelected = chunkId === selectedChunkId;
-        const isHovered = chunkId === hoveredChunkId;
+        // Set-membership is OR'd with the singleton match so the
+        // internal pointer-hover on the rect itself coexists with an
+        // external multi-chunk hover (Knowledge Forge LinkedView
+        // hovering a Topic / Entity card → many rects light up).
+        const isSelected =
+          chunkId === selectedChunkId ||
+          selectedChunkIds?.has(chunkId) === true;
+        const isHovered =
+          chunkId === hoveredChunkId ||
+          hoveredChunkIds?.has(chunkId) === true;
         const classes = [
           "pdf-highlight",
           source === "ai_extraction" ? "is-ai" : "is-parser",

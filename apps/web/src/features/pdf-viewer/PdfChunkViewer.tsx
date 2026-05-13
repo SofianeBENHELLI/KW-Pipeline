@@ -51,6 +51,22 @@ interface PdfChunkViewerProps {
    *  next to the viewer (e.g. the Knowledge Forge LinkedView's right
    *  pane) so the operator doesn't see two side panels side-by-side. */
   readonly hideBuiltInSidePanel?: boolean;
+  /** External multi-chunk hover set (e.g. the Knowledge Forge
+   *  LinkedView hovering a Topic that owns N chunks). When provided,
+   *  every chunk whose id is in the set renders with the hover
+   *  visual, in addition to whichever single rect the operator's
+   *  pointer is over. ``null`` / ``undefined`` disables the override
+   *  and the viewer falls back to its internal singleton hover. */
+  readonly externalHoveredChunkIds?: ReadonlySet<string> | null;
+  /** Symmetric multi-chunk selection set. Reserved for parity with
+   *  ``externalHoveredChunkIds``; today's LinkedView uses hover only
+   *  but the API is in place for a future click-to-pin Topic. */
+  readonly externalSelectedChunkIds?: ReadonlySet<string> | null;
+  /** Fires every time the rect-level hover changes — null on
+   *  pointer-leave. Lets the consumer reflect "PDF → right pane"
+   *  cross-highlight: hovering a rect lights up its parent Topic /
+   *  Entity card on the right side. */
+  readonly onHoverChunk?: (chunkId: string | null) => void;
 }
 
 type LoadState =
@@ -91,6 +107,9 @@ export function PdfChunkViewer({
   expectedHash,
   pdfBlobUrl,
   hideBuiltInSidePanel = false,
+  externalHoveredChunkIds = null,
+  externalSelectedChunkIds = null,
+  onHoverChunk,
 }: PdfChunkViewerProps) {
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const selection = useChunkSelection();
@@ -336,8 +355,18 @@ export function PdfChunkViewer({
                 chunks={chunks}
                 selectedChunkId={selection.selectedChunkId}
                 hoveredChunkId={selection.hoveredChunkId}
+                hoveredChunkIds={externalHoveredChunkIds}
+                selectedChunkIds={externalSelectedChunkIds}
                 onSelectChunk={selection.selectChunk}
-                onHoverChunk={selection.hoverChunk}
+                onHoverChunk={(id) => {
+                  // Internal hover state still drives the singleton
+                  // tooltip / focus visuals; the external callback
+                  // (when present) propagates to the right-pane
+                  // cross-highlight so hovering a rect lights up its
+                  // Topic / Entity card.
+                  selection.hoverChunk(id);
+                  onHoverChunk?.(id);
+                }}
               />
             </OverlayPortal>
           ))}
