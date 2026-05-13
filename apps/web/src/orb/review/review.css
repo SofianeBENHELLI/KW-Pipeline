@@ -87,40 +87,60 @@
   background: var(--orb-bg);
 }
 
-/* Header row: rail-collapse toggle + DocHeader on the same baseline. */
-.orb-app .kf-main__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.orb-app .kf-main__head > *:last-child {
-  flex: 1;
-  min-width: 0;
-}
-.orb-app .kf-rail-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--orb-border);
-  border-radius: 6px;
-  background: var(--orb-bg-elev);
-  color: var(--orb-fg-muted);
-  font: inherit;
-  font-size: 11px;
+/* Rail-edge collapse button — lives inside ``DocRail``'s search row,
+ * compact chevron with no label. Hovered state matches the rail-view
+ * tabs so the affordance reads as "rail chrome", not "page chrome". */
+.orb-app .kf-rail__collapse {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--orb-fg-dim);
   cursor: pointer;
   flex-shrink: 0;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.orb-app .kf-rail-toggle:hover {
+.orb-app .kf-rail__collapse:hover {
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg);
+  border-color: var(--orb-border);
+}
+
+/* "Expand rail" affordance — only rendered when the rail is
+ * collapsed. Floating button anchored to the left edge of
+ * ``.kf-main`` so it visually re-introduces the rail without
+ * shifting the surrounding layout. */
+.orb-app .kf-rail-expand {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--orb-border);
+  border-radius: 6px;
+  background: var(--orb-bg-elev);
+  color: var(--orb-fg-muted);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.orb-app .kf-rail-expand:hover {
   background: var(--orb-bg-hov);
   color: var(--orb-fg);
   border-color: var(--orb-fg-dim);
 }
-.orb-app .kf-rail-toggle__label {
-  letter-spacing: 0.01em;
+
+/* When the expand button is mounted, the main pane needs a left
+ * gutter so the DocHeader's title doesn't sit under the chevron. */
+.orb-app .kf-review.is-rail-collapsed .kf-main {
+  position: relative;
+  padding-left: 52px;
 }
 
 /* Tab content wrappers ─ each tab handles its own overflow strategy

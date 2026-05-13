@@ -227,7 +227,7 @@ describe("<ReviewWorkspace />", () => {
       window.localStorage.clear();
     });
 
-    it("rail-toggle button collapses + restores the rail with persisted state", async () => {
+    it("rail-collapse chevron collapses the rail; edge expand chevron restores it (with persisted state)", async () => {
       const { unmount } = renderWorkspace("/kf/review");
       await waitFor(() =>
         expect(screen.getByText("alpha.md")).toBeInTheDocument(),
@@ -235,17 +235,26 @@ describe("<ReviewWorkspace />", () => {
       const root = document.querySelector(".kf-review");
       expect(root?.classList.contains("is-rail-collapsed")).toBe(false);
 
-      fireEvent.click(screen.getByTestId("kf-rail-toggle"));
+      // The collapse chevron lives inside the rail header.
+      fireEvent.click(screen.getByTestId("kf-rail-collapse"));
       expect(root?.classList.contains("is-rail-collapsed")).toBe(true);
-      // Collapsed state is persisted so a reload keeps the rail
-      // hidden — operators who prefer a wide canvas don't get reset
-      // every refresh.
+      // When collapsed, the rail stays React-mounted (so its search /
+      // scroll state survives a re-expand) but is ``display: none``'d
+      // via the ``is-rail-collapsed`` class on the wrapper. The edge
+      // expand affordance is the visible counterpart and lives in
+      // ``.kf-main``.
+      expect(screen.getByTestId("kf-rail-expand")).toBeInTheDocument();
+      // Persisted so a reload keeps the rail hidden.
       expect(window.localStorage.getItem("kf:review:rail-collapsed")).toBe(
         "true",
       );
 
-      // Mount a fresh component; it should hydrate from localStorage
-      // and start in the collapsed state.
+      // Click the edge expand → rail returns.
+      fireEvent.click(screen.getByTestId("kf-rail-expand"));
+      expect(root?.classList.contains("is-rail-collapsed")).toBe(false);
+
+      // Mount fresh after a collapse — should hydrate from localStorage.
+      fireEvent.click(screen.getByTestId("kf-rail-collapse"));
       unmount();
       renderWorkspace("/kf/review");
       await waitFor(() =>

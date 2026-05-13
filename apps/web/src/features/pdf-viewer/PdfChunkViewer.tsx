@@ -22,7 +22,6 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 import {
   ChunkSidePanel,
@@ -35,6 +34,12 @@ import type {
 } from "../../../../_shared/pdf-viewer";
 
 import { listDocumentChunks } from "../../api/client";
+
+// pdfjs-dist exposes a moving target for the API namespace; we
+// import the whole module and grab what we need at runtime to keep
+// the TS typing surface narrow.
+type PdfJsModule = typeof import("pdfjs-dist");
+type PdfDocumentProxy = Awaited<ReturnType<PdfJsModule["getDocument"]>["promise"]>;
 
 interface PdfChunkViewerProps {
   readonly documentId: string;
@@ -162,76 +167,35 @@ export function PdfChunkViewer({
     return load.kind === "ready" ? load.response.items : [];
   }, [load]);
 
-  // ─── pdfjs-dist render loop ───────────────────────────────────────────────
-  // Render every page into its own canvas in document order. Each canvas
-  // is wrapped so the overlay layer can sit absolute-positioned over it.
-  const [pageCount, setPageCount] = useState<number>(0);
+  // ─── pdfjs-dist: load the document once, render pages individually ────────
+  // Previous implementation rendered every page imperatively in this
+  // effect and mounted highlights via ``createPortal``. The portals
+  // raced the imperative DOM mutation (page-wraps didn't exist when
+  // ``setPageCount`` triggered the React re-render that mounted the
+  // portals), so rect overlays never actually appeared. New shape:
+  // load the ``PDFDocumentProxy`` here, store it in a ref, render
+  // React-owned ``<PdfPage>`` siblings that each own their own canvas
+  // + highlight layer.
+  const [pdfDoc, setPdfDoc] = useState<PdfDocumentProxy | null>(null);
   useEffect(() => {
     if (load.kind !== "ready") return;
     let cancelled = false;
-    let cleanupTask: (() => void) | undefined;
+    let activePdf: PdfDocumentProxy | null = null;
 
-    // Lazy-load pdfjs-dist so the viewer bundle only pays for it when
-    // a PDF tab is actually opened. The worker URL needs to resolve to
-    // the matching version; we point to the package's worker entry.
     (async () => {
       const pdfjsLib = await import("pdfjs-dist");
       const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url"))
         .default;
-      // Side-effect: pdfjs-dist reads the worker src from this global.
       pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
       const loadingTask = pdfjsLib.getDocument(pdfBlobUrl);
-      cleanupTask = () => loadingTask.destroy();
       const pdf = await loadingTask.promise;
       if (cancelled) {
         pdf.destroy();
         return;
       }
-      setPageCount(pdf.numPages);
-
-      const container = pagesContainerRef.current;
-      if (!container) return;
-      container.innerHTML = "";
-
-      // Compute scale once per render pass from the container's current
-      // client width. ``ResizeObserver`` (below) bumps ``containerWidth``
-      // when the host pane resizes, which retriggers this effect and
-      // re-renders every page at the new scale. Devicescale (DPR) lifts
-      // the canvas backing-store resolution so the page stays crisp on
-      // retina displays without inflating CSS dimensions.
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        if (cancelled) break;
-        const page = await pdf.getPage(pageNumber);
-        const nativeViewport = page.getViewport({ scale: 1 });
-        const scale = _scaleForContainer(nativeViewport.width, containerWidth);
-        const viewport = page.getViewport({ scale });
-
-        const pageWrap = document.createElement("div");
-        pageWrap.className = "pdf-page-wrap";
-        pageWrap.dataset.pageNumber = String(pageNumber);
-        pageWrap.style.position = "relative";
-        pageWrap.style.width = `${viewport.width}px`;
-        pageWrap.style.height = `${viewport.height}px`;
-
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        canvas.className = "pdf-page-canvas";
-
-        pageWrap.appendChild(canvas);
-        container.appendChild(pageWrap);
-
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
-          await page.render({ canvasContext: ctx, viewport, transform }).promise;
-        }
-      }
+      activePdf = pdf;
+      setPdfDoc(pdf);
     })().catch((err) => {
       if (cancelled) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -240,9 +204,10 @@ export function PdfChunkViewer({
 
     return () => {
       cancelled = true;
-      cleanupTask?.();
+      activePdf?.destroy();
+      setPdfDoc(null);
     };
-  }, [load, pdfBlobUrl, containerWidth]);
+  }, [load, pdfBlobUrl]);
 
   // ``containerWidth`` is declared above the render effect (TDZ-safe);
   // this effect's job is to keep it in sync with the live pane width.
@@ -265,28 +230,51 @@ export function PdfChunkViewer({
     return () => observer.disconnect();
   }, []);
 
-  // ─── Scroll-to-selected-chunk effect ──────────────────────────────────────
-  // Effect runs after layout so the freshly-rendered page wraps are
-  // measurable. Scroll the matching page wrap into view and flash the
-  // first rect of the selected chunk via a transient CSS class.
+  // ─── Scroll-to-rect effect ────────────────────────────────────────────────
+  // Picks a "target chunk id" from (in order): the internally-selected
+  // chunk, the first id in the external hover set (cross-highlight from
+  // the right pane), the internally-hovered chunk. Skips the scroll
+  // when the target's first rect is already visible inside the
+  // scrollable pane — avoids yanking the viewport away when the user
+  // is just hovering an already-on-screen chunk.
   useLayoutEffect(() => {
-    if (!selection.selectedChunkId || load.kind !== "ready") return;
-    const chunk = load.response.items.find(
-      (c) => c.chunk_id === selection.selectedChunkId,
-    );
-    if (!chunk) return;
-    const firstRect = chunk.rects[0];
+    if (load.kind !== "ready") return;
+    const items = load.response.items;
+    const target =
+      (selection.selectedChunkId
+        ? items.find((c) => c.chunk_id === selection.selectedChunkId)
+        : null) ??
+      (externalHoveredChunkIds && externalHoveredChunkIds.size > 0
+        ? items.find((c) => externalHoveredChunkIds.has(c.chunk_id))
+        : null) ??
+      (selection.hoveredChunkId
+        ? items.find((c) => c.chunk_id === selection.hoveredChunkId)
+        : null);
+    if (!target) return;
+    const firstRect = target.rects[0];
     if (!firstRect) return;
 
-    const wrap = pagesContainerRef.current?.querySelector(
+    const scroller = pagesContainerRef.current;
+    if (!scroller) return;
+    const wrap = scroller.querySelector(
       `[data-page-number="${firstRect.page}"]`,
     ) as HTMLDivElement | null;
     if (!wrap) return;
 
-    // Approximate centre-of-rect scroll target.
-    const top = wrap.offsetTop + firstRect.y * wrap.offsetHeight - 80;
-    pagesContainerRef.current?.scrollTo({ top, behavior: "smooth" });
-  }, [selection.selectedChunkId, load]);
+    const rectTop = wrap.offsetTop + firstRect.y * wrap.offsetHeight;
+    const visibleTop = scroller.scrollTop;
+    const visibleBottom = visibleTop + scroller.clientHeight;
+    if (rectTop >= visibleTop + 40 && rectTop <= visibleBottom - 40) {
+      // Already comfortably in view — don't disrupt the operator.
+      return;
+    }
+    scroller.scrollTo({ top: rectTop - 80, behavior: "smooth" });
+  }, [
+    selection.selectedChunkId,
+    selection.hoveredChunkId,
+    externalHoveredChunkIds,
+    load,
+  ]);
 
   if (load.kind === "loading") {
     return <div className="pdf-viewer-loading">Loading PDF and chunk catalog…</div>;
@@ -346,30 +334,27 @@ export function PdfChunkViewer({
     >
       <div className="pdf-pages-pane">
         <div className="pdf-pages-scroll" ref={pagesContainerRef}>
-          {/* Render hooks for the overlay layers — pdfjs canvases are
-              injected as DOM siblings by the effect above. */}
-          {Array.from({ length: pageCount }, (_, idx) => idx + 1).map((pageNumber) => (
-            <OverlayPortal key={pageNumber} pageNumber={pageNumber}>
-              <HighlightLayer
-                pageNumber={pageNumber}
-                chunks={chunks}
-                selectedChunkId={selection.selectedChunkId}
-                hoveredChunkId={selection.hoveredChunkId}
-                hoveredChunkIds={externalHoveredChunkIds}
-                selectedChunkIds={externalSelectedChunkIds}
-                onSelectChunk={selection.selectChunk}
-                onHoverChunk={(id) => {
-                  // Internal hover state still drives the singleton
-                  // tooltip / focus visuals; the external callback
-                  // (when present) propagates to the right-pane
-                  // cross-highlight so hovering a rect lights up its
-                  // Topic / Entity card.
-                  selection.hoverChunk(id);
-                  onHoverChunk?.(id);
-                }}
-              />
-            </OverlayPortal>
-          ))}
+          {pdfDoc &&
+            Array.from({ length: pdfDoc.numPages }, (_, idx) => idx + 1).map(
+              (pageNumber) => (
+                <PdfPage
+                  key={pageNumber}
+                  pdf={pdfDoc}
+                  pageNumber={pageNumber}
+                  containerWidth={containerWidth}
+                  chunks={chunks}
+                  selectedChunkId={selection.selectedChunkId}
+                  hoveredChunkId={selection.hoveredChunkId}
+                  externalHoveredChunkIds={externalHoveredChunkIds}
+                  externalSelectedChunkIds={externalSelectedChunkIds}
+                  onSelectChunk={selection.selectChunk}
+                  onHoverChunk={(id) => {
+                    selection.hoverChunk(id);
+                    onHoverChunk?.(id);
+                  }}
+                />
+              ),
+            )}
         </div>
       </div>
       {hideBuiltInSidePanel ? null : (
@@ -385,26 +370,101 @@ export function PdfChunkViewer({
   );
 }
 
+interface PdfPageProps {
+  readonly pdf: PdfDocumentProxy;
+  readonly pageNumber: number;
+  readonly containerWidth: number;
+  readonly chunks: ChunkLocation[];
+  readonly selectedChunkId: string | null;
+  readonly hoveredChunkId: string | null;
+  readonly externalHoveredChunkIds: ReadonlySet<string> | null;
+  readonly externalSelectedChunkIds: ReadonlySet<string> | null;
+  readonly onSelectChunk: (chunkId: string) => void;
+  readonly onHoverChunk: (chunkId: string | null) => void;
+}
+
 /**
- * Mount the overlay layer into the imperative ``.pdf-page-wrap`` node
- * the pdfjs render effect created, so the React-managed overlay sits
- * inside the same offsetParent as the canvas without React owning the
- * canvas node directly.
+ * One PDF page in the scroll list. Owns its own canvas via a ref and
+ * runs an effect that fetches the pdfjs ``PDFPageProxy`` and renders
+ * it. The :class:`HighlightLayer` is a React sibling of the canvas so
+ * the cross-highlight overlay mounts as soon as React has the wrap
+ * node — no portal race against the imperative DOM mutation pattern
+ * the previous implementation used.
  */
-function OverlayPortal({
+function PdfPage({
+  pdf,
   pageNumber,
-  children,
-}: {
-  pageNumber: number;
-  children: React.ReactNode;
-}) {
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const candidate = document.querySelector(
-      `[data-page-number="${pageNumber}"]`,
-    ) as HTMLElement | null;
-    setHost(candidate);
-  }, [pageNumber]);
-  if (!host) return null;
-  return createPortal(<>{children}</>, host);
+  containerWidth,
+  chunks,
+  selectedChunkId,
+  hoveredChunkId,
+  externalHoveredChunkIds,
+  externalSelectedChunkIds,
+  onSelectChunk,
+  onHoverChunk,
+}: PdfPageProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: { cancel: () => void } | null = null;
+
+    (async () => {
+      const page = await pdf.getPage(pageNumber);
+      if (cancelled) return;
+      const nativeViewport = page.getViewport({ scale: 1 });
+      const scale = _scaleForContainer(nativeViewport.width, containerWidth);
+      const viewport = page.getViewport({ scale });
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      setSize({ width: viewport.width, height: viewport.height });
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+      const task = page.render({ canvasContext: ctx, viewport, transform });
+      renderTask = task as unknown as { cancel: () => void };
+      try {
+        await task.promise;
+      } catch {
+        // pdfjs throws when ``cancel()`` is called mid-render; that's
+        // expected during unmount or container-width changes and not
+        // a real error.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+    };
+  }, [pdf, pageNumber, containerWidth]);
+
+  // The wrap mirrors the rendered viewport size so the overlay's
+  // CSS-percentage rects align exactly with the canvas pixels.
+  const wrapStyle = size
+    ? { position: "relative" as const, width: `${size.width}px`, height: `${size.height}px` }
+    : { position: "relative" as const };
+
+  return (
+    <div className="pdf-page-wrap" data-page-number={pageNumber} style={wrapStyle}>
+      <canvas ref={canvasRef} className="pdf-page-canvas" />
+      <HighlightLayer
+        pageNumber={pageNumber}
+        chunks={chunks}
+        selectedChunkId={selectedChunkId}
+        hoveredChunkId={hoveredChunkId}
+        hoveredChunkIds={externalHoveredChunkIds}
+        selectedChunkIds={externalSelectedChunkIds}
+        onSelectChunk={onSelectChunk}
+        onHoverChunk={onHoverChunk}
+      />
+    </div>
+  );
 }
