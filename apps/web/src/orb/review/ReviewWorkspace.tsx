@@ -28,6 +28,7 @@ import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
 import { LinkedView, type LinkedViewPdf } from "./LinkedView";
 import { PipelineTab } from "./PipelineTab";
+import { ResizeHandle } from "./ResizeHandle";
 import { ReviewTab } from "./ReviewTab";
 import "./review.css";
 import "./linked.css";
@@ -36,7 +37,43 @@ import { latestStatus } from "./format";
 import { useBatchPipeline } from "../hooks/useBatchPipeline";
 import { useDocumentDetail } from "../hooks/useDocumentDetail";
 import { useDocuments, type RailView } from "../hooks/useDocuments";
+import { useResizable } from "./useResizable";
 import type { ApiDocument } from "../../api/types";
+
+// ── Rail resize/collapse persistence ────────────────────────────────
+// Keys are namespaced (``kf:`` prefix) so they cannot collide with
+// other localStorage consumers in the host shell.
+const _RAIL_WIDTH_KEY = "kf:review:rail-width";
+const _RAIL_COLLAPSED_KEY = "kf:review:rail-collapsed";
+const _RAIL_MIN_WIDTH = 240;
+const _RAIL_MAX_WIDTH = 640;
+const _RAIL_DEFAULT_WIDTH = 380;
+/**
+ * Keyboard shortcut that toggles rail collapse. ``[`` matches the
+ * existing single-key shortcut style elsewhere in the page footer
+ * (``j/k row · v validate · r reject``).
+ */
+const _RAIL_TOGGLE_KEY = "[";
+
+function _readBooleanStored(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return raw === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function _writeBooleanStored(key: string, value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // Best-effort.
+  }
+}
 
 const _PDF_CONTENT_TYPE = "application/pdf";
 
@@ -102,6 +139,54 @@ export function ReviewWorkspace({
   // Local UI state — not in the URL because they aren't shareable signals.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<RailSort>({ col: "uploaded", dir: "desc" });
+
+  // ── Rail width / collapse ─────────────────────────────────────────
+  // Two layout knobs that persist across reloads via ``localStorage``:
+  //
+  //   * ``railResize.value``  → live rail width in pixels (drag-driven).
+  //   * ``railCollapsed``     → boolean toggled via the rail-head button
+  //                             or the ``[`` keyboard shortcut. While
+  //                             true, the rail column collapses to a
+  //                             1-px sliver and the toggle moves into
+  //                             the main pane so the operator can
+  //                             expand it again.
+  const railResize = useResizable({
+    initial: _RAIL_DEFAULT_WIDTH,
+    min: _RAIL_MIN_WIDTH,
+    max: _RAIL_MAX_WIDTH,
+    storageKey: _RAIL_WIDTH_KEY,
+  });
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
+    _readBooleanStored(_RAIL_COLLAPSED_KEY, false),
+  );
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      _writeBooleanStored(_RAIL_COLLAPSED_KEY, next);
+      return next;
+    });
+  }, []);
+
+  // Global ``[`` shortcut. Skipped when focus is in an editable target
+  // so the operator can still type ``[`` inside the rail's search box
+  // or any text input.
+  useEffect(() => {
+    function handler(event: KeyboardEvent) {
+      if (event.key !== _RAIL_TOGGLE_KEY) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
+          return;
+        }
+      }
+      event.preventDefault();
+      toggleRail();
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [toggleRail]);
 
   // Fetch the catalog page. Tests can short-circuit by providing
   // `fixtureDocs`; we fall through to the real hook otherwise.
@@ -213,46 +298,112 @@ export function ReviewWorkspace({
     });
   }, [docs, selected]);
 
+  // CSS custom property feeds the grid template — keeps the rail
+  // column reactive to drag without per-frame React renders inside
+  // ``DocRail`` (which is heavy when the catalog is large).
+  const reviewStyle = {
+    "--kf-rail-w": railCollapsed ? "0px" : `${railResize.value}px`,
+  } as React.CSSProperties;
+
   return (
     <section
-      className="kf-review"
+      className={
+        railCollapsed
+          ? "kf-review is-rail-collapsed"
+          : "kf-review"
+      }
       aria-label="Knowledge Forge — Review Workspace"
+      style={reviewStyle}
     >
-      <DocRail
-        view={view}
-        onView={setView}
-        query={query}
-        onQuery={setQuery}
-        documents={sortedDocs}
-        loading={loading}
-        errorMessage={errorMessage}
-        activeDocId={params.docId ?? null}
-        onSelect={onSelectDoc}
-        selected={selected}
-        onToggleSelect={toggleSelect}
-        onClearSelection={clearSelection}
-        sort={sort}
-        onToggleSort={toggleSort}
-        onRunBatch={() => {
-          const ids = selected;
-          const picked = sortedDocs.filter((d) => ids.has(d.id));
-          if (picked.length === 0) return;
-          batch.run(picked).then(() => {
-            // Refresh the catalog page so status badges + FSM gates
-            // reflect the post-batch reality. Don't await — fire and
-            // forget so the banner stays visible.
-            live.refetch();
-            detail.refetch();
-          });
-        }}
+      <div
+        className="kf-rail-slot"
+        // The slot wraps the rail so we can collapse the whole column
+        // with a single CSS rule (``aria-hidden`` + display:none) and
+        // still keep DocRail's internal state alive in React for a
+        // snap-back on expand.
+        aria-hidden={railCollapsed}
+      >
+        <DocRail
+          view={view}
+          onView={setView}
+          query={query}
+          onQuery={setQuery}
+          documents={sortedDocs}
+          loading={loading}
+          errorMessage={errorMessage}
+          activeDocId={params.docId ?? null}
+          onSelect={onSelectDoc}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onClearSelection={clearSelection}
+          sort={sort}
+          onToggleSort={toggleSort}
+          onRunBatch={() => {
+            const ids = selected;
+            const picked = sortedDocs.filter((d) => ids.has(d.id));
+            if (picked.length === 0) return;
+            batch.run(picked).then(() => {
+              // Refresh the catalog page so status badges + FSM gates
+              // reflect the post-batch reality. Don't await — fire and
+              // forget so the banner stays visible.
+              live.refetch();
+              detail.refetch();
+            });
+          }}
+        />
+      </div>
+
+      <ResizeHandle
+        label="Resize document rail"
+        onPointerDown={railResize.onPointerDown}
+        isDragging={railResize.isDragging}
+        disabled={railCollapsed}
       />
 
       <main className="kf-main orb-scroll">
-        <DocHeader document={activeDoc} />
+        <div className="kf-main__head">
+          <button
+            type="button"
+            className="kf-rail-toggle"
+            onClick={toggleRail}
+            aria-label={railCollapsed ? "Expand document rail ([)" : "Collapse document rail ([)"}
+            aria-expanded={!railCollapsed}
+            title={railCollapsed ? "Expand document rail ([)" : "Collapse document rail ([)"}
+            data-testid="kf-rail-toggle"
+          >
+            {/* Chevron flips based on collapse state. SVG inline so the
+              * component stays self-contained without adding an icon
+              * import in this file. */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              {railCollapsed ? (
+                <polyline points="9 18 15 12 9 6" />
+              ) : (
+                <polyline points="15 18 9 12 15 6" />
+              )}
+            </svg>
+            <span className="kf-rail-toggle__label">
+              {railCollapsed ? "Rail" : "Hide rail"}
+            </span>
+          </button>
+          <DocHeader document={activeDoc} />
+        </div>
         <DocTabs active={tab} onChange={setTab} />
 
         {tab === "linked" && (
-          <div data-testid="kf-tab-linked">
+          <div
+            className="kf-tab-body kf-tab-body--linked"
+            data-testid="kf-tab-linked"
+          >
             <LinkedView
               documentId={params.docId ?? null}
               filename={activeDoc?.original_filename}
@@ -261,7 +412,10 @@ export function ReviewWorkspace({
           </div>
         )}
         {tab === "pipeline" && (
-          <div data-testid="kf-tab-pipeline">
+          <div
+            className="kf-tab-body kf-tab-body--pipeline orb-scroll"
+            data-testid="kf-tab-pipeline"
+          >
             {/* Per design §3.5: a single "Pipeline & FSM" tab that
                 combines the FSM action card, document detail, version
                 list, raw extraction, and semantic markdown. The
@@ -286,7 +440,7 @@ export function ReviewWorkspace({
           <span aria-hidden="true">·</span>
           <span>view · {view}</span>
           <span className="kf-foot__spacer" />
-          <span>j/k row · v validate · r reject</span>
+          <span>[ rail · j/k row · v validate · r reject</span>
         </footer>
       </main>
     </section>
