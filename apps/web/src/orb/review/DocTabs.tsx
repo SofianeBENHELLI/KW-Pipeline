@@ -1,23 +1,26 @@
 /**
- * DocTabs — Linked / Pipeline strip beneath the document header.
- * Per design §3.3 (the prototype canvas):
+ * DocTabs — Linked / Pipeline / Graph strip beneath the document header.
  *
- *   [Linked view*]  [Pipeline & FSM]    contextual hint →
+ *   [Linked view*]  [Pipeline & FSM]  [Graph]    contextual hint →
  *
  * The asterisk denotes the default-on tab (Linked View). The right-side
  * hint switches text per active tab so the surface always tells the
  * reviewer "what does hovering / clicking do here".
  *
+ * Scope note: the graph tab renders the per-document projection only.
+ * Corpus-wide graph exploration lives in the Knowledge Explorer app —
+ * Knowledge Forge never surfaces a corpus graph view.
+ *
  * Note on naming: the URL still accepts `?tab=review` as a legacy
  * alias (mapped to `pipeline`) so any links saved between the
- * three-tab interim and this two-tab cutover keep working.
+ * three-tab interim and this cutover keep working.
  */
 
 import type { ReactElement } from "react";
 
 import { OrbI } from "../index";
 
-export type DocTab = "linked" | "pipeline";
+export type DocTab = "linked" | "pipeline" | "graph";
 
 interface TabDef {
   id: DocTab;
@@ -38,6 +41,12 @@ const TABS: TabDef[] = [
     label: "Pipeline & FSM",
     icon: OrbI.bolt,
     hint: "lifecycle · extraction · semantic · versions",
+  },
+  {
+    id: "graph",
+    label: "Graph",
+    icon: OrbI.graph,
+    hint: "topics · entities · chunks projected for this document",
   },
 ];
 

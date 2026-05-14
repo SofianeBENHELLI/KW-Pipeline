@@ -9,15 +9,18 @@
  * surface must show it. The crumb (e.g. "kw-pipeline · alpha") is pure
  * trailing metadata and may be omitted.
  *
- * Top-bar nav tabs (Review / Graph / Search / Chat / Admin) match the
- * route family at `/kf/{review,graph,search,chat,admin}`. In PR 1 the
- * tabs are inert links — PR 2+ wires them through `<NavLink>`.
+ * Top-bar nav tabs (Review / Search / Chat / Admin) match the route
+ * family at `/kf/{review,search,chat,admin}`. Graph is intentionally
+ * absent: it lives as a per-document tab inside the Review Workspace
+ * because Knowledge Forge has no corpus-wide graph surface — corpus
+ * exploration is the scope of the Knowledge Explorer app
+ * (`apps/explorer`).
  */
 import type { ReactElement, ReactNode } from "react";
 
 import { OrbI } from "../atoms/icons";
 
-export type TopNavTab = "review" | "graph" | "search" | "chat" | "admin";
+export type TopNavTab = "review" | "search" | "chat" | "admin";
 
 interface NavTabDef {
   id: TopNavTab;
@@ -27,7 +30,6 @@ interface NavTabDef {
 
 const NAV_TABS: NavTabDef[] = [
   { id: "review", label: "Review", icon: OrbI.doc },
-  { id: "graph",  label: "Graph",  icon: OrbI.graph },
   { id: "search", label: "Search", icon: OrbI.search },
   { id: "chat",   label: "Chat",   icon: OrbI.chat },
   { id: "admin",  label: "Admin",  icon: OrbI.shield },

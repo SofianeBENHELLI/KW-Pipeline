@@ -1,5 +1,5 @@
 /**
- * GraphView — page shell rendered at /kf/graph.
+ * DocGraphTab — per-document graph tab in the Review Workspace.
  *
  *   ┌──────────────────────────────────────────────────────┐
  *   │ Filter toolbar (segmented)                           │
@@ -10,22 +10,27 @@
  *   │                                          │   when    │
  *   │                                          │   sel)    │
  *   └──────────────────────────────────────────┴───────────┘
+ *
+ * Scope: this component is intentionally scoped to a single document.
+ * Knowledge Forge has no corpus-wide graph surface — that's the scope
+ * of the Knowledge Explorer app (`apps/explorer`). The tab simply
+ * renders the same `GraphCanvas` / `GraphInspector` primitives the
+ * Linked View uses, fed by `getDocumentGraph(documentId)`.
  */
 
 import { useMemo, useState } from "react";
 import type { ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
 
-import "./graph.css";
 import { Btn, OrbI } from "../index";
-import { GraphCanvas } from "./GraphCanvas";
-import { GraphInspector } from "./GraphInspector";
+import { GraphCanvas } from "../graph/GraphCanvas";
+import { GraphInspector } from "../graph/GraphInspector";
+import "../graph/graph.css";
 import {
   neighborsOf,
+  useDocumentGraph,
   useFilteredGraph,
-  useKnowledgeGraph,
   type GraphFilter,
-} from "../hooks/useKnowledgeGraph";
+} from "../hooks/useDocumentGraph";
 
 const FILTERS: Array<{ id: GraphFilter; label: string }> = [
   { id: "all",          label: "All" },
@@ -36,11 +41,15 @@ const FILTERS: Array<{ id: GraphFilter; label: string }> = [
   { id: "sourcebacked", label: "Source-backed" },
 ];
 
-export function GraphView(): ReactElement {
-  const navigate = useNavigate();
+export interface DocGraphTabProps {
+  /** Active document id. ``null`` when no doc is selected yet. */
+  documentId: string | null;
+}
+
+export function DocGraphTab({ documentId }: DocGraphTabProps): ReactElement {
   const [filter, setFilter] = useState<GraphFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const live = useKnowledgeGraph();
+  const live = useDocumentGraph(documentId);
   const filtered = useFilteredGraph(filter, live.nodes, live.edges);
 
   const selectedNode = useMemo(
@@ -59,12 +68,33 @@ export function GraphView(): ReactElement {
     [filtered.edges, selectedId],
   );
 
+  if (!documentId) {
+    return (
+      <section
+        className="kf-gv"
+        aria-label="Document graph (no document selected)"
+      >
+        <div className="kf-gv__state">
+          Pick a document from the rail to view its knowledge graph.
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className="kf-gv" aria-label="Knowledge Forge — Graph">
-      <header className="kf-gv__toolbar" role="toolbar" aria-label="Graph filter">
+    <section className="kf-gv" aria-label="Document graph">
+      <header
+        className="kf-gv__toolbar"
+        role="toolbar"
+        aria-label="Graph filter"
+      >
         <div className="kf-gv__toolbar-l">
           <span className="orb-mono kf-gv__toolbar-h">Filter</span>
-          <div className="kf-gv__filters" role="tablist" aria-label="Filter graph">
+          <div
+            className="kf-gv__filters"
+            role="tablist"
+            aria-label="Filter graph"
+          >
             {FILTERS.map((f) => (
               <button
                 key={f.id}
@@ -95,18 +125,22 @@ export function GraphView(): ReactElement {
       <div className="kf-gv__body">
         <div className="kf-gv__canvaswrap">
           {live.status === "loading" && (
-            <div className="kf-gv__state">Loading knowledge graph…</div>
+            <div className="kf-gv__state">Loading document graph…</div>
           )}
           {live.status === "error" && (
             <div className="kf-gv__state kf-gv__state--err" role="alert">
               Failed to load graph
-              {live.error?.message ? <>: <code>{live.error.message}</code></> : null}
+              {live.error?.message ? (
+                <>
+                  : <code>{live.error.message}</code>
+                </>
+              ) : null}
             </div>
           )}
           {live.status === "empty" && (
             <div className="kf-gv__state">
-              No graph projected yet — validate at least one document on
-              the Review tab to populate it.
+              No graph projected for this document yet — validate the
+              latest version on the Pipeline & FSM tab to populate it.
             </div>
           )}
           {live.status === "ok" && (
@@ -125,7 +159,6 @@ export function GraphView(): ReactElement {
             incoming={neighbors.incoming}
             outgoing={neighbors.outgoing}
             onClose={() => setSelectedId(null)}
-            onOpenInReview={(docId) => navigate(`/kf/review/${docId}`)}
           />
         )}
       </div>

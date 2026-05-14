@@ -9,7 +9,9 @@
  *   PR 3 — Linked View tab inside Review Workspace.
  *   PR 4 — Review + Pipeline tabs + batch operations.
  *   PR 5 — `/kf/catalog`.
- *   PR 6 — `/kf/graph`.
+ *   PR 6 — corpus `/kf/graph` (since retired — graph is a
+ *           per-document tab on the Review Workspace; corpus-wide
+ *           exploration belongs to the Knowledge Explorer app).
  *   PR 7 — `/kf/search`, `/kf/chat`.
  *   PR 8 — `/kf/admin/*`, `/kf/settings`, deletes the `features-orb/`
  *           preview tree + its `/orb*` routes (now redundant with the
@@ -30,7 +32,6 @@ import {
 } from "react-router-dom";
 
 import { CatalogView } from "./catalog/CatalogView";
-import { GraphView } from "./graph/GraphView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { ChatPanel } from "./search/ChatPanel";
 import { SearchPanel } from "./search/SearchPanel";
@@ -112,7 +113,13 @@ export function KnowledgeForgeApp({
         <Route path="review" element={<ReviewWorkspace />} />
         <Route path="review/:docId" element={<ReviewWorkspace />} />
         <Route path="catalog/*" element={<CatalogView />} />
-        <Route path="graph/*" element={<GraphView />} />
+        {/* Legacy /kf/graph deep-links land on the Review Workspace —
+            graph is now a per-document tab. Corpus-wide graph
+            exploration belongs to the Knowledge Explorer app. */}
+        <Route
+          path="graph/*"
+          element={<Navigate to="/kf/review" replace />}
+        />
         <Route path="search/*" element={<SearchPanel />} />
         <Route path="chat/*" element={<ChatPanel />} />
         <Route path="admin/*" element={<AdminHub />} />
@@ -136,9 +143,8 @@ export function KnowledgeForgeApp({
 
 function pickActiveTab(
   pathname: string,
-): "review" | "graph" | "search" | "chat" | "admin" | undefined {
+): "review" | "search" | "chat" | "admin" | undefined {
   if (pathname.startsWith("/kf/review") || pathname === "/kf") return "review";
-  if (pathname.startsWith("/kf/graph")) return "graph";
   if (pathname.startsWith("/kf/search")) return "search";
   if (pathname.startsWith("/kf/chat")) return "chat";
   if (pathname.startsWith("/kf/admin")) return "admin";
@@ -149,7 +155,6 @@ function pickActiveTab(
 function routeForTopTab(tab: TopNavTab): string {
   switch (tab) {
     case "review": return "/kf/review";
-    case "graph":  return "/kf/graph";
     case "search": return "/kf/search";
     case "chat":   return "/kf/chat";
     case "admin":  return "/kf/admin";
@@ -173,7 +178,6 @@ function routeForRailTile(tile: RailTileId): string | null {
     case "review":   return "/kf/review";
     case "search":   return "/kf/search";
     case "info":     return "/kf/review";
-    case "graph":    return "/kf/graph";
     case "settings": return null; // handled separately — opens modal
   }
 }
@@ -187,7 +191,6 @@ function pickActiveRail(
   tab: ReturnType<typeof pickActiveTab>,
 ): RailTileId {
   if (pathname.startsWith("/kf/catalog")) return "upload";
-  if (pathname.startsWith("/kf/graph")) return "graph";
   if (pathname.startsWith("/kf/search")) return "search";
   if (pathname.startsWith("/kf/admin")) return "activity";
   if (pathname.startsWith("/kf/settings")) return "settings";

@@ -16,10 +16,6 @@ function railTile(name: string): HTMLElement {
   const rail = screen.getByRole("navigation", { name: /Primary navigation/i });
   return within(rail).getByRole("button", { name });
 }
-function topNavTab(name: RegExp | string): HTMLElement {
-  const nav = screen.getByRole("navigation", { name: /Workspace sections/i });
-  return within(nav).getByRole("button", { name });
-}
 
 function makeJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -90,13 +86,6 @@ describe("<KnowledgeForgeApp />", () => {
       unmount();
     }
     {
-      const { unmount } = renderAt("/kf/graph");
-      expect(
-        screen.getByRole("toolbar", { name: /Graph filter/ }),
-      ).toBeInTheDocument();
-      unmount();
-    }
-    {
       const { unmount } = renderAt("/kf/search");
       expect(screen.getByRole("heading", { name: "Search" })).toBeInTheDocument();
       unmount();
@@ -113,29 +102,24 @@ describe("<KnowledgeForgeApp />", () => {
     }
   });
 
-  it("clicking a top-bar nav tab navigates to the matching route", async () => {
+  it("never exposes a corpus-level Graph nav surface", async () => {
+    // Knowledge Forge has no corpus-wide graph view — graph is a
+    // per-document tab inside the Review Workspace. Corpus exploration
+    // is the scope of the Knowledge Explorer app (`apps/explorer`).
     renderAt("/kf/review");
     await waitFor(() =>
       expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
     );
-    fireEvent.click(topNavTab(/Graph/));
-    await waitFor(() =>
-      expect(
-        screen.getByRole("toolbar", { name: /Graph filter/ }),
-      ).toBeInTheDocument(),
-    );
+    const nav = screen.getByRole("navigation", { name: /Workspace sections/i });
+    expect(within(nav).queryByRole("button", { name: /^Graph$/ })).toBeNull();
+    const rail = screen.getByRole("navigation", { name: /Primary navigation/i });
+    expect(within(rail).queryByRole("button", { name: "Graph" })).toBeNull();
   });
 
-  it("clicking the icon-rail Graph tile navigates to /kf/graph", async () => {
-    renderAt("/kf/review");
+  it("/kf/graph deep-links redirect to the Review Workspace", async () => {
+    renderAt("/kf/graph");
     await waitFor(() =>
-      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument(),
-    );
-    fireEvent.click(railTile("Graph"));
-    await waitFor(() =>
-      expect(
-        screen.getByRole("toolbar", { name: /Graph filter/ }),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/Pick a document from the rail/i)).toBeInTheDocument(),
     );
   });
 
@@ -175,10 +159,10 @@ describe("<KnowledgeForgeApp />", () => {
   });
 
   it("highlights the matching rail tile based on the current route", async () => {
-    renderAt("/kf/graph");
-    const graphTile = railTile("Graph");
-    expect(graphTile).toHaveAttribute("aria-current", "page");
-    expect(graphTile).toHaveClass("is-active");
+    renderAt("/kf/catalog");
+    const uploadTile = railTile("Upload");
+    expect(uploadTile).toHaveAttribute("aria-current", "page");
+    expect(uploadTile).toHaveClass("is-active");
   });
 
   it("includes the pipelineName override in the brand crumb when given", () => {

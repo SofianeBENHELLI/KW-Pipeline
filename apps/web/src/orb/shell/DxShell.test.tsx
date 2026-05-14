@@ -24,18 +24,25 @@ describe("<TopBar />", () => {
     expect(screen.getByText("My Forge")).toBeInTheDocument();
   });
 
-  it("renders all five top-nav tabs (Review, Graph, Search, Chat, Admin)", () => {
+  it("renders the four top-nav tabs (Review, Search, Chat, Admin)", () => {
     render(<TopBar />);
-    for (const label of ["Review", "Graph", "Search", "Chat", "Admin"]) {
+    for (const label of ["Review", "Search", "Chat", "Admin"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
     }
   });
 
+  it("never exposes a corpus-level Graph top-nav tab", () => {
+    // Graph is a per-document tab inside the Review Workspace.
+    // Corpus-wide graph exploration is the Knowledge Explorer's scope.
+    render(<TopBar />);
+    expect(screen.queryByRole("button", { name: /^Graph$/ })).toBeNull();
+  });
+
   it("marks the active tab via aria-current and is-active", () => {
-    render(<TopBar activeTab="graph" />);
-    const graph = screen.getByRole("button", { name: /Graph/ });
-    expect(graph).toHaveAttribute("aria-current", "page");
-    expect(graph).toHaveClass("is-active");
+    render(<TopBar activeTab="search" />);
+    const search = screen.getByRole("button", { name: /Search/ });
+    expect(search).toHaveAttribute("aria-current", "page");
+    expect(search).toHaveClass("is-active");
     const review = screen.getByRole("button", { name: /Review/ });
     expect(review).not.toHaveAttribute("aria-current");
   });
@@ -67,7 +74,7 @@ describe("<TopBar />", () => {
 });
 
 describe("<IconRail />", () => {
-  it("renders the seven rail tiles", () => {
+  it("renders the six rail tiles", () => {
     render(<IconRail />);
     for (const label of [
       "Activity",
@@ -75,11 +82,16 @@ describe("<IconRail />", () => {
       "Review",
       "Search",
       "Document",
-      "Graph",
       "Settings",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("never exposes a corpus-level Graph rail tile", () => {
+    // Same scope rule as the top-bar — graph is per-document only.
+    render(<IconRail />);
+    expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
   });
 
   it("marks the active tile (defaults to 'review')", () => {
@@ -90,8 +102,8 @@ describe("<IconRail />", () => {
   });
 
   it("respects an explicit active tile", () => {
-    render(<IconRail active="graph" />);
-    expect(screen.getByRole("button", { name: "Graph" })).toHaveAttribute(
+    render(<IconRail active="upload" />);
+    expect(screen.getByRole("button", { name: "Upload" })).toHaveAttribute(
       "aria-current",
       "page",
     );
