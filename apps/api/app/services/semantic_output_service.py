@@ -1,6 +1,7 @@
 import logging
 from typing import Literal
 
+from app.models.document import DocumentVersionStatus
 from app.schemas.semantic_document import SemanticDocument
 from app.schemas.validation_metadata import ConfidenceScore, ValidationMetadata
 from app.services.confidence_scorer import ConfidenceScorer
@@ -9,10 +10,24 @@ from app.services.extraction_job_service import ExtractionJobService
 from app.services.hitl_router import HITLRouter
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.semantic_extractor import SemanticExtractor
+from app.services.semantic_generators import (
+    DEFAULT_SEMANTIC_METHOD,
+    SEMANTIC_METHOD_DETERMINISTIC,
+    DeterministicSemanticGenerator,
+    SemanticGenerator,
+)
 from app.services.semantic_schema_loader import load_semantic_document
 from app.services.validation_metadata_store import ValidationMetadataStore
 
 log = logging.getLogger(__name__)
+
+
+class UnknownSemanticMethod(KeyError):
+    """Requested method id is not in the registry."""
+
+
+class SemanticGenerationFailed(RuntimeError):
+    """The underlying generator raised on this version."""
 
 
 class SemanticOutputService:
@@ -46,6 +61,7 @@ class SemanticOutputService:
         confidence_scorer: ConfidenceScorer | None = None,
         validation_metadata_store: ValidationMetadataStore | None = None,
         hitl_router: HITLRouter | None = None,
+        generators: dict[str, SemanticGenerator] | None = None,
     ):
         self.documents = documents
         self.extraction_jobs = extraction_jobs
@@ -54,21 +70,73 @@ class SemanticOutputService:
         self.confidence_scorer = confidence_scorer
         self.validation_metadata_store = validation_metadata_store
         self.hitl_router = hitl_router
+        # Registry keyed by method id. The legacy ``semantic_extractor``
+        # arg is wrapped in a Deterministic adapter so the default
+        # method is always present — callers that don't pass
+        # ``generators`` keep the pre-method-dispatch behaviour exactly.
+        registry: dict[str, SemanticGenerator] = {
+            SEMANTIC_METHOD_DETERMINISTIC: DeterministicSemanticGenerator(
+                extractor=semantic_extractor,
+            ),
+        }
+        if generators:
+            registry.update(generators)
+        self._generators = registry
 
-    def generate(self, document_id: str, version_id: str) -> SemanticDocument:
-        """Generate semantic output once and return persisted output afterward."""
+    @property
+    def available_methods(self) -> list[str]:
+        """Ordered list of registered method ids (default first)."""
+        ordered: list[str] = [SEMANTIC_METHOD_DETERMINISTIC]
+        for name in self._generators:
+            if name != SEMANTIC_METHOD_DETERMINISTIC:
+                ordered.append(name)
+        return ordered
+
+    def generate(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        method: str | None = None,
+    ) -> SemanticDocument:
+        """Generate semantic output once and return persisted output afterward.
+
+        When ``method`` is omitted the existing cache-first behaviour
+        applies and the deterministic generator runs on a cache miss.
+        When ``method`` is supplied it must resolve in the registry; a
+        cached row whose ``extraction_method`` matches is returned
+        unchanged, otherwise the chosen generator runs and overwrites
+        the persisted row.
+        """
+        requested_method = method or DEFAULT_SEMANTIC_METHOD
+        if requested_method not in self._generators:
+            raise UnknownSemanticMethod(requested_method)
+
         try:
             payload = self.documents.catalog.get_semantic_document_payload(version_id)
             cached = load_semantic_document(payload)
-            log.info(
-                "semantic.cached",
-                extra={
-                    "document_id": document_id,
-                    "version_id": version_id,
-                    "section_count": len(cached.sections),
-                },
-            )
-            return cached
+            # When the caller didn't ask for a specific method, the
+            # cached row wins regardless of how it was produced — that's
+            # the pre-method-dispatch contract.
+            # When the caller did ask, the cached row only short-circuits
+            # if its recorded method matches.
+            if method is None or (
+                cached.extraction_method == requested_method
+                or (
+                    cached.extraction_method is None
+                    and requested_method == SEMANTIC_METHOD_DETERMINISTIC
+                )
+            ):
+                log.info(
+                    "semantic.cached",
+                    extra={
+                        "document_id": document_id,
+                        "version_id": version_id,
+                        "section_count": len(cached.sections),
+                        "method": cached.extraction_method,
+                    },
+                )
+                return cached
         except KeyError:
             pass  # nothing cached yet — generate below
 
@@ -77,20 +145,55 @@ class SemanticOutputService:
             version_id=version_id,
         )
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
-        semantic = self.semantic_extractor.extract(version=version, raw_extraction=raw_extraction)
+        generator = self._generators[requested_method]
+        try:
+            semantic = generator.generate(
+                version=version, raw_extraction=raw_extraction
+            )
+        except Exception as exc:  # noqa: BLE001 - boundary
+            log.warning(
+                "semantic.generation_failed",
+                extra={
+                    "document_id": document_id,
+                    "version_id": version_id,
+                    "method": requested_method,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise SemanticGenerationFailed(
+                f"Semantic generator {requested_method!r} failed: {exc}"
+            ) from exc
+        # Belt-and-braces — every generator is expected to stamp the
+        # method id itself, but enforce it here so a misbehaving
+        # generator can't desync the registry from the persisted row.
+        if semantic.extraction_method != requested_method:
+            semantic = semantic.model_copy(
+                update={"extraction_method": requested_method}
+            )
         semantic.markdown = self.markdown_generator.render(
             version=version,
             semantic=semantic,
             raw_extraction=raw_extraction,
         )
         self.documents.catalog.save_semantic_document(version_id, semantic)
-        self.documents.mark_semantic_ready(document_id=document_id, version_id=version_id)
+        # Only fire ``EXTRACTED → NEEDS_REVIEW`` when the version is
+        # still pre-review. Method-switch regeneration on a version
+        # that's already NEEDS_REVIEW / SEMANTIC_READY / VALIDATED /
+        # REJECTED keeps the FSM state intact — the operator changed
+        # the semantic shape, not the lifecycle decision. The catalog
+        # row is rewritten regardless above.
+        if version.status == DocumentVersionStatus.EXTRACTED:
+            self.documents.mark_semantic_ready(
+                document_id=document_id, version_id=version_id
+            )
         log.info(
             "semantic.generated",
             extra={
                 "document_id": document_id,
                 "version_id": version_id,
                 "section_count": len(semantic.sections),
+                "method": requested_method,
+                "fsm_transitioned": version.status == DocumentVersionStatus.EXTRACTED,
             },
         )
         # EPIC-A slice 1 (ADR-023): score the version that just landed

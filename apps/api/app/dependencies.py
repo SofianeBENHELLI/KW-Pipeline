@@ -81,6 +81,11 @@ from app.services.sampling_state_store import (
     SQLiteSamplingStateStore,
 )
 from app.services.semantic_extractor import SemanticExtractor
+from app.services.semantic_generators import (
+    SEMANTIC_METHOD_LLM,
+    LLMSemanticGenerator,
+    SemanticGenerator,
+)
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
     FileSystemStorageService,
@@ -693,6 +698,46 @@ def _maybe_build_claim_extractor(
     )
 
 
+def _maybe_build_llm_semantic_generators(
+    settings: Settings | None = None,
+    *,
+    client: Any = None,
+    model: str | None = None,
+) -> dict[str, SemanticGenerator]:
+    """Build the optional LLM semantic generator if a provider is configured.
+
+    Returns ``{"llm": LLMSemanticGenerator}`` when an instructor-patched
+    client can be built (Gemini primary, Anthropic fallback per
+    ADR-013 §6) AND the knowledge layer is on. Otherwise returns an
+    empty dict — :class:`SemanticOutputService` always registers the
+    deterministic method itself, so the dropdown shows one option in
+    the LLM-disabled posture and two when both providers resolve.
+
+    Callers may pass a pre-built ``client`` + ``model`` for tests; the
+    production factory builds a fresh instructor client. The reusable
+    cap mirrors :func:`_maybe_build_topic_extractor` so deployments
+    can size the per-document token budget consistently across all
+    instructor-driven extractors.
+    """
+    settings = settings or Settings()
+    if client is None or model is None:
+        from app.services.knowledge.instructor_client import (  # noqa: PLC0415
+            build_instructor_client,
+        )
+
+        built = build_instructor_client(settings)
+        if built is None:
+            return {}
+        client, model = built
+    cap = settings.topic_extractor_max_input_tokens_per_document
+    generator = LLMSemanticGenerator(
+        client=client,
+        model=model,
+        max_input_tokens=cap,
+    )
+    return {SEMANTIC_METHOD_LLM: generator}
+
+
 def _maybe_build_topic_extractor(
     settings: Settings | None = None,
     *,
@@ -1074,6 +1119,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
         hitl_router=hitl_router,
+        generators=_maybe_build_llm_semantic_generators(settings),
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)
@@ -1246,6 +1292,7 @@ def build_persistent_services(
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
         hitl_router=hitl_router,
+        generators=_maybe_build_llm_semantic_generators(settings),
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)

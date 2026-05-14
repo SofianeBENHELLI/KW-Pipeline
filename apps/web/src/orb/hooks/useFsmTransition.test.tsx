@@ -145,6 +145,59 @@ describe("useFsmTransition", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("appends `?method=llm` to the semantic POST when semanticMethod='llm'", async () => {
+    let capturedUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "EXTRACTED",
+        semanticMethod: "llm",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("semantic");
+    });
+    expect(capturedUrl).toMatch(/\/semantic\?method=llm$/);
+  });
+
+  it("does NOT append a method param when semanticMethod is omitted", async () => {
+    let capturedUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "EXTRACTED",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("semantic");
+    });
+    expect(capturedUrl).toMatch(/\/semantic$/);
+  });
+
   it("dispatches `demote` against /reset_to_review when status is VALIDATED", async () => {
     let capturedUrl = "";
     vi.spyOn(globalThis, "fetch").mockImplementation(

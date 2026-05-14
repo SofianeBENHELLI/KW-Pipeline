@@ -15,6 +15,10 @@ import type { ReactElement } from "react";
 
 import { Btn, OrbI } from "../index";
 import type { FsmAction, FsmGates, FsmStatus } from "../hooks/useFsmTransition";
+import {
+  DEFAULT_SEMANTIC_METHOD_ID,
+  SEMANTIC_METHOD_OPTIONS,
+} from "./semanticMethods";
 
 export interface FsmActionsProps {
   gates: FsmGates;
@@ -28,6 +32,15 @@ export interface FsmActionsProps {
   autoValidateThreshold?: number;
   /** Optional reviewer / actor identifier shown in the hint line. */
   actor?: string;
+  /**
+   * Currently-selected semantic-generation method id. Defaults to
+   * the deployment default ("deterministic"). The dropdown sits next
+   * to the Semantic button and threads this value out via
+   * ``onSemanticMethodChange``.
+   */
+  semanticMethod?: string;
+  /** Called when the operator picks a different semantic method. */
+  onSemanticMethodChange?: (method: string) => void;
 }
 
 const DISABLED_REASONS: Record<FsmAction, string> = {
@@ -52,12 +65,17 @@ export function FsmActions({
   confidence,
   autoValidateThreshold = 0.85,
   actor,
+  semanticMethod = DEFAULT_SEMANTIC_METHOD_ID,
+  onSemanticMethodChange,
 }: FsmActionsProps): ReactElement {
   const [note, setNote] = useState("");
 
   const inflight = (a: FsmAction) =>
     status === "running" && activeAction === a;
   const buttonTitle = (a: FsmAction) => (gates[a] ? undefined : DISABLED_REASONS[a]);
+
+  const semanticHint =
+    SEMANTIC_METHOD_OPTIONS.find((o) => o.id === semanticMethod)?.hint ?? "";
 
   return (
     <div className="kf-fsm">
@@ -72,16 +90,38 @@ export function FsmActions({
         >
           {inflight("extract") ? "Extracting…" : "Extract"}
         </Btn>
-        <Btn
-          icon={OrbI.spark}
-          disabled={!gates.semantic || status === "running"}
-          onClick={() => onRun("semantic", note || undefined)}
-          title={buttonTitle("semantic")}
-          aria-busy={inflight("semantic")}
-          data-testid="kf-fsm-semantic"
-        >
-          {inflight("semantic") ? "Generating…" : "Semantic"}
-        </Btn>
+        <div className="kf-fsm__semantic-group">
+          <Btn
+            icon={OrbI.spark}
+            disabled={!gates.semantic || status === "running"}
+            onClick={() => onRun("semantic", note || undefined)}
+            title={buttonTitle("semantic")}
+            aria-busy={inflight("semantic")}
+            data-testid="kf-fsm-semantic"
+          >
+            {inflight("semantic") ? "Generating…" : "Semantic"}
+          </Btn>
+          <label
+            className="kf-fsm__method"
+            title={semanticHint}
+          >
+            <span className="kf-fsm__method-label orb-mono">method</span>
+            <select
+              className="kf-fsm__method-select"
+              value={semanticMethod}
+              onChange={(e) => onSemanticMethodChange?.(e.target.value)}
+              aria-label="Semantic generation method"
+              data-testid="kf-fsm-semantic-method"
+              disabled={status === "running"}
+            >
+              {SEMANTIC_METHOD_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <span className="kf-fsm__spacer" />
         <Btn
           kind="ghost"

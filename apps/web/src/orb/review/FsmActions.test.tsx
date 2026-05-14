@@ -7,6 +7,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FsmActions } from "./FsmActions";
+import { SEMANTIC_METHOD_OPTIONS } from "./semanticMethods";
 
 const ALL_OFF = {
   extract: false,
@@ -117,5 +118,57 @@ describe("<FsmActions />", () => {
     );
     const err = screen.getByTestId("kf-fsm-error");
     expect(err).toHaveTextContent(/boom/);
+  });
+
+  it("exposes the semantic-method dropdown with the registered options", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const select = screen.getByTestId(
+      "kf-fsm-semantic-method",
+    ) as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    // Both options the registry ships with — deterministic first, llm second.
+    expect(select.options.length).toBe(SEMANTIC_METHOD_OPTIONS.length);
+    expect(select.options[0].value).toBe(SEMANTIC_METHOD_OPTIONS[0].id);
+    expect(select.options[1].value).toBe(SEMANTIC_METHOD_OPTIONS[1].id);
+  });
+
+  it("changing the dropdown fires onSemanticMethodChange with the picked id", () => {
+    const onSemanticMethodChange = vi.fn();
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+        semanticMethod="deterministic"
+        onSemanticMethodChange={onSemanticMethodChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("kf-fsm-semantic-method"), {
+      target: { value: "llm" },
+    });
+    expect(onSemanticMethodChange).toHaveBeenCalledWith("llm");
+  });
+
+  it("disables the dropdown while a transition is in flight", () => {
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, semantic: true }}
+        status="running"
+        activeAction="semantic"
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("kf-fsm-semantic-method")).toBeDisabled();
   });
 });

@@ -75,12 +75,19 @@ export interface UseFsmTransitionOptions {
   currentStatus: string | null | undefined;
   /** Called after a successful transition. Page typically refetches here. */
   onAfter?: (action: FsmAction) => void;
+  /**
+   * Semantic-generation method to send on the next ``semantic`` action.
+   * Omit (or pass ``undefined``) to keep the deployment default
+   * (deterministic). The dropdown surface threads the operator's
+   * choice in here.
+   */
+  semanticMethod?: string | undefined;
 }
 
 export function useFsmTransition(
   opts: UseFsmTransitionOptions,
 ): UseFsmTransitionResult {
-  const { documentId, versionId, currentStatus, onAfter } = opts;
+  const { documentId, versionId, currentStatus, onAfter, semanticMethod } = opts;
   const [status, setStatus] = useState<FsmStatus>("idle");
   const [activeAction, setActiveAction] = useState<FsmAction | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -98,7 +105,9 @@ export function useFsmTransition(
       if (action === "extract") {
         await extractVersion(documentId, versionId);
       } else if (action === "semantic") {
-        await generateSemantic(documentId, versionId);
+        await generateSemantic(documentId, versionId, {
+          method: semanticMethod || undefined,
+        });
       } else if (action === "validate") {
         await validateVersion(documentId, versionId, reviewerNote);
       } else if (action === "reject") {

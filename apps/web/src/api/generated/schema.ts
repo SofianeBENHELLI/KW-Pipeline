@@ -4232,6 +4232,8 @@ export interface components {
             document_profile: components["schemas"]["DocumentProfile"];
             /** Document Version Id */
             document_version_id: string;
+            /** Extraction Method */
+            extraction_method: string | null;
             /** Id */
             id: string;
             /** Markdown */
@@ -5732,7 +5734,10 @@ export interface operations {
     };
     generate_semantic: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Semantic generation method. Omit for the deployment default (deterministic). Pass an explicit id (e.g. ``llm``) to pick an alternative strategy; an unknown id returns 400. */
+                method?: string | null;
+            };
             header?: {
                 "Idempotency-Key"?: string | null;
             };
@@ -5753,6 +5758,13 @@ export interface operations {
                     "application/json": components["schemas"]["SemanticDocument"];
                 };
             };
+            /** @description Requested ``method`` is not registered for this deployment. ``GET /admin/config`` exposes the live list under ``semantic_methods``. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -5761,6 +5773,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description The LLM-backed semantic generator failed (network, rate-limit, or upstream error). Retry or fall back to the deterministic method. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

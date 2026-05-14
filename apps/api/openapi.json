@@ -4570,6 +4570,17 @@
             "title": "Document Version Id",
             "type": "string"
           },
+          "extraction_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Method"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4634,6 +4645,7 @@
           "source_references",
           "validation_status",
           "markdown",
+          "extraction_method",
           "created_at"
         ],
         "title": "SemanticDocument",
@@ -7193,6 +7205,24 @@
             }
           },
           {
+            "description": "Semantic generation method. Omit for the deployment default (deterministic). Pass an explicit id (e.g. ``llm``) to pick an alternative strategy; an unknown id returns 400.",
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Semantic generation method. Omit for the deployment default (deterministic). Pass an explicit id (e.g. ``llm``) to pick an alternative strategy; an unknown id returns 400.",
+              "title": "Method"
+            }
+          },
+          {
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -7220,6 +7250,9 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "Requested ``method`` is not registered for this deployment. ``GET /admin/config`` exposes the live list under ``semantic_methods``."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7229,6 +7262,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "description": "The LLM-backed semantic generator failed (network, rate-limit, or upstream error). Retry or fall back to the deterministic method."
           }
         },
         "summary": "Generate Semantic Document"

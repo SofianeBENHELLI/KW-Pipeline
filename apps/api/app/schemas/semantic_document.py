@@ -63,4 +63,9 @@ class SemanticDocument(BaseModel):
     source_references: list[dict] = Field(default_factory=list)
     validation_status: ValidationStatus = "needs_review"
     markdown: str | None = None
+    # Identifier of the SemanticGenerator that produced this payload
+    # (see :mod:`app.services.semantic_generators`). Optional + default
+    # ``None`` so persisted v0.1 payloads written before the
+    # method-dispatch lands keep loading unchanged.
+    extraction_method: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
