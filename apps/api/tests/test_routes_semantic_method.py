@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 from app.dependencies import build_services
 from app.main import create_app
 from app.services.semantic_generators import (
-    SEMANTIC_METHOD_DETERMINISTIC,
-    SEMANTIC_METHOD_LLM,
-    LLMSemanticGenerator,
+    SEMANTIC_METHOD_STRUCTURE_FIRST,
+    SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE,
+    SemanticIntelligenceGenerator,
     _AssetWire,
     _ProfileWire,
     _SemanticEnvelope,
@@ -65,14 +65,14 @@ def test_post_semantic_without_method_defaults_to_deterministic():
         f"/documents/{document_id}/versions/{version_id}/semantic"
     )
     assert response.status_code == 200
-    assert response.json()["extraction_method"] == SEMANTIC_METHOD_DETERMINISTIC
+    assert response.json()["extraction_method"] == SEMANTIC_METHOD_STRUCTURE_FIRST
 
 
 def test_post_semantic_with_method_llm_runs_llm_generator():
     services = build_services()
     # Inject a fake LLM generator so the test never hits the network.
-    services.semantic_outputs._generators[SEMANTIC_METHOD_LLM] = (
-        LLMSemanticGenerator(
+    services.semantic_outputs._generators[SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE] = (
+        SemanticIntelligenceGenerator(
             client=_FakeInstructorClient(
                 _SemanticEnvelope(
                     profile=_ProfileWire(
@@ -109,8 +109,8 @@ def test_post_semantic_with_method_llm_runs_llm_generator():
     ).json()
     section_id = deterministic["sections"][0]["id"]
     # Update the queued envelope so the LLM call cites a valid id.
-    services.semantic_outputs._generators[SEMANTIC_METHOD_LLM] = (
-        LLMSemanticGenerator(
+    services.semantic_outputs._generators[SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE] = (
+        SemanticIntelligenceGenerator(
             client=_FakeInstructorClient(
                 _SemanticEnvelope(
                     profile=_ProfileWire(
@@ -133,11 +133,11 @@ def test_post_semantic_with_method_llm_runs_llm_generator():
 
     response = client.post(
         f"/documents/{document_id}/versions/{version_id}/semantic",
-        params={"method": SEMANTIC_METHOD_LLM},
+        params={"method": SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE},
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["extraction_method"] == SEMANTIC_METHOD_LLM
+    assert body["extraction_method"] == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
     assert body["document_profile"]["title"] == "Supplier Policy"
     assert [a["text"] for a in body["assets"]] == [
         "Must complete the onboarding form.",
@@ -153,15 +153,15 @@ def test_post_semantic_with_method_change_overwrites_cached_row():
 
     first = client.post(
         f"/documents/{document_id}/versions/{version_id}/semantic",
-        params={"method": SEMANTIC_METHOD_DETERMINISTIC},
+        params={"method": SEMANTIC_METHOD_STRUCTURE_FIRST},
     )
     assert first.status_code == 200
-    assert first.json()["extraction_method"] == SEMANTIC_METHOD_DETERMINISTIC
+    assert first.json()["extraction_method"] == SEMANTIC_METHOD_STRUCTURE_FIRST
 
     # Plug a fake LLM generator AFTER extraction so we know the section id.
     section_id = first.json()["sections"][0]["id"]
-    services.semantic_outputs._generators[SEMANTIC_METHOD_LLM] = (
-        LLMSemanticGenerator(
+    services.semantic_outputs._generators[SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE] = (
+        SemanticIntelligenceGenerator(
             client=_FakeInstructorClient(
                 _SemanticEnvelope(
                     profile=_ProfileWire(
@@ -184,13 +184,13 @@ def test_post_semantic_with_method_change_overwrites_cached_row():
 
     second = client.post(
         f"/documents/{document_id}/versions/{version_id}/semantic",
-        params={"method": SEMANTIC_METHOD_LLM},
+        params={"method": SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE},
     )
     assert second.status_code == 200
-    assert second.json()["extraction_method"] == SEMANTIC_METHOD_LLM
+    assert second.json()["extraction_method"] == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
     # The persisted GET serves the most recently generated row.
     persisted = client.get(
         f"/documents/{document_id}/versions/{version_id}/semantic"
     ).json()
-    assert persisted["extraction_method"] == SEMANTIC_METHOD_LLM
+    assert persisted["extraction_method"] == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
     assert persisted["document_profile"]["title"] == "LLM Title"

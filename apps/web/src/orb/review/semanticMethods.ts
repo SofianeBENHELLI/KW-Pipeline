@@ -10,8 +10,9 @@
  *
  * The dropdown sits next to the "Semantic" FSM button — see
  * :class:`FsmActions`. The first entry MUST be the deployment
- * default ("deterministic") so the UX matches the unselected /
- * legacy posture.
+ * default ("structure_first" / Method 1) so the dropdown opens on
+ * the cheapest, most predictable generator per the 2026-05-14
+ * product decision.
  */
 
 export interface SemanticMethodOption {
@@ -25,15 +26,23 @@ export interface SemanticMethodOption {
 
 export const SEMANTIC_METHOD_OPTIONS: readonly SemanticMethodOption[] = [
   {
-    id: "deterministic",
-    label: "Deterministic (rule-based)",
-    hint: "Parser sections + regex enrichers. Fast, no LLM cost, stable across re-runs.",
+    id: "structure_first",
+    label: "Method 1 — Structure-first (rule-based)",
+    hint: "Parser sections + regex enrichers (dates / monetary / requirement cues + optional spaCy NER). Fastest, no LLM cost, stable across re-runs. Recommended default for high-volume ingestion.",
   },
   {
-    id: "llm",
-    label: "LLM extraction (instructor)",
-    hint: "One structured-output LLM call infers profile + typed assets with section-grounded citations. Requires an LLM provider key.",
+    id: "semantic_intelligence",
+    label: "Method 2 — Semantic Document Intelligence (LLM)",
+    hint: "One structured-output LLM call infers profile + typed assets (requirement / decision / risk / action_item / metric / definition / reference) with section-grounded citations. Requires an LLM provider key.",
+  },
+  {
+    id: "knowledge_graph",
+    label: "Method 3 — Knowledge Graph Extraction (LLM)",
+    hint: "Same LLM call shape as Method 2 but with the widened taxonomy (claim / requirement / decision / action / risk / issue / kpi / definition / assumption / dependency / business_value / technical_capability / open_question) tuned for graph projection. Requires an LLM provider key.",
   },
 ] as const;
 
+// Product decision 2026-05-14: default opens on Method 1 so the
+// dropdown lands on the cheapest, most predictable generator.
+// Method 2 / Method 3 are opt-in via the dropdown.
 export const DEFAULT_SEMANTIC_METHOD_ID = SEMANTIC_METHOD_OPTIONS[0].id;

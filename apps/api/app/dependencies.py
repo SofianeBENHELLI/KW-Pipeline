@@ -82,9 +82,11 @@ from app.services.sampling_state_store import (
 )
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_generators import (
-    SEMANTIC_METHOD_LLM,
-    LLMSemanticGenerator,
+    SEMANTIC_METHOD_KNOWLEDGE_GRAPH,
+    SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE,
+    KnowledgeGraphSemanticGenerator,
     SemanticGenerator,
+    SemanticIntelligenceGenerator,
 )
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
@@ -704,20 +706,23 @@ def _maybe_build_llm_semantic_generators(
     client: Any = None,
     model: str | None = None,
 ) -> dict[str, SemanticGenerator]:
-    """Build the optional LLM semantic generator if a provider is configured.
+    """Build the optional LLM-driven semantic generators if a provider
+    is configured.
 
-    Returns ``{"llm": LLMSemanticGenerator}`` when an instructor-patched
-    client can be built (Gemini primary, Anthropic fallback per
-    ADR-013 §6) AND the knowledge layer is on. Otherwise returns an
-    empty dict — :class:`SemanticOutputService` always registers the
-    deterministic method itself, so the dropdown shows one option in
-    the LLM-disabled posture and two when both providers resolve.
+    Returns Method 2 (``semantic_intelligence``) and Method 3
+    (``knowledge_graph``) when an instructor-patched client can be
+    built (Gemini primary, Anthropic fallback per ADR-013 §6) AND
+    the knowledge layer is on. Both generators share the same
+    underlying client, so the operator only pays one provider config
+    + one connection pool for the two methods.
+
+    Returns an empty dict when no provider resolves —
+    :class:`SemanticOutputService` always registers Method 1
+    (structure-first) itself, so the dropdown shows one option in the
+    LLM-disabled posture and three when an LLM provider is wired.
 
     Callers may pass a pre-built ``client`` + ``model`` for tests; the
-    production factory builds a fresh instructor client. The reusable
-    cap mirrors :func:`_maybe_build_topic_extractor` so deployments
-    can size the per-document token budget consistently across all
-    instructor-driven extractors.
+    production factory builds a fresh instructor client.
     """
     settings = settings or Settings()
     if client is None or model is None:
@@ -730,12 +735,18 @@ def _maybe_build_llm_semantic_generators(
             return {}
         client, model = built
     cap = settings.topic_extractor_max_input_tokens_per_document
-    generator = LLMSemanticGenerator(
-        client=client,
-        model=model,
-        max_input_tokens=cap,
-    )
-    return {SEMANTIC_METHOD_LLM: generator}
+    return {
+        SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE: SemanticIntelligenceGenerator(
+            client=client,
+            model=model,
+            max_input_tokens=cap,
+        ),
+        SEMANTIC_METHOD_KNOWLEDGE_GRAPH: KnowledgeGraphSemanticGenerator(
+            client=client,
+            model=model,
+            max_input_tokens=cap,
+        ),
+    }
 
 
 def _maybe_build_topic_extractor(

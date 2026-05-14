@@ -12,6 +12,7 @@ import { SEMANTIC_METHOD_OPTIONS } from "./semanticMethods";
 const ALL_OFF = {
   extract: false,
   semantic: false,
+  "semantic-rerun": false,
   validate: false,
   reject: false,
   demote: false,
@@ -134,10 +135,12 @@ describe("<FsmActions />", () => {
       "kf-fsm-semantic-method",
     ) as HTMLSelectElement;
     expect(select).toBeInTheDocument();
-    // Both options the registry ships with — deterministic first, llm second.
+    // Three options today: structure_first (M1), semantic_intelligence
+    // (M2), knowledge_graph (M3). Method 1 is the runtime default.
     expect(select.options.length).toBe(SEMANTIC_METHOD_OPTIONS.length);
-    expect(select.options[0].value).toBe(SEMANTIC_METHOD_OPTIONS[0].id);
-    expect(select.options[1].value).toBe(SEMANTIC_METHOD_OPTIONS[1].id);
+    expect([...select.options].map((o) => o.value)).toEqual(
+      SEMANTIC_METHOD_OPTIONS.map((o) => o.id),
+    );
   });
 
   it("changing the dropdown fires onSemanticMethodChange with the picked id", () => {
@@ -149,14 +152,14 @@ describe("<FsmActions />", () => {
         activeAction={null}
         error={null}
         onRun={() => {}}
-        semanticMethod="deterministic"
+        semanticMethod="structure_first"
         onSemanticMethodChange={onSemanticMethodChange}
       />,
     );
     fireEvent.change(screen.getByTestId("kf-fsm-semantic-method"), {
-      target: { value: "llm" },
+      target: { value: "knowledge_graph" },
     });
-    expect(onSemanticMethodChange).toHaveBeenCalledWith("llm");
+    expect(onSemanticMethodChange).toHaveBeenCalledWith("knowledge_graph");
   });
 
   it("disables the dropdown while a transition is in flight", () => {
@@ -170,5 +173,85 @@ describe("<FsmActions />", () => {
       />,
     );
     expect(screen.getByTestId("kf-fsm-semantic-method")).toBeDisabled();
+  });
+
+  it("dropdown lists all three semantic methods (Methods 1 / 2 / 3)", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const select = screen.getByTestId(
+      "kf-fsm-semantic-method",
+    ) as HTMLSelectElement;
+    expect(select.options.length).toBe(3);
+    expect([...select.options].map((o) => o.value)).toEqual([
+      "structure_first",
+      "semantic_intelligence",
+      "knowledge_graph",
+    ]);
+  });
+
+  it("default-selected method is Method 1 — structure_first", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const select = screen.getByTestId(
+      "kf-fsm-semantic-method",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("structure_first");
+  });
+
+  it("Re-run button is disabled until semantic output exists", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("kf-fsm-semantic-rerun")).toBeDisabled();
+  });
+
+  it("Re-run button fires onRun('semantic-rerun') when enabled", () => {
+    const onRun = vi.fn();
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "semantic-rerun": true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={onRun}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("kf-fsm-semantic-rerun"));
+    expect(onRun).toHaveBeenCalledWith("semantic-rerun", undefined);
+  });
+
+  it("Re-run button shows 'Re-running…' + aria-busy while in flight", () => {
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "semantic-rerun": true }}
+        status="running"
+        activeAction="semantic-rerun"
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const rerun = screen.getByTestId("kf-fsm-semantic-rerun");
+    expect(rerun).toHaveAttribute("aria-busy", "true");
+    expect(rerun).toHaveTextContent(/Re-running…/);
   });
 });

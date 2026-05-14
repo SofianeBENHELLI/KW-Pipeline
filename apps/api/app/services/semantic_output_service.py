@@ -12,9 +12,9 @@ from app.services.markdown_generator import MarkdownGenerator
 from app.services.semantic_extractor import SemanticExtractor
 from app.services.semantic_generators import (
     DEFAULT_SEMANTIC_METHOD,
-    SEMANTIC_METHOD_DETERMINISTIC,
-    DeterministicSemanticGenerator,
+    SEMANTIC_METHOD_STRUCTURE_FIRST,
     SemanticGenerator,
+    StructureFirstSemanticGenerator,
 )
 from app.services.semantic_schema_loader import load_semantic_document
 from app.services.validation_metadata_store import ValidationMetadataStore
@@ -75,7 +75,7 @@ class SemanticOutputService:
         # method is always present — callers that don't pass
         # ``generators`` keep the pre-method-dispatch behaviour exactly.
         registry: dict[str, SemanticGenerator] = {
-            SEMANTIC_METHOD_DETERMINISTIC: DeterministicSemanticGenerator(
+            SEMANTIC_METHOD_STRUCTURE_FIRST: StructureFirstSemanticGenerator(
                 extractor=semantic_extractor,
             ),
         }
@@ -86,9 +86,9 @@ class SemanticOutputService:
     @property
     def available_methods(self) -> list[str]:
         """Ordered list of registered method ids (default first)."""
-        ordered: list[str] = [SEMANTIC_METHOD_DETERMINISTIC]
+        ordered: list[str] = [SEMANTIC_METHOD_STRUCTURE_FIRST]
         for name in self._generators:
-            if name != SEMANTIC_METHOD_DETERMINISTIC:
+            if name != SEMANTIC_METHOD_STRUCTURE_FIRST:
                 ordered.append(name)
         return ordered
 
@@ -124,7 +124,7 @@ class SemanticOutputService:
                 cached.extraction_method == requested_method
                 or (
                     cached.extraction_method is None
-                    and requested_method == SEMANTIC_METHOD_DETERMINISTIC
+                    and requested_method == SEMANTIC_METHOD_STRUCTURE_FIRST
                 )
             ):
                 log.info(

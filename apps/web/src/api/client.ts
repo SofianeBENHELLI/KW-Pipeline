@@ -505,9 +505,11 @@ export async function listDocumentChunks(
  * Generates (or returns cached) semantic output.
  *
  * ``method`` selects the semantic-generation strategy. Omit (or pass
- * ``undefined``) for the deployment default (deterministic). Passing
- * ``"llm"`` runs the instructor-driven generator when a provider key
- * is configured; an unknown id returns 400.
+ * ``undefined``) for the runtime default (``structure_first`` —
+ * Method 1). Passing ``"semantic_intelligence"`` (Method 2) or
+ * ``"knowledge_graph"`` (Method 3) runs the instructor-driven
+ * generators when a provider key is configured; an unknown id
+ * returns 400.
  */
 export async function generateSemantic(
   documentId: string,

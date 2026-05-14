@@ -34,9 +34,9 @@ export interface FsmActionsProps {
   actor?: string;
   /**
    * Currently-selected semantic-generation method id. Defaults to
-   * the deployment default ("deterministic"). The dropdown sits next
-   * to the Semantic button and threads this value out via
-   * ``onSemanticMethodChange``.
+   * the deployment default ("structure_first" — Method 1). The
+   * dropdown sits next to the Semantic button and threads this
+   * value out via ``onSemanticMethodChange``.
    */
   semanticMethod?: string;
   /** Called when the operator picks a different semantic method. */
@@ -48,6 +48,8 @@ const DISABLED_REASONS: Record<FsmAction, string> = {
     "Available only when the version is in STORED or FAILED — re-extract from the source.",
   semantic:
     "Available only after extraction has succeeded (status EXTRACTED).",
+  "semantic-rerun":
+    "Re-run is available once semantic output already exists (NEEDS_REVIEW / SEMANTIC_READY / VALIDATED / REJECTED).",
   validate:
     "Available only when the version is in NEEDS_REVIEW or SEMANTIC_READY.",
   reject:
@@ -121,6 +123,24 @@ export function FsmActions({
               ))}
             </select>
           </label>
+          {/* Re-run: regenerate semantic with the dropdown's current
+              method when the version already has a semantic row. The
+              backend skips the FSM transition for regeneration so the
+              lifecycle decision (NEEDS_REVIEW / VALIDATED / REJECTED)
+              is unchanged — only the persisted semantic shape is
+              rewritten. */}
+          <Btn
+            kind="ghost"
+            xs
+            icon={OrbI.refresh}
+            disabled={!gates["semantic-rerun"] || status === "running"}
+            onClick={() => onRun("semantic-rerun", note || undefined)}
+            title={buttonTitle("semantic-rerun")}
+            aria-busy={inflight("semantic-rerun")}
+            data-testid="kf-fsm-semantic-rerun"
+          >
+            {inflight("semantic-rerun") ? "Re-running…" : "Re-run"}
+          </Btn>
         </div>
         <span className="kf-fsm__spacer" />
         <Btn
