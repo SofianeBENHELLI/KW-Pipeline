@@ -5735,7 +5735,7 @@ export interface operations {
     generate_semantic: {
         parameters: {
             query?: {
-                /** @description Semantic generation method. Omit for the deployment default (deterministic). Pass an explicit id (e.g. ``llm``) to pick an alternative strategy; an unknown id returns 400. */
+                /** @description Semantic-generation method id. Omit for the runtime default (``structure_first`` — Method 1). Pass ``semantic_intelligence`` (Method 2) or ``knowledge_graph`` (Method 3) to run an LLM-driven strategy when a provider key is configured. An unknown id returns 400; see https://github.com/SofianeBENHELLI/KW-Pipeline/issues/453 for the spec. */
                 method?: string | null;
             };
             header?: {

@@ -396,10 +396,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         method: str | None = Query(
             default=None,
             description=(
-                "Semantic generation method. Omit for the deployment "
-                "default (deterministic). Pass an explicit id (e.g. "
-                "``llm``) to pick an alternative strategy; an unknown "
-                "id returns 400."
+                "Semantic-generation method id. Omit for the runtime "
+                "default (``structure_first`` — Method 1). Pass "
+                "``semantic_intelligence`` (Method 2) or "
+                "``knowledge_graph`` (Method 3) to run an LLM-driven "
+                "strategy when a provider key is configured. An "
+                "unknown id returns 400; see "
+                "https://github.com/SofianeBENHELLI/KW-Pipeline/issues/453 "
+                "for the spec."
             ),
         ),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
