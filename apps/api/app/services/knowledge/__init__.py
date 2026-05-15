@@ -18,6 +18,12 @@ Public surface (intentionally small):
 """
 
 from app.services.knowledge.atlas import KnowledgeAtlasService
+from app.services.knowledge.bm25 import (
+    BM25Hit,
+    BM25Index,
+    build_bm25_index_from_graph_store,
+    tokenize,
+)
 from app.services.knowledge.chat_service import (
     DEFAULT_MAX_OUTPUT_TOKENS as DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
 )
@@ -44,6 +50,10 @@ from app.services.knowledge.graph_store import (
     GraphStore,
     InMemoryGraphStore,
     Neo4jGraphStore,
+)
+from app.services.knowledge.hybrid_search import (
+    HybridSearchService,
+    reciprocal_rank_fusion,
 )
 from app.services.knowledge.llm_client import (
     AnthropicLLMClient,
@@ -76,6 +86,8 @@ from app.services.knowledge.topic_clustering import (
 
 __all__ = [
     "AnthropicLLMClient",
+    "BM25Hit",
+    "BM25Index",
     "ChunkRecord",
     "ChunkRelation",
     "ChunkRelationKind",
@@ -89,6 +101,7 @@ __all__ = [
     "FakeLLMClient",
     "GeminiLLMClient",
     "GraphStore",
+    "HybridSearchService",
     "InMemoryGraphStore",
     "KnowledgeAtlasService",
     "KnowledgeChatService",
@@ -109,4 +122,7 @@ __all__ = [
     "TopicClusteringService",
     "TopicMembership",
     "VoyageEmbeddingClient",
+    "build_bm25_index_from_graph_store",
+    "reciprocal_rank_fusion",
+    "tokenize",
 ]

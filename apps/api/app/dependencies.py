@@ -66,6 +66,8 @@ from app.services.knowledge import (
     Neo4jGraphStore,
     VoyageEmbeddingClient,
 )
+from app.services.knowledge.bm25 import build_bm25_index_from_graph_store
+from app.services.knowledge.hybrid_search import HybridSearchService
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
 from app.services.process_store import (
@@ -268,7 +270,14 @@ class PipelineServices:
     # the projector skips the embedding write, the search route
     # returns 503.
     embedding_client: EmbeddingClient | None = None
-    knowledge_search: KnowledgeSearchService | None = None
+    # ``knowledge_search`` carries either the vector-only
+    # :class:`KnowledgeSearchService` (the MVP shape) or a
+    # :class:`HybridSearchService` wrapping it when
+    # ``KW_HYBRID_RETRIEVAL_ENABLED=true``. Both expose the same
+    # ``search(query, *, limit=...) -> ChunkSearchResponse`` surface so
+    # the route layer and chat service consume them interchangeably
+    # (EPIC-4 §4.3, the eval-harness ``_SearchLike`` Protocol).
+    knowledge_search: KnowledgeSearchService | HybridSearchService | None = None
     # Phase 3 chat surface. Constructed iff
     # ``KW_KNOWLEDGE_LAYER_ENABLED=true`` AND an LLM key resolves
     # (``GEMINI_API_KEY`` or ``ANTHROPIC_API_KEY``) AND a
@@ -967,11 +976,40 @@ def _maybe_build_knowledge_layer(
     )
 
 
+def _maybe_wrap_hybrid(
+    settings: Any,
+    *,
+    vector_search: KnowledgeSearchService | None,
+    graph_store: Any,
+) -> KnowledgeSearchService | HybridSearchService | None:
+    """Wrap ``vector_search`` in :class:`HybridSearchService` when the
+    operator opted into hybrid retrieval (EPIC-4 §4.3, ADR-016 follow-up).
+
+    Returns the wrapped service when ``KW_HYBRID_RETRIEVAL_ENABLED`` is
+    truthy AND a vector search is wired. Otherwise returns
+    ``vector_search`` unchanged — the route layer reads
+    ``services.knowledge_search`` and doesn't need to know which
+    flavour it got. Drop-in by design: both services expose the same
+    ``search(query, *, limit=...) -> ChunkSearchResponse`` shape.
+
+    The BM25 half is built once from the corpus visible *at startup*.
+    A corpus update at runtime (new documents ingested + projected)
+    requires a process restart to refresh the BM25 index; a follow-up
+    PR will add a build hook in ``KnowledgeProjector.project_chunks``
+    + an ``/admin/refresh-bm25`` route for ops surfaces that can't
+    restart.
+    """
+    if vector_search is None or not settings.hybrid_retrieval_enabled:
+        return vector_search
+    bm25 = build_bm25_index_from_graph_store(graph_store)
+    return HybridSearchService(vector=vector_search, bm25=bm25)
+
+
 def _maybe_build_chat_service(
     *,
     llm: LLMClient | None,
     llm_model: str | None,
-    knowledge_search: KnowledgeSearchService | None,
+    knowledge_search: KnowledgeSearchService | HybridSearchService | None,
     graph_store: GraphStore,
 ) -> KnowledgeChatService | None:
     """Wire the Phase 3 chat service when every dependency is available.
@@ -1083,13 +1121,18 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
         settings, embedding_client=embedding_client
     )
-    knowledge_search = (
+    knowledge_search_vector: KnowledgeSearchService | None = (
         KnowledgeSearchService(
             embedding_client=embedding_client,
             graph_store=graph_store,
         )
         if embedding_client is not None
         else None
+    )
+    knowledge_search = _maybe_wrap_hybrid(
+        settings,
+        vector_search=knowledge_search_vector,
+        graph_store=graph_store,
     )
     # Build the LLM once and share it between the entity extractor and
     # the chat service so they amortise the same prompt cache and
@@ -1255,13 +1298,18 @@ def build_persistent_services(
     graph_store, knowledge_projector = _maybe_build_knowledge_layer(
         settings, embedding_client=embedding_client
     )
-    knowledge_search = (
+    knowledge_search_vector: KnowledgeSearchService | None = (
         KnowledgeSearchService(
             embedding_client=embedding_client,
             graph_store=graph_store,
         )
         if embedding_client is not None
         else None
+    )
+    knowledge_search = _maybe_wrap_hybrid(
+        settings,
+        vector_search=knowledge_search_vector,
+        graph_store=graph_store,
     )
     llm_pair = _maybe_build_llm(settings)
     llm_client = llm_pair[0] if llm_pair else None

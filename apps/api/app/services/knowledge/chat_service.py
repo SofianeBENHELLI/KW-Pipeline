@@ -30,6 +30,7 @@ from app.schemas.knowledge import (
     GraphNode,
 )
 from app.services.knowledge.graph_store import GraphStore
+from app.services.knowledge.hybrid_search import HybridSearchService
 from app.services.knowledge.llm_client import LLMClient
 from app.services.knowledge.search import KnowledgeSearchService
 
@@ -89,7 +90,7 @@ class KnowledgeChatService:
     def __init__(
         self,
         *,
-        search: KnowledgeSearchService,
+        search: KnowledgeSearchService | HybridSearchService,
         graph_store: GraphStore,
         llm: LLMClient,
         llm_model: str,

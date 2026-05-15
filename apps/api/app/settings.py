@@ -353,6 +353,20 @@ class Settings(BaseSettings):
             "``1``, ``true``, ``yes``, ``on`` (case-insensitive)."
         ),
     )
+    hybrid_retrieval_enabled_raw: str = Field(
+        default="",
+        validation_alias=AliasChoices("KW_HYBRID_RETRIEVAL_ENABLED"),
+        description=(
+            "Opt-in flag for vector + BM25 hybrid retrieval (EPIC-4 §4.3). "
+            "When truthy AND the knowledge layer + embedding client are "
+            "wired, the ``services.knowledge_search`` slot is wrapped in "
+            "a ``HybridSearchService`` so both ``GET /knowledge/search`` "
+            "and ``POST /knowledge/chat`` transparently consume the fused "
+            "vector+BM25 ranking. Truthy values: ``1``, ``true``, ``yes``, "
+            "``on`` (case-insensitive). Default off — vector-only is the "
+            "MVP retrieval shape."
+        ),
+    )
     neo4j_uri: str = Field(
         default="",
         validation_alias=AliasChoices("KW_NEO4J_URI"),
@@ -958,6 +972,17 @@ class Settings(BaseSettings):
         — including the empty string — is False.
         """
         return _truthy(self.knowledge_layer_enabled_raw)
+
+    @property
+    def hybrid_retrieval_enabled(self) -> bool:
+        """Truthy parse of the hybrid-retrieval kill switch.
+
+        Same truthiness rules as :attr:`knowledge_layer_enabled`. The
+        flag is independent: hybrid retrieval is only constructed when
+        BOTH this flag and the knowledge layer are enabled AND an
+        embedding client is wired (a vector retriever to fuse with).
+        """
+        return _truthy(self.hybrid_retrieval_enabled_raw)
 
     @property
     def ner_enabled(self) -> bool:

@@ -195,4 +195,36 @@ class BM25Index:
         return [BM25Hit(chunk_id=cid, score=s) for s, cid in scored[:limit]]
 
 
-__all__ = ["BM25Hit", "BM25Index", "tokenize"]
+def build_bm25_index_from_graph_store(graph_store: object) -> BM25Index:
+    """Walk every ``chunk`` node in a :class:`GraphStore` and build an
+    index over the chunks' ``text_preview`` properties.
+
+    Used at startup wiring time to construct the BM25 half of a
+    :class:`HybridSearchService`. The graph store dependency is typed
+    loosely (``object`` + duck-typed call below) so this module
+    doesn't import the heavy graph-store types; the caller passes the
+    actual :class:`GraphStore`.
+
+    Chunks with no ``text_preview`` are skipped — they can't be
+    keyword-matched and would just inflate the document-frequency
+    denominator. The index reflects the corpus *as of construction
+    time*; runtime updates (newly projected chunks) require a rebuild.
+    The first-cut wiring rebuilds at process startup only; a later PR
+    will hook the projector to refresh.
+    """
+    chunks_with_text: list[tuple[str, str]] = []
+    nodes = graph_store.find_nodes_by_kind("chunk")  # type: ignore[attr-defined]
+    for node in nodes:
+        text_preview = node.properties.get("text_preview")
+        if not isinstance(text_preview, str) or not text_preview.strip():
+            continue
+        chunks_with_text.append((node.id, text_preview))
+    return BM25Index(chunks_with_text)
+
+
+__all__ = [
+    "BM25Hit",
+    "BM25Index",
+    "build_bm25_index_from_graph_store",
+    "tokenize",
+]
