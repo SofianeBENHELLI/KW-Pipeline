@@ -158,24 +158,28 @@ export type {
   DeepLinkErrorBannerProps,
 } from "./catalog/Banners";
 
-// PR 6 — Graph view
-export { GraphView } from "./graph/GraphView";
+// Graph primitives — used by the per-document graph tab in the
+// Review Workspace. Knowledge Forge has no corpus-wide graph
+// surface; corpus exploration is the scope of the Knowledge
+// Explorer app (`apps/explorer`).
 export { GraphCanvas } from "./graph/GraphCanvas";
 export type { GraphCanvasProps } from "./graph/GraphCanvas";
 export { GraphInspector } from "./graph/GraphInspector";
 export type { GraphInspectorProps } from "./graph/GraphInspector";
+export { DocGraphTab } from "./review/DocGraphTab";
+export type { DocGraphTabProps } from "./review/DocGraphTab";
 export {
   applyGraphFilter,
   neighborsOf,
+  useDocumentGraph,
   useFilteredGraph,
-  useKnowledgeGraph,
-} from "./hooks/useKnowledgeGraph";
+} from "./hooks/useDocumentGraph";
 export type {
   FilterApplied,
   GraphFilter,
   GraphStatus,
-  UseKnowledgeGraphResult,
-} from "./hooks/useKnowledgeGraph";
+  UseDocumentGraphResult,
+} from "./hooks/useDocumentGraph";
 
 // PR 7 — Search + Chat
 export { SearchPanel } from "./search/SearchPanel";

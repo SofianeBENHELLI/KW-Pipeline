@@ -1,7 +1,7 @@
 /**
- * DocTabs — pin the two tab labels (Linked view / Pipeline & FSM),
- * the active state, the default-on tag, and the hint that swaps
- * with the active tab.
+ * DocTabs — pin the three tab labels (Linked view / Pipeline & FSM /
+ * Graph), the active state, the default-on tag, and the hint that
+ * swaps with the active tab.
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -10,12 +10,13 @@ import { describe, expect, it, vi } from "vitest";
 import { DocTabs } from "./DocTabs";
 
 describe("<DocTabs />", () => {
-  it("renders the two tabs with the right labels", () => {
+  it("renders the three tabs with the right labels", () => {
     render(<DocTabs active="linked" onChange={() => {}} />);
     expect(screen.getByRole("tab", { name: /Linked view/ })).toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: /Pipeline & FSM/ }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Graph/ })).toBeInTheDocument();
   });
 
   it("marks the active tab via aria-selected and aria-current", () => {
@@ -47,5 +48,16 @@ describe("<DocTabs />", () => {
     expect(
       screen.getByText(/lifecycle · extraction · semantic · versions/i),
     ).toBeInTheDocument();
+    rerender(<DocTabs active="graph" onChange={() => {}} />);
+    expect(
+      screen.getByText(/topics · entities · chunks projected for this document/i),
+    ).toBeInTheDocument();
+  });
+
+  it("invokes onChange when the Graph tab is clicked", () => {
+    const onChange = vi.fn();
+    render(<DocTabs active="linked" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("tab", { name: /^Graph/ }));
+    expect(onChange).toHaveBeenCalledWith("graph");
   });
 });

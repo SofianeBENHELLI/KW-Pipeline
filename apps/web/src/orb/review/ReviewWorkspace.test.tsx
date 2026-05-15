@@ -173,6 +173,22 @@ describe("<ReviewWorkspace />", () => {
     expect(screen.getByTestId("kf-tab-pipeline")).toBeInTheDocument();
   });
 
+  it("clicking the Graph tab mounts the per-document graph body", async () => {
+    renderWorkspace("/kf/review/doc-a");
+    await waitFor(() =>
+      expect(screen.getByTestId("kf-tab-linked")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Graph/ }));
+    expect(screen.getByTestId("kf-tab-graph")).toBeInTheDocument();
+    // The graph filter toolbar is the per-doc surface; corpus-wide
+    // exploration is the Knowledge Explorer's scope, not this view's.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("toolbar", { name: /Graph filter/ }),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("legacy `?tab=review` URL still lands on the merged Pipeline & FSM body", async () => {
     renderWorkspace("/kf/review/doc-a?tab=review");
     await waitFor(() =>

@@ -15,7 +15,7 @@
  * Filters live in `URLSearchParams` so links are shareable:
  *   ?view=review|recent|validated|failed
  *   ?q=<filename substring>
- *   ?tab=linked|review|pipeline
+ *   ?tab=linked|review|pipeline|graph
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +23,7 @@ import type { ReactElement } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { BatchBanner } from "./BatchBanner";
+import { DocGraphTab } from "./DocGraphTab";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
@@ -104,7 +105,7 @@ function _pdfMetaFor(doc: ApiDocument | null): LinkedViewPdf | null {
 }
 
 const VALID_VIEWS = new Set<RailView>(["recent", "review", "validated", "failed"]);
-const VALID_TABS = new Set<DocTab>(["linked", "pipeline"]);
+const VALID_TABS = new Set<DocTab>(["linked", "pipeline", "graph"]);
 
 function parseView(raw: string | null): RailView {
   if (raw && VALID_VIEWS.has(raw as RailView)) return raw as RailView;
@@ -427,6 +428,16 @@ export function ReviewWorkspace({
               }}
             />
             <PipelineTab document={activeDoc} />
+          </div>
+        )}
+        {tab === "graph" && (
+          <div
+            className="kf-tab-body kf-tab-body--graph"
+            data-testid="kf-tab-graph"
+          >
+            {/* Per-document graph projection. Corpus-wide graph
+                exploration lives in Knowledge Explorer, never here. */}
+            <DocGraphTab documentId={params.docId ?? null} />
           </div>
         )}
 

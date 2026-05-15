@@ -7,12 +7,12 @@
  * tile is rendered separately so a flex spacer can push it down.
  *
  * The set of tiles intentionally lags the top-bar nav: the rail is for
- * activity-style verbs (Activity / Upload / Review / Search / Document /
- * Graph / Settings) per the prototype's `DX_RAIL_ICONS` list. Top-bar
- * nav is for routes (Review / Graph / Search / Chat / Admin) per §2.2.
- *
- * In PR 1 every tile is inert (no router handler wired). PRs 2-8
- * introduce real navigation.
+ * activity-style verbs (Activity / Upload / Review / Search / Document
+ * / Settings). Top-bar nav is for routes (Review / Search / Chat /
+ * Admin) per §2.2. There is no Graph tile because Knowledge Forge has
+ * no corpus-wide graph surface — graph lives as a per-document tab in
+ * the Review Workspace; corpus-wide exploration is the scope of the
+ * Knowledge Explorer app (`apps/explorer`).
  */
 import {
   Activity,
@@ -20,7 +20,6 @@ import {
   FileText,
   Settings,
   Upload,
-  Workflow,
 } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
@@ -32,7 +31,6 @@ export type RailTileId =
   | "review"
   | "search"
   | "info"
-  | "graph"
   | "settings";
 
 interface RailTile {
@@ -53,7 +51,6 @@ const MID_TILES: RailTile[] = [
   { id: "review",   label: "Review",       icon: <FileText   size={SZ} strokeWidth={SW} /> },
   { id: "search",   label: "Search",       icon: OrbI.search },
   { id: "info",     label: "Document",     icon: <CircleHelp size={SZ} strokeWidth={SW} /> },
-  { id: "graph",    label: "Graph",        icon: <Workflow   size={SZ} strokeWidth={SW} /> },
 ];
 
 const BOTTOM_TILE: RailTile = {
