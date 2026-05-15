@@ -153,9 +153,7 @@ def _project_chunk(
         char_count=len(text),
         content_sha256=content_sha256,
         source_reference_ids=list(section.source_reference_ids),
-        # ``ValidationStatus`` is the closed Literal; cast through
-        # the type system via Pydantic's coercion.
-        validation_status=validation_status,  # type: ignore[arg-type]
+        validation_status=validation_status,
     )
 
 
