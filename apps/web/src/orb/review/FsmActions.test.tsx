@@ -156,10 +156,50 @@ describe("<FsmActions />", () => {
         onSemanticMethodChange={onSemanticMethodChange}
       />,
     );
+    // Pick Method 2 — Method 3 is currently disabled in the dropdown
+    // ("under development") so we exercise the change handler against
+    // an enabled target.
     fireEvent.change(screen.getByTestId("kf-fsm-semantic-method"), {
-      target: { value: "knowledge_graph" },
+      target: { value: "semantic_intelligence" },
     });
-    expect(onSemanticMethodChange).toHaveBeenCalledWith("knowledge_graph");
+    expect(onSemanticMethodChange).toHaveBeenCalledWith("semantic_intelligence");
+  });
+
+  it("Method 3 — knowledge_graph is rendered but disabled (under development)", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const option = screen.getByTestId(
+      "kf-fsm-semantic-method-option-knowledge_graph",
+    ) as HTMLOptionElement;
+    expect(option).toBeDisabled();
+    expect(option.textContent).toMatch(/under development/i);
+  });
+
+  it("the other two methods are enabled in the dropdown", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("kf-fsm-semantic-method-option-structure_first"),
+    ).not.toBeDisabled();
+    expect(
+      screen.getByTestId(
+        "kf-fsm-semantic-method-option-semantic_intelligence",
+      ),
+    ).not.toBeDisabled();
   });
 
   it("disables the dropdown while a transition is in flight", () => {

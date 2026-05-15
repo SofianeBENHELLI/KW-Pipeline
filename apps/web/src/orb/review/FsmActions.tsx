@@ -18,6 +18,7 @@ import type { FsmAction, FsmGates, FsmStatus } from "../hooks/useFsmTransition";
 import {
   DEFAULT_SEMANTIC_METHOD_ID,
   SEMANTIC_METHOD_OPTIONS,
+  UNDER_DEVELOPMENT_SUFFIX,
 } from "./semanticMethods";
 
 export interface FsmActionsProps {
@@ -117,8 +118,16 @@ export function FsmActions({
               disabled={status === "running"}
             >
               {SEMANTIC_METHOD_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
+                <option
+                  key={opt.id}
+                  value={opt.id}
+                  disabled={opt.disabled}
+                  title={opt.disabled ? opt.hint : undefined}
+                  data-testid={`kf-fsm-semantic-method-option-${opt.id}`}
+                >
+                  {opt.disabled
+                    ? `${opt.label}${UNDER_DEVELOPMENT_SUFFIX}`
+                    : opt.label}
                 </option>
               ))}
             </select>
