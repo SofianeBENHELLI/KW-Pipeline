@@ -316,7 +316,12 @@ class DocumentService:
         return self.catalog.get_version(document_id=document_id, version_id=version_id)
 
     def update_status(
-        self, document_id: str, version_id: str, status: DocumentVersionStatus
+        self,
+        document_id: str,
+        version_id: str,
+        status: DocumentVersionStatus,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Update and return a document version lifecycle status.
 
@@ -340,7 +345,7 @@ class DocumentService:
             version_id=version_id,
             status=status,
         )
-        _log_status_changed(updated, previous=previous)
+        _log_status_changed(updated, previous=previous, actor=actor)
         return updated
 
     def mark_failed(
@@ -348,15 +353,24 @@ class DocumentService:
         document_id: str,
         version_id: str,
         reason: str,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
-        """Mark a version FAILED and persist the human-readable failure reason."""
+        """Mark a version FAILED and persist the human-readable failure reason.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4); when
+        provided, the ``document.status_changed`` audit event for this
+        FSM move records it. Worker / boot-time failures
+        (extraction worker timeout, stuck-state recovery) emit ``None``
+        and the key is omitted from the audit payload.
+        """
         previous = self.catalog.get_version(document_id=document_id, version_id=version_id).status
         updated = self.catalog.update_version_failure(
             document_id=document_id,
             version_id=version_id,
             reason=reason,
         )
-        _log_status_changed(updated, previous=previous)
+        _log_status_changed(updated, previous=previous, actor=actor)
         return updated
 
     def mark_semantic_ready(self, document_id: str, version_id: str) -> DocumentVersion:
@@ -442,7 +456,7 @@ class DocumentService:
             reviewer_note=reviewer_note,
             reviewed_at=datetime.now(UTC),
         )
-        _log_status_changed(updated, previous=previous)
+        _log_status_changed(updated, previous=previous, actor=actor)
         log.info(
             "review.demoted",
             extra={
@@ -519,7 +533,7 @@ class DocumentService:
             reviewer_note=reviewer_note,
             reviewed_at=datetime.now(UTC),
         )
-        _log_status_changed(updated, previous=previous)
+        _log_status_changed(updated, previous=previous, actor=actor)
         if target_status == DocumentVersionStatus.VALIDATED:
             log.info(
                 "review.validated",

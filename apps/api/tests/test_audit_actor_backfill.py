@@ -6,13 +6,17 @@ sweep had landed. Audit events that come from a human caller should
 carry ``actor`` in their ``extra=`` payload so the admin viewer's
 actor filter (and any downstream forensics) can attribute the action.
 
-This file pins the ``document.uploaded`` path. Status-change emits
-(``document.status_changed``) currently flow through both human-driven
-routes (validate / reject) and worker-driven paths (extraction
-worker, recovery, semantic output service). The helper now accepts
-``actor`` but the threading from non-upload routes is queued as a
-follow-up — this PR ships the upload path so the contract is
-demonstrated end-to-end with a green test.
+This file pins:
+
+- ``document.uploaded`` — single + batch upload routes (originally
+  shipped in PR #460).
+- ``document.status_changed`` — validate / reject / demote flows
+  threaded through ``DocumentService._record_review`` and
+  ``mark_demoted_to_review`` (added in the status-change follow-up).
+
+The async-path ``extraction.*`` events still need an ``actor`` field
+on ``ExtractionRequest`` to thread the principal from enqueue to
+dequeue; that's queued as a separate follow-up.
 """
 
 from __future__ import annotations
@@ -132,3 +136,128 @@ def test_document_service_upload_omits_actor_key_when_none() -> None:
     assert matches, "document.uploaded should fire on a successful upload"
     # ``actor`` is absent from the extras when the call didn't pass one.
     assert not hasattr(matches[0], "actor")
+
+
+# ─── document.status_changed carries actor on validate / reject / demote ──
+
+
+def _land_version_in_needs_review(services) -> tuple[str, str]:
+    """Drive a fresh upload through extract + semantic so the version
+    sits at NEEDS_REVIEW — the precondition for validate / reject. Reused
+    pattern from ``test_review_service.py``."""
+    version = services.documents.upload(
+        filename="policy.txt",
+        content_type=PLAIN,
+        content=b"Hello world. This is a tiny test fixture.",
+    )
+    services.extraction_jobs.extract(
+        document_id=version.document_id, version_id=version.id
+    )
+    services.semantic_outputs.generate(
+        document_id=version.document_id, version_id=version.id
+    )
+    return version.document_id, version.id
+
+
+def test_validate_route_emits_actor_on_document_status_changed(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``POST /documents/{id}/versions/{vid}/validate`` flows through
+    ``ReviewService.handle_validation → mark_validated → _record_review
+    → _log_status_changed(actor=…)``. The actor lands on the
+    ``document.status_changed`` event for the NEEDS_REVIEW → VALIDATED
+    transition."""
+    from app.dependencies import build_services
+    from app.main import create_app
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+    fresh_client = TestClient(create_app(services=services))
+
+    caplog.clear()
+    caplog.set_level(logging.INFO)
+    response = fresh_client.post(
+        f"/documents/{document_id}/versions/{version_id}/validate",
+        json={"reviewer_note": "all good"},
+    )
+    assert response.status_code == 200, response.text
+
+    matches = _records(caplog, "document.status_changed")
+    # One status_changed event for the NEEDS_REVIEW → VALIDATED transition.
+    transition = next(
+        (m for m in matches if _extra(m).get("to") == "VALIDATED"),
+        None,
+    )
+    assert transition is not None, "expected a NEEDS_REVIEW → VALIDATED transition"
+    extra = _extra(transition)
+    assert extra.get("actor") == "dev"
+    # The review.validated companion event keeps its actor too.
+    review_events = _records(caplog, "review.validated")
+    assert review_events and _extra(review_events[-1]).get("actor") == "dev"
+
+
+def test_reject_route_emits_actor_on_document_status_changed(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same shape as the validate test, on the rejection path."""
+    from app.dependencies import build_services
+    from app.main import create_app
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+    fresh_client = TestClient(create_app(services=services))
+
+    caplog.clear()
+    caplog.set_level(logging.INFO)
+    response = fresh_client.post(
+        f"/documents/{document_id}/versions/{version_id}/reject",
+        json={"reviewer_note": "wrong document"},
+    )
+    assert response.status_code == 200, response.text
+
+    matches = _records(caplog, "document.status_changed")
+    transition = next(
+        (m for m in matches if _extra(m).get("to") == "REJECTED"),
+        None,
+    )
+    assert transition is not None, "expected a NEEDS_REVIEW → REJECTED transition"
+    assert _extra(transition).get("actor") == "dev"
+
+
+def test_demote_route_emits_actor_on_document_status_changed(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Demote route (``POST /demote-to-review``) — VALIDATED → NEEDS_REVIEW
+    transition's ``document.status_changed`` event carries the actor."""
+    from app.dependencies import build_services
+    from app.main import create_app
+
+    services = build_services()
+    document_id, version_id = _land_version_in_needs_review(services)
+    # Drive to VALIDATED first so the demote precondition is met.
+    services.review.handle_validation(
+        document_id=document_id,
+        version_id=version_id,
+        reviewer_note="seed",
+        actor="dev",
+    )
+    fresh_client = TestClient(create_app(services=services))
+
+    caplog.clear()
+    caplog.set_level(logging.INFO)
+    response = fresh_client.post(
+        f"/documents/{document_id}/versions/{version_id}/demote-to-review",
+        json={"reviewer_note": "second look"},
+    )
+    assert response.status_code == 200, response.text
+
+    matches = _records(caplog, "document.status_changed")
+    transition = next(
+        (m for m in matches if _extra(m).get("to") == "NEEDS_REVIEW"),
+        None,
+    )
+    assert transition is not None, "expected a VALIDATED → NEEDS_REVIEW transition"
+    assert _extra(transition).get("actor") == "dev"
