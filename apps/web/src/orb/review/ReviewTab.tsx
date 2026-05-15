@@ -14,7 +14,7 @@
  *   └────────────────────────────────────┘
  */
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { Card, CardHead, SectionH } from "../index";
 import { DocumentDetailCard } from "./DocumentDetailCard";
@@ -29,6 +29,7 @@ import {
   type FsmAction,
 } from "../hooks/useFsmTransition";
 import { useSemantic } from "../hooks/useSemantic";
+import { DEFAULT_SEMANTIC_METHOD_ID } from "./semanticMethods";
 import { latestStatus, latestVersion } from "./format";
 
 export interface ReviewTabProps {
@@ -44,11 +45,20 @@ export function ReviewTab({
   const docId = document?.id ?? null;
   const verId = ver?.id ?? null;
 
+  // Semantic-method choice is component-local: the rail's notion of
+  // "active document" is the only thing that resets it. Persisting the
+  // choice across docs would invite the operator to silently
+  // re-generate every doc with a method they meant for one outlier.
+  const [semanticMethod, setSemanticMethod] = useState<string>(
+    DEFAULT_SEMANTIC_METHOD_ID,
+  );
+
   const fsm = useFsmTransition({
     documentId: docId,
     versionId: verId,
     currentStatus: latestStatus(document),
     onAfter: onAfterTransition,
+    semanticMethod,
   });
   const extraction = useExtraction(docId, verId);
   const semantic = useSemantic(docId, verId);
@@ -89,6 +99,8 @@ export function ReviewTab({
           activeAction={fsm.activeAction}
           error={fsm.error}
           onRun={fsm.run}
+          semanticMethod={semanticMethod}
+          onSemanticMethodChange={setSemanticMethod}
         />
       </Card>
 

@@ -503,15 +503,25 @@ export async function listDocumentChunks(
 /**
  * POST /documents/{document_id}/versions/{version_id}/semantic
  * Generates (or returns cached) semantic output.
+ *
+ * ``method`` selects the semantic-generation strategy. Omit (or pass
+ * ``undefined``) for the runtime default (``structure_first`` —
+ * Method 1). Passing ``"semantic_intelligence"`` (Method 2) or
+ * ``"knowledge_graph"`` (Method 3) runs the instructor-driven
+ * generators when a provider key is configured; an unknown id
+ * returns 400.
  */
 export async function generateSemantic(
   documentId: string,
   versionId: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; method?: string } = {},
 ): Promise<ApiSemanticDocument> {
   return unwrap(
     await http.POST("/documents/{document_id}/versions/{version_id}/semantic", {
-      params: { path: { document_id: documentId, version_id: versionId } },
+      params: {
+        path: { document_id: documentId, version_id: versionId },
+        ...(options.method ? { query: { method: options.method } } : {}),
+      },
       signal: options.signal,
     }),
   );

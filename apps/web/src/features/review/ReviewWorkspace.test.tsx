@@ -79,6 +79,7 @@ const FIXTURE_SEMANTIC: ApiSemanticDocument = {
   source_references: [],
   validation_status: "needs_review",
   markdown: "# Hello",
+  extraction_method: null,
   created_at: "2026-05-01T00:00:00Z",
 };
 

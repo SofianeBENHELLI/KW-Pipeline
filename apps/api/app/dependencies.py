@@ -81,6 +81,13 @@ from app.services.sampling_state_store import (
     SQLiteSamplingStateStore,
 )
 from app.services.semantic_extractor import SemanticExtractor
+from app.services.semantic_generators import (
+    SEMANTIC_METHOD_KNOWLEDGE_GRAPH,
+    SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE,
+    KnowledgeGraphSemanticGenerator,
+    SemanticGenerator,
+    SemanticIntelligenceGenerator,
+)
 from app.services.semantic_output_service import SemanticOutputService
 from app.services.storage_service import (
     FileSystemStorageService,
@@ -693,6 +700,55 @@ def _maybe_build_claim_extractor(
     )
 
 
+def _maybe_build_llm_semantic_generators(
+    settings: Settings | None = None,
+    *,
+    client: Any = None,
+    model: str | None = None,
+) -> dict[str, SemanticGenerator]:
+    """Build the optional LLM-driven semantic generators if a provider
+    is configured.
+
+    Returns Method 2 (``semantic_intelligence``) and Method 3
+    (``knowledge_graph``) when an instructor-patched client can be
+    built (Gemini primary, Anthropic fallback per ADR-013 §6) AND
+    the knowledge layer is on. Both generators share the same
+    underlying client, so the operator only pays one provider config
+    + one connection pool for the two methods.
+
+    Returns an empty dict when no provider resolves —
+    :class:`SemanticOutputService` always registers Method 1
+    (structure-first) itself, so the dropdown shows one option in the
+    LLM-disabled posture and three when an LLM provider is wired.
+
+    Callers may pass a pre-built ``client`` + ``model`` for tests; the
+    production factory builds a fresh instructor client.
+    """
+    settings = settings or Settings()
+    if client is None or model is None:
+        from app.services.knowledge.instructor_client import (  # noqa: PLC0415
+            build_instructor_client,
+        )
+
+        built = build_instructor_client(settings)
+        if built is None:
+            return {}
+        client, model = built
+    cap = settings.topic_extractor_max_input_tokens_per_document
+    return {
+        SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE: SemanticIntelligenceGenerator(
+            client=client,
+            model=model,
+            max_input_tokens=cap,
+        ),
+        SEMANTIC_METHOD_KNOWLEDGE_GRAPH: KnowledgeGraphSemanticGenerator(
+            client=client,
+            model=model,
+            max_input_tokens=cap,
+        ),
+    }
+
+
 def _maybe_build_topic_extractor(
     settings: Settings | None = None,
     *,
@@ -1074,6 +1130,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
         hitl_router=hitl_router,
+        generators=_maybe_build_llm_semantic_generators(settings),
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)
@@ -1246,6 +1303,7 @@ def build_persistent_services(
         confidence_scorer=confidence_scorer,
         validation_metadata_store=validation_metadata_store,
         hitl_router=hitl_router,
+        generators=_maybe_build_llm_semantic_generators(settings),
     )
     entity_extractor = _maybe_build_entity_extractor(settings, llm=llm_client)
     knowledge_relations = KnowledgeRelationsService(graph_store=graph_store)

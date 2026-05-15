@@ -51,6 +51,42 @@
 .orb-app .kf-fsm__spacer {
   flex: 1;
 }
+/* Semantic button + method picker form one logical control on the
+ * action row. The picker hugs the button so the operator's eye
+ * tracks button → method as a single decision. */
+.orb-app .kf-fsm__semantic-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.orb-app .kf-fsm__method {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-fsm__method-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+}
+.orb-app .kf-fsm__method-select {
+  padding: 3px 8px;
+  background: var(--orb-bg-sunk);
+  border: 1px solid var(--orb-border);
+  border-radius: var(--orb-r-sm);
+  font: inherit;
+  font-size: 11px;
+  color: var(--orb-fg);
+  max-width: 220px;
+}
+.orb-app .kf-fsm__method-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .orb-app .kf-fsm__note {
   width: 100%;
   min-height: 60px;

@@ -17,42 +17,42 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 describe("computeGates", () => {
   it("STORED → only Extract enabled", () => {
     expect(computeGates("STORED")).toEqual({
-      extract: true, semantic: false, validate: false, reject: false, demote: false,
+      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
   it("FAILED → only Extract enabled (allows retry)", () => {
     expect(computeGates("FAILED")).toEqual({
-      extract: true, semantic: false, validate: false, reject: false, demote: false,
+      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
   it("EXTRACTED → only Semantic enabled", () => {
     expect(computeGates("EXTRACTED")).toEqual({
-      extract: false, semantic: true, validate: false, reject: false, demote: false,
+      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
-  it("NEEDS_REVIEW → Validate + Reject enabled", () => {
+  it("NEEDS_REVIEW → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("NEEDS_REVIEW")).toEqual({
-      extract: false, semantic: false, validate: true, reject: true, demote: false,
+      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
     });
   });
-  it("SEMANTIC_READY → Validate + Reject enabled", () => {
+  it("SEMANTIC_READY → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("SEMANTIC_READY")).toEqual({
-      extract: false, semantic: false, validate: true, reject: true, demote: false,
+      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
     });
   });
-  it("VALIDATED → only Demote enabled (re-open path)", () => {
+  it("VALIDATED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("VALIDATED")).toEqual({
-      extract: false, semantic: false, validate: false, reject: false, demote: true,
+      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
     });
   });
-  it("REJECTED → only Demote enabled (re-open path)", () => {
+  it("REJECTED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("REJECTED")).toEqual({
-      extract: false, semantic: false, validate: false, reject: false, demote: true,
+      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
     });
   });
   it("null status → nothing enabled", () => {
     expect(computeGates(null)).toEqual({
-      extract: false, semantic: false, validate: false, reject: false, demote: false,
+      extract: false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
 });
@@ -75,8 +75,36 @@ describe("useFsmTransition", () => {
       }),
     );
     expect(result.current.gates).toEqual({
-      extract: false, semantic: true, validate: false, reject: false, demote: false,
+      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
+  });
+
+  it("`semantic-rerun` hits the same /semantic endpoint with the chosen method", async () => {
+    let capturedUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "NEEDS_REVIEW",
+        semanticMethod: "knowledge_graph",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("semantic-rerun");
+    });
+    expect(result.current.status).toBe("ok");
+    expect(capturedUrl).toMatch(/\/semantic\?method=knowledge_graph$/);
   });
 
   it("dispatches `validate` and calls onAfter", async () => {
@@ -143,6 +171,59 @@ describe("useFsmTransition", () => {
       await result.current.run("validate");
     });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("appends `?method=semantic_intelligence` to the semantic POST when semanticMethod='semantic_intelligence'", async () => {
+    let capturedUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "EXTRACTED",
+        semanticMethod: "semantic_intelligence",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("semantic");
+    });
+    expect(capturedUrl).toMatch(/\/semantic\?method=semantic_intelligence$/);
+  });
+
+  it("does NOT append a method param when semanticMethod is omitted", async () => {
+    let capturedUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "EXTRACTED",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("semantic");
+    });
+    expect(capturedUrl).toMatch(/\/semantic$/);
   });
 
   it("dispatches `demote` against /reset_to_review when status is VALIDATED", async () => {
