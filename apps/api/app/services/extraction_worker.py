@@ -41,10 +41,19 @@ class ExtractionRequest:
     Identifies a single ``(document_id, version_id)`` extraction job.
     Frozen so the worker can't mutate it mid-flight; ``slots=True`` keeps
     the payload tight in memory for high-throughput queues.
+
+    ``actor`` is the authenticated principal id (ADR-019 §4) carried
+    end-to-end from enqueue to dequeue so the worker can attribute the
+    ``extraction.started`` / ``extraction.succeeded`` /
+    ``extraction.failed`` audit events to the human who pressed the
+    button. ``None`` is allowed for legacy callers / tests that don't
+    carry an authenticated user; the audit emissions omit the ``actor``
+    key in that case.
     """
 
     document_id: str
     version_id: str
+    actor: str | None = None
 
 
 class QueueFull(Exception):
@@ -223,9 +232,11 @@ class ExtractionWorker:
         try:
             await loop.run_in_executor(
                 None,
-                self._jobs.extract,
-                request.document_id,
-                request.version_id,
+                lambda: self._jobs.extract(
+                    request.document_id,
+                    request.version_id,
+                    actor=request.actor,
+                ),
             )
         except asyncio.CancelledError:
             raise

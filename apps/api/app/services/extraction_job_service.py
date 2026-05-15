@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from app.models.document import DocumentVersionStatus
 from app.schemas.extraction import RawExtraction
@@ -6,6 +7,20 @@ from app.services.document_parser import ParserRegistry
 from app.services.document_service import DocumentService
 
 log = logging.getLogger(__name__)
+
+
+def _emit(event: str, payload: dict[str, Any], *, actor: str | None, level: int) -> None:
+    """Emit a structured-log event with ``actor`` folded into ``extra`` only when set.
+
+    Centralises the actor-conditional payload shape so every
+    ``extraction.*`` emit site stays consistent — passing
+    ``actor: None`` would land a ``null`` value in the audit JSON and
+    confuse the :func:`event_actor` projection (and grep / jq).
+    """
+    extra = dict(payload)
+    if actor is not None:
+        extra["actor"] = actor
+    log.log(level, event, extra=extra)
 
 
 class ExtractionFailed(Exception):
@@ -37,21 +52,40 @@ class ExtractionJobService:
         self.documents = documents
         self.parsers = parsers
 
-    def extract(self, document_id: str, version_id: str) -> RawExtraction:
-        """Run extraction for one stored, non-duplicate document version."""
+    def extract(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        actor: str | None = None,
+    ) -> RawExtraction:
+        """Run extraction for one stored, non-duplicate document version.
+
+        ``actor`` is the authenticated principal id (ADR-019 §4); when
+        provided, it lands on the ``extraction.started`` /
+        ``extraction.succeeded`` / ``extraction.failed`` audit events
+        plus the ``document.status_changed`` transitions emitted via
+        ``mark_failed`` / ``update_status``. ``None`` is allowed for
+        legacy / system callers (boot-time recovery, scripts) — the
+        ``actor`` key is omitted from the audit payload in that case.
+        """
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
         if version.status == DocumentVersionStatus.DUPLICATE_DETECTED:
             raise ValueError("Duplicate versions are not extracted independently.")
-        log.info(
+        _emit(
             "extraction.started",
-            extra={
+            {
                 "document_id": document_id,
                 "version_id": version_id,
                 "content_type": version.content_type,
                 "bytes_in": version.file_size,
             },
+            actor=actor,
+            level=logging.INFO,
         )
-        self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTING)
+        self.documents.update_status(
+            document_id, version_id, DocumentVersionStatus.EXTRACTING, actor=actor
+        )
         try:
             parser = self.parsers.for_content_type(version.content_type)
         except KeyError as exc:
@@ -60,15 +94,17 @@ class ExtractionJobService:
                 if exc.args
                 else f"No parser for content_type: {version.content_type}"
             )
-            self.documents.mark_failed(document_id, version_id, reason)
-            log.warning(
+            self.documents.mark_failed(document_id, version_id, reason, actor=actor)
+            _emit(
                 "extraction.failed",
-                extra={
+                {
                     "document_id": document_id,
                     "version_id": version_id,
                     "parser_name": None,
                     "failure_reason": reason,
                 },
+                actor=actor,
+                level=logging.WARNING,
             )
             raise ExtractionFailed(reason) from exc
         # Use the parser's declared ``name`` so the audit log uses the
@@ -80,45 +116,59 @@ class ExtractionJobService:
             raw_extraction = parser.parse(version=version, storage=self.documents.storage)
         except Exception as exc:
             reason = f"{parser_name}: {exc}"
-            self.documents.mark_failed(document_id, version_id, reason)
-            log.warning(
+            self.documents.mark_failed(document_id, version_id, reason, actor=actor)
+            _emit(
                 "extraction.failed",
-                extra={
+                {
                     "document_id": document_id,
                     "version_id": version_id,
                     "parser_name": parser_name,
                     "failure_reason": reason,
                 },
+                actor=actor,
+                level=logging.WARNING,
             )
             raise ExtractionFailed(reason) from exc
         if not raw_extraction.source_references:
             reason = f"{parser_name}: No extractable content"
-            self.documents.mark_failed(document_id, version_id, reason)
-            log.warning(
+            self.documents.mark_failed(document_id, version_id, reason, actor=actor)
+            _emit(
                 "extraction.failed",
-                extra={
+                {
                     "document_id": document_id,
                     "version_id": version_id,
                     "parser_name": parser_name,
                     "failure_reason": reason,
                 },
+                actor=actor,
+                level=logging.WARNING,
             )
             raise ExtractionFailed(reason)
         self.documents.catalog.save_raw_extraction(version_id, raw_extraction)
-        self.documents.update_status(document_id, version_id, DocumentVersionStatus.EXTRACTED)
-        log.info(
+        self.documents.update_status(
+            document_id, version_id, DocumentVersionStatus.EXTRACTED, actor=actor
+        )
+        _emit(
             "extraction.succeeded",
-            extra={
+            {
                 "document_id": document_id,
                 "version_id": version_id,
                 "parser_name": parser_name,
                 "bytes_in": version.file_size,
                 "sections_out": len(raw_extraction.source_references),
             },
+            actor=actor,
+            level=logging.INFO,
         )
         return raw_extraction
 
-    def retry_extract(self, document_id: str, version_id: str) -> RawExtraction:
+    def retry_extract(
+        self,
+        document_id: str,
+        version_id: str,
+        *,
+        actor: str | None = None,
+    ) -> RawExtraction:
         """Retry extraction for a previously-FAILED document version (#87).
 
         The MVP recovery surface for "an extraction failed because of an
@@ -150,15 +200,19 @@ class ExtractionJobService:
             raise ValueError(
                 f"Retry only allowed from FAILED; version is currently {version.status.value}."
             )
-        log.info(
+        _emit(
             "extraction.retried",
-            extra={
+            {
                 "document_id": document_id,
                 "version_id": version_id,
                 "previous_failure_reason": version.failure_reason,
             },
+            actor=actor,
+            level=logging.INFO,
         )
-        return self.extract(document_id=document_id, version_id=version_id)
+        return self.extract(
+            document_id=document_id, version_id=version_id, actor=actor
+        )
 
     def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
         """Return raw extraction output for a document version."""
