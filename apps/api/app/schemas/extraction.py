@@ -117,3 +117,27 @@ class ExtractionJobSnapshot(BaseModel):
     status: DocumentVersionStatus
     submitted_at: datetime = Field(default_factory=utc_now)
     queue_position: int | None = None
+
+
+class ReconcileResult(BaseModel):
+    """Result of one ``POST /admin/reconcile`` call (#40, ADR-006 §5).
+
+    Runtime twin of the boot-time stuck-state recovery: every version
+    stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING`` is flipped to
+    ``FAILED`` with the ``failure_reason`` set to the canonical
+    "extraction interrupted by process restart" message. Operators
+    use this when a worker died mid-flight without a process restart
+    that would otherwise have triggered the same scan on lifespan
+    startup.
+
+    ``skipped_inline`` is true when ``KW_EXTRACTION_INLINE=true`` —
+    inline mode never enqueues, so the reconciliation pass would be
+    a no-op and is short-circuited at the route layer. The structured
+    audit trail (``extraction.recovery.recovered`` per row,
+    ``extraction.recovery.summary`` for the batch) is the source of
+    truth for what was touched; this response is the operator-facing
+    receipt.
+    """
+
+    recovered_count: int = Field(ge=0)
+    skipped_inline: bool = False
