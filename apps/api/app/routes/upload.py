@@ -216,6 +216,7 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
                     content_type=raw_content_type,
                     chunks=_iter_chunks(),
                     document_id=document_id,
+                    actor=current_user.id,
                 )
                 # Persist the scope link before returning. ``add_scope`` is
                 # idempotent on (document_id, kind, ref) so the same upload
@@ -302,7 +303,7 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
     async def upload_documents_batch(
         files: list[UploadFile] = File(...),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        current_user: User = Depends(require_contributor),  # noqa: ARG001 — gate-only dep, body uses no actor today
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         """Bulk upload — one request, one structured per-file report (#82).
 
@@ -452,6 +453,7 @@ def build_upload_router(services: PipelineServices) -> APIRouter:
                         filename=filename,
                         content_type=raw_content_type,
                         chunks=_iter_chunks(),
+                        actor=current_user.id,
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad file mustn't abort the batch
                     outcomes[index] = BatchUploadOutcome(
