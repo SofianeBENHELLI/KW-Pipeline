@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from app.dependencies import build_services
 from app.main import create_app
 from app.services.semantic_generators import (
-    SEMANTIC_METHOD_STRUCTURE_FIRST,
     SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE,
+    SEMANTIC_METHOD_STRUCTURE_FIRST,
     SemanticIntelligenceGenerator,
     _AssetWire,
     _ProfileWire,

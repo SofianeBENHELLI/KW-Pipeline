@@ -9,24 +9,21 @@ import pytest
 from app.dependencies import build_services
 from app.schemas.document import DocumentVersion
 from app.schemas.extraction import RawExtraction
-from app.schemas.semantic_document import SemanticDocument
 from app.services.semantic_generators import (
+    _KNOWLEDGE_GRAPH_ASSET_TYPES,
+    _SEMANTIC_INTELLIGENCE_ASSET_TYPES,
     DEFAULT_SEMANTIC_METHOD,
     SEMANTIC_METHOD_KNOWLEDGE_GRAPH,
     SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE,
     SEMANTIC_METHOD_STRUCTURE_FIRST,
     KnowledgeGraphSemanticGenerator,
     SemanticIntelligenceGenerator,
-    StructureFirstSemanticGenerator,
     _AssetWire,
-    _KNOWLEDGE_GRAPH_ASSET_TYPES,
     _ProfileWire,
-    _SEMANTIC_INTELLIGENCE_ASSET_TYPES,
     _SemanticEnvelope,
 )
 from app.services.semantic_output_service import (
     SemanticGenerationFailed,
-    SemanticOutputService,
     UnknownSemanticMethod,
 )
 
