@@ -34,6 +34,8 @@ class DocumentService:
         content_type: str,
         content: bytes,
         document_id: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Store uploaded bytes and return the cataloged document version.
 
@@ -68,7 +70,7 @@ class DocumentService:
             if existing_document is None:
                 raise KeyError("Document not found.")
             version = self._append_new_version(existing_document, filename, content_type, content)
-        _log_uploaded(version)
+        _log_uploaded(version, actor=actor)
         return version
 
     def upload_stream(
@@ -77,6 +79,8 @@ class DocumentService:
         content_type: str,
         chunks: Iterable[bytes],
         document_id: str | None = None,
+        *,
+        actor: str | None = None,
     ) -> DocumentVersion:
         """Streaming sibling of :meth:`upload` for chunk-iterable callers.
 
@@ -148,7 +152,7 @@ class DocumentService:
             self.catalog.save_document_with_version(document=document, version=version)
         else:
             self.catalog.append_version_to_document(document_id=target_document.id, version=version)
-        _log_uploaded(version)
+        _log_uploaded(version, actor=actor)
         return version
 
     def _upload_new_family(
@@ -539,7 +543,7 @@ class DocumentService:
         return updated
 
 
-def _log_uploaded(version: DocumentVersion) -> None:
+def _log_uploaded(version: DocumentVersion, *, actor: str | None = None) -> None:
     """Emit a ``document.uploaded`` audit event for a fresh version.
 
     ``filename`` is renamed to ``document_filename`` in the ``extra`` map
@@ -547,34 +551,49 @@ def _log_uploaded(version: DocumentVersion) -> None:
     in ``extra`` raises ``KeyError: "Attempt to overwrite 'filename' in
     LogRecord"`` at log time. Same caveat for any other reserved name
     (see ``app.logging_config._RESERVED_RECORD_ATTRS``).
+
+    ``actor`` is the authenticated caller's id (typically
+    ``current_user.id`` from a ``require_contributor`` route). Threaded
+    through optionally so background / system call sites that legitimately
+    have no caller (e.g. demo dataset loader) can pass ``None``; the key
+    is omitted from the payload in that case so the audit
+    :func:`event_actor` projection isn't confused by a ``None`` value
+    (#91, 2026-05-14 progress plan §A.2).
     """
-    log.info(
-        "document.uploaded",
-        extra={
-            "document_id": version.document_id,
-            "version_id": version.id,
-            "version_number": version.version_number,
-            "sha256": version.sha256,
-            "bytes": version.file_size,
-            "content_type": version.content_type,
-            "document_filename": version.filename,
-            "is_duplicate": (version.status == DocumentVersionStatus.DUPLICATE_DETECTED),
-        },
-    )
+    payload: dict[str, object] = {
+        "document_id": version.document_id,
+        "version_id": version.id,
+        "version_number": version.version_number,
+        "sha256": version.sha256,
+        "bytes": version.file_size,
+        "content_type": version.content_type,
+        "document_filename": version.filename,
+        "is_duplicate": (version.status == DocumentVersionStatus.DUPLICATE_DETECTED),
+    }
+    if actor is not None:
+        payload["actor"] = actor
+    log.info("document.uploaded", extra=payload)
 
 
 def _log_status_changed(
     version: DocumentVersion,
     *,
     previous: DocumentVersionStatus,
+    actor: str | None = None,
 ) -> None:
-    """Emit a ``document.status_changed`` audit event for an FSM move."""
-    log.info(
-        "document.status_changed",
-        extra={
-            "document_id": version.document_id,
-            "version_id": version.id,
-            "from": previous.value,
-            "to": version.status.value,
-        },
-    )
+    """Emit a ``document.status_changed`` audit event for an FSM move.
+
+    ``actor`` is included only when the caller threaded one. Worker /
+    boot-time transitions (the async extraction worker, stuck-state
+    recovery, etc.) emit ``None`` and the key is omitted — those are
+    legitimately actor-less and the audit table records them as such.
+    """
+    payload: dict[str, object] = {
+        "document_id": version.document_id,
+        "version_id": version.id,
+        "from": previous.value,
+        "to": version.status.value,
+    }
+    if actor is not None:
+        payload["actor"] = actor
+    log.info("document.status_changed", extra=payload)
