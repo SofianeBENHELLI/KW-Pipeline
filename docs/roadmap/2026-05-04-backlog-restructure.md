@@ -548,6 +548,39 @@ modulo restructuring.)
 
 ---
 
+## H. Errata — 2026-05-15
+
+The 2026-05-15 audit (see
+[`2026-05-15-progress-plan.md`](2026-05-15-progress-plan.md) §B)
+cross-checked this document against the live issue tracker. Four
+issue / doc mismatches surfaced — none change the epic structure or
+sprint plan, but they make this document less trustworthy as a
+status source. Recording them here rather than rewriting the
+original sections (the original framing is preserved for archival
+clarity; future revisions of this doc should fold these in).
+
+| Reference in this doc | What it says | Reality on 2026-05-15 |
+|---|---|---|
+| §C EPIC 9 (#59 duplicate uploads) | "KEEP, blocked on D9" | **Closed** 2026-05-04 (`state_reason: completed`). D9 was resolved implicitly — append-to-original-family ([Recommendation A](https://github.com/SofianeBENHELLI/KW-Pipeline/issues/59)) was adopted. |
+| §C EPIC 2 (#84 retention / purge policy) | "KEEP, blocked on D3" | **Closed** 2026-05-10. Superseded by ADR-027 (archive / purge admin tool, accepted) + the `/admin/archive/*` route family. |
+| §F (#210 self-learning taxonomy, #211 hybrid taxonomy) | "Kept open as parent specs; not actionable" | **Both closed** 2026-05-10. EPIC-1 parent issue #336 + slices #338–#352 took over as the canonical tracker entries. The 200+-line specs remain readable on the issue tracker as historical context. |
+| §A.4 D9 (duplicate uploads decision) | "Open, blocks #59" | Resolved implicitly when #59 closed; the chosen recommendation was option A. |
+
+The 2026-05-14 progress plan §A.1 separately claimed that **#321
+(Explorer large-corpus truncation states)** was closed via
+#397/#398/#400/#401. Verification on 2026-05-15: **#321 is still
+open** (last updated 2026-05-07). The four cited PRs landed the
+truncation-banner surface, but the issue itself was not
+administratively closed at that time. Either close it or amend the
+2026-05-14 plan — out of scope for this errata block.
+
+This errata block is the canonical pointer for these mismatches; the
+inline §C / §F / §A.4 entries above are preserved unmodified so the
+2026-05-04 narrative reads as it was originally written.
+
+---
+
 *Generated 2026-05-04 by the backlog-restructure pass following
-the audit-followups handover. Next review: after Sprint S+1
+the audit-followups handover. Errata appended 2026-05-15 by the
+post-audit drift sweep. Next review: after Sprint S+1
 closes and ADRs 006/019/020/021 land.*
