@@ -24,7 +24,7 @@ from app.dependencies import build_services
 from app.main import create_app
 from app.models.document import DocumentVersionStatus
 from app.rebackfill import _DEMOTE_NOTE, run_rebackfill
-from app.schemas.claim import Claim, CLAIM_SCHEMA_VERSION
+from app.schemas.claim import CLAIM_SCHEMA_VERSION, Claim
 from app.schemas.document_topic import DOCUMENT_TOPIC_SCHEMA_VERSION, DocumentTopic
 from app.schemas.extraction import RawExtraction, RawSection, SourceReference
 from app.services.parsers.pdf import PDF_CONTENT_TYPE

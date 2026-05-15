@@ -25,6 +25,13 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Requ
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
+from app.schemas.chunk_location import (
+    CHUNK_LOCATION_SCHEMA_VERSION,
+    MAX_CHUNK_LOCATIONS_LIMIT,
+    ChunkLocation,
+    ChunkLocationsResponse,
+    ChunkSource,
+)
 from app.schemas.document import (
     Document,
     DocumentListResponse,
@@ -33,13 +40,6 @@ from app.schemas.document import (
     LineageVersion,
     SimilarDocument,
     SimilarDocumentsResponse,
-)
-from app.schemas.chunk_location import (
-    CHUNK_LOCATION_SCHEMA_VERSION,
-    MAX_CHUNK_LOCATIONS_LIMIT,
-    ChunkLocation,
-    ChunkLocationsResponse,
-    ChunkSource,
 )
 from app.schemas.document_topic import DOCUMENT_TOPIC_SCHEMA_VERSION
 from app.schemas.extraction import ExtractionJobSnapshot, NormalizedRect, RawExtraction

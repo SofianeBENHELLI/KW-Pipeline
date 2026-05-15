@@ -127,7 +127,7 @@ def _group_lines_into_sections(lines: list[_Line]) -> list[list[_Line]]:
     threshold = median_height * _SECTION_GAP_MULTIPLIER if median_height else None
 
     groups: list[list[_Line]] = [[lines[0]]]
-    for prev, curr in zip(lines, lines[1:]):
+    for prev, curr in zip(lines, lines[1:], strict=False):
         gap = curr.top - prev.bottom
         if threshold is not None and gap > threshold:
             groups.append([curr])
@@ -241,7 +241,11 @@ class PdfParser:
                     if getattr(t, "bbox", None) and len(t.bbox) == 4
                 ]
                 if table_bboxes:
-                    lines = [line for line in lines if not _line_inside_any_bbox(line, table_bboxes)]
+                    lines = [
+                        line
+                        for line in lines
+                        if not _line_inside_any_bbox(line, table_bboxes)
+                    ]
 
                 if lines:
                     page_font_sizes = [line.font_size for line in lines if line.font_size > 0]

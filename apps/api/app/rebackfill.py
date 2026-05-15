@@ -248,12 +248,8 @@ def run_rebackfill(
 def _print_summary(result: RebackfillResult, *, stream: Any = sys.stdout) -> None:
     print(
         (
-            "Scanned {scanned} version(s); {eligible} eligible "
-            "(PDF + parser_version < {target}).".format(
-                scanned=result.scanned_versions,
-                eligible=result.eligible_versions,
-                target=_TARGET_PARSER_VERSION,
-            )
+            f"Scanned {result.scanned_versions} version(s); {result.eligible_versions} eligible "
+            f"(PDF + parser_version < {_TARGET_PARSER_VERSION})."
         ),
         file=stream,
     )
