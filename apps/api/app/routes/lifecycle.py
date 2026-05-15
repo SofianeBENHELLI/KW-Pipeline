@@ -249,12 +249,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 idempotency_key=idempotency_key,
                 route=_route,
                 request_hash=_req_hash,
+                actor=current_user.id,
             )
         return _enqueue_extract(
             request=request,
             services=services,
             document_id=document_id,
             version_id=version_id,
+            actor=current_user.id,
         )
 
     @router.post(
@@ -286,7 +288,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         document_id: str,
         version_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        _user: User = Depends(require_contributor),
+        current_user: User = Depends(require_contributor),
     ) -> Any:
         """Retry extraction for a previously-FAILED version (#87, ADR-006 PR-2).
 
@@ -318,12 +320,14 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 idempotency_key=idempotency_key,
                 route=_route,
                 request_hash=_req_hash,
+                actor=current_user.id,
             )
         return _enqueue_retry(
             request=request,
             services=services,
             document_id=document_id,
             version_id=version_id,
+            actor=current_user.id,
         )
 
     @router.get(
@@ -1378,6 +1382,7 @@ def _run_inline_extract(
     idempotency_key: str | None,
     route: str,
     request_hash: str,
+    actor: str | None = None,
 ) -> Any:
     """Inline (synchronous) extract — the pre-ADR-006 behaviour.
 
@@ -1386,7 +1391,9 @@ def _run_inline_extract(
     so a replay of the same key returns the same payload.
     """
     try:
-        result = services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
+        result = services.extraction_jobs.extract(
+            document_id=document_id, version_id=version_id, actor=actor
+        )
         _store_idempotency(
             store=services.idempotency,
             idempotency_key=idempotency_key,
@@ -1411,11 +1418,12 @@ def _run_inline_retry(
     idempotency_key: str | None,
     route: str,
     request_hash: str,
+    actor: str | None = None,
 ) -> Any:
     """Inline (synchronous) retry — mirrors :func:`_run_inline_extract`."""
     try:
         result = services.extraction_jobs.retry_extract(
-            document_id=document_id, version_id=version_id
+            document_id=document_id, version_id=version_id, actor=actor
         )
         _store_idempotency(
             store=services.idempotency,
@@ -1439,6 +1447,7 @@ def _enqueue_extract(
     services: PipelineServices,
     document_id: str,
     version_id: str,
+    actor: str | None = None,
 ) -> Response:
     """Async-mode extract: ``STORED → QUEUED_FOR_EXTRACTION`` then enqueue.
 
@@ -1455,7 +1464,10 @@ def _enqueue_extract(
         raise HTTPException(status_code=503, detail="Extraction queue not initialised.")
     try:
         services.documents.update_status(
-            document_id, version_id, DocumentVersionStatus.QUEUED_FOR_EXTRACTION
+            document_id,
+            version_id,
+            DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+            actor=actor,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1465,6 +1477,7 @@ def _enqueue_extract(
         queue=queue,
         document_id=document_id,
         version_id=version_id,
+        actor=actor,
     )
 
 
@@ -1474,6 +1487,7 @@ def _enqueue_retry(
     services: PipelineServices,
     document_id: str,
     version_id: str,
+    actor: str | None = None,
 ) -> Response:
     """Async-mode retry: ``FAILED → QUEUED_FOR_EXTRACTION`` then enqueue.
 
@@ -1500,7 +1514,10 @@ def _enqueue_retry(
         )
     try:
         services.documents.update_status(
-            document_id, version_id, DocumentVersionStatus.QUEUED_FOR_EXTRACTION
+            document_id,
+            version_id,
+            DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
+            actor=actor,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1510,6 +1527,7 @@ def _enqueue_retry(
         queue=queue,
         document_id=document_id,
         version_id=version_id,
+        actor=actor,
     )
 
 
@@ -1518,6 +1536,7 @@ def _put_and_build_snapshot(
     queue: Any,
     document_id: str,
     version_id: str,
+    actor: str | None = None,
 ) -> Response:
     """Enqueue an :class:`ExtractionRequest` and return the 202 receipt.
 
@@ -1530,10 +1549,15 @@ def _put_and_build_snapshot(
     queue's underlying non-blocking put through ``_queue.put_nowait``
     when available; the protocol's ``put`` raises immediately so we
     can call it directly via the synchronous helper.
+
+    ``actor`` rides the :class:`ExtractionRequest` from enqueue to
+    dequeue so the worker can attribute the ``extraction.*`` audit
+    events to the human who pressed the button.
     """
     extraction_request = ExtractionRequest(
         document_id=document_id,
         version_id=version_id,
+        actor=actor,
     )
     try:
         # ``InMemoryExtractionQueue.put`` is declared ``async`` but its
