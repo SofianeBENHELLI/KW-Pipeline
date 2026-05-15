@@ -235,11 +235,19 @@ class PdfParser:
                 # Drop lines that sit inside a detected table bbox so the
                 # same content is not emitted twice (once as text, once as
                 # the table section).
-                table_bboxes = [
-                    tuple(float(c) for c in t.bbox)
-                    for t in page_tables
-                    if getattr(t, "bbox", None) and len(t.bbox) == 4
-                ]
+                # Construct fixed 4-tuples explicitly so the type matches
+                # ``_line_inside_any_bbox``'s signature — a comprehension
+                # over ``tuple(float(c) for c in t.bbox)`` produces a
+                # variadic ``tuple[float, ...]``, which mypy refuses.
+                table_bboxes: list[tuple[float, float, float, float]] = []
+                for t in page_tables:
+                    bbox = getattr(t, "bbox", None)
+                    if not bbox or len(bbox) != 4:
+                        continue
+                    x0, y0, x1, y1 = bbox
+                    table_bboxes.append(
+                        (float(x0), float(y0), float(x1), float(y1))
+                    )
                 if table_bboxes:
                     lines = [
                         line

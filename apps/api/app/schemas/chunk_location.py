@@ -45,7 +45,7 @@ from pydantic import Field
 from app.schemas import APISchemaModel as BaseModel
 from app.schemas.extraction import NormalizedRect
 
-CHUNK_LOCATION_SCHEMA_VERSION: Final[str] = "v0.1"
+CHUNK_LOCATION_SCHEMA_VERSION: Final[Literal["v0.1"]] = "v0.1"
 
 # Hard ceiling per request — the viewer fetches all of a document's
 # chunks at once, but a single PDF should not blow past this. Bigger
