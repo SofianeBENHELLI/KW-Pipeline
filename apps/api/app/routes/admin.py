@@ -112,6 +112,7 @@ from app.schemas.document import (
     ReadinessCheck,
     ReadyResponse,
 )
+from app.schemas.extraction import ReconcileResult
 from app.schemas.scope import Scope
 from app.schemas.taxonomy import (
     TaxonomyImportYamlRequest,
@@ -121,6 +122,7 @@ from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
 from app.services.catalog_store import InvalidCursor
+from app.services.extraction_recovery import recover_stuck_extractions
 from app.services.knowledge.graph_store import Neo4jGraphStore
 from app.services.knowledge.llm_client import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -1714,5 +1716,46 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             next_cursor=next_cursor,
             available_event_names=services.audit_events.list_event_names(),
         )
+
+    @router.post(
+        "/admin/reconcile",
+        operation_id="admin_reconcile_extraction_queue",
+        response_model=ReconcileResult,
+    )
+    def admin_reconcile(
+        user: User = Depends(require_admin),
+    ) -> ReconcileResult:
+        """Runtime trigger for the stuck-extraction scan (ADR-006 §5, #40).
+
+        Re-runs the same recovery pass that fires on lifespan startup:
+        every version stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING``
+        is flipped to ``FAILED`` with the canonical "extraction
+        interrupted by process restart" reason, and the operator
+        recovers via the existing ``POST /documents/.../retry-extraction``
+        route. Operators reach for this when a worker died mid-flight
+        without a process restart that would have triggered the same
+        scan automatically.
+
+        Always 200. ``recovered_count`` is the number of versions
+        actually transitioned in this pass; ``skipped_inline`` is true
+        when ``KW_EXTRACTION_INLINE=true`` (inline mode never enqueues,
+        so the pass is a no-op by design). The per-row audit trail
+        (``extraction.recovery.recovered``) and batch summary
+        (``extraction.recovery.summary``) are the structured-log source
+        of truth for what changed.
+        """
+        settings = services.settings
+        log.info(
+            "admin.reconcile.invoked",
+            extra={
+                "actor": user.id,
+                "actor_role": user.role,
+                "inline_mode": settings.extraction_inline,
+            },
+        )
+        if settings.extraction_inline:
+            return ReconcileResult(recovered_count=0, skipped_inline=True)
+        recovered = recover_stuck_extractions(services)
+        return ReconcileResult(recovered_count=recovered)
 
     return router

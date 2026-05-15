@@ -1551,12 +1551,29 @@ def _put_and_build_snapshot(
         if isinstance(exc, (QueueFull, _AsyncQueueFull)):
             raise _queue_full_error() from exc
         raise
+    # #40 / 2026-05-14 progress plan: queue-depth gauge after every
+    # enqueue. Operators watching the structured-log feed (or piping it
+    # into Prometheus via a log-to-metric exporter) get a live
+    # depth-over-time signal without us coupling to a metrics framework.
+    # Measured route-side after the put: that's the operator-relevant
+    # value ("queue is now N deep; is N approaching the bound?").
+    qsize = queue.qsize()
+    log.info(
+        "extraction.queue_depth",
+        extra={
+            "qsize": qsize,
+            "maxsize": queue.maxsize,
+            "is_full": queue.is_full(),
+            "document_id": document_id,
+            "version_id": version_id,
+        },
+    )
     snapshot = ExtractionJobSnapshot(
         job_id=_job_id_for(version_id),
         document_id=document_id,
         version_id=version_id,
         status=DocumentVersionStatus.QUEUED_FOR_EXTRACTION,
-        queue_position=queue.qsize(),
+        queue_position=qsize,
     )
     return Response(
         status_code=202,
