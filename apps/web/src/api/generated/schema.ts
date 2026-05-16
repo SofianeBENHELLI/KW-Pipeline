@@ -488,6 +488,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Reconcile
+         * @description Runtime trigger for the stuck-extraction scan (ADR-006 §5, #40).
+         *
+         *     Re-runs the same recovery pass that fires on lifespan startup:
+         *     every version stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING``
+         *     is flipped to ``FAILED`` with the canonical "extraction
+         *     interrupted by process restart" reason, and the operator
+         *     recovers via the existing ``POST /documents/.../retry-extraction``
+         *     route. Operators reach for this when a worker died mid-flight
+         *     without a process restart that would have triggered the same
+         *     scan automatically.
+         *
+         *     Always 200. ``recovered_count`` is the number of versions
+         *     actually transitioned in this pass; ``skipped_inline`` is true
+         *     when ``KW_EXTRACTION_INLINE=true`` (inline mode never enqueues,
+         *     so the pass is a no-op by design). The per-row audit trail
+         *     (``extraction.recovery.recovered``) and batch summary
+         *     (``extraction.recovery.summary``) are the structured-log source
+         *     of truth for what changed.
+         */
+        post: operations["admin_reconcile_extraction_queue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/taxonomy/import_yaml": {
         parameters: {
             query?: never;
@@ -4036,6 +4073,35 @@ export interface components {
             status: "ok" | "error";
         };
         /**
+         * ReconcileResult
+         * @description Result of one ``POST /admin/reconcile`` call (#40, ADR-006 §5).
+         *
+         *     Runtime twin of the boot-time stuck-state recovery: every version
+         *     stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING`` is flipped to
+         *     ``FAILED`` with the ``failure_reason`` set to the canonical
+         *     "extraction interrupted by process restart" message. Operators
+         *     use this when a worker died mid-flight without a process restart
+         *     that would otherwise have triggered the same scan on lifespan
+         *     startup.
+         *
+         *     ``skipped_inline`` is true when ``KW_EXTRACTION_INLINE=true`` —
+         *     inline mode never enqueues, so the reconciliation pass would be
+         *     a no-op and is short-circuited at the route layer. The structured
+         *     audit trail (``extraction.recovery.recovered`` per row,
+         *     ``extraction.recovery.summary`` for the batch) is the source of
+         *     truth for what was touched; this response is the operator-facing
+         *     receipt.
+         */
+        ReconcileResult: {
+            /** Recovered Count */
+            recovered_count: number;
+            /**
+             * Skipped Inline
+             * @default false
+             */
+            skipped_inline: boolean;
+        };
+        /**
          * RelationEvidence
          * @description Wire shape for ``GET /knowledge/relations/{relation_id}``.
          *
@@ -5037,6 +5103,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_reconcile_extraction_queue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileResult"];
                 };
             };
         };

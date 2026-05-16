@@ -87,7 +87,7 @@ def test_batch_upload_route_emits_actor_on_every_document_uploaded(
     caplog.set_level(logging.INFO)
 
     response = client.post(
-        "/documents/upload-batch",
+        "/documents/upload/batch",
         files=[
             ("files", ("a.txt", b"first batch file", PLAIN)),
             ("files", ("b.txt", b"second batch file", PLAIN)),
