@@ -1982,3 +1982,112 @@ pre {
   outline: 2px solid var(--action);
   outline-offset: 1px;
 }
+
+
+/* ── Admin taxonomy versions (EPIC-1 §1.9, ADR-018) ────────────── */
+
+.taxonomy-lookup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+.taxonomy-lookup label {
+  font-weight: 500;
+}
+
+.taxonomy-lookup input {
+  flex: 1 1 240px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--panel);
+}
+
+.taxonomy-lookup input:focus {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.taxonomy-lineage-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.taxonomy-lineage-table th,
+.taxonomy-lineage-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.taxonomy-lineage-table th {
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.taxonomy-lineage-row-active {
+  background: var(--panel-muted);
+}
+
+.lineage-version-number {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+/* State pill — used for the version's lifecycle state. The neutral
+ * pill shape is shared; each modifier paints background + border in
+ * the state's signature hue. Colours kept inline so a future palette
+ * swap is one place. */
+.state-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.82em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.state-pill--draft {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #78350f;
+}
+
+.state-pill--candidate {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e3a8a;
+}
+
+.state-pill--validated {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #14532d;
+}
+
+.state-pill--archived {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+.state-pill--discarded {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #7f1d1d;
+}

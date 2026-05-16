@@ -40,6 +40,8 @@ import type {
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiTaxonomyVersion,
+  ApiTaxonomyVersionListResponse,
   ApiUnarchiveResponse,
   ApiUploadResponse,
   ListDocumentsResponse,
@@ -994,5 +996,52 @@ export async function purgeBatch(
       body: { document_ids: documentIds },
       signal: options.signal,
     }),
+  );
+}
+
+/**
+ * GET /admin/taxonomy/versions/{taxonomy_id}
+ *
+ * Admin-only. Returns every version of one taxonomy lineage sorted by
+ * ``version_number`` ascending. Unknown ``taxonomy_id`` returns
+ * ``{taxonomy_id, versions: []}`` (200, not 404) so the Explorer can
+ * render an empty lineage panel without a special-case error path.
+ */
+export async function listTaxonomyVersions(
+  taxonomyId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersionListResponse> {
+  return unwrap(
+    await http.GET("/admin/taxonomy/versions/{taxonomy_id}", {
+      params: { path: { taxonomy_id: taxonomyId } },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /admin/taxonomy/versions/{taxonomy_id}/{version_number}
+ *
+ * Admin-only. Returns the single version at the requested coordinate.
+ * 404 ``KW_NOT_FOUND`` when the version doesn't exist.
+ */
+export async function getTaxonomyVersion(
+  taxonomyId: string,
+  versionNumber: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.GET(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+          },
+        },
+        signal: options.signal,
+      },
+    ),
   );
 }
