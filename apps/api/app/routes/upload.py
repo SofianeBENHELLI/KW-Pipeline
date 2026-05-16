@@ -92,7 +92,7 @@ def _resolve_upload_scope(
                 "'swym_community', or 'project'. See ADR-020 §1."
             ),
         )
-    return scope_kind, scope_ref  # type: ignore[return-value]
+    return scope_kind, scope_ref
 
 
 def build_upload_router(services: PipelineServices) -> APIRouter:
