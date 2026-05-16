@@ -2096,14 +2096,22 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
         - The target version must be in ``DRAFT`` (409 ``CONFLICT``
           otherwise — synthesizing on top of a CANDIDATE / VALIDATED /
           ARCHIVED version would mutate a frozen artifact).
+        - At least one suggestion must be ``ACCEPTED`` or ``MERGED``
+          (409 ``CONFLICT`` otherwise — running with no reviewed
+          concepts would replace any hand-edited tree with an empty
+          taxonomy, which is almost certainly an accident rather
+          than an intent).
         - The :class:`BusinessTaxonomyCreator` must be wired (503
           ``KW_LLM_DISABLED`` otherwise — wiring is gated on
           ``KW_LLM_PROVIDER`` + the matching API key).
 
-        Idempotent in spirit: every call re-runs the LLM and overwrites
-        the draft's ``taxonomy`` field, so two consecutive calls give
-        two independent syntheses. The store-side audit event
-        (``knowledge.business_taxonomy.created``) carries the actor.
+        Re-runnable, not idempotent: the LLM is non-deterministic, so
+        two consecutive calls produce two independent syntheses and
+        the second overwrites the first. The store-side audit event
+        (``knowledge.business_taxonomy.created``) carries the actor;
+        the route fires its own ``taxonomy.draft.synthesized`` event
+        tying the version-store mutation to ``(taxonomy_id,
+        version_number, actor)``.
         """
         if services.business_taxonomy_creator is None:
             raise ApiError(
@@ -2147,6 +2155,26 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
                     "synthesize on that draft instead."
                 ),
             )
+        # Mirror the creator's own filter so the route fails closed
+        # *before* the upsert when there's nothing to synthesize —
+        # otherwise an empty filtered set would wipe any prior tree
+        # on the draft with ``categories=[]``.
+        feeds_llm = [s for s in version.suggestions if s.state in ("ACCEPTED", "MERGED")]
+        if not feeds_llm:
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=(
+                    "No ACCEPTED or MERGED suggestions on this draft; "
+                    "synthesis would overwrite the tree with an empty taxonomy."
+                ),
+                retryable=False,
+                remediation=(
+                    "Review concept suggestions and transition at least one to "
+                    "ACCEPTED or MERGED before synthesizing. See POST "
+                    "/admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition."
+                ),
+            )
         try:
             new_taxonomy = services.business_taxonomy_creator.create_from_suggestions(
                 version.suggestions,
@@ -2155,7 +2183,7 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
         except BusinessTaxonomyCreationFailed as exc:
             raise ApiError(
                 status_code=502,
-                code=ErrorCode.HTTP_ERROR,
+                code=ErrorCode.LLM_SYNTHESIS_FAILED,
                 message=f"Taxonomy synthesis failed: {exc}",
                 retryable=True,
                 remediation=(
@@ -2165,6 +2193,17 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             ) from exc
         updated = version.model_copy(update={"taxonomy": new_taxonomy})
         services.taxonomy_version_store.upsert(updated)
+        log.info(
+            "taxonomy.draft.synthesized",
+            extra={
+                "taxonomy_id": taxonomy_id,
+                "version_number": version_number,
+                "accepted_count": len(feeds_llm),
+                "category_count": _count_categories(new_taxonomy.categories),
+                "actor": user.id,
+                "actor_role": user.role,
+            },
+        )
         return updated
 
     return router

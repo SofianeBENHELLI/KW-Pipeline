@@ -431,6 +431,24 @@ def _wire_fake_creator(services, canned: Any) -> _FakeInstructor:
     return fake
 
 
+def _promote_empty_to_candidate(services, *, taxonomy_id: str, version_number: int) -> None:
+    """Drop suggestions then promote — the model validator rejects
+    suggestions on non-DRAFT versions, so promotion requires an empty
+    suggestion list. Pulled out of the 409 test so the workaround is
+    in one place if either side of it shifts.
+    """
+    stored = services.taxonomy_version_store.get(
+        taxonomy_id=taxonomy_id, version_number=version_number
+    )
+    assert stored is not None
+    services.taxonomy_version_store.upsert(stored.model_copy(update={"suggestions": []}))
+    promote_to_candidate(
+        services.taxonomy_version_store,
+        taxonomy_id=taxonomy_id,
+        version_number=version_number,
+    )
+
+
 class TestSynthesize:
     def _seed_draft_with_accepted(
         self, services, *, taxonomy_id: str = "tx-syn"
@@ -447,7 +465,9 @@ class TestSynthesize:
         )
         return draft
 
-    def test_happy_path_writes_tree_onto_draft(self, bearer_env: None) -> None:
+    def test_happy_path_writes_tree_onto_draft(
+        self, bearer_env: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
         client, services = _client_and_services()
         draft = self._seed_draft_with_accepted(services)
         _wire_fake_creator(
@@ -464,6 +484,7 @@ class TestSynthesize:
             },
         )
         headers = {"Authorization": f"Bearer {_token('admin', user_id='ada')}"}
+        caplog.set_level("INFO")
         response = client.post(
             f"/admin/taxonomy/versions/tx-syn/{draft.version_number}/synthesize",
             headers=headers,
@@ -479,6 +500,15 @@ class TestSynthesize:
         )
         assert stored is not None
         assert [c.id for c in stored.taxonomy.categories] == ["battery"]
+        # Route-level audit event landed with actor + version coords.
+        events = [r for r in caplog.records if r.msg == "taxonomy.draft.synthesized"]
+        assert events, "expected taxonomy.draft.synthesized log event"
+        record = events[-1]
+        assert getattr(record, "actor", None) == "ada"
+        assert getattr(record, "taxonomy_id", None) == "tx-syn"
+        assert getattr(record, "version_number", None) == draft.version_number
+        assert getattr(record, "accepted_count", None) == 2
+        assert getattr(record, "category_count", None) == 1
 
     def test_503_when_creator_unwired(self, bearer_env: None) -> None:
         client, services = _client_and_services()
@@ -495,22 +525,36 @@ class TestSynthesize:
     def test_409_when_version_not_draft(self, bearer_env: None) -> None:
         client, services = _client_and_services()
         draft = self._seed_draft_with_accepted(services, taxonomy_id="tx-syn-c")
-        # Drop suggestions so promote_to_candidate doesn't choke on the
-        # "suggestions only on drafts" model validator after promotion.
-        stored = services.taxonomy_version_store.get(
-            taxonomy_id="tx-syn-c", version_number=draft.version_number
-        )
-        assert stored is not None
-        services.taxonomy_version_store.upsert(stored.model_copy(update={"suggestions": []}))
-        promote_to_candidate(
-            services.taxonomy_version_store,
-            taxonomy_id="tx-syn-c",
-            version_number=draft.version_number,
+        _promote_empty_to_candidate(
+            services, taxonomy_id="tx-syn-c", version_number=draft.version_number
         )
         _wire_fake_creator(services, {"categories": []})
         headers = {"Authorization": f"Bearer {_token('admin')}"}
         response = client.post(
             f"/admin/taxonomy/versions/tx-syn-c/{draft.version_number}/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "KW_CONFLICT"
+
+    def test_409_when_no_accepted_suggestions(self, bearer_env: None) -> None:
+        """Empty filtered set fails closed — avoids wiping a hand-edited tree."""
+        client, services = _client_and_services()
+        draft = create_draft(services.taxonomy_version_store, taxonomy_id="tx-syn-empty")
+        # NEW / REJECTED / DEFERRED suggestions don't feed the LLM —
+        # the route should refuse rather than overwrite with an empty tree.
+        add_suggestions(
+            services.taxonomy_version_store,
+            taxonomy_id="tx-syn-empty",
+            version_number=draft.version_number,
+            suggestions=[
+                ConceptSuggestion(label="Untriaged", description="...", state="NEW"),
+            ],
+        )
+        _wire_fake_creator(services, {"categories": []})
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+        response = client.post(
+            f"/admin/taxonomy/versions/tx-syn-empty/{draft.version_number}/synthesize",
             headers=headers,
         )
         assert response.status_code == 409, response.text
@@ -538,6 +582,7 @@ class TestSynthesize:
         )
         assert response.status_code == 502, response.text
         body = response.json()
+        assert body["error"]["code"] == "KW_LLM_SYNTHESIS_FAILED"
         assert body["error"]["retryable"] is True
         assert "upstream 500" in body["error"]["message"]
 

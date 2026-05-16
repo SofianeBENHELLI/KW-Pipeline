@@ -101,6 +101,17 @@ class ErrorCode:
     # will help without operator action.
     LLM_DISABLED = "KW_LLM_DISABLED"
 
+    # ─── LLM upstream failure (EPIC-1 §1.6) ────────────────────────
+    # Surfaced as 502 when an admin route's LLM call fails after the
+    # provider client's internal retries (network error, provider
+    # 5xx, response-model validation failure). Distinguished from
+    # ``KW_HTTP_ERROR`` so dashboards can grep for LLM-specific
+    # upstream failures separately from generic gateway errors.
+    # ``retryable=True`` — the failure is plausibly transient (rate
+    # limit, brief provider outage) so frontends render a Retry
+    # button.
+    LLM_SYNTHESIS_FAILED = "KW_LLM_SYNTHESIS_FAILED"
+
     # ─── Admin audit log viewer (GET /admin/audit/events, #206 follow-up) ─
     # Surfaced as a 503 when ``KW_AUDIT_ENABLED=false`` (the in-memory
     # default). The store still works in-process — but a deployment

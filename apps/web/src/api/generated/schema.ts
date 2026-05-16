@@ -702,14 +702,22 @@ export interface paths {
          *     - The target version must be in ``DRAFT`` (409 ``CONFLICT``
          *       otherwise — synthesizing on top of a CANDIDATE / VALIDATED /
          *       ARCHIVED version would mutate a frozen artifact).
+         *     - At least one suggestion must be ``ACCEPTED`` or ``MERGED``
+         *       (409 ``CONFLICT`` otherwise — running with no reviewed
+         *       concepts would replace any hand-edited tree with an empty
+         *       taxonomy, which is almost certainly an accident rather
+         *       than an intent).
          *     - The :class:`BusinessTaxonomyCreator` must be wired (503
          *       ``KW_LLM_DISABLED`` otherwise — wiring is gated on
          *       ``KW_LLM_PROVIDER`` + the matching API key).
          *
-         *     Idempotent in spirit: every call re-runs the LLM and overwrites
-         *     the draft's ``taxonomy`` field, so two consecutive calls give
-         *     two independent syntheses. The store-side audit event
-         *     (``knowledge.business_taxonomy.created``) carries the actor.
+         *     Re-runnable, not idempotent: the LLM is non-deterministic, so
+         *     two consecutive calls produce two independent syntheses and
+         *     the second overwrites the first. The store-side audit event
+         *     (``knowledge.business_taxonomy.created``) carries the actor;
+         *     the route fires its own ``taxonomy.draft.synthesized`` event
+         *     tying the version-store mutation to ``(taxonomy_id,
+         *     version_number, actor)``.
          */
         post: operations["admin_taxonomy_synthesize"];
         delete?: never;
