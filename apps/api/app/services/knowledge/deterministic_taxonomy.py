@@ -50,6 +50,7 @@ from app.schemas.deterministic_taxonomy import (
     DeterministicTaxonomyConcept,
     DeterministicTaxonomyForChunk,
 )
+from app.schemas.extraction import RawSection
 from app.schemas.semantic_document import SemanticSection
 from app.services.knowledge.chunk_relations import (
     ChunkRecord,
@@ -98,7 +99,7 @@ _CONFIDENCE_NER_CANDIDATE = 0.80
 def extract_deterministic_taxonomy(
     record: ChunkRecord,
     *,
-    section: SemanticSection | None = None,
+    section: SemanticSection | RawSection | None = None,
     ner_entities: Iterable[str] | None = None,
     keyword_limit: int = _DEFAULT_KEYWORD_LIMIT,
 ) -> DeterministicTaxonomyForChunk:
@@ -204,25 +205,30 @@ def extract_deterministic_taxonomy(
 # ─── Helpers ───────────────────────────────────────────────────────────
 
 
-def _ner_from_section(section: SemanticSection | None) -> list[str]:
+def _ner_from_section(section: object | None) -> list[str]:
     """Pull a ``list[str]`` of NER entities off a section's parser
     metadata, when the spaCy enricher (#190) populated it.
 
     The enricher writes a JSON-encoded list to
-    ``section.parser_metadata["spacy_ner_entities"]`` so the field
-    survives the ``dict[str, str]`` shape constraint
-    (:class:`RawSection.parser_metadata`'s value type is ``str``).
-    We decode lazily and fail-soft — a malformed value is treated as
-    "no entities" rather than raising, so a future enricher bug
-    doesn't break the deterministic extractor for the whole chunk.
+    ``section.parser_metadata["spacy_ner_entities"]``. The shape lives
+    on :class:`RawSection` (parser output) — not on
+    :class:`SemanticSection` (the published wire shape). Callers that
+    have a ``RawSection`` in hand can pass it here; callers further
+    down the pipeline (where the section has been projected to
+    :class:`SemanticSection` and ``parser_metadata`` has been dropped)
+    should use the explicit ``ner_entities`` parameter on
+    :func:`extract_deterministic_taxonomy` instead.
+
+    Implementation reads ``parser_metadata`` via ``getattr`` so a
+    :class:`SemanticSection` (which lacks the field) returns an
+    empty list cleanly. Fail-soft on malformed JSON.
     """
     if section is None:
         return []
-    raw: Any = (
-        section.parser_metadata.get("spacy_ner_entities")
-        if section.parser_metadata
-        else None
-    )
+    parser_metadata = getattr(section, "parser_metadata", None)
+    if not parser_metadata:
+        return []
+    raw: Any = parser_metadata.get("spacy_ner_entities")
     if not raw:
         return []
     try:

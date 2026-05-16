@@ -467,6 +467,16 @@ class TestTransitionConcept:
             version_number=draft.version_number,
             suggestions=[suggestion],
         )
+        # ``MERGED`` is only legal from ``UNDER_REVIEW`` per ADR-018 §5;
+        # transition through there first so the merge_target_id check
+        # is the one that fires.
+        transition_concept(
+            store,
+            taxonomy_id=draft.taxonomy_id,
+            version_number=draft.version_number,
+            suggestion_id=suggestion.suggestion_id,
+            to_state="UNDER_REVIEW",
+        )
         with pytest.raises(ValueError, match="merge_target_id is required"):
             transition_concept(
                 store,
@@ -486,6 +496,14 @@ class TestTransitionConcept:
             taxonomy_id=draft.taxonomy_id,
             version_number=draft.version_number,
             suggestions=[suggestion],
+        )
+        # NEW → UNDER_REVIEW → MERGED (the canonical path per ADR-018).
+        transition_concept(
+            store,
+            taxonomy_id=draft.taxonomy_id,
+            version_number=draft.version_number,
+            suggestion_id=suggestion.suggestion_id,
+            to_state="UNDER_REVIEW",
         )
         merged = transition_concept(
             store,
