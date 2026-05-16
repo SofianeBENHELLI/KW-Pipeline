@@ -75,9 +75,7 @@ class TestKeywordExtraction:
         assert "the" not in keywords
 
     def test_keyword_limit_override(self) -> None:
-        record = _record(
-            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
-        )
+        record = _record("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu")
         projection = extract_deterministic_taxonomy(record, keyword_limit=3)
         keywords = [c for c in projection.concepts if c.kind == "keyword"]
         assert len(keywords) == 3
@@ -263,9 +261,7 @@ class TestDeduplication:
         record = _record("battery battery battery cooling cooling")
         projection = extract_deterministic_taxonomy(record)
         battery_keywords = [
-            c
-            for c in projection.concepts
-            if c.kind == "keyword" and c.text == "battery"
+            c for c in projection.concepts if c.kind == "keyword" and c.text == "battery"
         ]
         assert len(battery_keywords) == 1
 

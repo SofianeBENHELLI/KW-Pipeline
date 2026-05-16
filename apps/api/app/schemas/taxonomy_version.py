@@ -83,9 +83,7 @@ source of new candidates."""
 # Transition tables — module-level constants so a future test can
 # assert exhaustiveness without scraping a state machine library.
 # Empty list means "terminal".
-_ALLOWED_VERSION_TRANSITIONS: dict[
-    str, tuple[str, ...]
-] = {
+_ALLOWED_VERSION_TRANSITIONS: dict[str, tuple[str, ...]] = {
     "DRAFT": ("CANDIDATE_V0", "DISCARDED"),
     "CANDIDATE_V0": ("VALIDATED_V1", "DISCARDED"),
     "VALIDATED_V1": ("ARCHIVED",),
@@ -93,9 +91,7 @@ _ALLOWED_VERSION_TRANSITIONS: dict[
     "DISCARDED": (),
 }
 
-_ALLOWED_CONCEPT_TRANSITIONS: dict[
-    str, tuple[str, ...]
-] = {
+_ALLOWED_CONCEPT_TRANSITIONS: dict[str, tuple[str, ...]] = {
     "NEW": ("UNDER_REVIEW", "ACCEPTED", "REJECTED", "DEFERRED"),
     "UNDER_REVIEW": ("ACCEPTED", "REJECTED", "MERGED", "DEFERRED"),
     "ACCEPTED": (),
@@ -161,13 +157,9 @@ class ConceptSuggestion(BaseModel):
     @model_validator(mode="after")
     def _merge_target_only_when_merged(self) -> ConceptSuggestion:
         if self.merge_target_id is not None and self.state != "MERGED":
-            raise ValueError(
-                "merge_target_id must only be set when state == 'MERGED'."
-            )
+            raise ValueError("merge_target_id must only be set when state == 'MERGED'.")
         if self.state == "MERGED" and self.merge_target_id is None:
-            raise ValueError(
-                "state == 'MERGED' requires merge_target_id to be set."
-            )
+            raise ValueError("state == 'MERGED' requires merge_target_id to be set.")
         return self
 
 

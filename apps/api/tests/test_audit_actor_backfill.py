@@ -22,13 +22,32 @@ This file pins:
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.schemas.scope import Scope
 
 PLAIN = "text/plain"
+
+
+def _link_personal_scope(services, document_id: str, user_id: str = "dev") -> None:
+    """Wire a ``personal:<user_id>`` scope link onto a document.
+
+    The catalog write that normally happens in the upload **route**
+    (not in ``DocumentService.upload``) is bypassed when the test seeds
+    a document via the service-direct path. Without this link the
+    scope filter hides the document from the dev-mode user and every
+    per-doc route returns 404. Tests that need to hit those routes
+    after a service-direct seed call this to restore visibility.
+    """
+    now = datetime.now(UTC)
+    services.documents.catalog.add_scope(
+        document_id,
+        Scope(kind="personal", ref=user_id, added_at=now, added_by=user_id),
+    )
 
 
 @pytest.fixture
@@ -145,12 +164,19 @@ def test_document_service_upload_omits_actor_key_when_none() -> None:
 def _land_version_in_needs_review(services) -> tuple[str, str]:
     """Drive a fresh upload through extract + semantic so the version
     sits at NEEDS_REVIEW — the precondition for validate / reject. Reused
-    pattern from ``test_review_service.py``."""
+    pattern from ``test_review_service.py``.
+
+    Seeds the ``personal:dev`` scope link so the downstream HTTP routes
+    (which run :func:`assert_can_access_document` before any review
+    work) don't 404 out under the scope filter — the link is the moral
+    equivalent of "this upload happened as the dev-mode user".
+    """
     version = services.documents.upload(
         filename="policy.txt",
         content_type=PLAIN,
         content=b"Hello world. This is a tiny test fixture.",
     )
+    _link_personal_scope(services, version.document_id)
     services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
     services.semantic_outputs.generate(document_id=version.document_id, version_id=version.id)
     return version.document_id, version.id
@@ -227,7 +253,7 @@ def test_demote_route_emits_actor_on_document_status_changed(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Demote route (``POST /demote-to-review``) — VALIDATED → NEEDS_REVIEW
+    """Demote route (``POST /reset_to_review``) — VALIDATED → NEEDS_REVIEW
     transition's ``document.status_changed`` event carries the actor."""
     from app.dependencies import build_services
     from app.main import create_app
@@ -246,7 +272,7 @@ def test_demote_route_emits_actor_on_document_status_changed(
     caplog.clear()
     caplog.set_level(logging.INFO)
     response = fresh_client.post(
-        f"/documents/{document_id}/versions/{version_id}/demote-to-review",
+        f"/documents/{document_id}/versions/{version_id}/reset_to_review",
         json={"reviewer_note": "second look"},
     )
     assert response.status_code == 200, response.text

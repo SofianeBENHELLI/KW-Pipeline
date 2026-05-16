@@ -140,9 +140,7 @@ class TestStoreCRUD:
     def test_list_returns_ordered_by_version_number(self) -> None:
         store = InMemoryTaxonomyVersionStore()
         for n in (2, 1, 3):
-            store.upsert(
-                TaxonomyVersion(taxonomy_id="tax-x", version_number=n, state="DRAFT")
-            )
+            store.upsert(TaxonomyVersion(taxonomy_id="tax-x", version_number=n, state="DRAFT"))
         listed = store.list_for_taxonomy(taxonomy_id="tax-x")
         assert [v.version_number for v in listed] == [1, 2, 3]
 
@@ -175,9 +173,10 @@ def _records(caplog: pytest.LogCaptureFixture, event_name: str):
 
 
 def _extra(record: logging.LogRecord) -> dict:
-    reserved = set(
-        vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()
-    ) | {"message", "asctime"}
+    reserved = set(vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()) | {
+        "message",
+        "asctime",
+    }
     return {k: v for k, v in vars(record).items() if k not in reserved}
 
 
@@ -238,12 +237,8 @@ class TestPromote:
         events = _records(caplog, "taxonomy.candidate.promoted")
         assert events and _extra(events[-1]).get("actor") == "ada"
 
-    def test_promote_from_validated_is_illegal(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
-        store.upsert(
-            TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1")
-        )
+    def test_promote_from_validated_is_illegal(self, store: InMemoryTaxonomyVersionStore) -> None:
+        store.upsert(TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1"))
         with pytest.raises(IllegalTaxonomyTransition) as exc:
             promote_to_candidate(store, taxonomy_id="t", version_number=1)
         assert exc.value.kind == "version"
@@ -278,9 +273,7 @@ class TestValidate:
         active = store.active_validated(taxonomy_id="tax-z")
         assert active is not None and active.version_number == validated.version_number
 
-    def test_validate_records_version_label(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_validate_records_version_label(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         promote_to_candidate(
             store,
@@ -295,9 +288,7 @@ class TestValidate:
         )
         assert validated.version_label == "V1"
 
-    def test_validate_from_draft_is_illegal(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_validate_from_draft_is_illegal(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         with pytest.raises(IllegalTaxonomyTransition):
             validate_version(
@@ -311,9 +302,7 @@ class TestArchive:
     def test_archive_validated_emits_event(
         self, store: InMemoryTaxonomyVersionStore, caplog: pytest.LogCaptureFixture
     ) -> None:
-        store.upsert(
-            TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1")
-        )
+        store.upsert(TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1"))
         caplog.set_level(logging.INFO)
         archived = archive_version(
             store,
@@ -326,9 +315,7 @@ class TestArchive:
         events = _records(caplog, "taxonomy.version.archived")
         assert events and _extra(events[-1]).get("reason") == "superseded by V2"
 
-    def test_archive_draft_is_illegal(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_archive_draft_is_illegal(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         with pytest.raises(IllegalTaxonomyTransition):
             archive_version(
@@ -356,9 +343,7 @@ class TestDiscard:
         events = _records(caplog, "taxonomy.draft.discarded")
         assert events and _extra(events[-1]).get("discarded_from_state") == "DRAFT"
 
-    def test_candidate_discards_too(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_candidate_discards_too(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         promote_to_candidate(
             store,
@@ -372,12 +357,8 @@ class TestDiscard:
         )
         assert discarded.state == "DISCARDED"
 
-    def test_discard_from_validated_is_illegal(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
-        store.upsert(
-            TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1")
-        )
+    def test_discard_from_validated_is_illegal(self, store: InMemoryTaxonomyVersionStore) -> None:
+        store.upsert(TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1"))
         with pytest.raises(IllegalTaxonomyTransition):
             discard_draft(store, taxonomy_id="t", version_number=1)
 
@@ -416,12 +397,8 @@ class TestAddSuggestions:
         assert {_extra(e).get("source") for e in events} == {"extractor", "llm"}
         assert all(_extra(e).get("actor") == "bob" for e in events)
 
-    def test_rejects_non_draft_targets(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
-        store.upsert(
-            TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1")
-        )
+    def test_rejects_non_draft_targets(self, store: InMemoryTaxonomyVersionStore) -> None:
+        store.upsert(TaxonomyVersion(taxonomy_id="t", version_number=1, state="VALIDATED_V1"))
         with pytest.raises(IllegalTaxonomyTransition):
             add_suggestions(
                 store,
@@ -456,9 +433,7 @@ class TestTransitionConcept:
         events = _records(caplog, "taxonomy.concept.transitioned")
         assert events and _extra(events[-1]).get("to") == "ACCEPTED"
 
-    def test_merge_requires_target(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_merge_requires_target(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         suggestion = ConceptSuggestion(label="X", description="Y")
         add_suggestions(
@@ -486,9 +461,7 @@ class TestTransitionConcept:
                 to_state="MERGED",
             )
 
-    def test_merge_with_target_succeeds(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_merge_with_target_succeeds(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         suggestion = ConceptSuggestion(label="X", description="Y")
         add_suggestions(
@@ -516,9 +489,7 @@ class TestTransitionConcept:
         assert merged.state == "MERGED"
         assert merged.merge_target_id == "hr.existing"
 
-    def test_illegal_concept_transition_raises(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_illegal_concept_transition_raises(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         suggestion = ConceptSuggestion(label="X", description="Y", state="ACCEPTED")
         add_suggestions(
@@ -536,9 +507,7 @@ class TestTransitionConcept:
                 to_state="REJECTED",
             )
 
-    def test_unknown_suggestion_raises_keyerror(
-        self, store: InMemoryTaxonomyVersionStore
-    ) -> None:
+    def test_unknown_suggestion_raises_keyerror(self, store: InMemoryTaxonomyVersionStore) -> None:
         draft = create_draft(store)
         with pytest.raises(KeyError, match=re.compile(r"missing", re.IGNORECASE)):
             transition_concept(

@@ -34,6 +34,7 @@ from app.schemas.semantic_document import (
     SemanticAsset,
     SemanticDocument,
     SemanticSection,
+    ValidationStatus,
 )
 
 if TYPE_CHECKING:
@@ -132,7 +133,7 @@ def _project_chunk(
     section: SemanticSection,
     document_id: str,
     version_id: str,
-    validation_status: str,
+    validation_status: ValidationStatus,
     occurrence_index: int = 0,
 ) -> ExportedChunk:
     text = section.text or ""
