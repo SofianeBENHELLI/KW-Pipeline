@@ -29,9 +29,12 @@ Key contracts that differ from :class:`TopicExtractor`:
   document does not blow a single LLM call's context budget. The
   trade-off is request count — operators set
   ``KW_BUSINESS_TAXONOMY_ALLOCATOR_MAX_INPUT_TOKENS_PER_CHUNK`` to
-  cap any individual chunk's prompt size; chunks that exceed the cap
-  are skipped (an empty allocation row is still written so the audit
-  trail records the skip).
+  cap any individual chunk's prompt size; bodies that exceed the
+  cap are **truncated** to fit (the LLM call still runs; the
+  category block and the allowed-ids line are load-bearing and
+  survive verbatim). Skip-with-empty-row is a future option if
+  truncation ever proves to miss too much signal for very long
+  chunks.
 * **Allowed pool is every category id.** The allocator filters
   hallucinated ids post-validation and drops any whose target is
   not in the active taxonomy tree. An allocation that cites at

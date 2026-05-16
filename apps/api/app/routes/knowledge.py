@@ -941,12 +941,13 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         ``schema_version`` so a future v0.2 evolution lands without
         silently flowing through to v0.1 readers.
 
-        Filters are exclusive: pass ``chunk_id`` to drill into one
-        chunk's history across re-allocations, or ``document_id``
-        for every chunk in a document family. With neither, returns
-        every allocation in the store (the audit / drift-inspection
-        view). When both are supplied ``chunk_id`` wins (it's the
-        more specific filter).
+        Filters are mutually exclusive: pass ``chunk_id`` to drill
+        into one chunk's history across re-allocations, or
+        ``document_id`` for every chunk in a document family. With
+        neither, returns every allocation in the store (the audit
+        / drift-inspection view). Supplying **both** is a 400 —
+        silent-wins behaviour is surprising and an intersection
+        query is not yet a documented contract.
 
         Pagination follows the same opaque-cursor convention as the
         rest of the catalog read paths. ``next_cursor`` is ``None``
@@ -955,6 +956,16 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         is returned as HTTP 200, mirroring the rest of the
         knowledge-layer read surface.
         """
+        if chunk_id is not None and document_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Specify chunk_id OR document_id, not both. "
+                    "Use chunk_id to drill into one chunk's "
+                    "allocation history; document_id for every "
+                    "chunk in a document family."
+                ),
+            )
         try:
             if chunk_id is not None:
                 items, next_cursor = services.chunk_taxonomy_allocation_store.list_for_chunk(

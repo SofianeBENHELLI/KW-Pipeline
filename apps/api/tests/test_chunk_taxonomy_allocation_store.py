@@ -443,34 +443,19 @@ def test_route_filters_by_chunk_id() -> None:
     assert [a.id for a in parsed.items] == ["a-1"]
 
 
-def test_route_chunk_id_wins_when_both_filters_supplied() -> None:
-    """``chunk_id`` is the more specific filter; the route applies it
-    and ignores ``document_id`` rather than intersecting (matches the
-    docstring contract)."""
+def test_route_returns_400_when_both_filters_supplied() -> None:
+    """``chunk_id`` and ``document_id`` are mutually exclusive — silent
+    wins behaviour would be surprising and an intersection contract is
+    not yet documented. The route rejects with 400 so the caller knows
+    they violated the contract."""
     app = create_app()
-    services = app.state.services
-    services.chunk_taxonomy_allocation_store.save_allocations(
-        [
-            _make_allocation(
-                alloc_id="a-1",
-                chunk_id="chunk-A",
-                section_id="chunk-A",
-                document_id="doc-1",
-            ),
-            _make_allocation(
-                alloc_id="a-2",
-                chunk_id="chunk-A",
-                section_id="chunk-A",
-                document_id="doc-2",
-                version_id="ver-2",
-            ),
-        ]
-    )
     client = TestClient(app)
-    response = client.get("/knowledge/taxonomy-allocations?chunk_id=chunk-A&document_id=doc-1")
-    parsed = ChunkTaxonomyAllocationsListResponse.model_validate(response.json())
-    # Both allocations target chunk-A; document_id is ignored.
-    assert {a.id for a in parsed.items} == {"a-1", "a-2"}
+    response = client.get(
+        "/knowledge/taxonomy-allocations?chunk_id=chunk-A&document_id=doc-1"
+    )
+    assert response.status_code == 400
+    assert "chunk_id" in response.json()["detail"]
+    assert "document_id" in response.json()["detail"]
 
 
 def test_route_returns_400_on_invalid_cursor() -> None:
