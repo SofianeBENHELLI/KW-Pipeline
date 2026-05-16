@@ -61,9 +61,7 @@ def test_post_semantic_without_method_defaults_to_deterministic():
     client = TestClient(create_app(services=services))
     document_id, version_id = _upload_and_extract(client)
 
-    response = client.post(
-        f"/documents/{document_id}/versions/{version_id}/semantic"
-    )
+    response = client.post(f"/documents/{document_id}/versions/{version_id}/semantic")
     assert response.status_code == 200
     assert response.json()["extraction_method"] == SEMANTIC_METHOD_STRUCTURE_FIRST
 
@@ -104,9 +102,7 @@ def test_post_semantic_with_method_llm_runs_llm_generator():
     # allow-list keeps the asset rather than dropping it. The parser
     # emits one section keyed by ``"section-1"`` for the plain-text
     # parser; we look it up rather than hardcode.
-    deterministic = client.post(
-        f"/documents/{document_id}/versions/{version_id}/semantic"
-    ).json()
+    deterministic = client.post(f"/documents/{document_id}/versions/{version_id}/semantic").json()
     section_id = deterministic["sections"][0]["id"]
     # Update the queued envelope so the LLM call cites a valid id.
     services.semantic_outputs._generators[SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE] = (
@@ -189,8 +185,6 @@ def test_post_semantic_with_method_change_overwrites_cached_row():
     assert second.status_code == 200
     assert second.json()["extraction_method"] == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
     # The persisted GET serves the most recently generated row.
-    persisted = client.get(
-        f"/documents/{document_id}/versions/{version_id}/semantic"
-    ).json()
+    persisted = client.get(f"/documents/{document_id}/versions/{version_id}/semantic").json()
     assert persisted["extraction_method"] == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
     assert persisted["document_profile"]["title"] == "LLM Title"

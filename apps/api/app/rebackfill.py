@@ -307,10 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--actor",
         default="kw-rebackfill",
-        help=(
-            "Audit-log actor recorded on the demote-to-review event. "
-            "Defaults to the CLI name."
-        ),
+        help=("Audit-log actor recorded on the demote-to-review event. Defaults to the CLI name."),
     )
     args = parser.parse_args(argv)
 

@@ -98,8 +98,7 @@ class TestReconcileHappyPath:
     def test_recovers_multiple_versions(self, bearer_env: None) -> None:
         services = _services_with(extraction_inline=False)
         targets = [
-            _stick_version_in_extracting(services, filename=f"stuck-{i}.txt")
-            for i in range(3)
+            _stick_version_in_extracting(services, filename=f"stuck-{i}.txt") for i in range(3)
         ]
         client = TestClient(create_app(services=services))
         headers = {"Authorization": f"Bearer {_token('admin')}"}
@@ -131,9 +130,7 @@ class TestReconcileHappyPath:
 
 
 class TestReconcileInlineMode:
-    def test_inline_mode_short_circuits_without_touching_stuck_rows(
-        self, bearer_env: None
-    ) -> None:
+    def test_inline_mode_short_circuits_without_touching_stuck_rows(self, bearer_env: None) -> None:
         services = _services_with(extraction_inline=True)
         # Force a stuck-looking row (in inline mode this can't happen
         # organically — we set it up to prove the route doesn't touch
@@ -274,9 +271,7 @@ class TestQueueDepthLogEvent:
                 )
                 assert extract.status_code == 202, extract.text
 
-                gauge_events = [
-                    r for r in caplog.records if r.message == "extraction.queue_depth"
-                ]
+                gauge_events = [r for r in caplog.records if r.message == "extraction.queue_depth"]
                 assert len(gauge_events) == 1, (
                     "extraction.queue_depth should fire exactly once per enqueue"
                 )

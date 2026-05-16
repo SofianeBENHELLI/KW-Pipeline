@@ -115,9 +115,7 @@ class StructureFirstSemanticGenerator:
         version: DocumentVersion,
         raw_extraction: RawExtraction,
     ) -> SemanticDocument:
-        semantic = self._extractor.extract(
-            version=version, raw_extraction=raw_extraction
-        )
+        semantic = self._extractor.extract(version=version, raw_extraction=raw_extraction)
         return semantic.model_copy(update={"extraction_method": self.name})
 
 
@@ -312,9 +310,7 @@ class _LLMBackedSemanticGenerator:
 
         warnings = list(raw_extraction.warnings)
         if any(not section.source_reference_ids for section in sections):
-            warnings.append(
-                "One or more semantic sections are missing source lineage."
-            )
+            warnings.append("One or more semantic sections are missing source lineage.")
 
         assets = self._hydrate_assets(
             wire_assets=envelope.assets,
@@ -323,8 +319,7 @@ class _LLMBackedSemanticGenerator:
         )
 
         profile = DocumentProfile(
-            title=envelope.profile.title.strip()
-            or self._fallback_title(version.filename),
+            title=envelope.profile.title.strip() or self._fallback_title(version.filename),
             document_type=envelope.profile.document_type.strip() or "unknown",
             purpose=_strip_or_none(envelope.profile.purpose),
             audience=_strip_or_none(envelope.profile.audience),
@@ -338,8 +333,7 @@ class _LLMBackedSemanticGenerator:
             assets=assets,
             warnings=warnings,
             source_references=[
-                ref.model_dump(mode="json")
-                for ref in raw_extraction.source_references
+                ref.model_dump(mode="json") for ref in raw_extraction.source_references
             ],
             validation_status="needs_review",
             extraction_method=self.name,
@@ -376,9 +370,7 @@ class _LLMBackedSemanticGenerator:
                     "error_type": type(exc).__name__,
                 },
             )
-            raise RuntimeError(
-                f"LLM semantic generation failed: {exc}"
-            ) from exc
+            raise RuntimeError(f"LLM semantic generation failed: {exc}") from exc
 
         usage = getattr(completion, "usage", None)
         log.info(
@@ -403,9 +395,7 @@ class _LLMBackedSemanticGenerator:
         """Drop assets without grounded provenance; force ``needs_review``."""
         validated: list[SemanticAsset] = []
         for wire in wire_assets:
-            filtered = [
-                ref for ref in wire.source_reference_ids if ref in allowed_section_ids
-            ]
+            filtered = [ref for ref in wire.source_reference_ids if ref in allowed_section_ids]
             if not filtered:
                 log.warning(
                     "semantic.llm.asset_dropped_unknown_provenance",

@@ -44,9 +44,10 @@ def _extra(record: logging.LogRecord) -> dict:
     """Pull ``extra=`` back out of a record by subtracting the reserved
     ``LogRecord`` attribute set. Mirrors what ``AuditLogHandler`` does
     when projecting a record into the audit payload."""
-    reserved = set(
-        vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()
-    ) | {"message", "asctime"}
+    reserved = set(vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()) | {
+        "message",
+        "asctime",
+    }
     return {k: v for k, v in vars(record).items() if k not in reserved}
 
 
@@ -150,12 +151,8 @@ def _land_version_in_needs_review(services) -> tuple[str, str]:
         content_type=PLAIN,
         content=b"Hello world. This is a tiny test fixture.",
     )
-    services.extraction_jobs.extract(
-        document_id=version.document_id, version_id=version.id
-    )
-    services.semantic_outputs.generate(
-        document_id=version.document_id, version_id=version.id
-    )
+    services.extraction_jobs.extract(document_id=version.document_id, version_id=version.id)
+    services.semantic_outputs.generate(document_id=version.document_id, version_id=version.id)
     return version.document_id, version.id
 
 
@@ -340,9 +337,7 @@ def test_inline_retry_route_emits_actor_on_extraction_retried(
     started = _records(caplog, "extraction.started")
     assert started and _extra(started[-1]).get("actor") == "dev"
     # And the second attempt succeeded.
-    final = services.documents.get_version(
-        document_id=version.document_id, version_id=version.id
-    )
+    final = services.documents.get_version(document_id=version.document_id, version_id=version.id)
     assert final.status == DocumentVersionStatus.EXTRACTED
 
 

@@ -50,9 +50,7 @@ def _seed_extracted_pdf(client: TestClient) -> dict:
     )
     assert upload.status_code == 200, upload.text
     version = upload.json()
-    extract = client.post(
-        f"/documents/{version['document_id']}/versions/{version['id']}/extract"
-    )
+    extract = client.post(f"/documents/{version['document_id']}/versions/{version['id']}/extract")
     assert extract.status_code == 200, extract.text
     return version
 
@@ -67,9 +65,7 @@ def test_chunks_route_returns_parser_only_locations_with_rects(monkeypatch):
     client, _ = _build_client(monkeypatch)
     version = _seed_extracted_pdf(client)
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/chunks")
     assert response.status_code == 200, response.text
     body = response.json()
 
@@ -119,9 +115,7 @@ def test_chunks_route_flips_source_to_ai_extraction_when_topic_cites_chunk(monke
         ]
     )
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/chunks")
     assert response.status_code == 200, response.text
     items = response.json()["items"]
 
@@ -174,9 +168,7 @@ def test_chunks_route_picks_highest_confidence_topic_when_multiple_cite_one_chun
         ]
     )
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/chunks")
     items = response.json()["items"]
     enriched = next(i for i in items if i["chunk_id"] == target_chunk_id)
     assert enriched["topic_id"] == "topic-high"
@@ -269,9 +261,7 @@ def test_chunks_route_returns_404_for_unknown_version(monkeypatch):
     client, _ = _build_client(monkeypatch)
     version = _seed_extracted_pdf(client)
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/does-not-exist/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/does-not-exist/chunks")
     assert response.status_code == 404
 
 
@@ -286,9 +276,7 @@ def test_chunks_route_invariant_every_modern_chunk_has_at_least_one_rect(monkeyp
     client, _ = _build_client(monkeypatch)
     version = _seed_extracted_pdf(client)
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/chunks")
     body = response.json()
     assert body["parser_version"] >= "0.2"
     for item in body["items"]:
@@ -296,9 +284,9 @@ def test_chunks_route_invariant_every_modern_chunk_has_at_least_one_rect(monkeyp
             f"chunk {item['chunk_id']} returned with no rects under "
             f"parser_version {body['parser_version']}"
         )
-        assert all(
-            rect["width"] * rect["height"] > 0 for rect in item["rects"]
-        ), f"chunk {item['chunk_id']} returned a zero-area rect"
+        assert all(rect["width"] * rect["height"] > 0 for rect in item["rects"]), (
+            f"chunk {item['chunk_id']} returned a zero-area rect"
+        )
 
 
 def test_chunks_route_returns_404_when_extraction_has_not_run(monkeypatch):
@@ -312,7 +300,5 @@ def test_chunks_route_returns_404_when_extraction_has_not_run(monkeypatch):
     version = upload.json()
     # Note: deliberately skip the /extract call so raw_extraction is missing.
 
-    response = client.get(
-        f"/documents/{version['document_id']}/versions/{version['id']}/chunks"
-    )
+    response = client.get(f"/documents/{version['document_id']}/versions/{version['id']}/chunks")
     assert response.status_code == 404

@@ -82,9 +82,7 @@ class _Line:
         return max(self.bottom - self.top, 0.0)
 
 
-def _line_inside_any_bbox(
-    line: _Line, bboxes: list[tuple[float, float, float, float]]
-) -> bool:
+def _line_inside_any_bbox(line: _Line, bboxes: list[tuple[float, float, float, float]]) -> bool:
     """Return True when the line's centre falls inside any table bbox.
 
     Used to drop lines that pdfplumber's line extractor picks up *inside*
@@ -245,14 +243,10 @@ class PdfParser:
                     if not bbox or len(bbox) != 4:
                         continue
                     x0, y0, x1, y1 = bbox
-                    table_bboxes.append(
-                        (float(x0), float(y0), float(x1), float(y1))
-                    )
+                    table_bboxes.append((float(x0), float(y0), float(x1), float(y1)))
                 if table_bboxes:
                     lines = [
-                        line
-                        for line in lines
-                        if not _line_inside_any_bbox(line, table_bboxes)
+                        line for line in lines if not _line_inside_any_bbox(line, table_bboxes)
                     ]
 
                 if lines:

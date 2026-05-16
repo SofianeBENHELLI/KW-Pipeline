@@ -147,9 +147,7 @@ class SemanticOutputService:
         version = self.documents.get_version(document_id=document_id, version_id=version_id)
         generator = self._generators[requested_method]
         try:
-            semantic = generator.generate(
-                version=version, raw_extraction=raw_extraction
-            )
+            semantic = generator.generate(version=version, raw_extraction=raw_extraction)
         except Exception as exc:  # noqa: BLE001 - boundary
             log.warning(
                 "semantic.generation_failed",
@@ -167,9 +165,7 @@ class SemanticOutputService:
         # method id itself, but enforce it here so a misbehaving
         # generator can't desync the registry from the persisted row.
         if semantic.extraction_method != requested_method:
-            semantic = semantic.model_copy(
-                update={"extraction_method": requested_method}
-            )
+            semantic = semantic.model_copy(update={"extraction_method": requested_method})
         semantic.markdown = self.markdown_generator.render(
             version=version,
             semantic=semantic,
@@ -183,9 +179,7 @@ class SemanticOutputService:
         # the semantic shape, not the lifecycle decision. The catalog
         # row is rewritten regardless above.
         if version.status == DocumentVersionStatus.EXTRACTED:
-            self.documents.mark_semantic_ready(
-                document_id=document_id, version_id=version_id
-            )
+            self.documents.mark_semantic_ready(document_id=document_id, version_id=version_id)
         log.info(
             "semantic.generated",
             extra={

@@ -109,9 +109,7 @@ class BM25Index:
         self._doc_frequency: Counter[str] = Counter()
         for chunk_id, text in chunks:
             if chunk_id in self._doc_term_freqs:
-                raise ValueError(
-                    f"duplicate chunk_id in index input: {chunk_id!r}"
-                )
+                raise ValueError(f"duplicate chunk_id in index input: {chunk_id!r}")
             tokens = tokenize(text, min_token_length=min_token_length)
             self._doc_lengths[chunk_id] = len(tokens)
             tf = Counter(tokens)
@@ -123,9 +121,7 @@ class BM25Index:
 
         self._num_docs = len(self._doc_lengths)
         self._avg_doc_length = (
-            sum(self._doc_lengths.values()) / self._num_docs
-            if self._num_docs
-            else 0.0
+            sum(self._doc_lengths.values()) / self._num_docs if self._num_docs else 0.0
         )
 
     @property
@@ -160,8 +156,10 @@ class BM25Index:
         if not query or not query.strip():
             raise ValueError("query must not be empty.")
         doc_len = self._doc_lengths[chunk_id]
-        denom_norm = 1.0 - self._b + self._b * (
-            doc_len / self._avg_doc_length if self._avg_doc_length else 1.0
+        denom_norm = (
+            1.0
+            - self._b
+            + self._b * (doc_len / self._avg_doc_length if self._avg_doc_length else 1.0)
         )
         total = 0.0
         for term in tokenize(query, min_token_length=self._min_token_length):

@@ -27,6 +27,7 @@ from app.schemas.knowledge_explore_search import (
 if TYPE_CHECKING:
     from app.services.document_service import DocumentService
     from app.services.knowledge.graph_store import GraphStore
+    from app.services.knowledge.hybrid_search import HybridSearchService
     from app.services.knowledge.search import KnowledgeSearchService
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ class KnowledgeExploreSearchService:
     def __init__(
         self,
         *,
-        search: KnowledgeSearchService,
+        search: KnowledgeSearchService | HybridSearchService,
         graph_store: GraphStore,
         documents: DocumentService,
     ) -> None:
