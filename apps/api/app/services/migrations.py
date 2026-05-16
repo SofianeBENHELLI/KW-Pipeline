@@ -683,6 +683,79 @@ def _migrate_0014_document_topics(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_0015_chunk_taxonomy_allocations(conn: sqlite3.Connection) -> None:
+    """LLM business-taxonomy allocation per chunk (EPIC-1 slice 1.3, #340).
+
+    A :class:`~app.schemas.chunk_taxonomy_allocation.ChunkTaxonomyAllocation`
+    is one LLM pass over a single chunk that maps the chunk onto the
+    operator-imposed business taxonomy (ADR-017 §3.5). Distinct from
+    the deterministic chunk-cluster ``Topic`` that lives in the
+    knowledge graph (auto-deduced clustering) and from the
+    document-level ``DocumentTopic`` rows (LLM-extracted themes per
+    document) — this slice carries chunk-level category assignments
+    with per-assignment confidence and a SHA-256 fingerprint of the
+    active taxonomy at allocation time.
+
+    One table, ``chunk_taxonomy_allocations``. ``version_id`` carries
+    an ``ON DELETE CASCADE`` FK into ``document_versions(id)``
+    (matches the convention established by ``0012_claims`` /
+    ``0013_processes`` / ``0014_document_topics``) so purging a
+    version cleans its allocations automatically.
+    ``assignments_json`` is a JSON-encoded array of
+    :class:`BusinessCategoryAssignment` objects — SQLite has no
+    native array type and a join table buys nothing the chunk-
+    inspector UI cares about (it always loads every assignment for
+    one chunk).
+
+    ``taxonomy_fingerprint`` enables drift detection: an operator
+    inspecting two allocation passes can group rows by fingerprint
+    to see which were produced against which taxonomy snapshot.
+    ``prompt_hash`` does the same for prompt evolution.
+
+    Three indexes cover the hot read paths:
+
+    * ``idx_chunk_taxonomy_allocations_document_id`` — "list every
+      allocation for this document family" (the chunk-inspector
+      panel's per-document view).
+    * ``idx_chunk_taxonomy_allocations_chunk_id`` — "every
+      allocation pass for this chunk" (the chunk-inspector's
+      drill-down view).
+    * ``idx_chunk_taxonomy_allocations_version_id`` — "every
+      allocation produced by this version", which the re-allocation
+      flow hits before each new pass to invalidate stale rows.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chunk_taxonomy_allocations (
+            id                          TEXT PRIMARY KEY,
+            chunk_id                    TEXT NOT NULL,
+            section_id                  TEXT NOT NULL,
+            document_id                 TEXT NOT NULL,
+            version_id                  TEXT NOT NULL,
+            assignments_json            TEXT NOT NULL DEFAULT '[]',
+            taxonomy_fingerprint        TEXT NOT NULL,
+            model_id                    TEXT NOT NULL,
+            prompt_hash                 TEXT NOT NULL,
+            schema_version              TEXT NOT NULL,
+            extracted_at                TEXT NOT NULL,
+            FOREIGN KEY (version_id) REFERENCES document_versions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunk_taxonomy_allocations_document_id "
+        "ON chunk_taxonomy_allocations (document_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunk_taxonomy_allocations_chunk_id "
+        "ON chunk_taxonomy_allocations (chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunk_taxonomy_allocations_version_id "
+        "ON chunk_taxonomy_allocations (version_id)"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
@@ -698,6 +771,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0012_claims", _migrate_0012_claims),
     ("0013_processes", _migrate_0013_processes),
     ("0014_document_topics", _migrate_0014_document_topics),
+    ("0015_chunk_taxonomy_allocations", _migrate_0015_chunk_taxonomy_allocations),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.

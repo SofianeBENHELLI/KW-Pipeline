@@ -17,6 +17,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.dependencies import PipelineServices
 from app.errors import ApiError, ErrorCode
 from app.models.document import DocumentVersionStatus
+from app.schemas.chunk_taxonomy_allocation import (
+    ChunkTaxonomyAllocationsListResponse,
+)
 from app.schemas.claim import ClaimsListResponse
 from app.schemas.document import Document
 from app.schemas.document_topic import DocumentTopicsListResponse
@@ -59,6 +62,10 @@ from app.services.auth import (
 )
 from app.services.auth.scope_filter import ALL_SCOPES_SENTINEL, user_can_access
 from app.services.catalog_store import InvalidCursor, _encode_cursor
+from app.services.chunk_taxonomy_allocation_store import (
+    DEFAULT_ALLOCATIONS_PAGE_LIMIT,
+    MAX_ALLOCATIONS_PAGE_LIMIT,
+)
 from app.services.claim_store import (
     DEFAULT_CLAIMS_PAGE_LIMIT,
     MAX_CLAIMS_PAGE_LIMIT,
@@ -907,6 +914,68 @@ def build_knowledge_router(services: PipelineServices) -> APIRouter:
         except InvalidCursor as exc:
             raise HTTPException(status_code=400, detail=f"Invalid cursor: {exc}") from exc
         return DocumentTopicsListResponse(items=items, next_cursor=next_cursor)
+
+    @router.get(
+        "/knowledge/taxonomy-allocations",
+        operation_id="list_knowledge_taxonomy_allocations",
+        response_model=ChunkTaxonomyAllocationsListResponse,
+    )
+    def list_knowledge_taxonomy_allocations(
+        document_id: str | None = Query(default=None, max_length=200),
+        chunk_id: str | None = Query(default=None, max_length=200),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(
+            default=DEFAULT_ALLOCATIONS_PAGE_LIMIT,
+            ge=1,
+            le=MAX_ALLOCATIONS_PAGE_LIMIT,
+        ),
+        _user: User = Depends(require_viewer),
+    ) -> Any:
+        """List LLM business-taxonomy allocations (EPIC-1 §1.3, #340).
+
+        Returns per-chunk allocation rows (chunk → category
+        assignments with confidence, rationale, and taxonomy /
+        prompt / model fingerprints) that the
+        :class:`~app.services.business_taxonomy_allocator.BusinessTaxonomyAllocator`
+        has emitted. The v0.1 wire shape is gated by
+        ``schema_version`` so a future v0.2 evolution lands without
+        silently flowing through to v0.1 readers.
+
+        Filters are exclusive: pass ``chunk_id`` to drill into one
+        chunk's history across re-allocations, or ``document_id``
+        for every chunk in a document family. With neither, returns
+        every allocation in the store (the audit / drift-inspection
+        view). When both are supplied ``chunk_id`` wins (it's the
+        more specific filter).
+
+        Pagination follows the same opaque-cursor convention as the
+        rest of the catalog read paths. ``next_cursor`` is ``None``
+        when no more rows exist behind the current page. An empty
+        ``items`` list is a valid response (no allocations yet) and
+        is returned as HTTP 200, mirroring the rest of the
+        knowledge-layer read surface.
+        """
+        try:
+            if chunk_id is not None:
+                items, next_cursor = services.chunk_taxonomy_allocation_store.list_for_chunk(
+                    chunk_id,
+                    cursor=cursor,
+                    limit=limit,
+                )
+            elif document_id is not None:
+                items, next_cursor = services.chunk_taxonomy_allocation_store.list_for_document(
+                    document_id,
+                    cursor=cursor,
+                    limit=limit,
+                )
+            else:
+                items, next_cursor = services.chunk_taxonomy_allocation_store.list_all(
+                    cursor=cursor,
+                    limit=limit,
+                )
+        except InvalidCursor as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid cursor: {exc}") from exc
+        return ChunkTaxonomyAllocationsListResponse(items=items, next_cursor=next_cursor)
 
     # ─── EPIC-C C.3 catalog view (ADR-025 §3) ─────────────────────────
     # Appended at the end of the file by convention so the parallel

@@ -1724,6 +1724,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/taxonomy-allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Taxonomy Allocations
+         * @description List LLM business-taxonomy allocations (EPIC-1 §1.3, #340).
+         *
+         *     Returns per-chunk allocation rows (chunk → category
+         *     assignments with confidence, rationale, and taxonomy /
+         *     prompt / model fingerprints) that the
+         *     :class:`~app.services.business_taxonomy_allocator.BusinessTaxonomyAllocator`
+         *     has emitted. The v0.1 wire shape is gated by
+         *     ``schema_version`` so a future v0.2 evolution lands without
+         *     silently flowing through to v0.1 readers.
+         *
+         *     Filters are exclusive: pass ``chunk_id`` to drill into one
+         *     chunk's history across re-allocations, or ``document_id``
+         *     for every chunk in a document family. With neither, returns
+         *     every allocation in the store (the audit / drift-inspection
+         *     view). When both are supplied ``chunk_id`` wins (it's the
+         *     more specific filter).
+         *
+         *     Pagination follows the same opaque-cursor convention as the
+         *     rest of the catalog read paths. ``next_cursor`` is ``None``
+         *     when no more rows exist behind the current page. An empty
+         *     ``items`` list is a valid response (no allocations yet) and
+         *     is returned as HTTP 200, mirroring the rest of the
+         *     knowledge-layer read surface.
+         */
+        get: operations["list_knowledge_taxonomy_allocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/topics": {
         parameters: {
             query?: never;
@@ -2414,6 +2456,41 @@ export interface components {
             topic_cluster: string;
         };
         /**
+         * BusinessCategoryAssignment
+         * @description One ``chunk → category`` assignment.
+         *
+         *     ``category_id`` references a node in the operator-imposed
+         *     :class:`~app.schemas.taxonomy.Taxonomy`. The allocator filters
+         *     hallucinated ids (any value not in the published tree) before the
+         *     assignment reaches the store, so consumers can assume every id
+         *     here resolves at the time of allocation. A subsequent taxonomy
+         *     edit that removes a category leaves stale allocations in place
+         *     (the fingerprint flags them as ``taxonomy_drifted``); the
+         *     reconciler can re-allocate or archive them.
+         *
+         *     ``confidence`` lives in ``[0, 1]`` so the chunk inspector can
+         *     apply one threshold across allocations, claims, and topics. The
+         *     LLM is prompted to score conservatively: > 0.8 for "clearly
+         *     applies", 0.5–0.8 for "partial match", < 0.5 indicates the LLM
+         *     is hedging and the UI may surface it under a "weak match" banner.
+         *
+         *     ``rationale`` is a one-sentence justification the LLM emits for
+         *     each assignment, capped to 500 chars so the chunk inspector can
+         *     render the full text without scrolling. The supporting
+         *     deterministic-concept texts are listed separately so the
+         *     inspector can highlight the source spans in the chunk body.
+         */
+        BusinessCategoryAssignment: {
+            /** Category Id */
+            category_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Rationale */
+            rationale: string;
+            /** Supporting Concept Texts */
+            supporting_concept_texts: string[];
+        };
+        /**
          * ChatCitation
          * @description One context source the chat answer was grounded in.
          *
@@ -2619,6 +2696,73 @@ export interface components {
             snippet: string | null;
             /** Version Id */
             version_id: string;
+        };
+        /**
+         * ChunkTaxonomyAllocation
+         * @description One LLM allocation pass over a single chunk.
+         *
+         *     Rows are addressed by ``id`` (deterministic: ``alloc-<version
+         *     _id>-<chunk_id>``) so a re-allocation idempotently replaces the
+         *     prior row. ``assignments`` may be empty when the LLM found no
+         *     matching category — we still persist the empty case so the audit
+         *     trail records "the allocator ran and chose to abstain" rather
+         *     than collapsing it with "the allocator never ran".
+         *
+         *     ``extracted_at`` is set server-side by the store on save — the
+         *     allocator hands the allocation in with a sentinel timestamp and
+         *     the store stamps it with ``datetime.now(UTC)`` before INSERT.
+         */
+        ChunkTaxonomyAllocation: {
+            /** Assignments */
+            assignments: components["schemas"]["BusinessCategoryAssignment"][];
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Extracted At
+             * Format: date-time
+             */
+            extracted_at: string;
+            /** Id */
+            id: string;
+            /** Model Id */
+            model_id: string;
+            /** Prompt Hash */
+            prompt_hash: string;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Section Id */
+            section_id: string;
+            /** Taxonomy Fingerprint */
+            taxonomy_fingerprint: string;
+            /** Version Id */
+            version_id: string;
+        };
+        /**
+         * ChunkTaxonomyAllocationsListResponse
+         * @description Response envelope for ``GET /knowledge/taxonomy-allocations``.
+         *
+         *     ``next_cursor`` follows the same opaque-cursor pattern as the
+         *     rest of the catalog read paths — the codec lives in
+         *     :mod:`app.services.catalog_store` and clients must treat the
+         *     string as opaque.
+         */
+        ChunkTaxonomyAllocationsListResponse: {
+            /** Items */
+            items: components["schemas"]["ChunkTaxonomyAllocation"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
         };
         /**
          * Claim
@@ -6912,6 +7056,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxonomyResponse"];
+                };
+            };
+        };
+    };
+    list_knowledge_taxonomy_allocations: {
+        parameters: {
+            query?: {
+                document_id?: string | null;
+                chunk_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkTaxonomyAllocationsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
