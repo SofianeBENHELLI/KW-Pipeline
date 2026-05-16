@@ -4138,6 +4138,27 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "ReconcileResult": {
+        "description": "Result of one ``POST /admin/reconcile`` call (#40, ADR-006 §5).\n\nRuntime twin of the boot-time stuck-state recovery: every version\nstuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING`` is flipped to\n``FAILED`` with the ``failure_reason`` set to the canonical\n\"extraction interrupted by process restart\" message. Operators\nuse this when a worker died mid-flight without a process restart\nthat would otherwise have triggered the same scan on lifespan\nstartup.\n\n``skipped_inline`` is true when ``KW_EXTRACTION_INLINE=true`` —\ninline mode never enqueues, so the reconciliation pass would be\na no-op and is short-circuited at the route layer. The structured\naudit trail (``extraction.recovery.recovered`` per row,\n``extraction.recovery.summary`` for the batch) is the source of\ntruth for what was touched; this response is the operator-facing\nreceipt.",
+        "properties": {
+          "recovered_count": {
+            "minimum": 0.0,
+            "title": "Recovered Count",
+            "type": "integer"
+          },
+          "skipped_inline": {
+            "default": false,
+            "title": "Skipped Inline",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recovered_count",
+          "skipped_inline"
+        ],
+        "title": "ReconcileResult",
+        "type": "object"
+      },
       "RelationEvidence": {
         "description": "Wire shape for ``GET /knowledge/relations/{relation_id}``.\n\nAll fields are optional except the routing-bones (``relation_id``,\n``kind``, ``provenance_class``, ``source_id``, ``target_id``) so\none model covers every edge kind. Unused fields stay at their\nPydantic defaults — the typed client on the frontend pattern-matches\non ``provenance_class`` to know which evidence fields to read.\n\nScoring fields (``score`` / ``strength_class`` / ``is_bridge`` /\n``is_outlier``) are populated for ``DETERMINISTIC`` edges via\n:func:`app.services.knowledge.scoring.score_edge`. They stay\n``None`` for ``STRUCTURAL`` (a structural parent-child edge has no\nnotion of \"strength\") and for ``LLM`` (the confidence field is the\ncloser analogue there — see ``confidence`` below).",
         "properties": {
@@ -5998,6 +6019,25 @@
           }
         },
         "summary": "Orbital Purge Document"
+      }
+    },
+    "/admin/reconcile": {
+      "post": {
+        "description": "Runtime trigger for the stuck-extraction scan (ADR-006 §5, #40).\n\nRe-runs the same recovery pass that fires on lifespan startup:\nevery version stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING``\nis flipped to ``FAILED`` with the canonical \"extraction\ninterrupted by process restart\" reason, and the operator\nrecovers via the existing ``POST /documents/.../retry-extraction``\nroute. Operators reach for this when a worker died mid-flight\nwithout a process restart that would have triggered the same\nscan automatically.\n\nAlways 200. ``recovered_count`` is the number of versions\nactually transitioned in this pass; ``skipped_inline`` is true\nwhen ``KW_EXTRACTION_INLINE=true`` (inline mode never enqueues,\nso the pass is a no-op by design). The per-row audit trail\n(``extraction.recovery.recovered``) and batch summary\n(``extraction.recovery.summary``) are the structured-log source\nof truth for what changed.",
+        "operationId": "admin_reconcile_extraction_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcileResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Reconcile"
       }
     },
     "/admin/taxonomy/import_yaml": {
