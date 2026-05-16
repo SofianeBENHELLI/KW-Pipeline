@@ -1477,6 +1477,143 @@
         "title": "ClaimsListResponse",
         "type": "object"
       },
+      "ConceptSuggestion": {
+        "description": "One proposed concept attached to a DRAFT :class:`TaxonomyVersion`.\n\nThe concept's content (label + description + parent) is what the\nsuggestion *proposes* to add to the tree on promotion. The\n:attr:`state` tracks where the suggestion sits in the review\nworkflow; :attr:`source` records which subsystem produced it.\n\n``merge_target_id`` is set only when :attr:`state` is ``MERGED`` —\nit points at the existing category the suggestion was folded into\nso the audit trail can replay the merge later.",
+        "properties": {
+          "confidence": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Chunk Ids",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "last_actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Actor"
+          },
+          "merge_target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge Target Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the suggestion proposes a subcategory under this existing category id. ``None`` means a new top-level category.",
+            "title": "Parent Id"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "default": "extractor",
+            "enum": [
+              "extractor",
+              "llm",
+              "operator"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "default": "NEW",
+            "enum": [
+              "NEW",
+              "UNDER_REVIEW",
+              "ACCEPTED",
+              "REJECTED",
+              "MERGED",
+              "DEFERRED"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "state_changed_at": {
+            "format": "date-time",
+            "title": "State Changed At",
+            "type": "string"
+          },
+          "suggestion_id": {
+            "title": "Suggestion Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "suggestion_id",
+          "label",
+          "description",
+          "parent_id",
+          "source",
+          "state",
+          "confidence",
+          "evidence_chunk_ids",
+          "merge_target_id",
+          "created_at",
+          "state_changed_at",
+          "created_by",
+          "last_actor"
+        ],
+        "title": "ConceptSuggestion",
+        "type": "object"
+      },
       "ContributingChunkPair": {
         "description": "One chunk-level edge contributing to an aggregated doc-doc relation.\n\nThe pair carries the edge's evidence (``reason``, ``shared_keywords``)\nplus the combined #314 score so the frontend can rank pairs without\nre-running the scoring policy.",
         "properties": {
@@ -1563,6 +1700,37 @@
           "allowed_origin_regex"
         ],
         "title": "CorsConfig",
+        "type": "object"
+      },
+      "CreateDraftRequest": {
+        "description": "Body for ``POST /admin/taxonomy/drafts``.\n\n``taxonomy_id`` + ``source_version_number`` together select the\nbranching source. When both are omitted, a fresh taxonomy_id is\nminted and the draft starts empty. When ``taxonomy_id`` is set\nwithout ``source_version_number``, the draft is the next version\nfor that taxonomy_id starting empty (rare but legal). When both\nare set, the draft inherits the source version's tree.",
+        "properties": {
+          "source_version_number": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version Number"
+          },
+          "taxonomy_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxonomy Id"
+          }
+        },
+        "title": "CreateDraftRequest",
         "type": "object"
       },
       "DemoLoadRequest": {
@@ -4857,6 +5025,30 @@
         "title": "SourceReference",
         "type": "object"
       },
+      "Taxonomy": {
+        "description": "Top-level taxonomy document.\n\nEmpty ``categories`` is a valid shape — it means the operator\nhas the YAML file present but hasn't authored anything yet.\nThe ``GET /knowledge/taxonomy`` route distinguishes this from\n\"no file at all\" via the ``is_configured`` field on the\nresponse wrapper.",
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "categories"
+        ],
+        "title": "Taxonomy",
+        "type": "object"
+      },
       "TaxonomyCategory": {
         "description": "One node in the taxonomy tree.\n\n``id`` is stable across runs and is what the classifier writes\nonto chunks/documents (``taxonomy_category_id``). The convention\nis dot-separated lower-snake (``hr.hybrid_work``); the id format\nis enforced at load time, not by this schema, so the wire shape\nstays permissive enough to describe a future v0.2 with different\nrules.\n\n``description`` is a free-text paragraph the classifier embeds\nonce at taxonomy-publish time and compares against chunk\nembeddings via cosine similarity. Operators write this with the\nmetier vocabulary they want to match.\n\n``source`` records which half of the hybrid taxonomy this\ncategory came from (#249, ADR-017): ``\"imposed\"`` for nodes\nparsed out of the operator-authored YAML, ``\"computed\"`` for\nnodes auto-deduced from topic clustering on the corpus. The\nfield defaults to ``\"imposed\"`` because the YAML loader is the\ndominant call site and that path always sets it; the route\nlayer overrides to ``\"computed\"`` when synthesising entries\nfrom the topic-clustering output.",
         "properties": {
@@ -5011,6 +5203,220 @@
           "categories"
         ],
         "title": "TaxonomyResponse",
+        "type": "object"
+      },
+      "TaxonomyVersion": {
+        "description": "One versioned taxonomy resource (ADR-018 §9).\n\nWraps the existing :class:`Taxonomy` tree with the lifecycle\nmetadata: stable id, monotonic version number, state, audit\ntimestamps, optional concept-suggestion list (populated only in\nDRAFT versions).\n\nIdentity is ``(taxonomy_id, version_number)``. The integer is the\naudit-trail key; :attr:`version_label` is a free-text display\nfield operators set on promotion.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "CANDIDATE_V0",
+              "VALIDATED_V1",
+              "ARCHIVED",
+              "DISCARDED"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "state_changed_at": {
+            "format": "date-time",
+            "title": "State Changed At",
+            "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ConceptSuggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "superseded_version_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When :attr:`state` is ``ARCHIVED`` or this is a promoted ``VALIDATED_V1``, points at the previous Validated version this one supersedes. ``None`` for the first Validated and for Drafts / Candidates.",
+            "title": "Superseded Version Number"
+          },
+          "taxonomy": {
+            "$ref": "#/components/schemas/Taxonomy"
+          },
+          "taxonomy_id": {
+            "title": "Taxonomy Id",
+            "type": "string"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          },
+          "version_number": {
+            "minimum": 1.0,
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "taxonomy_id",
+          "version_number",
+          "version_label",
+          "state",
+          "taxonomy",
+          "suggestions",
+          "created_at",
+          "state_changed_at",
+          "created_by",
+          "superseded_version_number"
+        ],
+        "title": "TaxonomyVersion",
+        "type": "object"
+      },
+      "TaxonomyVersionListResponse": {
+        "description": "Response for ``GET /admin/taxonomy/versions/{tid}``.\n\nReturns every version of one taxonomy_id sorted by version_number\nascending. The Explorer / admin UI uses this to render the lineage\npanel (Draft 1 → Candidate V0 → Validated V1 → Archived …).",
+        "properties": {
+          "taxonomy_id": {
+            "title": "Taxonomy Id",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "taxonomy_id",
+          "versions"
+        ],
+        "title": "TaxonomyVersionListResponse",
+        "type": "object"
+      },
+      "TransitionConceptRequest": {
+        "description": "Body for ``POST /admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition``.\n\n``to_state`` selects the per-suggestion target state per\nADR-018 §5. ``merge_target_id`` is **required** when transitioning\nto ``MERGED`` and rejected for every other target state\n(Pydantic validator enforces).\n\n``reason`` lands on the audit event for accept / reject / merge /\ndefer transitions.",
+        "properties": {
+          "merge_target_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge Target Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "to_state": {
+            "enum": [
+              "NEW",
+              "UNDER_REVIEW",
+              "ACCEPTED",
+              "REJECTED",
+              "MERGED",
+              "DEFERRED"
+            ],
+            "title": "To State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to_state"
+        ],
+        "title": "TransitionConceptRequest",
+        "type": "object"
+      },
+      "TransitionVersionRequest": {
+        "description": "Body for ``POST /admin/taxonomy/versions/{tid}/{vnum}/transition``.\n\n``to_state`` selects the target lifecycle state — the route\nlayer dispatches to the right transition function. ADR-018 §2\npins the legal moves; an illegal move surfaces as 409 with the\ncanonical ``IllegalTaxonomyTransition`` message.\n\n``version_label`` only applies when transitioning to\n``VALIDATED_V1``; ignored otherwise.\n\n``reason`` only applies to ``ARCHIVED`` / ``DISCARDED``; lands\non the structured-log audit event as the ``reason`` field.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "to_state": {
+            "enum": [
+              "DRAFT",
+              "CANDIDATE_V0",
+              "VALIDATED_V1",
+              "ARCHIVED",
+              "DISCARDED"
+            ],
+            "title": "To State",
+            "type": "string"
+          },
+          "version_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Label"
+          }
+        },
+        "required": [
+          "to_state"
+        ],
+        "title": "TransitionVersionRequest",
         "type": "object"
       },
       "UnarchiveRequest": {
@@ -6040,6 +6446,45 @@
         "summary": "Admin Reconcile"
       }
     },
+    "/admin/taxonomy/drafts": {
+      "post": {
+        "description": "Create a new ``DRAFT`` :class:`TaxonomyVersion` (ADR-018 §2).\n\nThree modes:\n\n- Body empty → fresh taxonomy_id, empty tree, version_number=1.\n- ``taxonomy_id`` set, no ``source_version_number`` → next\n  version for that taxonomy_id, empty tree.\n- Both set → next version inheriting the source version's\n  tree as a starting point (the typical \"branch from V1 to\n  edit V2\" flow).\n\nReturns the new draft. The store-side transition emits a\n``taxonomy.draft.created`` audit event carrying the\nauthenticated actor.",
+        "operationId": "admin_taxonomy_create_draft",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy Create Draft"
+      }
+    },
     "/admin/taxonomy/import_yaml": {
       "post": {
         "description": "Import an operator-authored YAML taxonomy into the SQLite\nstore and flip it active (#379 / ADR-031).\n\nReads the YAML from ``body.path`` when provided, otherwise\nfrom the server-side ``KW_TAXONOMY_PATH`` setting. Each call\npublishes a new ``taxonomies`` row regardless of content —\noperators who want at-most-once-per-edit semantics should\ngate the call client-side (or wait for the upcoming\ndiff-aware editor).\n\nAudits ``orbital.taxonomy.publish`` with the new\n``taxonomy_id`` + actor + category count so the operator\ndashboard surface can show \"who published what when\".\n\nErrors:\n\n* ``404`` when no path is configured (neither in the body\n  nor in ``KW_TAXONOMY_PATH``) — the operator gets a clear\n  remediation hint.\n* ``422`` when the YAML is malformed (invalid id, duplicate,\n  excessive depth, schema version mismatch, etc.) — the\n  ``TaxonomyLoadError`` message is surfaced verbatim so the\n  author can fix their file.",
@@ -6077,6 +6522,222 @@
           }
         },
         "summary": "Admin Taxonomy Import Yaml"
+      }
+    },
+    "/admin/taxonomy/versions/{taxonomy_id}": {
+      "get": {
+        "description": "List every version of one taxonomy_id (ADR-018 §3).\n\nReturns the lineage sorted by ``version_number`` ascending —\nthe Explorer / admin UI renders this as the version timeline.\nEmpty list when no version exists for the id (the route does\nNOT 404; an unknown taxonomy_id is a valid query).",
+        "operationId": "admin_taxonomy_list_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taxonomy_id",
+            "required": true,
+            "schema": {
+              "title": "Taxonomy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyVersionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy List Versions"
+      }
+    },
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}": {
+      "get": {
+        "description": "Read one version by ``(taxonomy_id, version_number)``.",
+        "operationId": "admin_taxonomy_get_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taxonomy_id",
+            "required": true,
+            "schema": {
+              "title": "Taxonomy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_number",
+            "required": true,
+            "schema": {
+              "title": "Version Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy Get Version"
+      }
+    },
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition": {
+      "post": {
+        "description": "Drive one concept suggestion through its lifecycle (ADR-018 §5).\n\nLegal transitions per the state machine:\n\n- ``NEW → UNDER_REVIEW / ACCEPTED / REJECTED / DEFERRED``\n- ``UNDER_REVIEW → ACCEPTED / REJECTED / MERGED / DEFERRED``\n- ``DEFERRED → UNDER_REVIEW``\n\n``MERGED`` requires ``merge_target_id`` (the existing\ncategory the suggestion folds into); the Pydantic validator\non :class:`ConceptSuggestion` enforces this — the route\nsurfaces it as 400 BAD_REQUEST. Illegal transitions surface\nas 409 CONFLICT.",
+        "operationId": "admin_taxonomy_transition_concept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taxonomy_id",
+            "required": true,
+            "schema": {
+              "title": "Taxonomy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_number",
+            "required": true,
+            "schema": {
+              "title": "Version Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "suggestion_id",
+            "required": true,
+            "schema": {
+              "title": "Suggestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionConceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptSuggestion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy Transition Concept"
+      }
+    },
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition": {
+      "post": {
+        "description": "Drive a :class:`TaxonomyVersion` to its next lifecycle state.\n\n``to_state`` selects the target; the route dispatches to the\nmatching transition function in\n:mod:`app.services.taxonomy_version_store`. ADR-018 §2 pins\nthe legal moves; illegal moves surface as 409 with the\n:class:`IllegalTaxonomyTransition` message.\n\nOptional body fields per transition:\n\n- ``CANDIDATE_V0``: no extras.\n- ``VALIDATED_V1``: ``version_label`` (free-text display\n  form). When omitted, the version inherits its previous\n  label (None for first promotion).\n- ``ARCHIVED`` / ``DISCARDED``: ``reason`` lands on the\n  audit event.\n\nThe store-side function emits the matching structured-log\naudit event with the actor.",
+        "operationId": "admin_taxonomy_transition_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taxonomy_id",
+            "required": true,
+            "schema": {
+              "title": "Taxonomy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_number",
+            "required": true,
+            "schema": {
+              "title": "Version Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy Transition Version"
       }
     },
     "/documents": {

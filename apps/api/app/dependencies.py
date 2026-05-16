@@ -102,6 +102,10 @@ from app.services.taxonomy_store import (
     TaxonomyStore,
     import_yaml_into_store,
 )
+from app.services.taxonomy_version_store import (
+    InMemoryTaxonomyVersionStore,
+    TaxonomyVersionStoreProtocol,
+)
 from app.services.topic_extractor import TopicExtractor
 from app.services.validation_metadata_store import (
     InMemoryValidationMetadataStore,
@@ -334,6 +338,16 @@ class PipelineServices:
     # ``POST /admin/taxonomy/import_yaml`` route writes through
     # this store.
     taxonomy_store: TaxonomyStore = field(default_factory=InMemoryTaxonomyStore)
+    # Versioned taxonomy store (#339, ADR-018). Manages the DRAFT →
+    # CANDIDATE_V0 → VALIDATED_V1 → ARCHIVED lifecycle for taxonomy
+    # versions + concept suggestions, distinct from ``taxonomy_store``
+    # which owns the singleton-active published taxonomy. The
+    # ``/admin/taxonomy/*`` workflow routes (EPIC-1 §1.8) write
+    # through this store; the in-memory default is the test / demo
+    # affordance until the SQLite implementation lands.
+    taxonomy_version_store: TaxonomyVersionStoreProtocol = field(
+        default_factory=InMemoryTaxonomyVersionStore
+    )
     # Atomic Claim/Fact store (#368, ADR-031). Always present — the
     # in-memory default is the test/demo affordance; persistent
     # builds wire :class:`SQLiteClaimStore`. Read by

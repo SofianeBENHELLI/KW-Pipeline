@@ -525,6 +525,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/taxonomy/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Taxonomy Create Draft
+         * @description Create a new ``DRAFT`` :class:`TaxonomyVersion` (ADR-018 §2).
+         *
+         *     Three modes:
+         *
+         *     - Body empty → fresh taxonomy_id, empty tree, version_number=1.
+         *     - ``taxonomy_id`` set, no ``source_version_number`` → next
+         *       version for that taxonomy_id, empty tree.
+         *     - Both set → next version inheriting the source version's
+         *       tree as a starting point (the typical "branch from V1 to
+         *       edit V2" flow).
+         *
+         *     Returns the new draft. The store-side transition emits a
+         *     ``taxonomy.draft.created`` audit event carrying the
+         *     authenticated actor.
+         */
+        post: operations["admin_taxonomy_create_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/taxonomy/import_yaml": {
         parameters: {
             query?: never;
@@ -561,6 +594,121 @@ export interface paths {
          *       author can fix their file.
          */
         post: operations["admin_taxonomy_import_yaml"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/taxonomy/versions/{taxonomy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Taxonomy List Versions
+         * @description List every version of one taxonomy_id (ADR-018 §3).
+         *
+         *     Returns the lineage sorted by ``version_number`` ascending —
+         *     the Explorer / admin UI renders this as the version timeline.
+         *     Empty list when no version exists for the id (the route does
+         *     NOT 404; an unknown taxonomy_id is a valid query).
+         */
+        get: operations["admin_taxonomy_list_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Taxonomy Get Version
+         * @description Read one version by ``(taxonomy_id, version_number)``.
+         */
+        get: operations["admin_taxonomy_get_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Taxonomy Transition Concept
+         * @description Drive one concept suggestion through its lifecycle (ADR-018 §5).
+         *
+         *     Legal transitions per the state machine:
+         *
+         *     - ``NEW → UNDER_REVIEW / ACCEPTED / REJECTED / DEFERRED``
+         *     - ``UNDER_REVIEW → ACCEPTED / REJECTED / MERGED / DEFERRED``
+         *     - ``DEFERRED → UNDER_REVIEW``
+         *
+         *     ``MERGED`` requires ``merge_target_id`` (the existing
+         *     category the suggestion folds into); the Pydantic validator
+         *     on :class:`ConceptSuggestion` enforces this — the route
+         *     surfaces it as 400 BAD_REQUEST. Illegal transitions surface
+         *     as 409 CONFLICT.
+         */
+        post: operations["admin_taxonomy_transition_concept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Taxonomy Transition Version
+         * @description Drive a :class:`TaxonomyVersion` to its next lifecycle state.
+         *
+         *     ``to_state`` selects the target; the route dispatches to the
+         *     matching transition function in
+         *     :mod:`app.services.taxonomy_version_store`. ADR-018 §2 pins
+         *     the legal moves; illegal moves surface as 409 with the
+         *     :class:`IllegalTaxonomyTransition` message.
+         *
+         *     Optional body fields per transition:
+         *
+         *     - ``CANDIDATE_V0``: no extras.
+         *     - ``VALIDATED_V1``: ``version_label`` (free-text display
+         *       form). When omitted, the version inherits its previous
+         *       label (None for first promotion).
+         *     - ``ARCHIVED`` / ``DISCARDED``: ``reason`` lands on the
+         *       audit event.
+         *
+         *     The store-side function emits the matching structured-log
+         *     audit event with the actor.
+         */
+        post: operations["admin_taxonomy_transition_version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2566,6 +2714,73 @@ export interface components {
             schema_version: "v0.1";
         };
         /**
+         * ConceptSuggestion
+         * @description One proposed concept attached to a DRAFT :class:`TaxonomyVersion`.
+         *
+         *     The concept's content (label + description + parent) is what the
+         *     suggestion *proposes* to add to the tree on promotion. The
+         *     :attr:`state` tracks where the suggestion sits in the review
+         *     workflow; :attr:`source` records which subsystem produced it.
+         *
+         *     ``merge_target_id`` is set only when :attr:`state` is ``MERGED`` —
+         *     it points at the existing category the suggestion was folded into
+         *     so the audit trail can replay the merge later.
+         */
+        ConceptSuggestion: {
+            /**
+             * Confidence
+             * @default 1
+             */
+            confidence: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Description */
+            description: string;
+            /** Evidence Chunk Ids */
+            evidence_chunk_ids: string[];
+            /** Label */
+            label: string;
+            /** Last Actor */
+            last_actor: string | null;
+            /** Merge Target Id */
+            merge_target_id: string | null;
+            /**
+             * Parent Id
+             * @description When set, the suggestion proposes a subcategory under this existing category id. ``None`` means a new top-level category.
+             */
+            parent_id: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /**
+             * Source
+             * @default extractor
+             * @enum {string}
+             */
+            source: "extractor" | "llm" | "operator";
+            /**
+             * State
+             * @default NEW
+             * @enum {string}
+             */
+            state: "NEW" | "UNDER_REVIEW" | "ACCEPTED" | "REJECTED" | "MERGED" | "DEFERRED";
+            /**
+             * State Changed At
+             * Format: date-time
+             */
+            state_changed_at: string;
+            /** Suggestion Id */
+            suggestion_id: string;
+        };
+        /**
          * ContributingChunkPair
          * @description One chunk-level edge contributing to an aggregated doc-doc relation.
          *
@@ -2603,6 +2818,23 @@ export interface components {
             allowed_origin_regex: string;
             /** Allowed Origins */
             allowed_origins: string[];
+        };
+        /**
+         * CreateDraftRequest
+         * @description Body for ``POST /admin/taxonomy/drafts``.
+         *
+         *     ``taxonomy_id`` + ``source_version_number`` together select the
+         *     branching source. When both are omitted, a fresh taxonomy_id is
+         *     minted and the draft starts empty. When ``taxonomy_id`` is set
+         *     without ``source_version_number``, the draft is the next version
+         *     for that taxonomy_id starting empty (rare but legal). When both
+         *     are set, the draft inherits the source version's tree.
+         */
+        CreateDraftRequest: {
+            /** Source Version Number */
+            source_version_number?: number | null;
+            /** Taxonomy Id */
+            taxonomy_id?: string | null;
         };
         /**
          * DemoLoadRequest
@@ -4412,6 +4644,26 @@ export interface components {
             snippet: string;
         };
         /**
+         * Taxonomy
+         * @description Top-level taxonomy document.
+         *
+         *     Empty ``categories`` is a valid shape — it means the operator
+         *     has the YAML file present but hasn't authored anything yet.
+         *     The ``GET /knowledge/taxonomy`` route distinguishes this from
+         *     "no file at all" via the ``is_configured`` field on the
+         *     response wrapper.
+         */
+        Taxonomy: {
+            /** Categories */
+            categories: components["schemas"]["TaxonomyCategory"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+        };
+        /**
          * TaxonomyCategory
          * @description One node in the taxonomy tree.
          *
@@ -4522,6 +4774,121 @@ export interface components {
             schema_version: "v0.1";
             /** Source Path */
             source_path: string | null;
+        };
+        /**
+         * TaxonomyVersion
+         * @description One versioned taxonomy resource (ADR-018 §9).
+         *
+         *     Wraps the existing :class:`Taxonomy` tree with the lifecycle
+         *     metadata: stable id, monotonic version number, state, audit
+         *     timestamps, optional concept-suggestion list (populated only in
+         *     DRAFT versions).
+         *
+         *     Identity is ``(taxonomy_id, version_number)``. The integer is the
+         *     audit-trail key; :attr:`version_label` is a free-text display
+         *     field operators set on promotion.
+         */
+        TaxonomyVersion: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "DRAFT" | "CANDIDATE_V0" | "VALIDATED_V1" | "ARCHIVED" | "DISCARDED";
+            /**
+             * State Changed At
+             * Format: date-time
+             */
+            state_changed_at: string;
+            /** Suggestions */
+            suggestions: components["schemas"]["ConceptSuggestion"][];
+            /**
+             * Superseded Version Number
+             * @description When :attr:`state` is ``ARCHIVED`` or this is a promoted ``VALIDATED_V1``, points at the previous Validated version this one supersedes. ``None`` for the first Validated and for Drafts / Candidates.
+             */
+            superseded_version_number: number | null;
+            taxonomy: components["schemas"]["Taxonomy"];
+            /** Taxonomy Id */
+            taxonomy_id: string;
+            /** Version Label */
+            version_label: string | null;
+            /** Version Number */
+            version_number: number;
+        };
+        /**
+         * TaxonomyVersionListResponse
+         * @description Response for ``GET /admin/taxonomy/versions/{tid}``.
+         *
+         *     Returns every version of one taxonomy_id sorted by version_number
+         *     ascending. The Explorer / admin UI uses this to render the lineage
+         *     panel (Draft 1 → Candidate V0 → Validated V1 → Archived …).
+         */
+        TaxonomyVersionListResponse: {
+            /** Taxonomy Id */
+            taxonomy_id: string;
+            /** Versions */
+            versions: components["schemas"]["TaxonomyVersion"][];
+        };
+        /**
+         * TransitionConceptRequest
+         * @description Body for ``POST /admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition``.
+         *
+         *     ``to_state`` selects the per-suggestion target state per
+         *     ADR-018 §5. ``merge_target_id`` is **required** when transitioning
+         *     to ``MERGED`` and rejected for every other target state
+         *     (Pydantic validator enforces).
+         *
+         *     ``reason`` lands on the audit event for accept / reject / merge /
+         *     defer transitions.
+         */
+        TransitionConceptRequest: {
+            /** Merge Target Id */
+            merge_target_id?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * To State
+             * @enum {string}
+             */
+            to_state: "NEW" | "UNDER_REVIEW" | "ACCEPTED" | "REJECTED" | "MERGED" | "DEFERRED";
+        };
+        /**
+         * TransitionVersionRequest
+         * @description Body for ``POST /admin/taxonomy/versions/{tid}/{vnum}/transition``.
+         *
+         *     ``to_state`` selects the target lifecycle state — the route
+         *     layer dispatches to the right transition function. ADR-018 §2
+         *     pins the legal moves; an illegal move surfaces as 409 with the
+         *     canonical ``IllegalTaxonomyTransition`` message.
+         *
+         *     ``version_label`` only applies when transitioning to
+         *     ``VALIDATED_V1``; ignored otherwise.
+         *
+         *     ``reason`` only applies to ``ARCHIVED`` / ``DISCARDED``; lands
+         *     on the structured-log audit event as the ``reason`` field.
+         */
+        TransitionVersionRequest: {
+            /** Reason */
+            reason?: string | null;
+            /**
+             * To State
+             * @enum {string}
+             */
+            to_state: "DRAFT" | "CANDIDATE_V0" | "VALIDATED_V1" | "ARCHIVED" | "DISCARDED";
+            /** Version Label */
+            version_label?: string | null;
         };
         /**
          * UnarchiveRequest
@@ -5127,6 +5494,39 @@ export interface operations {
             };
         };
     };
+    admin_taxonomy_create_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyVersion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_taxonomy_import_yaml: {
         parameters: {
             query?: never;
@@ -5147,6 +5547,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxonomyImportYamlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_list_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taxonomy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyVersionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_get_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taxonomy_id: string;
+                version_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyVersion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_transition_concept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taxonomy_id: string;
+                version_number: number;
+                suggestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionConceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptSuggestion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_transition_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taxonomy_id: string;
+                version_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyVersion"];
                 };
             };
             /** @description Validation Error */

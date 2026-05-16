@@ -106,6 +106,12 @@ from app.schemas.admin_hitl import (
     AdminHITLStateResponse,
     BucketState,
 )
+from app.schemas.admin_taxonomy_workflow import (
+    CreateDraftRequest,
+    TaxonomyVersionListResponse,
+    TransitionConceptRequest,
+    TransitionVersionRequest,
+)
 from app.schemas.document import (
     HealthResponse,
     MetricsResponse,
@@ -118,6 +124,7 @@ from app.schemas.taxonomy import (
     TaxonomyImportYamlRequest,
     TaxonomyImportYamlResponse,
 )
+from app.schemas.taxonomy_version import ConceptSuggestion, TaxonomyVersion
 from app.schemas.validation_metadata import AutoPromoteResult
 from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
@@ -132,6 +139,15 @@ from app.services.taxonomy_loader import TaxonomyLoadError
 from app.services.taxonomy_store import (
     TAXONOMY_SOURCE_YAML_IMPORT,
     import_yaml_into_store,
+)
+from app.services.taxonomy_version_store import (
+    IllegalTaxonomyTransition,
+    archive_version,
+    create_draft,
+    discard_draft,
+    promote_to_candidate,
+    transition_concept,
+    validate_version,
 )
 from app.settings import Settings
 
@@ -1757,5 +1773,300 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
             return ReconcileResult(recovered_count=0, skipped_inline=True)
         recovered = recover_stuck_extractions(services)
         return ReconcileResult(recovered_count=recovered)
+
+    # ─── Taxonomy versioning workflow (EPIC-1 §1.8, ADR-018) ──────────
+
+    @router.post(
+        "/admin/taxonomy/drafts",
+        operation_id="admin_taxonomy_create_draft",
+        response_model=TaxonomyVersion,
+    )
+    def admin_taxonomy_create_draft(
+        body: CreateDraftRequest,
+        user: User = Depends(require_admin),
+    ) -> TaxonomyVersion:
+        """Create a new ``DRAFT`` :class:`TaxonomyVersion` (ADR-018 §2).
+
+        Three modes:
+
+        - Body empty → fresh taxonomy_id, empty tree, version_number=1.
+        - ``taxonomy_id`` set, no ``source_version_number`` → next
+          version for that taxonomy_id, empty tree.
+        - Both set → next version inheriting the source version's
+          tree as a starting point (the typical "branch from V1 to
+          edit V2" flow).
+
+        Returns the new draft. The store-side transition emits a
+        ``taxonomy.draft.created`` audit event carrying the
+        authenticated actor.
+        """
+        source = None
+        if body.source_version_number is not None:
+            if body.taxonomy_id is None:
+                raise ApiError(
+                    status_code=400,
+                    code=ErrorCode.BAD_REQUEST,
+                    message=(
+                        "source_version_number requires taxonomy_id "
+                        "to disambiguate which taxonomy to branch."
+                    ),
+                    retryable=False,
+                    remediation=(
+                        "Send both taxonomy_id and source_version_number, "
+                        "or omit both to mint a fresh taxonomy."
+                    ),
+                )
+            try:
+                source = services.taxonomy_version_store.get(
+                    taxonomy_id=body.taxonomy_id,
+                    version_number=body.source_version_number,
+                )
+            except Exception as exc:  # noqa: BLE001 - store boundary
+                raise ApiError(
+                    status_code=500,
+                    code=ErrorCode.INTERNAL_ERROR,
+                    message=f"Failed to read source version: {exc}",
+                    retryable=True,
+                    remediation=None,
+                ) from exc
+            if source is None:
+                raise ApiError(
+                    status_code=404,
+                    code=ErrorCode.NOT_FOUND,
+                    message=(
+                        f"Source version "
+                        f"({body.taxonomy_id!r}, {body.source_version_number}) "
+                        "not found."
+                    ),
+                    retryable=False,
+                    remediation=(
+                        "Confirm the taxonomy_id + version_number against "
+                        "GET /admin/taxonomy/versions/{taxonomy_id}."
+                    ),
+                )
+        return create_draft(
+            services.taxonomy_version_store,
+            taxonomy_id=body.taxonomy_id,
+            source_version=source,
+            actor=user.id,
+        )
+
+    @router.get(
+        "/admin/taxonomy/versions/{taxonomy_id}",
+        operation_id="admin_taxonomy_list_versions",
+        response_model=TaxonomyVersionListResponse,
+    )
+    def admin_taxonomy_list_versions(
+        taxonomy_id: str,
+        _user: User = Depends(require_admin),
+    ) -> TaxonomyVersionListResponse:
+        """List every version of one taxonomy_id (ADR-018 §3).
+
+        Returns the lineage sorted by ``version_number`` ascending —
+        the Explorer / admin UI renders this as the version timeline.
+        Empty list when no version exists for the id (the route does
+        NOT 404; an unknown taxonomy_id is a valid query).
+        """
+        versions = services.taxonomy_version_store.list_for_taxonomy(
+            taxonomy_id=taxonomy_id,
+        )
+        return TaxonomyVersionListResponse(
+            taxonomy_id=taxonomy_id,
+            versions=versions,
+        )
+
+    @router.get(
+        "/admin/taxonomy/versions/{taxonomy_id}/{version_number}",
+        operation_id="admin_taxonomy_get_version",
+        response_model=TaxonomyVersion,
+    )
+    def admin_taxonomy_get_version(
+        taxonomy_id: str,
+        version_number: int,
+        _user: User = Depends(require_admin),
+    ) -> TaxonomyVersion:
+        """Read one version by ``(taxonomy_id, version_number)``."""
+        version = services.taxonomy_version_store.get(
+            taxonomy_id=taxonomy_id,
+            version_number=version_number,
+        )
+        if version is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=(f"TaxonomyVersion ({taxonomy_id!r}, {version_number}) not found."),
+                retryable=False,
+                remediation=("Confirm against GET /admin/taxonomy/versions/{taxonomy_id}."),
+            )
+        return version
+
+    @router.post(
+        "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition",
+        operation_id="admin_taxonomy_transition_version",
+        response_model=TaxonomyVersion,
+    )
+    def admin_taxonomy_transition_version(
+        taxonomy_id: str,
+        version_number: int,
+        body: TransitionVersionRequest,
+        user: User = Depends(require_admin),
+    ) -> TaxonomyVersion:
+        """Drive a :class:`TaxonomyVersion` to its next lifecycle state.
+
+        ``to_state`` selects the target; the route dispatches to the
+        matching transition function in
+        :mod:`app.services.taxonomy_version_store`. ADR-018 §2 pins
+        the legal moves; illegal moves surface as 409 with the
+        :class:`IllegalTaxonomyTransition` message.
+
+        Optional body fields per transition:
+
+        - ``CANDIDATE_V0``: no extras.
+        - ``VALIDATED_V1``: ``version_label`` (free-text display
+          form). When omitted, the version inherits its previous
+          label (None for first promotion).
+        - ``ARCHIVED`` / ``DISCARDED``: ``reason`` lands on the
+          audit event.
+
+        The store-side function emits the matching structured-log
+        audit event with the actor.
+        """
+        try:
+            if body.to_state == "CANDIDATE_V0":
+                return promote_to_candidate(
+                    services.taxonomy_version_store,
+                    taxonomy_id=taxonomy_id,
+                    version_number=version_number,
+                    actor=user.id,
+                )
+            if body.to_state == "VALIDATED_V1":
+                return validate_version(
+                    services.taxonomy_version_store,
+                    taxonomy_id=taxonomy_id,
+                    version_number=version_number,
+                    version_label=body.version_label,
+                    actor=user.id,
+                )
+            if body.to_state == "ARCHIVED":
+                return archive_version(
+                    services.taxonomy_version_store,
+                    taxonomy_id=taxonomy_id,
+                    version_number=version_number,
+                    actor=user.id,
+                    reason=body.reason,
+                )
+            if body.to_state == "DISCARDED":
+                return discard_draft(
+                    services.taxonomy_version_store,
+                    taxonomy_id=taxonomy_id,
+                    version_number=version_number,
+                    actor=user.id,
+                    reason=body.reason,
+                )
+            # DRAFT is the construction state — not reachable as a
+            # transition target via this route. Use POST /admin/taxonomy/drafts.
+            raise ApiError(
+                status_code=400,
+                code=ErrorCode.BAD_REQUEST,
+                message=(
+                    f"to_state={body.to_state!r} is not a valid transition "
+                    "target. Use POST /admin/taxonomy/drafts to create a "
+                    "DRAFT; this route only transitions existing versions."
+                ),
+                retryable=False,
+                remediation=(
+                    "Valid to_state values: CANDIDATE_V0, VALIDATED_V1, ARCHIVED, DISCARDED."
+                ),
+            )
+        except KeyError as exc:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=str(exc).strip("'"),
+                retryable=False,
+                remediation=None,
+            ) from exc
+        except IllegalTaxonomyTransition as exc:
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=str(exc),
+                retryable=False,
+                remediation=(
+                    "Confirm the version's current state via GET "
+                    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}; "
+                    "ADR-018 §2 pins the legal transitions."
+                ),
+            ) from exc
+
+    @router.post(
+        "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition",
+        operation_id="admin_taxonomy_transition_concept",
+        response_model=ConceptSuggestion,
+    )
+    def admin_taxonomy_transition_concept(
+        taxonomy_id: str,
+        version_number: int,
+        suggestion_id: str,
+        body: TransitionConceptRequest,
+        user: User = Depends(require_admin),
+    ) -> ConceptSuggestion:
+        """Drive one concept suggestion through its lifecycle (ADR-018 §5).
+
+        Legal transitions per the state machine:
+
+        - ``NEW → UNDER_REVIEW / ACCEPTED / REJECTED / DEFERRED``
+        - ``UNDER_REVIEW → ACCEPTED / REJECTED / MERGED / DEFERRED``
+        - ``DEFERRED → UNDER_REVIEW``
+
+        ``MERGED`` requires ``merge_target_id`` (the existing
+        category the suggestion folds into); the Pydantic validator
+        on :class:`ConceptSuggestion` enforces this — the route
+        surfaces it as 400 BAD_REQUEST. Illegal transitions surface
+        as 409 CONFLICT.
+        """
+        try:
+            return transition_concept(
+                services.taxonomy_version_store,
+                taxonomy_id=taxonomy_id,
+                version_number=version_number,
+                suggestion_id=suggestion_id,
+                to_state=body.to_state,
+                actor=user.id,
+                reason=body.reason,
+                merge_target_id=body.merge_target_id,
+            )
+        except KeyError as exc:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=str(exc).strip("'"),
+                retryable=False,
+                remediation=None,
+            ) from exc
+        except IllegalTaxonomyTransition as exc:
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=str(exc),
+                retryable=False,
+                remediation=(
+                    "Confirm the suggestion's current state and ADR-018 §5 for legal transitions."
+                ),
+            ) from exc
+        except ValueError as exc:
+            # ``merge_target_id`` missing on a MERGED transition is the
+            # canonical case — both the Pydantic validator and the
+            # transition function can raise.
+            raise ApiError(
+                status_code=400,
+                code=ErrorCode.BAD_REQUEST,
+                message=str(exc),
+                retryable=False,
+                remediation=(
+                    "When transitioning to MERGED, include "
+                    "merge_target_id pointing at the existing category."
+                ),
+            ) from exc
 
     return router
