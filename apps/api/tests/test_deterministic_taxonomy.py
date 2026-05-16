@@ -32,9 +32,8 @@ def _record(text: str, *, heading: str = "Section A", chunk_id: str = "c-1"):
     )
 
     doc = SemanticDocument(
-        document_id="doc-1",
         document_version_id="ver-1",
-        profile=DocumentProfile(),
+        document_profile=DocumentProfile(title="Test fixture"),
         sections=[section],
     )
     return service.chunks_for(doc)[0]
@@ -181,8 +180,15 @@ class TestNERCandidates:
         assert ner == ["Dassault Systèmes", "3DEXPERIENCE"]
 
     def test_section_metadata_supplies_ner_entities(self) -> None:
+        """``parser_metadata["spacy_ner_entities"]`` lives on
+        :class:`RawSection` (parser output); :class:`SemanticSection`
+        drops it during the semantic-extractor projection. The
+        extractor reads it off a RawSection — useful for callers
+        that have the raw form in hand."""
+        from app.schemas.extraction import RawSection
+
         record = _record("Voyage AI provides embeddings.")
-        section = SemanticSection(
+        section = RawSection(
             id=record.section_id,
             heading=record.heading,
             text=record.text,
@@ -198,8 +204,10 @@ class TestNERCandidates:
         """A broken ``spacy_ner_entities`` value mustn't blow up the
         whole extractor — it just means "no NER entities for this
         chunk"."""
+        from app.schemas.extraction import RawSection
+
         record = _record("body text")
-        section = SemanticSection(
+        section = RawSection(
             id=record.section_id,
             heading=record.heading,
             text=record.text,
@@ -210,8 +218,10 @@ class TestNERCandidates:
         assert ner == []
 
     def test_explicit_ner_overrides_section_metadata(self) -> None:
+        from app.schemas.extraction import RawSection
+
         record = _record("body text")
-        section = SemanticSection(
+        section = RawSection(
             id=record.section_id,
             heading=record.heading,
             text=record.text,
