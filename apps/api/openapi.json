@@ -6841,6 +6841,55 @@
         "summary": "Admin Taxonomy Transition Concept"
       }
     },
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/synthesize": {
+      "post": {
+        "description": "Synthesize a DRAFT's accepted suggestions into a Taxonomy tree.\n\nHands the draft's ``ACCEPTED`` + ``MERGED`` concept suggestions\nto the :class:`BusinessTaxonomyCreator` (EPIC-1 §1.6,\nADR-018 §6) and writes the resulting tree back onto the draft.\nThe draft stays in ``DRAFT`` state — the operator promotes to\n``CANDIDATE_V0`` via ``/transition`` once the synthesized tree\npasses review.\n\nPre-conditions:\n\n- The target version must be in ``DRAFT`` (409 ``CONFLICT``\n  otherwise — synthesizing on top of a CANDIDATE / VALIDATED /\n  ARCHIVED version would mutate a frozen artifact).\n- The :class:`BusinessTaxonomyCreator` must be wired (503\n  ``KW_LLM_DISABLED`` otherwise — wiring is gated on\n  ``KW_LLM_PROVIDER`` + the matching API key).\n\nIdempotent in spirit: every call re-runs the LLM and overwrites\nthe draft's ``taxonomy`` field, so two consecutive calls give\ntwo independent syntheses. The store-side audit event\n(``knowledge.business_taxonomy.created``) carries the actor.",
+        "operationId": "admin_taxonomy_synthesize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taxonomy_id",
+            "required": true,
+            "schema": {
+              "title": "Taxonomy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_number",
+            "required": true,
+            "schema": {
+              "title": "Version Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Taxonomy Synthesize"
+      }
+    },
     "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition": {
       "post": {
         "description": "Drive a :class:`TaxonomyVersion` to its next lifecycle state.\n\n``to_state`` selects the target; the route dispatches to the\nmatching transition function in\n:mod:`app.services.taxonomy_version_store`. ADR-018 §2 pins\nthe legal moves; illegal moves surface as 409 with the\n:class:`IllegalTaxonomyTransition` message.\n\nOptional body fields per transition:\n\n- ``CANDIDATE_V0``: no extras.\n- ``VALIDATED_V1``: ``version_label`` (free-text display\n  form). When omitted, the version inherits its previous\n  label (None for first promotion).\n- ``ARCHIVED`` / ``DISCARDED``: ``reason`` lands on the\n  audit event.\n\nThe store-side function emits the matching structured-log\naudit event with the actor.",

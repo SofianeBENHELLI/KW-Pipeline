@@ -11,10 +11,16 @@ The store-level transitions are pinned in
   the unknown-version 404.
 - ``POST .../concepts/{cid}/transition``: legal accept + merge-without-
   target 400 + unknown-suggestion 404 + illegal-state-transition 409.
+- ``POST .../synthesize``: LLM-driven taxonomy build (EPIC-1 §1.6) —
+  503 when creator unwired, 409 on non-DRAFT, 404 on missing, 200 with
+  tree written back onto the draft.
 - 403 gating for non-admin callers.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +29,7 @@ from app.dependencies import build_services
 from app.main import create_app
 from app.schemas.taxonomy_version import ConceptSuggestion, TaxonomyVersion
 from app.services.auth import encode_hs256
+from app.services.knowledge.business_taxonomy_creator import BusinessTaxonomyCreator
 from app.services.taxonomy_version_store import (
     add_suggestions,
     create_draft,
@@ -371,3 +378,177 @@ class TestConceptTransition:
             headers=headers,
         )
         assert response.status_code == 404, response.text
+
+
+# ─── POST .../synthesize ──────────────────────────────────────────────
+
+
+@dataclass
+class _FakeInstructor:
+    """Stub that mirrors the BusinessTaxonomyCreator's _InstructorLike protocol.
+
+    Builds the canned envelope through the real ``response_model`` so
+    the service sees a genuine Pydantic instance and the route's
+    error paths exercise the real schema. ``canned_response=Exception``
+    re-raises to drive the 502 failure case.
+    """
+
+    canned_response: Any
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def create_with_completion(
+        self,
+        *,
+        response_model,  # type: ignore[no-untyped-def]
+        messages,  # type: ignore[no-untyped-def]
+        max_retries=2,  # type: ignore[no-untyped-def]
+        max_tokens=4096,  # type: ignore[no-untyped-def]
+    ):
+        self.calls.append({"response_model": response_model, "messages": messages})
+        if isinstance(self.canned_response, Exception):
+            raise self.canned_response
+
+        @dataclass
+        class _Usage:
+            input_tokens: int = 100
+            output_tokens: int = 50
+
+        @dataclass
+        class _Completion:
+            usage: _Usage = field(default_factory=_Usage)
+
+        return response_model(**self.canned_response), _Completion()
+
+
+def _wire_fake_creator(services, canned: Any) -> _FakeInstructor:
+    """Replace ``services.business_taxonomy_creator`` with a fake-backed one."""
+    fake = _FakeInstructor(canned_response=canned)
+    object.__setattr__(
+        services,
+        "business_taxonomy_creator",
+        BusinessTaxonomyCreator(client=fake, model="test-model"),
+    )
+    return fake
+
+
+class TestSynthesize:
+    def _seed_draft_with_accepted(
+        self, services, *, taxonomy_id: str = "tx-syn"
+    ) -> TaxonomyVersion:
+        draft = create_draft(services.taxonomy_version_store, taxonomy_id=taxonomy_id)
+        add_suggestions(
+            services.taxonomy_version_store,
+            taxonomy_id=taxonomy_id,
+            version_number=draft.version_number,
+            suggestions=[
+                ConceptSuggestion(label="Battery", description="...", state="ACCEPTED"),
+                ConceptSuggestion(label="Thermal", description="...", state="ACCEPTED"),
+            ],
+        )
+        return draft
+
+    def test_happy_path_writes_tree_onto_draft(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        draft = self._seed_draft_with_accepted(services)
+        _wire_fake_creator(
+            services,
+            {
+                "categories": [
+                    {
+                        "id": "battery",
+                        "label": "Battery",
+                        "description": "Battery domain.",
+                        "subcategories": [],
+                    }
+                ]
+            },
+        )
+        headers = {"Authorization": f"Bearer {_token('admin', user_id='ada')}"}
+        response = client.post(
+            f"/admin/taxonomy/versions/tx-syn/{draft.version_number}/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["state"] == "DRAFT"
+        assert body["version_number"] == draft.version_number
+        assert [c["id"] for c in body["taxonomy"]["categories"]] == ["battery"]
+        # Tree persists in the store too.
+        stored = services.taxonomy_version_store.get(
+            taxonomy_id="tx-syn", version_number=draft.version_number
+        )
+        assert stored is not None
+        assert [c.id for c in stored.taxonomy.categories] == ["battery"]
+
+    def test_503_when_creator_unwired(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        draft = self._seed_draft_with_accepted(services)
+        object.__setattr__(services, "business_taxonomy_creator", None)
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+        response = client.post(
+            f"/admin/taxonomy/versions/tx-syn/{draft.version_number}/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 503, response.text
+        assert response.json()["error"]["code"] == "KW_LLM_DISABLED"
+
+    def test_409_when_version_not_draft(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        draft = self._seed_draft_with_accepted(services, taxonomy_id="tx-syn-c")
+        # Drop suggestions so promote_to_candidate doesn't choke on the
+        # "suggestions only on drafts" model validator after promotion.
+        stored = services.taxonomy_version_store.get(
+            taxonomy_id="tx-syn-c", version_number=draft.version_number
+        )
+        assert stored is not None
+        services.taxonomy_version_store.upsert(stored.model_copy(update={"suggestions": []}))
+        promote_to_candidate(
+            services.taxonomy_version_store,
+            taxonomy_id="tx-syn-c",
+            version_number=draft.version_number,
+        )
+        _wire_fake_creator(services, {"categories": []})
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+        response = client.post(
+            f"/admin/taxonomy/versions/tx-syn-c/{draft.version_number}/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "KW_CONFLICT"
+
+    def test_404_when_version_missing(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        _wire_fake_creator(services, {"categories": []})
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+        response = client.post(
+            "/admin/taxonomy/versions/tx-nope/99/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 404, response.text
+        assert response.json()["error"]["code"] == "KW_NOT_FOUND"
+
+    def test_502_when_llm_fails(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        draft = self._seed_draft_with_accepted(services, taxonomy_id="tx-syn-fail")
+        _wire_fake_creator(services, RuntimeError("upstream 500"))
+        headers = {"Authorization": f"Bearer {_token('admin')}"}
+        response = client.post(
+            f"/admin/taxonomy/versions/tx-syn-fail/{draft.version_number}/synthesize",
+            headers=headers,
+        )
+        assert response.status_code == 502, response.text
+        body = response.json()
+        assert body["error"]["retryable"] is True
+        assert "upstream 500" in body["error"]["message"]
+
+    def test_non_admin_is_403(self, bearer_env: None) -> None:
+        client, services = _client_and_services()
+        draft = self._seed_draft_with_accepted(services, taxonomy_id="tx-syn-403")
+        _wire_fake_creator(services, {"categories": []})
+        for role in ("viewer", "contributor", "reviewer"):
+            headers = {"Authorization": f"Bearer {_token(role)}"}
+            response = client.post(
+                f"/admin/taxonomy/versions/tx-syn-403/{draft.version_number}/synthesize",
+                headers=headers,
+            )
+            assert response.status_code == 403, f"role={role}: {response.text}"
