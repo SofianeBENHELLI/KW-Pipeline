@@ -356,9 +356,7 @@ def test_pdf_parser_table_rect_covers_table_area_only():
     extraction = PdfParser().parse(version=version, storage=documents.storage)
 
     table_section = next(s for s in extraction.sections if "Table" in s.heading)
-    table_ref = next(
-        r for r in extraction.source_references if r.section_id == table_section.id
-    )
+    table_ref = next(r for r in extraction.source_references if r.section_id == table_section.id)
     assert len(table_ref.rects) == 1
     table_rect = table_ref.rects[0]
     # Table sits below the heading line, so its top is non-trivial.

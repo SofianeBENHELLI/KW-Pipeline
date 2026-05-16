@@ -110,13 +110,9 @@ class HybridSearchService:
         min_candidate_pool: int = 20,
     ) -> None:
         if candidate_multiplier < 1:
-            raise ValueError(
-                f"candidate_multiplier must be >= 1; got {candidate_multiplier}."
-            )
+            raise ValueError(f"candidate_multiplier must be >= 1; got {candidate_multiplier}.")
         if min_candidate_pool < 1:
-            raise ValueError(
-                f"min_candidate_pool must be >= 1; got {min_candidate_pool}."
-            )
+            raise ValueError(f"min_candidate_pool must be >= 1; got {min_candidate_pool}.")
         self._vector = vector
         self._bm25 = bm25
         self._rrf_k = rrf_k

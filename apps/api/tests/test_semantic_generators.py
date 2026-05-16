@@ -102,13 +102,9 @@ class TestSemanticOutputServiceDispatch:
     def test_default_method_runs_deterministic_and_stamps_method_id(self):
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
 
-        out = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
+        out = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
 
         # Deterministic is the default; the adapter must stamp the
         # method id on the persisted row so the registry stays in sync
@@ -118,9 +114,7 @@ class TestSemanticOutputServiceDispatch:
     def test_unknown_method_raises_unknownsemanticmethod(self):
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
 
         with pytest.raises(UnknownSemanticMethod):
             services.semantic_outputs.generate(
@@ -132,25 +126,17 @@ class TestSemanticOutputServiceDispatch:
         # the cache-first behaviour the original service shipped.
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
 
-        first = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
-        second = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
+        first = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
+        second = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
         assert second.id == first.id
 
     def test_method_change_regenerates_persisted_row(self):
         """Switching from deterministic → llm overwrites the cached row."""
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
         deterministic_first = services.semantic_outputs.generate(
             document_id=document_id,
             version_id=version_id,
@@ -161,9 +147,7 @@ class TestSemanticOutputServiceDispatch:
         # instructor + provider keys; tests use the fake.
         section_id = deterministic_first.sections[0].id
         fake_client = _FakeInstructorClient(_envelope_with_one_asset(section_id))
-        llm_generator = SemanticIntelligenceGenerator(
-            client=fake_client, model="test/fake"
-        )
+        llm_generator = SemanticIntelligenceGenerator(client=fake_client, model="test/fake")
         # Re-wire the service registry — the simplest test affordance
         # is to mutate the private dict because the field is built once
         # at construction time. Production paths inject via
@@ -183,9 +167,7 @@ class TestSemanticOutputServiceDispatch:
         assert len(llm_out.assets) == 1
         assert llm_out.assets[0].source_reference_ids == [section_id]
         # Persisted row really got rewritten.
-        re_read = services.semantic_outputs.get(
-            document_id=document_id, version_id=version_id
-        )
+        re_read = services.semantic_outputs.get(document_id=document_id, version_id=version_id)
         assert re_read.extraction_method == SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE
 
     def test_available_methods_lists_deterministic_first(self):
@@ -268,7 +250,8 @@ class TestSemanticIntelligenceGenerator:
         raw = _raw_extraction_with_section("sec-1")
         envelope = _SemanticEnvelope(
             profile=_ProfileWire(
-                title="Doc", document_type="report",
+                title="Doc",
+                document_type="report",
             ),
             assets=[
                 _AssetWire(
@@ -314,9 +297,7 @@ class TestSemanticIntelligenceGenerator:
 
     def test_llm_failure_raises_runtimeerror(self):
         raw = _raw_extraction_with_section("sec-1")
-        gen = SemanticIntelligenceGenerator(
-            client=_RaisingInstructorClient(), model="test/fake"
-        )
+        gen = SemanticIntelligenceGenerator(client=_RaisingInstructorClient(), model="test/fake")
         with pytest.raises(RuntimeError, match="LLM semantic generation failed"):
             gen.generate(version=_version(), raw_extraction=raw)
 
@@ -343,14 +324,10 @@ class TestSemanticIntelligenceGenerator:
     def test_service_maps_generator_runtimeerror_to_semanticgenerationfailed(self):
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
         # Inject a generator that always raises.
         services.semantic_outputs._generators[SEMANTIC_METHOD_SEMANTIC_INTELLIGENCE] = (
-            SemanticIntelligenceGenerator(
-                client=_RaisingInstructorClient(), model="test/fake"
-            )
+            SemanticIntelligenceGenerator(client=_RaisingInstructorClient(), model="test/fake")
         )
         with pytest.raises(SemanticGenerationFailed):
             services.semantic_outputs.generate(
@@ -404,14 +381,10 @@ class TestKnowledgeGraphSemanticGenerator:
     def test_method_3_via_service_dispatch(self):
         services = build_services()
         document_id, version_id = _upload(services)
-        services.extraction_jobs.extract(
-            document_id=document_id, version_id=version_id
-        )
+        services.extraction_jobs.extract(document_id=document_id, version_id=version_id)
         # Bootstrap a cached deterministic row so we can read the
         # generated section id, then plug in the Method 3 generator.
-        first = services.semantic_outputs.generate(
-            document_id=document_id, version_id=version_id
-        )
+        first = services.semantic_outputs.generate(document_id=document_id, version_id=version_id)
         section_id = first.sections[0].id
         services.semantic_outputs._generators[SEMANTIC_METHOD_KNOWLEDGE_GRAPH] = (
             KnowledgeGraphSemanticGenerator(

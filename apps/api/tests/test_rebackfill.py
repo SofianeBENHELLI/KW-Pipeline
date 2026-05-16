@@ -146,23 +146,12 @@ def test_previously_validated_row_is_demoted_to_needs_review(monkeypatch):
     assert upload.status_code == 200, upload.text
     version = upload.json()
     document_id, version_id = version["document_id"], version["id"]
+    assert client.post(f"/documents/{document_id}/versions/{version_id}/extract").status_code == 200
     assert (
-        client.post(
-            f"/documents/{document_id}/versions/{version_id}/extract"
-        ).status_code
-        == 200
+        client.post(f"/documents/{document_id}/versions/{version_id}/semantic").status_code == 200
     )
     assert (
-        client.post(
-            f"/documents/{document_id}/versions/{version_id}/semantic"
-        ).status_code
-        == 200
-    )
-    assert (
-        client.post(
-            f"/documents/{document_id}/versions/{version_id}/validate"
-        ).status_code
-        == 200
+        client.post(f"/documents/{document_id}/versions/{version_id}/validate").status_code == 200
     )
 
     # Overwrite the raw_extraction with a v0.1 payload so rebackfill
@@ -197,9 +186,7 @@ def test_previously_validated_row_is_demoted_to_needs_review(monkeypatch):
     result = run_rebackfill(services=services)
 
     assert result.demoted == [version_id]
-    refreshed = services.documents.get_version(
-        document_id=document_id, version_id=version_id
-    )
+    refreshed = services.documents.get_version(document_id=document_id, version_id=version_id)
     assert refreshed.status is DocumentVersionStatus.NEEDS_REVIEW
     assert refreshed.reviewer_note == _DEMOTE_NOTE
 
@@ -277,7 +264,4 @@ def test_document_id_filter_narrows_work_set():
     result = run_rebackfill(services=services, document_id=doc_a)
 
     assert result.rebackfilled == [version_a]
-    assert (
-        services.documents.catalog.get_raw_extraction(version_b).parser_version
-        == "0.1"
-    )
+    assert services.documents.catalog.get_raw_extraction(version_b).parser_version == "0.1"

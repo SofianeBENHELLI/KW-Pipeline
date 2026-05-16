@@ -210,9 +210,7 @@ class ExtractionJobService:
             actor=actor,
             level=logging.INFO,
         )
-        return self.extract(
-            document_id=document_id, version_id=version_id, actor=actor
-        )
+        return self.extract(document_id=document_id, version_id=version_id, actor=actor)
 
     def get_raw_extraction(self, document_id: str, version_id: str) -> RawExtraction:
         """Return raw extraction output for a document version."""

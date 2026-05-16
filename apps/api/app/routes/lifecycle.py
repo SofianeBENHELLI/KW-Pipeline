@@ -704,8 +704,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         refs_by_id = {ref.id: ref for ref in extraction.source_references}
 
         pipeline_version = (
-            f"parser={extraction.parser_version};"
-            f"topic={DOCUMENT_TOPIC_SCHEMA_VERSION}"
+            f"parser={extraction.parser_version};topic={DOCUMENT_TOPIC_SCHEMA_VERSION}"
         )
 
         items: list[ChunkLocation] = []
