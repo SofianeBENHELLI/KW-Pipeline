@@ -21,7 +21,7 @@
  * react-router; clicking a tile or tab navigates without a
  * full-page reload.
  */
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Navigate,
@@ -31,6 +31,14 @@ import {
   useNavigate,
 } from "react-router-dom";
 
+import { SessionExpiredBanner, useSessionGuard } from "../../../_shared/auth";
+import {
+  clearSessionTrigger,
+  getApiBaseUrl,
+  setSessionTrigger,
+} from "../api/client";
+import { useAdminConfig } from "../api/useAdminConfig";
+import { ForceAutoBanner } from "./catalog/Banners";
 import { CatalogView } from "./catalog/CatalogView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { ChatPanel } from "./search/ChatPanel";
@@ -61,6 +69,26 @@ export function KnowledgeForgeApp({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // ADR-019 §5 — register the orb shell with the session-expired
+  // trigger so any 401 thrown from the api client flips the banner
+  // here too. SessionGuardProvider sits at the top of main.tsx, so
+  // we just read its value and wire the api hook.
+  const session = useSessionGuard();
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => clearSessionTrigger();
+  }, [session.trigger]);
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
+
+  // EPIC-A A.8 force-auto banner — surfaces ``force_auto_corpus=true``
+  // for admins. Hidden for non-admin users (403) and on fetch error.
+  const adminConfig = useAdminConfig(getApiBaseUrl());
+  const forceAutoActive =
+    adminConfig.status === "ok" &&
+    adminConfig.config?.hitl?.force_auto_corpus === true;
   // /kf/settings → open the modal AND render the workspace below it
   // so closing the modal returns the user to a real surface, not a
   // blank page.
@@ -108,6 +136,11 @@ export function KnowledgeForgeApp({
         onOpenSettings: () => setSettingsOpen(true),
       }}
     >
+      <ForceAutoBanner hidden={!forceAutoActive} />
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+      />
       <Routes>
         <Route index element={<Navigate to="/kf/review" replace />} />
         <Route path="review" element={<ReviewWorkspace />} />
