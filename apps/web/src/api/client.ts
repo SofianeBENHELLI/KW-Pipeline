@@ -25,6 +25,8 @@ import type {
   ApiChatMode,
   ApiChatResponse,
   ApiChunkSearchResponse,
+  ApiConceptSuggestion,
+  ApiCreateDraftRequest,
   ApiDocument,
   ApiDocumentHashCheck,
   ApiDocumentVersion,
@@ -42,6 +44,8 @@ import type {
   ApiSemanticDocument,
   ApiTaxonomyVersion,
   ApiTaxonomyVersionListResponse,
+  ApiTransitionConceptRequest,
+  ApiTransitionVersionRequest,
   ApiUnarchiveResponse,
   ApiUploadResponse,
   ListDocumentsResponse,
@@ -49,7 +53,8 @@ import type {
 
 // ─── Base URL + transport ────────────────────────────────────────────────────
 
-const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const BASE_URL: string =
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 /** Resolved API base URL — exposed so the Settings surface can show
  *  what's actually being targeted at runtime. Build-time only; the
@@ -241,14 +246,10 @@ function unwrap<T>(result: {
   const { response, error } = result;
   // openapi-fetch parsed the JSON for us — `error` is the body shape.
   const body =
-    error && typeof error === "object"
-      ? (error as ResponseBodyShape)
-      : null;
+    error && typeof error === "object" ? (error as ResponseBodyShape) : null;
   const { detail, code, retryable, remediation } = fieldsFromBody(
     body,
-    typeof error === "string" && error.length > 0
-      ? error
-      : response.statusText,
+    typeof error === "string" && error.length > 0 ? error : response.statusText,
   );
   throw new ApiError(response.status, detail, code, retryable, remediation);
 }
@@ -332,10 +333,14 @@ export async function getDocument(
 export async function checkDocumentHash(
   sha256: string,
 ): Promise<ApiDocumentHashCheck> {
-  const { data, error, response } = await http.GET("/documents/by-hash/{sha256}", {
-    params: { path: { sha256 } },
-  });
-  if (error !== undefined || data === undefined) throw await asApiError(response);
+  const { data, error, response } = await http.GET(
+    "/documents/by-hash/{sha256}",
+    {
+      params: { path: { sha256 } },
+    },
+  );
+  if (error !== undefined || data === undefined)
+    throw await asApiError(response);
   return data;
 }
 
@@ -451,10 +456,13 @@ export async function getExtraction(
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiRawExtraction> {
   return unwrap(
-    await http.GET("/documents/{document_id}/versions/{version_id}/extraction", {
-      params: { path: { document_id: documentId, version_id: versionId } },
-      signal: options.signal,
-    }),
+    await http.GET(
+      "/documents/{document_id}/versions/{version_id}/extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
   );
 }
 
@@ -564,7 +572,9 @@ export async function getMarkdown(
       parseAs: "text",
     },
   );
-  return unwrap(result as { data?: string; error?: unknown; response: Response });
+  return unwrap(
+    result as { data?: string; error?: unknown; response: Response },
+  );
 }
 
 // ─── Review endpoints ─────────────────────────────────────────────────────────
@@ -666,13 +676,10 @@ export async function getProjectionStatus(
   versionId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiProjectionStatusResponse | null> {
-  const result = await http.GET(
-    "/knowledge/projection_status/{version_id}",
-    {
-      params: { path: { version_id: versionId } },
-      signal: options.signal,
-    },
-  );
+  const result = await http.GET("/knowledge/projection_status/{version_id}", {
+    params: { path: { version_id: versionId } },
+    signal: options.signal,
+  });
   if (result.response.status === 404) return null;
   return unwrap(result);
 }
@@ -1031,8 +1038,133 @@ export async function getTaxonomyVersion(
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiTaxonomyVersion> {
   return unwrap(
-    await http.GET(
-      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}",
+    await http.GET("/admin/taxonomy/versions/{taxonomy_id}/{version_number}", {
+      params: {
+        path: {
+          taxonomy_id: taxonomyId,
+          version_number: versionNumber,
+        },
+      },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/drafts (EPIC-1 §1.8)
+ *
+ * Admin-only. Creates a new ``DRAFT`` taxonomy version. Three modes
+ * per ADR-018 §2:
+ *
+ * - Empty body → mints a fresh ``taxonomy_id`` with an empty tree.
+ * - ``taxonomy_id`` only → next version_number for that lineage,
+ *   empty tree (rare "branch + reset" flow).
+ * - Both ``taxonomy_id`` and ``source_version_number`` → next version
+ *   inheriting the source version's tree (the typical
+ *   "branch from V1 to edit V2" flow).
+ *
+ * 409 with ``KW_ILLEGAL_TAXONOMY_TRANSITION`` if the source version
+ * is in a non-branchable state.
+ */
+export async function createTaxonomyDraft(
+  opts: ApiCreateDraftRequest = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST("/admin/taxonomy/drafts", {
+      body: opts,
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition
+ *
+ * Admin-only. Drives a version through the ADR-018 §2 state machine:
+ * DRAFT → CANDIDATE_V0 → VALIDATED_V1 → ARCHIVED (with DISCARDED as
+ * the dead-end side branch). ``version_label`` only applies to
+ * ``VALIDATED_V1``; ``reason`` only to ``ARCHIVED`` / ``DISCARDED``.
+ *
+ * Illegal moves surface as ``409 KW_ILLEGAL_TAXONOMY_TRANSITION`` with
+ * the canonical message — the UI banners it verbatim.
+ */
+export async function transitionTaxonomyVersion(
+  taxonomyId: string,
+  versionNumber: number,
+  body: ApiTransitionVersionRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition
+ *
+ * Admin-only. Drives one concept suggestion through the per-suggestion
+ * FSM (ADR-018 §5). ``merge_target_id`` is REQUIRED when transitioning
+ * to ``MERGED`` and rejected for every other target state — a 400
+ * surfaces inline in the concepts sub-table.
+ */
+export async function transitionTaxonomyConcept(
+  taxonomyId: string,
+  versionNumber: number,
+  suggestionId: string,
+  body: ApiTransitionConceptRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiConceptSuggestion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+            suggestion_id: suggestionId,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{taxonomy_id}/{version_number}/synthesize
+ *
+ * Admin-only. Runs the LLM-driven business-taxonomy synthesizer on a
+ * DRAFT version, replacing its ``taxonomy.categories`` with the
+ * generated tree and emitting ``taxonomy.synthesized`` audit. Returns
+ * the updated version so the lineage table can refresh without a
+ * follow-up GET.
+ *
+ * 503 ``KW_LLM_DISABLED`` when the LLM provider is unwired; 409
+ * ``KW_ILLEGAL_TAXONOMY_TRANSITION`` when the version is not DRAFT.
+ */
+export async function synthesizeTaxonomy(
+  taxonomyId: string,
+  versionNumber: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/synthesize",
       {
         params: {
           path: {

@@ -57,6 +57,30 @@ function makeVersion(
   } as ApiTaxonomyVersion;
 }
 
+// Helper for one ``ConceptSuggestion`` row. The route shape only cares
+// about the id + state + label fields the action tests assert on.
+function makeSuggestion(
+  overrides: Partial<ApiTaxonomyVersion["suggestions"][number]> = {},
+): ApiTaxonomyVersion["suggestions"][number] {
+  return {
+    suggestion_id: "sug-1",
+    label: "Cooling",
+    description: "Battery cooling subsystem.",
+    parent_id: null,
+    state: "NEW",
+    source: "extractor",
+    confidence: 0.9,
+    evidence_chunk_ids: [],
+    created_at: "2026-05-01T10:00:00Z",
+    state_changed_at: "2026-05-01T10:00:00Z",
+    created_by: null,
+    last_actor: null,
+    merge_target_id: null,
+    schema_version: "v0.1",
+    ...overrides,
+  } as ApiTaxonomyVersion["suggestions"][number];
+}
+
 function renderView(initialEntry = "/admin/taxonomy") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -302,5 +326,419 @@ describe("formatTimestamp", () => {
   });
   it("returns the raw string for an unparseable input", () => {
     expect(formatTimestamp("not-a-date")).toBe("not-a-date");
+  });
+});
+
+// ─── Action button coverage (slice 1.9 follow-up) ───────────────────────────
+
+/** Wire one fetch mock that returns ``listResponses[i]`` for the i-th
+ *  GET /admin/taxonomy/versions/{id} call and routes every POST to the
+ *  ``onPost`` handler. Lets the action tests assert "POST fires + list
+ *  re-fetches" with a single mock. */
+function installListPostMock(
+  listResponses: ApiTaxonomyVersion[][],
+  onPost: (url: string, body: unknown) => Response | Promise<Response>,
+) {
+  let listIdx = 0;
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "GET" && url.includes("/admin/taxonomy/versions/")) {
+          const next =
+            listResponses[Math.min(listIdx, listResponses.length - 1)];
+          listIdx += 1;
+          return makeJsonResponse({
+            taxonomy_id: "tx-act",
+            versions: next ?? [],
+          });
+        }
+        if (method === "POST") {
+          let body: unknown = null;
+          if (input instanceof Request) {
+            try {
+              body = await input.clone().json();
+            } catch {
+              body = null;
+            }
+          } else if (init?.body !== undefined) {
+            try {
+              body = JSON.parse(init.body as string);
+            } catch {
+              body = null;
+            }
+          }
+          return onPost(url, body);
+        }
+        return makeJsonResponse({ detail: "unexpected" }, 500);
+      },
+    );
+}
+
+describe("AdminTaxonomyView — version actions", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Promote button POSTs to_state=CANDIDATE_V0 and refetches the lineage", async () => {
+    let promoteCalled = false;
+    let promoteBody: unknown = null;
+    let promoteUrl = "";
+    const draft = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-act",
+    });
+    const candidate = { ...draft, state: "CANDIDATE_V0" as const };
+    installListPostMock([[draft], [candidate]], (url, body) => {
+      if (url.includes("/transition")) {
+        promoteCalled = true;
+        promoteBody = body;
+        promoteUrl = url;
+        return makeJsonResponse(candidate);
+      }
+      return makeJsonResponse({ detail: "unexpected" }, 500);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-promote"));
+
+    await waitFor(() => {
+      expect(promoteCalled).toBe(true);
+    });
+    expect(promoteUrl).toContain(
+      "/admin/taxonomy/versions/tx-act/1/transition",
+    );
+    expect(promoteBody).toEqual({ to_state: "CANDIDATE_V0" });
+    // Lineage refetched and the row now shows the Candidate pill.
+    await waitFor(() => {
+      expect(screen.getByTestId("state-pill-CANDIDATE_V0")).toBeInTheDocument();
+    });
+  });
+
+  it("Validate modal submits to_state=VALIDATED_V1 with the typed label", async () => {
+    let validateBody: unknown = null;
+    const candidate = makeVersion({
+      version_number: 2,
+      state: "CANDIDATE_V0",
+      taxonomy_id: "tx-act",
+    });
+    const validated = {
+      ...candidate,
+      state: "VALIDATED_V1" as const,
+      version_label: "Launch",
+    };
+    installListPostMock([[candidate], [validated]], (_url, body) => {
+      validateBody = body;
+      return makeJsonResponse(validated);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-validate"));
+    fireEvent.change(await screen.findByTestId("validate-version-label"), {
+      target: { value: "Launch" },
+    });
+    fireEvent.click(screen.getByTestId("validate-submit"));
+
+    await waitFor(() => {
+      expect(validateBody).toEqual({
+        to_state: "VALIDATED_V1",
+        version_label: "Launch",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("state-pill-VALIDATED_V1")).toBeInTheDocument();
+    });
+  });
+
+  it("Archive modal submits to_state=ARCHIVED with the optional reason", async () => {
+    let archiveBody: unknown = null;
+    const validated = makeVersion({
+      version_number: 3,
+      state: "VALIDATED_V1",
+      taxonomy_id: "tx-act",
+    });
+    const archived = { ...validated, state: "ARCHIVED" as const };
+    installListPostMock([[validated], [archived]], (_url, body) => {
+      archiveBody = body;
+      return makeJsonResponse(archived);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-archive"));
+    fireEvent.change(await screen.findByTestId("reason-input"), {
+      target: { value: "superseded by v4" },
+    });
+    fireEvent.click(screen.getByTestId("reason-submit"));
+
+    await waitFor(() => {
+      expect(archiveBody).toEqual({
+        to_state: "ARCHIVED",
+        reason: "superseded by v4",
+      });
+    });
+  });
+
+  it("Discard modal with an empty reason sends reason=null", async () => {
+    let discardBody: unknown = null;
+    const draft = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-act",
+    });
+    const discarded = { ...draft, state: "DISCARDED" as const };
+    installListPostMock([[draft], [discarded]], (_url, body) => {
+      discardBody = body;
+      return makeJsonResponse(discarded);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-discard"));
+    // No reason typed — submit with the empty default.
+    fireEvent.click(await screen.findByTestId("reason-submit"));
+
+    await waitFor(() => {
+      expect(discardBody).toEqual({ to_state: "DISCARDED", reason: null });
+    });
+  });
+
+  it("Synthesize button POSTs to .../synthesize and refetches the lineage", async () => {
+    let synthCalled = false;
+    let synthUrl = "";
+    const draft = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-act",
+    });
+    const draftWithTree = {
+      ...draft,
+      taxonomy: {
+        schema_version: "v0.1",
+        categories: [
+          {
+            id: "battery",
+            label: "Battery",
+            description: "...",
+            source: "imposed",
+            subcategories: [],
+          },
+        ],
+      } as ApiTaxonomyVersion["taxonomy"],
+    };
+    installListPostMock([[draft], [draftWithTree]], (url, _body) => {
+      if (url.includes("/synthesize")) {
+        synthCalled = true;
+        synthUrl = url;
+        return makeJsonResponse(draftWithTree);
+      }
+      return makeJsonResponse({ detail: "unexpected" }, 500);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-synthesize"));
+
+    await waitFor(() => {
+      expect(synthCalled).toBe(true);
+    });
+    expect(synthUrl).toContain("/admin/taxonomy/versions/tx-act/1/synthesize");
+    // Lineage refetched — category count cell now reads 1.
+    await waitFor(() => {
+      const row = screen.getByTestId("taxonomy-lineage-row-1");
+      expect(row).toHaveTextContent("1");
+    });
+  });
+
+  it("surfaces a 409 illegal-transition envelope in the inline error banner", async () => {
+    const candidate = makeVersion({
+      version_number: 1,
+      state: "CANDIDATE_V0",
+      taxonomy_id: "tx-act",
+    });
+    installListPostMock([[candidate]], () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "KW_ILLEGAL_TAXONOMY_TRANSITION",
+            message:
+              "Illegal transition CANDIDATE_V0 -> CANDIDATE_V0 (ADR-018 §2).",
+            status: 409,
+            retryable: false,
+            remediation: null,
+          },
+          detail:
+            "Illegal transition CANDIDATE_V0 -> CANDIDATE_V0 (ADR-018 §2).",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    // The validate-modal path drives the failing POST.
+    fireEvent.click(await screen.findByTestId("action-validate"));
+    fireEvent.click(await screen.findByTestId("validate-submit"));
+
+    expect(
+      await screen.findByTestId("taxonomy-action-error"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Illegal transition/)).toBeInTheDocument();
+    // The row is still there — a failed mutation does not wipe state.
+    expect(screen.getByTestId("taxonomy-lineage-row-1")).toBeInTheDocument();
+  });
+});
+
+describe("AdminTaxonomyView — create draft", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Create draft button opens the modal and POSTs the empty body for a fresh lineage", async () => {
+    let postCalled = false;
+    let postUrl = "";
+    let postBody: unknown = null;
+    const fresh = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-fresh",
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/admin/taxonomy/drafts")) {
+          postCalled = true;
+          postUrl = url;
+          if (input instanceof Request) {
+            try {
+              postBody = await input.clone().json();
+            } catch {
+              postBody = null;
+            }
+          }
+          return makeJsonResponse(fresh);
+        }
+        if (
+          method === "GET" &&
+          url.includes("/admin/taxonomy/versions/tx-fresh")
+        ) {
+          return makeJsonResponse({
+            taxonomy_id: "tx-fresh",
+            versions: [fresh],
+          });
+        }
+        return makeJsonResponse({ detail: "unexpected" }, 500);
+      },
+    );
+
+    renderView();
+
+    fireEvent.click(screen.getByTestId("create-draft-button"));
+    // Modal fields are empty by default — submit "as-is".
+    fireEvent.click(await screen.findByTestId("create-draft-submit"));
+
+    await waitFor(() => {
+      expect(postCalled).toBe(true);
+    });
+    expect(postUrl).toContain("/admin/taxonomy/drafts");
+    expect(postBody).toEqual({});
+    // The view switches the applied id over to the new lineage.
+    await waitFor(() => {
+      expect(screen.getByTestId("taxonomy-lineage-row-1")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("AdminTaxonomyView — concept transitions", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Accept on a NEW suggestion POSTs to_state=ACCEPTED and refetches", async () => {
+    let acceptCalled = false;
+    let acceptUrl = "";
+    let acceptBody: unknown = null;
+    const suggestion = makeSuggestion({
+      suggestion_id: "sug-cooling",
+      state: "NEW",
+    });
+    const draft = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-act",
+      suggestions: [suggestion],
+    });
+    const accepted = {
+      ...draft,
+      suggestions: [{ ...suggestion, state: "ACCEPTED" as const }],
+    };
+    installListPostMock([[draft], [accepted]], (url, body) => {
+      if (url.includes("/concepts/")) {
+        acceptCalled = true;
+        acceptUrl = url;
+        acceptBody = body;
+        return makeJsonResponse({ ...suggestion, state: "ACCEPTED" });
+      }
+      return makeJsonResponse({ detail: "unexpected" }, 500);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    // Expand the concepts sub-table.
+    fireEvent.click(await screen.findByTestId("action-toggle-concepts"));
+    fireEvent.click(await screen.findByTestId("concept-accept-sug-cooling"));
+
+    await waitFor(() => {
+      expect(acceptCalled).toBe(true);
+    });
+    expect(acceptUrl).toContain(
+      "/admin/taxonomy/versions/tx-act/1/concepts/sug-cooling/transition",
+    );
+    expect(acceptBody).toEqual({ to_state: "ACCEPTED" });
+  });
+
+  it("Merge with an empty target id surfaces the 400 in the banner", async () => {
+    const suggestion = makeSuggestion({
+      suggestion_id: "sug-cooling",
+      state: "UNDER_REVIEW",
+    });
+    const draft = makeVersion({
+      version_number: 1,
+      state: "DRAFT",
+      taxonomy_id: "tx-act",
+      suggestions: [suggestion],
+    });
+    installListPostMock([[draft]], (url) => {
+      if (url.includes("/concepts/")) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "KW_BAD_REQUEST",
+              message:
+                "merge_target_id is required when transitioning to MERGED.",
+              status: 400,
+              retryable: false,
+              remediation: null,
+            },
+            detail: "merge_target_id is required when transitioning to MERGED.",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return makeJsonResponse({ detail: "unexpected" }, 500);
+    });
+
+    renderView("/admin/taxonomy?taxonomy_id=tx-act");
+
+    fireEvent.click(await screen.findByTestId("action-toggle-concepts"));
+    fireEvent.click(await screen.findByTestId("concept-merge-sug-cooling"));
+    // Submit without typing a target id — the server returns the 400.
+    fireEvent.click(await screen.findByTestId("merge-submit"));
+
+    expect(
+      await screen.findByText(/merge_target_id is required/),
+    ).toBeInTheDocument();
   });
 });

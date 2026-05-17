@@ -120,8 +120,7 @@ export type ApiOrbitalPurgeDocumentResponse =
   Schemas["OrbitalPurgeDocumentResponse"];
 
 /** Response body of ``POST /admin/orbital/purge_all`` (#292 — bulk override). */
-export type ApiOrbitalPurgeAllResponse =
-  Schemas["OrbitalPurgeAllResponse"];
+export type ApiOrbitalPurgeAllResponse = Schemas["OrbitalPurgeAllResponse"];
 
 /**
  * Operator-typed phrase the bulk-purge route demands as a second
@@ -209,6 +208,18 @@ export type ApiConceptSuggestionState = ApiConceptSuggestion["state"];
  *  by ``version_number`` ascending. */
 export type ApiTaxonomyVersionListResponse =
   Schemas["TaxonomyVersionListResponse"];
+
+/** Body for ``POST /admin/taxonomy/drafts``. Both fields optional —
+ *  empty submission mints a fresh lineage. */
+export type ApiCreateDraftRequest = Schemas["CreateDraftRequest"];
+
+/** Body for ``POST /admin/taxonomy/versions/{tid}/{vnum}/transition``.
+ *  ``to_state`` is the target lifecycle state per ADR-018 §2. */
+export type ApiTransitionVersionRequest = Schemas["TransitionVersionRequest"];
+
+/** Body for the concept-suggestion transition route. ``merge_target_id``
+ *  is required when ``to_state === "MERGED"`` and rejected otherwise. */
+export type ApiTransitionConceptRequest = Schemas["TransitionConceptRequest"];
 
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 

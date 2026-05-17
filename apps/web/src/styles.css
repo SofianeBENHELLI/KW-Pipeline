@@ -1,7 +1,6 @@
 :root {
   color-scheme: light;
-  font-family:
-    Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --surface: #f7f8fa;
   --panel: #ffffff;
   --panel-muted: #f0f3f6;
@@ -832,7 +831,7 @@ pre {
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(31, 143, 191, 0.12);
-  color: #1F8FBF;
+  color: #1f8fbf;
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -847,24 +846,24 @@ pre {
   border: 1px solid transparent;
 }
 .sem-asset__status--needs_review {
-  background: #FFF8E1;
-  color: #8B6500;
-  border-color: #F2D689;
+  background: #fff8e1;
+  color: #8b6500;
+  border-color: #f2d689;
 }
 .sem-asset__status--source_backed {
-  background: #E5F2F8;
-  color: #1F8FBF;
-  border-color: #B0D6E6;
+  background: #e5f2f8;
+  color: #1f8fbf;
+  border-color: #b0d6e6;
 }
 .sem-asset__status--validated {
-  background: #E5F4EC;
-  color: #1F7A4A;
-  border-color: #CFE9DD;
+  background: #e5f4ec;
+  color: #1f7a4a;
+  border-color: #cfe9dd;
 }
 .sem-asset__status--rejected {
-  background: #F8E2E0;
-  color: #B3261E;
-  border-color: #F3C4C4;
+  background: #f8e2e0;
+  color: #b3261e;
+  border-color: #f3c4c4;
 }
 .sem-asset__text {
   margin: 0;
@@ -886,7 +885,7 @@ pre {
 }
 .sem-asset__confidence-fill {
   height: 100%;
-  background: linear-gradient(90deg, #B26A00 0%, #1F7A4A 100%);
+  background: linear-gradient(90deg, #b26a00 0%, #1f7a4a 100%);
   transition: width 0.2s ease;
 }
 .sem-asset__confidence-value {
@@ -903,11 +902,11 @@ pre {
   flex-direction: row;
   align-items: flex-start;
   gap: 8px;
-  background: #FBEFD8;
-  border-color: #F6DCA6;
+  background: #fbefd8;
+  border-color: #f6dca6;
 }
 .sem-warning__glyph {
-  color: #B26A00;
+  color: #b26a00;
   font-size: 1rem;
   line-height: 1;
   flex: 0 0 auto;
@@ -1917,7 +1916,9 @@ pre {
   color: inherit;
   font: inherit;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .admin-hub-card:hover,
@@ -1982,7 +1983,6 @@ pre {
   outline: 2px solid var(--action);
   outline-offset: 1px;
 }
-
 
 /* ── Admin taxonomy versions (EPIC-1 §1.9, ADR-018) ────────────── */
 
@@ -2090,4 +2090,44 @@ pre {
   background: #fee2e2;
   border-color: #ef4444;
   color: #7f1d1d;
+}
+
+/* Per-row action cell on the lineage table. Buttons wrap on narrow
+ * viewports and a single in-flight mutation disables every button so
+ * an operator can't double-fire. */
+.taxonomy-action-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.taxonomy-action-cell .secondary-button,
+.taxonomy-action-cell .primary-button,
+.taxonomy-action-cell .text-button {
+  font-size: 0.85em;
+  padding: 4px 8px;
+}
+
+/* Concepts sub-table sits in the colspan row directly under its
+ * parent DRAFT version. The muted background separates it from the
+ * surrounding lineage rows so the expansion is unmistakable. */
+.concepts-sub-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel-muted);
+  margin: 4px 0;
+}
+
+.concepts-sub-table th,
+.concepts-sub-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 0.92em;
+}
+
+.secondary-button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
 }
