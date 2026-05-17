@@ -47,6 +47,25 @@ const SettingsModal = lazy(() =>
   import("./admin/SettingsModal").then((m) => ({ default: m.SettingsModal })),
 );
 
+// Knowledge Explorer MVP (ADR-028, #316). Each view is lazy-loaded —
+// the Topic Detail view in particular drags in the NVL canvas, so the
+// initial Explorer chunk stays small.
+const ExploreLandingView = lazy(() =>
+  import("../features/explore/ExploreLandingView").then((m) => ({
+    default: m.ExploreLandingView,
+  })),
+);
+const TopicIndexView = lazy(() =>
+  import("../features/explore/TopicIndexView").then((m) => ({
+    default: m.TopicIndexView,
+  })),
+);
+const TopicDetailView = lazy(() =>
+  import("../features/explore/TopicDetailView").then((m) => ({
+    default: m.TopicDetailView,
+  })),
+);
+
 import "./tokens.css";
 
 export interface KnowledgeForgeAppProps {
@@ -123,6 +142,31 @@ export function KnowledgeForgeApp({
         <Route path="search/*" element={<SearchPanel />} />
         <Route path="chat/*" element={<ChatPanel />} />
         <Route path="admin/*" element={<AdminHub />} />
+        {/* Knowledge Explorer MVP — ADR-028 §"Information Architecture". */}
+        <Route
+          path="explore"
+          element={
+            <Suspense fallback={<div className="kw-loading">Loading explorer…</div>}>
+              <ExploreLandingView />
+            </Suspense>
+          }
+        />
+        <Route
+          path="explore/topics"
+          element={
+            <Suspense fallback={<div className="kw-loading">Loading explorer…</div>}>
+              <TopicIndexView />
+            </Suspense>
+          }
+        />
+        <Route
+          path="explore/topics/:topicId"
+          element={
+            <Suspense fallback={<div className="kw-loading">Loading explorer…</div>}>
+              <TopicDetailView />
+            </Suspense>
+          }
+        />
         <Route
           path="settings/*"
           element={<Navigate to="/kf/review" replace />}
@@ -148,6 +192,9 @@ function pickActiveTab(
   if (pathname.startsWith("/kf/search")) return "search";
   if (pathname.startsWith("/kf/chat")) return "chat";
   if (pathname.startsWith("/kf/admin")) return "admin";
+  // Explorer surface doesn't claim a top-tab — the rail's Explorer
+  // tile is the primary affordance.
+  if (pathname.startsWith("/kf/explore")) return undefined;
   return undefined;
 }
 
@@ -177,6 +224,7 @@ function routeForRailTile(tile: RailTileId): string | null {
     case "upload":   return "/kf/catalog";
     case "review":   return "/kf/review";
     case "search":   return "/kf/search";
+    case "explore":  return "/kf/explore";
     case "info":     return "/kf/review";
     case "settings": return null; // handled separately — opens modal
   }
@@ -193,6 +241,7 @@ function pickActiveRail(
   if (pathname.startsWith("/kf/catalog")) return "upload";
   if (pathname.startsWith("/kf/search")) return "search";
   if (pathname.startsWith("/kf/admin")) return "activity";
+  if (pathname.startsWith("/kf/explore")) return "explore";
   if (pathname.startsWith("/kf/settings")) return "settings";
   if (tab === "chat") return "search"; // chat lives next to search on the rail
   return "review";

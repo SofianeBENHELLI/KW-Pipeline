@@ -17,6 +17,7 @@
 import {
   Activity,
   CircleHelp,
+  Compass,
   FileText,
   Settings,
   Upload,
@@ -31,6 +32,7 @@ export type RailTileId =
   | "review"
   | "search"
   | "info"
+  | "explore"
   | "settings";
 
 interface RailTile {
@@ -50,6 +52,7 @@ const TOP_TILES: RailTile[] = [
 const MID_TILES: RailTile[] = [
   { id: "review",   label: "Review",       icon: <FileText   size={SZ} strokeWidth={SW} /> },
   { id: "search",   label: "Search",       icon: OrbI.search },
+  { id: "explore",  label: "Knowledge Explorer", icon: <Compass size={SZ} strokeWidth={SW} /> },
   { id: "info",     label: "Document",     icon: <CircleHelp size={SZ} strokeWidth={SW} /> },
 ];
 
