@@ -28,8 +28,13 @@ import type {
   ApiDocument,
   ApiDocumentHashCheck,
   ApiDocumentVersion,
+  ApiKnowledgeAggregatedRelation,
+  ApiKnowledgeAtlas,
+  ApiKnowledgeExploreSearch,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiKnowledgeNeighborhood,
+  ApiKnowledgeTopicsList,
   ApiProjectionStatusResponse,
   ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
@@ -736,6 +741,189 @@ export async function askKnowledgeChat(
   return unwrap(
     await http.POST("/knowledge/chat", {
       body: { question, mode, top_k },
+      signal,
+    }),
+  );
+}
+
+// ─── Knowledge Explorer (ADR-028) ────────────────────────────────────────────
+// Read-side APIs powering the Topic/Search Atlas + focused graph lens.
+// All routes are scope-aware on the backend; the frontend stays read-
+// only and never tries to derive trust client-side.
+
+/**
+ * GET /knowledge/atlas
+ *
+ * Corpus atlas summary for the Explorer's default home (#312, #316,
+ * ADR-028 §"Information Architecture"). Returns five bounded summary
+ * blocks (top topics, validation coverage, recent imports, bridge
+ * documents, outlier relations) so the surface renders in a single
+ * page without pulling the full corpus graph.
+ */
+export async function getKnowledgeAtlas(
+  options: {
+    topTopicsLimit?: number;
+    recentDocumentsLimit?: number;
+    bridgeDocumentsLimit?: number;
+    outlierRelationsLimit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiKnowledgeAtlas> {
+  const {
+    topTopicsLimit,
+    recentDocumentsLimit,
+    bridgeDocumentsLimit,
+    outlierRelationsLimit,
+    signal,
+  } = options;
+  const query: Record<string, number> = {};
+  if (topTopicsLimit !== undefined) query.top_topics_limit = topTopicsLimit;
+  if (recentDocumentsLimit !== undefined)
+    query.recent_documents_limit = recentDocumentsLimit;
+  if (bridgeDocumentsLimit !== undefined)
+    query.bridge_documents_limit = bridgeDocumentsLimit;
+  if (outlierRelationsLimit !== undefined)
+    query.outlier_relations_limit = outlierRelationsLimit;
+  return unwrap(
+    await http.GET("/knowledge/atlas", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/topics
+ *
+ * Paginated list of LLM-extracted document-level topics (#411,
+ * ADR-031). Supports the Topic Index view and the Atlas's "top
+ * topics" tile — see ``listKnowledgeTopics({ limit: 10 })``.
+ */
+export async function listKnowledgeTopics(
+  options: {
+    documentId?: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiKnowledgeTopicsList> {
+  const { documentId, cursor, limit, signal } = options;
+  const query: Record<string, string | number> = {};
+  if (documentId) query.document_id = documentId;
+  if (cursor) query.cursor = cursor;
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/knowledge/topics", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/neighborhood
+ *
+ * Bounded subgraph around one focus root (#310, ADR-028). MUST be the
+ * source for any Explorer graph render — never fall back to
+ * ``GET /knowledge/graph`` (full-corpus payload), which the ADR
+ * explicitly forbids as a default view.
+ *
+ * ``depth=2`` is the MVP's lens default; the BFS budget + strength
+ * threshold keep the visible edge set small enough for the canvas.
+ */
+export async function getKnowledgeNeighborhood(
+  options: {
+    rootKind: "document" | "topic" | "chunk";
+    rootId: string;
+    depth?: number;
+    edgeLimit?: number;
+    minStrength?: number;
+    signal?: AbortSignal;
+  },
+): Promise<ApiKnowledgeNeighborhood> {
+  const { rootKind, rootId, depth, edgeLimit, minStrength, signal } = options;
+  const query: Record<string, string | number> = {
+    root_kind: rootKind,
+    root_id: rootId,
+  };
+  if (depth !== undefined) query.depth = depth;
+  if (edgeLimit !== undefined) query.edge_limit = edgeLimit;
+  if (minStrength !== undefined) query.min_strength = minStrength;
+  return unwrap(
+    await http.GET("/knowledge/neighborhood", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/explore/search
+ *
+ * Multi-kind grouped semantic search (#313, ADR-028). Returns chunks /
+ * documents / topics in a single envelope; entities + relations are
+ * empty placeholders today (reserved for v0.2). 503 with
+ * ``KW_VECTOR_SEARCH_DISABLED`` when Voyage isn't configured.
+ */
+export async function exploreSearch(
+  options: {
+    q: string;
+    chunkLimit?: number;
+    documentLimit?: number;
+    topicLimit?: number;
+    contributingChunksPerDocument?: number;
+    signal?: AbortSignal;
+  },
+): Promise<ApiKnowledgeExploreSearch> {
+  const {
+    q,
+    chunkLimit,
+    documentLimit,
+    topicLimit,
+    contributingChunksPerDocument,
+    signal,
+  } = options;
+  const query: Record<string, string | number> = { q };
+  if (chunkLimit !== undefined) query.chunk_limit = chunkLimit;
+  if (documentLimit !== undefined) query.document_limit = documentLimit;
+  if (topicLimit !== undefined) query.topic_limit = topicLimit;
+  if (contributingChunksPerDocument !== undefined)
+    query.contributing_chunks_per_document = contributingChunksPerDocument;
+  return unwrap(
+    await http.GET("/knowledge/explore/search", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/relations/aggregate
+ *
+ * Synthesised doc-doc relation evidence (#311, ADR-028, #380). Used by
+ * the focused-lens inspector to explain an aggregated document link
+ * via its contributing chunk pairs.
+ */
+export async function aggregateRelations(
+  options: {
+    sourceDocumentId: string;
+    targetDocumentId: string;
+    topN?: number;
+    refresh?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<ApiKnowledgeAggregatedRelation> {
+  const { sourceDocumentId, targetDocumentId, topN, refresh, signal } =
+    options;
+  const query: Record<string, string | number | boolean> = {
+    source_document_id: sourceDocumentId,
+    target_document_id: targetDocumentId,
+  };
+  if (topN !== undefined) query.top_n = topN;
+  if (refresh !== undefined) query.refresh = refresh;
+  return unwrap(
+    await http.GET("/knowledge/relations/aggregate", {
+      params: { query: query as never },
       signal,
     }),
   );

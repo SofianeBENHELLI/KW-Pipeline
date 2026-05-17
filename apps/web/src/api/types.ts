@@ -180,6 +180,35 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── Knowledge Explorer (ADR-028) ──────────────────────────────────────────
+// Wire shapes for the Atlas + Topics + Neighborhood + Explore-search +
+// Relations-aggregate read surfaces. The MVP frontend slice (#316/#317
+// /#318/#319) consumes these to render the Topic/Search Atlas with a
+// bounded graph lens — see ADR-028 §"Information Architecture".
+
+export type ApiKnowledgeAtlas = Schemas["AtlasResponse"];
+export type ApiKnowledgeAtlasTopicSummary = Schemas["AtlasTopicSummary"];
+export type ApiKnowledgeAtlasValidationCoverage =
+  Schemas["AtlasValidationCoverage"];
+export type ApiKnowledgeAtlasRecentDocument = Schemas["AtlasRecentDocument"];
+export type ApiKnowledgeAtlasBridgeDocument = Schemas["AtlasBridgeDocument"];
+export type ApiKnowledgeAtlasOutlierRelation =
+  Schemas["AtlasOutlierRelation"];
+
+export type ApiKnowledgeTopic = Schemas["DocumentTopic"];
+export type ApiKnowledgeTopicsList = Schemas["DocumentTopicsListResponse"];
+
+export type ApiKnowledgeNeighborhood = Schemas["FocusedNeighborhood"];
+export type ApiKnowledgeNeighborhoodEdge = Schemas["NeighborhoodEdge"];
+
+export type ApiKnowledgeExploreSearch = Schemas["ExploreSearchResponse"];
+export type ApiKnowledgeExploreChunk = Schemas["ExploreSearchChunk"];
+export type ApiKnowledgeExploreDocument = Schemas["ExploreSearchDocument"];
+export type ApiKnowledgeExploreTopic = Schemas["ExploreSearchTopic"];
+
+export type ApiKnowledgeAggregatedRelation =
+  Schemas["AggregatedRelationEvidence"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];
