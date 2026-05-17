@@ -828,12 +828,12 @@ export function AdminTaxonomyView() {
           conceptLabel={mergeModal.suggestion.label}
           busy={
             actionBusy ===
-            `c${mergeModal.versionNumber}:${mergeModal.suggestion.id}:MERGED`
+            `c${mergeModal.versionNumber}:${mergeModal.suggestion.suggestion_id}:MERGED`
           }
           onClose={() => setMergeModal(null)}
           onSubmit={(target) => {
             const vn = mergeModal.versionNumber;
-            const sid = mergeModal.suggestion.id;
+            const sid = mergeModal.suggestion.suggestion_id;
             setMergeModal(null);
             void runConceptTransition(vn, sid, "MERGED", {
               merge_target_id: target,

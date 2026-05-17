@@ -21,7 +21,10 @@ import {
   StatePill,
   formatTimestamp,
 } from "../AdminTaxonomyView";
-import type { ApiTaxonomyVersion } from "../../../api/types";
+import type {
+  ApiConceptSuggestion,
+  ApiTaxonomyVersion,
+} from "../../../api/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -302,5 +305,269 @@ describe("formatTimestamp", () => {
   });
   it("returns the raw string for an unparseable input", () => {
     expect(formatTimestamp("not-a-date")).toBe("not-a-date");
+  });
+});
+
+// ─── Slice 3 — lifecycle actions ──────────────────────────────────────────
+
+function makeConcept(
+  overrides: Partial<ApiConceptSuggestion> = {},
+): ApiConceptSuggestion {
+  return {
+    schema_version: "v0.1",
+    suggestion_id: "sug-1",
+    label: "Battery cooling",
+    description: "Proposed subcategory for thermal subsystems.",
+    parent_id: null,
+    state: "NEW",
+    source: "extractor",
+    confidence: 0.9,
+    evidence_chunk_ids: [],
+    merge_target_id: null,
+    last_actor: null,
+    created_by: null,
+    created_at: "2026-05-01T10:00:00Z",
+    state_changed_at: "2026-05-01T10:00:00Z",
+    ...overrides,
+  } as ApiConceptSuggestion;
+}
+
+describe("AdminTaxonomyView — lifecycle actions (slice 3)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders state-machine-gated action buttons for each row", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({
+        taxonomy_id: "tx-1",
+        versions: [
+          makeVersion({ version_number: 1, state: "DRAFT" }),
+          makeVersion({ version_number: 2, state: "CANDIDATE_V0" }),
+          makeVersion({ version_number: 3, state: "VALIDATED_V1" }),
+        ],
+      }),
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    await screen.findByTestId("taxonomy-lineage-row-1");
+
+    // DRAFT row: Promote + Discard enabled; Validate + Archive disabled.
+    expect(screen.getByTestId("taxonomy-promote-1")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-discard-1")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-validate-1")).toBeDisabled();
+    expect(screen.getByTestId("taxonomy-archive-1")).toBeDisabled();
+
+    // CANDIDATE_V0 row: Validate + Discard enabled; Promote + Archive disabled.
+    expect(screen.getByTestId("taxonomy-validate-2")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-discard-2")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-promote-2")).toBeDisabled();
+    expect(screen.getByTestId("taxonomy-archive-2")).toBeDisabled();
+
+    // VALIDATED_V1 row: only Archive enabled.
+    expect(screen.getByTestId("taxonomy-archive-3")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-promote-3")).toBeDisabled();
+    expect(screen.getByTestId("taxonomy-validate-3")).toBeDisabled();
+    expect(screen.getByTestId("taxonomy-discard-3")).toBeDisabled();
+
+    // Synthesize is the slice 3 stub — always disabled until #477.
+    expect(screen.getByTestId("taxonomy-synthesize-1")).toBeDisabled();
+  });
+
+  it("clicking Promote POSTs to the transition route and refetches", async () => {
+    let postUrl = "";
+    let postBody: string | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/transition")) {
+          postUrl = url;
+          postBody =
+            input instanceof Request
+              ? await input.clone().text()
+              : typeof init?.body === "string"
+                ? init.body
+                : null;
+          return makeJsonResponse(makeVersion({ state: "CANDIDATE_V0" }));
+        }
+        return makeJsonResponse({
+          taxonomy_id: "tx-1",
+          versions: [makeVersion({ version_number: 1, state: "DRAFT" })],
+        });
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    const btn = await screen.findByTestId("taxonomy-promote-1");
+    fireEvent.click(btn);
+    await waitFor(() => expect(postUrl).toContain("/transition"));
+    expect(postUrl).toContain("/admin/taxonomy/versions/tx-1/1/transition");
+    expect(JSON.parse(postBody ?? "{}")).toMatchObject({
+      to_state: "CANDIDATE_V0",
+    });
+  });
+
+  it("a 409 illegal-transition envelope surfaces the inline error banner", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/transition")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: {
+                  code: "KW_ILLEGAL_TRANSITION",
+                  message: "DRAFT → ARCHIVED is not a legal move.",
+                  status: 409,
+                  retryable: false,
+                  remediation: "Promote to CANDIDATE first.",
+                },
+                detail: "DRAFT → ARCHIVED is not a legal move.",
+              }),
+              {
+                status: 409,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        return Promise.resolve(
+          makeJsonResponse({
+            taxonomy_id: "tx-1",
+            versions: [makeVersion({ version_number: 1, state: "DRAFT" })],
+          }),
+        );
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    // Drive a Promote — the mocked 409 will surface the banner via
+    // the same action-error path.
+    fireEvent.click(await screen.findByTestId("taxonomy-promote-1"));
+    expect(
+      await screen.findByTestId("taxonomy-action-error"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("DRAFT → ARCHIVED is not a legal move."),
+    ).toBeInTheDocument();
+  });
+
+  it("the Validate modal posts version_label when supplied", async () => {
+    let postBody: string | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/transition")) {
+          postBody =
+            input instanceof Request
+              ? await input.clone().text()
+              : typeof init?.body === "string"
+                ? init.body
+                : null;
+          return makeJsonResponse(makeVersion({ state: "VALIDATED_V1" }));
+        }
+        return makeJsonResponse({
+          taxonomy_id: "tx-1",
+          versions: [makeVersion({ version_number: 2, state: "CANDIDATE_V0" })],
+        });
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    fireEvent.click(await screen.findByTestId("taxonomy-validate-2"));
+    fireEvent.change(screen.getByTestId("taxonomy-validate-label"), {
+      target: { value: "2026-Q2 launch" },
+    });
+    fireEvent.click(screen.getByTestId("taxonomy-validate-submit"));
+    await waitFor(() => expect(postBody).not.toBeNull());
+    expect(JSON.parse(postBody!)).toMatchObject({
+      to_state: "VALIDATED_V1",
+      version_label: "2026-Q2 launch",
+    });
+  });
+
+  it("Create draft modal posts the body and switches the table to the new lineage", async () => {
+    let postUrl = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/admin/taxonomy/drafts")) {
+          postUrl = url;
+          return makeJsonResponse(
+            makeVersion({
+              taxonomy_id: "tx-fresh",
+              version_number: 1,
+              state: "DRAFT",
+            }),
+          );
+        }
+        if (url.includes("tx-fresh")) {
+          return makeJsonResponse({
+            taxonomy_id: "tx-fresh",
+            versions: [
+              makeVersion({
+                taxonomy_id: "tx-fresh",
+                version_number: 1,
+                state: "DRAFT",
+              }),
+            ],
+          });
+        }
+        return makeJsonResponse({ taxonomy_id: "tx-1", versions: [] });
+      },
+    );
+    renderView();
+    fireEvent.click(screen.getByTestId("taxonomy-create-draft"));
+    fireEvent.click(screen.getByTestId("taxonomy-draft-submit"));
+    await waitFor(() => expect(postUrl).toContain("/admin/taxonomy/drafts"));
+    // After creation the table jumps to the new lineage.
+    expect(
+      await screen.findByTestId("taxonomy-lineage-row-1"),
+    ).toBeInTheDocument();
+  });
+
+  it("expands a version's concepts panel and accepts a suggestion", async () => {
+    let postUrl = "";
+    let postBody: string | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/concepts/")) {
+          postUrl = url;
+          postBody =
+            input instanceof Request
+              ? await input.clone().text()
+              : typeof init?.body === "string"
+                ? init.body
+                : null;
+          return makeJsonResponse(makeConcept({ state: "ACCEPTED" }));
+        }
+        return makeJsonResponse({
+          taxonomy_id: "tx-1",
+          versions: [
+            makeVersion({
+              version_number: 1,
+              state: "DRAFT",
+              suggestions: [makeConcept({ suggestion_id: "sug-1" })],
+            }),
+          ],
+        });
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    fireEvent.click(await screen.findByTestId("taxonomy-concepts-toggle-1"));
+    expect(
+      screen.getByTestId("taxonomy-concepts-panel-1"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("taxonomy-concept-accept-sug-1"));
+    await waitFor(() => expect(postUrl).toContain("/concepts/"));
+    expect(postUrl).toContain(
+      "/admin/taxonomy/versions/tx-1/1/concepts/sug-1/transition",
+    );
+    expect(JSON.parse(postBody!)).toMatchObject({ to_state: "ACCEPTED" });
   });
 });
