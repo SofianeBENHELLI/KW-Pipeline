@@ -450,9 +450,7 @@ def test_route_returns_400_when_both_filters_supplied() -> None:
     they violated the contract."""
     app = create_app()
     client = TestClient(app)
-    response = client.get(
-        "/knowledge/taxonomy-allocations?chunk_id=chunk-A&document_id=doc-1"
-    )
+    response = client.get("/knowledge/taxonomy-allocations?chunk_id=chunk-A&document_id=doc-1")
     assert response.status_code == 400
     assert "chunk_id" in response.json()["detail"]
     assert "document_id" in response.json()["detail"]
