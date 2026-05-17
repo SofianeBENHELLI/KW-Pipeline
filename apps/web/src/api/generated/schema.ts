@@ -677,6 +677,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/synthesize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Taxonomy Synthesize
+         * @description Synthesize a DRAFT's accepted suggestions into a Taxonomy tree.
+         *
+         *     Hands the draft's ``ACCEPTED`` + ``MERGED`` concept suggestions
+         *     to the :class:`BusinessTaxonomyCreator` (EPIC-1 §1.6,
+         *     ADR-018 §6) and writes the resulting tree back onto the draft.
+         *     The draft stays in ``DRAFT`` state — the operator promotes to
+         *     ``CANDIDATE_V0`` via ``/transition`` once the synthesized tree
+         *     passes review.
+         *
+         *     Pre-conditions:
+         *
+         *     - The target version must be in ``DRAFT`` (409 ``CONFLICT``
+         *       otherwise — synthesizing on top of a CANDIDATE / VALIDATED /
+         *       ARCHIVED version would mutate a frozen artifact).
+         *     - At least one suggestion must be ``ACCEPTED`` or ``MERGED``
+         *       (409 ``CONFLICT`` otherwise — running with no reviewed
+         *       concepts would replace any hand-edited tree with an empty
+         *       taxonomy, which is almost certainly an accident rather
+         *       than an intent).
+         *     - The :class:`BusinessTaxonomyCreator` must be wired (503
+         *       ``KW_LLM_DISABLED`` otherwise — wiring is gated on
+         *       ``KW_LLM_PROVIDER`` + the matching API key).
+         *
+         *     Re-runnable, not idempotent: the LLM is non-deterministic, so
+         *     two consecutive calls produce two independent syntheses and
+         *     the second overwrites the first. The store-side audit event
+         *     (``knowledge.business_taxonomy.created``) carries the actor;
+         *     the route fires its own ``taxonomy.draft.synthesized`` event
+         *     tying the version-store mutation to ``(taxonomy_id,
+         *     version_number, actor)``.
+         */
+        post: operations["admin_taxonomy_synthesize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition": {
         parameters: {
             query?: never;
@@ -5792,6 +5841,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConceptSuggestion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_taxonomy_synthesize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taxonomy_id: string;
+                version_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyVersion"];
                 };
             };
             /** @description Validation Error */

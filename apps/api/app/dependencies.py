@@ -75,6 +75,7 @@ from app.services.knowledge import (
     VoyageEmbeddingClient,
 )
 from app.services.knowledge.bm25 import build_bm25_index_from_graph_store
+from app.services.knowledge.business_taxonomy_creator import BusinessTaxonomyCreator
 from app.services.knowledge.hybrid_search import HybridSearchService
 from app.services.markdown_generator import MarkdownGenerator
 from app.services.parsers import DocxParser, PdfParser, PptxParser
@@ -356,6 +357,11 @@ class PipelineServices:
     taxonomy_version_store: TaxonomyVersionStoreProtocol = field(
         default_factory=InMemoryTaxonomyVersionStore
     )
+    # LLM-driven business taxonomy creator (#343, EPIC-1 §1.6).
+    # ``None`` when no LLM provider is configured (Gemini / Anthropic
+    # key absent); the ``POST /admin/taxonomy/.../synthesize`` route
+    # surfaces 503 ``KW_LLM_DISABLED`` in that case.
+    business_taxonomy_creator: BusinessTaxonomyCreator | None = None
     # Atomic Claim/Fact store (#368, ADR-031). Always present — the
     # in-memory default is the test/demo affordance; persistent
     # builds wire :class:`SQLiteClaimStore`. Read by
@@ -885,6 +891,36 @@ def _maybe_build_business_taxonomy_allocator(
     )
 
 
+def _maybe_build_business_taxonomy_creator(
+    settings: Settings | None = None,
+    *,
+    client: Any = None,
+    model: str | None = None,
+) -> BusinessTaxonomyCreator | None:
+    """Build the LLM-driven business taxonomy creator if an LLM
+    provider is configured (#343, EPIC-1 §1.6).
+
+    Returns ``None`` when no LLM provider is wired — the
+    ``/admin/taxonomy/.../synthesize`` route surfaces 503 in that
+    case. Tests pass a pre-built fake client + model.
+
+    Shares the same ``build_instructor_client`` factory as
+    ``_maybe_build_topic_extractor`` so the same provider-selection
+    rules (ADR-013 §6) govern both extractors.
+    """
+    settings = settings or Settings()
+    if client is None or model is None:
+        from app.services.knowledge.instructor_client import (  # noqa: PLC0415
+            build_instructor_client,
+        )
+
+        built = build_instructor_client(settings)
+        if built is None:
+            return None
+        client, model = built
+    return BusinessTaxonomyCreator(client=client, model=model)
+
+
 def _maybe_build_embedding_client(
     settings: Settings | None = None,
 ) -> EmbeddingClient | None:
@@ -1289,6 +1325,11 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # LLM / missing taxonomy all leave the hook as a no-op (preserves
     # pre-slice-1.3 behaviour exactly).
     business_taxonomy_allocator = _maybe_build_business_taxonomy_allocator(settings)
+    # EPIC-1 slice 1.6 (#343): LLM-driven business taxonomy creator —
+    # consumed by ``POST /admin/taxonomy/.../synthesize``. ``None``
+    # when no LLM provider is configured; the route returns 503 in
+    # that case.
+    business_taxonomy_creator = _maybe_build_business_taxonomy_creator(settings)
     # #385: wire the cache onto the projector so post-projection
     # warm fires for every validate. ``None``-safe: when the
     # knowledge layer is disabled, ``knowledge_projector`` is None
@@ -1360,6 +1401,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
+        business_taxonomy_creator=business_taxonomy_creator,
         claim_store=claim_store,
         process_store=process_store,
         document_topic_store=document_topic_store,
@@ -1480,6 +1522,9 @@ def build_persistent_services(
     # ``None`` keeps the projector hook a no-op (pre-slice-1.3
     # behaviour preserved).
     business_taxonomy_allocator = _maybe_build_business_taxonomy_allocator(settings)
+    # EPIC-1 slice 1.6 (#343): same shape as build_services — see the
+    # in-memory branch above for the rationale.
+    business_taxonomy_creator = _maybe_build_business_taxonomy_creator(settings)
     # #385: same as build_services — wire the cache onto the
     # projector so post-projection warm fires for every validate
     # in the persistent runtime.
@@ -1547,6 +1592,7 @@ def build_persistent_services(
         taxonomy=taxonomy,
         taxonomy_source_path=str(taxonomy_source_path) if taxonomy_source_path else None,
         taxonomy_store=taxonomy_store,
+        business_taxonomy_creator=business_taxonomy_creator,
         claim_store=claim_store,
         process_store=process_store,
         document_topic_store=document_topic_store,

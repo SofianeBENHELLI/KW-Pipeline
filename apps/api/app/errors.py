@@ -90,6 +90,28 @@ class ErrorCode:
     # ─── HITL auto-promotion (POST /admin/hitl/run_auto_promote_pass) ─
     HITL_DISABLED = "KW_HITL_DISABLED"
 
+    # ─── LLM provider gating (EPIC-1 §1.6, ADR-018) ────────────────
+    # Surfaced as 503 when an admin route requires the configured LLM
+    # provider but ``KW_LLM_PROVIDER`` is unset / no API key is wired.
+    # First raise site: ``POST /admin/taxonomy/versions/{tid}/{vnum}/
+    # synthesize`` (the BusinessTaxonomyCreator is built lazily in
+    # :mod:`app.dependencies` and lands as ``None`` when no provider
+    # is configured). Frontends surface a "configure an LLM provider"
+    # remediation; ``retryable=False`` because no number of retries
+    # will help without operator action.
+    LLM_DISABLED = "KW_LLM_DISABLED"
+
+    # ─── LLM upstream failure (EPIC-1 §1.6) ────────────────────────
+    # Surfaced as 502 when an admin route's LLM call fails after the
+    # provider client's internal retries (network error, provider
+    # 5xx, response-model validation failure). Distinguished from
+    # ``KW_HTTP_ERROR`` so dashboards can grep for LLM-specific
+    # upstream failures separately from generic gateway errors.
+    # ``retryable=True`` — the failure is plausibly transient (rate
+    # limit, brief provider outage) so frontends render a Retry
+    # button.
+    LLM_SYNTHESIS_FAILED = "KW_LLM_SYNTHESIS_FAILED"
+
     # ─── Admin audit log viewer (GET /admin/audit/events, #206 follow-up) ─
     # Surfaced as a 503 when ``KW_AUDIT_ENABLED=false`` (the in-memory
     # default). The store still works in-process — but a deployment

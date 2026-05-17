@@ -130,6 +130,9 @@ from app.services.audit_event_store import event_actor as _audit_event_actor
 from app.services.auth import User, require_admin
 from app.services.catalog_store import InvalidCursor
 from app.services.extraction_recovery import recover_stuck_extractions
+from app.services.knowledge.business_taxonomy_creator import (
+    BusinessTaxonomyCreationFailed,
+)
 from app.services.knowledge.graph_store import Neo4jGraphStore
 from app.services.knowledge.llm_client import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -2068,5 +2071,139 @@ def build_admin_router(services: PipelineServices) -> APIRouter:
                     "merge_target_id pointing at the existing category."
                 ),
             ) from exc
+
+    @router.post(
+        "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/synthesize",
+        operation_id="admin_taxonomy_synthesize",
+        response_model=TaxonomyVersion,
+    )
+    def admin_taxonomy_synthesize(
+        taxonomy_id: str,
+        version_number: int,
+        user: User = Depends(require_admin),
+    ) -> TaxonomyVersion:
+        """Synthesize a DRAFT's accepted suggestions into a Taxonomy tree.
+
+        Hands the draft's ``ACCEPTED`` + ``MERGED`` concept suggestions
+        to the :class:`BusinessTaxonomyCreator` (EPIC-1 §1.6,
+        ADR-018 §6) and writes the resulting tree back onto the draft.
+        The draft stays in ``DRAFT`` state — the operator promotes to
+        ``CANDIDATE_V0`` via ``/transition`` once the synthesized tree
+        passes review.
+
+        Pre-conditions:
+
+        - The target version must be in ``DRAFT`` (409 ``CONFLICT``
+          otherwise — synthesizing on top of a CANDIDATE / VALIDATED /
+          ARCHIVED version would mutate a frozen artifact).
+        - At least one suggestion must be ``ACCEPTED`` or ``MERGED``
+          (409 ``CONFLICT`` otherwise — running with no reviewed
+          concepts would replace any hand-edited tree with an empty
+          taxonomy, which is almost certainly an accident rather
+          than an intent).
+        - The :class:`BusinessTaxonomyCreator` must be wired (503
+          ``KW_LLM_DISABLED`` otherwise — wiring is gated on
+          ``KW_LLM_PROVIDER`` + the matching API key).
+
+        Re-runnable, not idempotent: the LLM is non-deterministic, so
+        two consecutive calls produce two independent syntheses and
+        the second overwrites the first. The store-side audit event
+        (``knowledge.business_taxonomy.created``) carries the actor;
+        the route fires its own ``taxonomy.draft.synthesized`` event
+        tying the version-store mutation to ``(taxonomy_id,
+        version_number, actor)``.
+        """
+        if services.business_taxonomy_creator is None:
+            raise ApiError(
+                status_code=503,
+                code=ErrorCode.LLM_DISABLED,
+                message=(
+                    "BusinessTaxonomyCreator is not wired. Likely cause: "
+                    "KW_LLM_PROVIDER is unset or no matching API key is "
+                    "configured."
+                ),
+                retryable=False,
+                remediation=(
+                    "Set KW_LLM_PROVIDER=gemini|anthropic and the matching "
+                    "GEMINI_API_KEY / ANTHROPIC_API_KEY, then restart the API."
+                ),
+            )
+        version = services.taxonomy_version_store.get(
+            taxonomy_id=taxonomy_id,
+            version_number=version_number,
+        )
+        if version is None:
+            raise ApiError(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=(f"TaxonomyVersion ({taxonomy_id!r}, {version_number}) not found."),
+                retryable=False,
+                remediation=("Confirm against GET /admin/taxonomy/versions/{taxonomy_id}."),
+            )
+        if version.state != "DRAFT":
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=(
+                    f"Cannot synthesize taxonomy on a version in state "
+                    f"{version.state!r}; synthesis is a DRAFT-only operation."
+                ),
+                retryable=False,
+                remediation=(
+                    "Create a fresh DRAFT via POST /admin/taxonomy/drafts "
+                    "(optionally branching from this version's source) and "
+                    "synthesize on that draft instead."
+                ),
+            )
+        # Mirror the creator's own filter so the route fails closed
+        # *before* the upsert when there's nothing to synthesize —
+        # otherwise an empty filtered set would wipe any prior tree
+        # on the draft with ``categories=[]``.
+        feeds_llm = [s for s in version.suggestions if s.state in ("ACCEPTED", "MERGED")]
+        if not feeds_llm:
+            raise ApiError(
+                status_code=409,
+                code=ErrorCode.CONFLICT,
+                message=(
+                    "No ACCEPTED or MERGED suggestions on this draft; "
+                    "synthesis would overwrite the tree with an empty taxonomy."
+                ),
+                retryable=False,
+                remediation=(
+                    "Review concept suggestions and transition at least one to "
+                    "ACCEPTED or MERGED before synthesizing. See POST "
+                    "/admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition."
+                ),
+            )
+        try:
+            new_taxonomy = services.business_taxonomy_creator.create_from_suggestions(
+                version.suggestions,
+                actor=user.id,
+            )
+        except BusinessTaxonomyCreationFailed as exc:
+            raise ApiError(
+                status_code=502,
+                code=ErrorCode.LLM_SYNTHESIS_FAILED,
+                message=f"Taxonomy synthesis failed: {exc}",
+                retryable=True,
+                remediation=(
+                    "The LLM call failed upstream. Retry; if the failure "
+                    "persists, check API logs for the underlying provider error."
+                ),
+            ) from exc
+        updated = version.model_copy(update={"taxonomy": new_taxonomy})
+        services.taxonomy_version_store.upsert(updated)
+        log.info(
+            "taxonomy.draft.synthesized",
+            extra={
+                "taxonomy_id": taxonomy_id,
+                "version_number": version_number,
+                "accepted_count": len(feeds_llm),
+                "category_count": _count_categories(new_taxonomy.categories),
+                "actor": user.id,
+                "actor_role": user.role,
+            },
+        )
+        return updated
 
     return router
