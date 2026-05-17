@@ -9,6 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
+import { SessionGuardProvider } from "../../../_shared/auth";
 import { KnowledgeForgeApp } from "./KnowledgeForgeApp";
 
 /** Disambiguate icon-rail tiles vs top-bar tabs (both use button + same labels). */
@@ -177,5 +178,107 @@ describe("<KnowledgeForgeApp />", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("kw-pipeline · alpha")).toBeInTheDocument();
+  });
+});
+
+// ─── Banner wiring (slice 2) ───────────────────────────────────────────────
+
+describe("<KnowledgeForgeApp /> — session + force-auto banners", () => {
+  function urlOf(input: RequestInfo | URL): string {
+    if (typeof input === "string") return input;
+    if (input instanceof URL) return input.toString();
+    return input.url;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("flips the session-expired banner on a 401 from /documents", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.includes("/admin/config")) {
+          return Promise.resolve(makeJsonResponse({}, 403));
+        }
+        if (url.includes("/documents")) {
+          return Promise.resolve(makeJsonResponse({}, 401));
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+    render(
+      <SessionGuardProvider>
+        <MemoryRouter initialEntries={["/kf/review"]}>
+          <Routes>
+            <Route path="/kf/*" element={<KnowledgeForgeApp />} />
+          </Routes>
+        </MemoryRouter>
+      </SessionGuardProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("session-expired-banner")).toBeInTheDocument();
+    });
+  });
+
+  it("renders the force-auto banner when /admin/config flags it on", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.includes("/admin/config")) {
+          return Promise.resolve(
+            makeJsonResponse({
+              hitl: { force_auto_corpus: true },
+            }),
+          );
+        }
+        if (url.includes("/documents")) {
+          return Promise.resolve(
+            makeJsonResponse({ items: [], next_cursor: null }),
+          );
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+    render(
+      <SessionGuardProvider>
+        <MemoryRouter initialEntries={["/kf/review"]}>
+          <Routes>
+            <Route path="/kf/*" element={<KnowledgeForgeApp />} />
+          </Routes>
+        </MemoryRouter>
+      </SessionGuardProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("kf-banner-force-auto")).toBeInTheDocument();
+    });
+  });
+
+  it("hides the force-auto banner when /admin/config returns 403", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const url = urlOf(input);
+        if (url.includes("/admin/config")) {
+          return Promise.resolve(makeJsonResponse({}, 403));
+        }
+        if (url.includes("/documents")) {
+          return Promise.resolve(
+            makeJsonResponse({ items: [], next_cursor: null }),
+          );
+        }
+        return Promise.resolve(makeJsonResponse({ detail: "Not found" }, 404));
+      },
+    );
+    render(
+      <SessionGuardProvider>
+        <MemoryRouter initialEntries={["/kf/review"]}>
+          <Routes>
+            <Route path="/kf/*" element={<KnowledgeForgeApp />} />
+          </Routes>
+        </MemoryRouter>
+      </SessionGuardProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Filter filename…")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("kf-banner-force-auto")).toBeNull();
   });
 });
