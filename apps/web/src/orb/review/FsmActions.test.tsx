@@ -11,6 +11,7 @@ import { SEMANTIC_METHOD_OPTIONS } from "./semanticMethods";
 
 const ALL_OFF = {
   extract: false,
+  "retry-extraction": false,
   semantic: false,
   "semantic-rerun": false,
   validate: false,
@@ -293,5 +294,44 @@ describe("<FsmActions />", () => {
     const rerun = screen.getByTestId("kf-fsm-semantic-rerun");
     expect(rerun).toHaveAttribute("aria-busy", "true");
     expect(rerun).toHaveTextContent(/Re-running…/);
+  });
+
+  // Slice 6 — retry-extraction surface for FAILED versions.
+  it("renders the Retry extraction button only when the gate is open", () => {
+    const { rerender } = render(
+      <FsmActions
+        gates={{ ...ALL_OFF }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("kf-fsm-retry-extraction")).toBeNull();
+    rerender(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("kf-fsm-retry-extraction")).toBeInTheDocument();
+  });
+
+  it("Retry extraction click fires onRun('retry-extraction')", () => {
+    const onRun = vi.fn();
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={onRun}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("kf-fsm-retry-extraction"));
+    expect(onRun).toHaveBeenCalledWith("retry-extraction", undefined);
   });
 });

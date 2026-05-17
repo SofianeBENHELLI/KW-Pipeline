@@ -39,7 +39,7 @@ function renderHub() {
 describe("AdminHubView", () => {
   beforeEach(() => navigateMock.mockReset());
 
-  it("renders the three v1 admin cards with title + description", () => {
+  it("renders the v1 admin cards with title + description", () => {
     renderHub();
 
     expect(screen.getByText("Administration")).toBeInTheDocument();
@@ -48,14 +48,15 @@ describe("AdminHubView", () => {
     ).toBeInTheDocument();
 
     const grid = screen.getByTestId("admin-hub-grid");
-    // 4 cards: archive / hitl / audit / taxonomy. Each has a testid
-    // so the count is pinned even if titles drift.
-    expect(grid.querySelectorAll("[data-testid^='admin-hub-card-']")).toHaveLength(4);
+    // 5 cards: archive / hitl / audit / taxonomy / reconcile. Each has
+    // a testid so the count is pinned even if titles drift.
+    expect(grid.querySelectorAll("[data-testid^='admin-hub-card-']")).toHaveLength(5);
 
     expect(screen.getByTestId("admin-hub-card-archive")).toBeInTheDocument();
     expect(screen.getByTestId("admin-hub-card-hitl")).toBeInTheDocument();
     expect(screen.getByTestId("admin-hub-card-audit")).toBeInTheDocument();
     expect(screen.getByTestId("admin-hub-card-taxonomy")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-hub-card-reconcile")).toBeInTheDocument();
 
     // Sub-line copy is what an admin scans for; spot-check each.
     expect(
@@ -87,7 +88,10 @@ describe("AdminHubView", () => {
     fireEvent.click(screen.getByTestId("admin-hub-card-taxonomy"));
     expect(navigateMock).toHaveBeenCalledWith("/admin/taxonomy");
 
-    expect(navigateMock).toHaveBeenCalledTimes(4);
+    fireEvent.click(screen.getByTestId("admin-hub-card-reconcile"));
+    expect(navigateMock).toHaveBeenCalledWith("/admin/reconcile");
+
+    expect(navigateMock).toHaveBeenCalledTimes(5);
   });
 
   it("renders the role footer note", () => {

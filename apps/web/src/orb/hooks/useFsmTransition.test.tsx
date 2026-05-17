@@ -17,42 +17,42 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 describe("computeGates", () => {
   it("STORED → only Extract enabled", () => {
     expect(computeGates("STORED")).toEqual({
-      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: true, "retry-extraction": false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
-  it("FAILED → only Extract enabled (allows retry)", () => {
+  it("FAILED → Extract + Retry-extraction enabled (recovery paths)", () => {
     expect(computeGates("FAILED")).toEqual({
-      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: true, "retry-extraction": true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
   it("EXTRACTED → only Semantic enabled", () => {
     expect(computeGates("EXTRACTED")).toEqual({
-      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, "retry-extraction": false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
   it("NEEDS_REVIEW → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("NEEDS_REVIEW")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
+      extract: false, "retry-extraction": false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
     });
   });
   it("SEMANTIC_READY → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("SEMANTIC_READY")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
+      extract: false, "retry-extraction": false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
     });
   });
   it("VALIDATED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("VALIDATED")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
+      extract: false, "retry-extraction": false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
     });
   });
   it("REJECTED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("REJECTED")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
+      extract: false, "retry-extraction": false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
     });
   });
   it("null status → nothing enabled", () => {
     expect(computeGates(null)).toEqual({
-      extract: false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, "retry-extraction": false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
 });
@@ -75,7 +75,7 @@ describe("useFsmTransition", () => {
       }),
     );
     expect(result.current.gates).toEqual({
-      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, "retry-extraction": false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
     });
   });
 

@@ -180,6 +180,11 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── Admin reconcile (ADR-006 §5, #40) ──────────────────────────────────
+
+/** Response body of ``POST /admin/reconcile``. */
+export type ApiReconcileResult = Schemas["ReconcileResult"];
+
 // ─── Document lineage + similar (EPIC-C C.3, ADR-025) ────────────────────
 
 /** Response body of ``GET /documents/{id}/lineage``. */

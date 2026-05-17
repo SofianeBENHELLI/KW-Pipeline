@@ -393,6 +393,11 @@ const AdminTaxonomyView = lazy(() =>
     default: mod.AdminTaxonomyView,
   })),
 );
+const AdminReconcileView = lazy(() =>
+  import("./features/admin/AdminReconcileView").then((mod) => ({
+    default: mod.AdminReconcileView,
+  })),
+);
 
 // Shared Suspense fallback for every lazy admin route. Hoisted out
 // of the JSX so the literal isn't inlined three times in the initial
@@ -443,6 +448,14 @@ export default function App() {
         element={
           <Suspense fallback={ADMIN_FALLBACK}>
             <AdminTaxonomyView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/reconcile"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminReconcileView />
           </Suspense>
         }
       />

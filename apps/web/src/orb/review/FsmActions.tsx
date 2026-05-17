@@ -47,6 +47,8 @@ export interface FsmActionsProps {
 const DISABLED_REASONS: Record<FsmAction, string> = {
   extract:
     "Available only when the version is in STORED or FAILED — re-extract from the source.",
+  "retry-extraction":
+    "Available only when the version is in FAILED — re-queue the dedicated retry path.",
   semantic:
     "Available only after extraction has succeeded (status EXTRACTED).",
   "semantic-rerun":
@@ -93,6 +95,24 @@ export function FsmActions({
         >
           {inflight("extract") ? "Extracting…" : "Extract"}
         </Btn>
+        {/* Slice 6 — dedicated Retry surface for FAILED versions. The
+            Extract button is wider-scope (STORED + FAILED); this
+            button is FAILED-only and calls the purpose-built
+            ``/retry-extraction`` route so the audit trail records a
+            recovery rather than a fresh extraction attempt. */}
+        {gates["retry-extraction"] && (
+          <Btn
+            kind="ghost"
+            icon={OrbI.refresh}
+            disabled={status === "running"}
+            onClick={() => onRun("retry-extraction", note || undefined)}
+            title={buttonTitle("retry-extraction")}
+            aria-busy={inflight("retry-extraction")}
+            data-testid="kf-fsm-retry-extraction"
+          >
+            {inflight("retry-extraction") ? "Retrying…" : "Retry extraction"}
+          </Btn>
+        )}
         <div className="kf-fsm__semantic-group">
           <Btn
             icon={OrbI.spark}

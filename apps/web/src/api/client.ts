@@ -41,6 +41,7 @@ import type {
   ApiExtractionJobSnapshot,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
+  ApiReconcileResult,
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
@@ -1119,6 +1120,46 @@ export async function transitionTaxonomyConcept(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * POST /documents/{document_id}/versions/{version_id}/retry-extraction (#87)
+ *
+ * Retries extraction for a previously-FAILED version. 200 in inline
+ * mode with the fresh RawExtraction; 202 in async mode with a
+ * job snapshot; 409 if the version isn't in FAILED.
+ */
+export async function retryExtraction(
+  documentId: string,
+  versionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiRawExtraction | ApiExtractionJobSnapshot> {
+  return unwrap(
+    await http.POST(
+      "/documents/{document_id}/versions/{version_id}/retry-extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/reconcile (ADR-006 §5, #40)
+ *
+ * Admin-only. Re-runs the stuck-extraction recovery pass. Returns
+ * ``recovered_count`` + ``skipped_inline`` (true when
+ * KW_EXTRACTION_INLINE=true — the pass is a no-op by design).
+ */
+export async function runReconcilePass(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiReconcileResult> {
+  return unwrap(
+    await http.POST("/admin/reconcile", {
+      signal: options.signal,
+    }),
   );
 }
 

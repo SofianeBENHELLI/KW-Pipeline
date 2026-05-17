@@ -68,6 +68,13 @@ const HUB_CARDS: readonly HubCard[] = [
       "Inspect the DRAFT → CANDIDATE → VALIDATED → ARCHIVED lineage for a taxonomy.",
     testId: "admin-hub-card-taxonomy",
   },
+  {
+    href: "/admin/reconcile",
+    title: "Extraction reconcile",
+    description:
+      "Re-run the stuck-extraction scan (ADR-006 §5). Recovers versions wedged in QUEUED / EXTRACTING after a worker death.",
+    testId: "admin-hub-card-reconcile",
+  },
 ];
 
 export function AdminHubView() {
