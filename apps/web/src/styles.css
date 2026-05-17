@@ -1982,3 +1982,123 @@ pre {
   outline: 2px solid var(--action);
   outline-offset: 1px;
 }
+
+/* ─── Knowledge Explorer (ADR-028) ─────────────────────────────────────── */
+.explore-topic-list,
+.explore-citation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.explore-topic-list li a,
+.explore-citation-list li a {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  text-decoration: none;
+  color: inherit;
+}
+
+.explore-topic-list li a:hover,
+.explore-topic-list li a:focus-visible,
+.explore-citation-list li a:hover,
+.explore-citation-list li a:focus-visible {
+  border-color: var(--action);
+  outline: none;
+}
+
+.explore-topic-list li a strong,
+.explore-citation-list li a strong {
+  display: block;
+}
+
+.explore-topic-list li a span,
+.explore-citation-list li a span {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+}
+
+.explore-search-input {
+  width: 100%;
+  margin: 8px 0 16px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.explore-search-input:focus {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.explore-lens-panel,
+.explore-citations {
+  margin-top: 16px;
+}
+
+.explore-lens-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+}
+
+.explore-lens-canvas {
+  height: 420px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-muted);
+}
+
+.explore-inspector {
+  position: fixed;
+  right: 16px;
+  top: 80px;
+  width: 320px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+}
+
+.explore-inspector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.explore-inspector-fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  font-size: 0.85rem;
+}
+
+.explore-inspector-fields dt {
+  color: var(--muted);
+}
+
+.explore-inspector-fields dd {
+  margin: 0;
+}
+
+.explore-inspector-aggregate {
+  margin-top: 12px;
+}
