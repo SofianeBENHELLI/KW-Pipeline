@@ -25,6 +25,8 @@ import type {
   ApiChatMode,
   ApiChatResponse,
   ApiChunkSearchResponse,
+  ApiConceptSuggestion,
+  ApiConceptSuggestionState,
   ApiDocument,
   ApiDocumentHashCheck,
   ApiDocumentVersion,
@@ -40,6 +42,7 @@ import type {
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiTaxonomyState,
   ApiTaxonomyVersion,
   ApiTaxonomyVersionListResponse,
   ApiUnarchiveResponse,
@@ -1043,5 +1046,95 @@ export async function getTaxonomyVersion(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition
+ *
+ * Drives a TaxonomyVersion to its next lifecycle state (ADR-018 §2).
+ * 409 on illegal transitions, 400 on missing fields, 503 KW_LLM_DISABLED
+ * when the synthesize path is the prerequisite.
+ */
+export async function transitionTaxonomyVersion(
+  taxonomyId: string,
+  versionNumber: number,
+  body: {
+    to_state: ApiTaxonomyState;
+    version_label?: string | null;
+    reason?: string | null;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition
+ *
+ * Drives one ``ConceptSuggestion`` through its lifecycle (ADR-018 §5).
+ * ``merge_target_id`` is required when ``to_state === "MERGED"`` and
+ * rejected for every other target. 409 on illegal moves.
+ */
+export async function transitionTaxonomyConcept(
+  taxonomyId: string,
+  versionNumber: number,
+  suggestionId: string,
+  body: {
+    to_state: ApiConceptSuggestionState;
+    merge_target_id?: string | null;
+    reason?: string | null;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiConceptSuggestion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+            suggestion_id: suggestionId,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/drafts
+ *
+ * Mints a new ``DRAFT`` taxonomy version. Three modes per ADR-018 §2:
+ *  - empty body → fresh ``taxonomy_id``, empty tree, ``version_number=1``
+ *  - ``taxonomy_id`` only → next version for that id, empty tree
+ *  - both → next version inheriting the source's tree
+ */
+export async function createTaxonomyDraft(
+  body: { taxonomy_id?: string | null; source_version_number?: number | null } = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST("/admin/taxonomy/drafts", {
+      body,
+      signal: options.signal,
+    }),
   );
 }
