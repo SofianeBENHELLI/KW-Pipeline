@@ -928,6 +928,44 @@
         "title": "BucketState",
         "type": "object"
       },
+      "BusinessCategoryAssignment": {
+        "description": "One ``chunk → category`` assignment.\n\n``category_id`` references a node in the operator-imposed\n:class:`~app.schemas.taxonomy.Taxonomy`. The allocator filters\nhallucinated ids (any value not in the published tree) before the\nassignment reaches the store, so consumers can assume every id\nhere resolves at the time of allocation. A subsequent taxonomy\nedit that removes a category leaves stale allocations in place\n(the fingerprint flags them as ``taxonomy_drifted``); the\nreconciler can re-allocate or archive them.\n\n``confidence`` lives in ``[0, 1]`` so the chunk inspector can\napply one threshold across allocations, claims, and topics. The\nLLM is prompted to score conservatively: > 0.8 for \"clearly\napplies\", 0.5–0.8 for \"partial match\", < 0.5 indicates the LLM\nis hedging and the UI may surface it under a \"weak match\" banner.\n\n``rationale`` is a one-sentence justification the LLM emits for\neach assignment, capped to 500 chars so the chunk inspector can\nrender the full text without scrolling. The supporting\ndeterministic-concept texts are listed separately so the\ninspector can highlight the source spans in the chunk body.",
+        "properties": {
+          "category_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Category Id",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "rationale": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "supporting_concept_texts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supporting Concept Texts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category_id",
+          "confidence",
+          "rationale",
+          "supporting_concept_texts"
+        ],
+        "title": "BusinessCategoryAssignment",
+        "type": "object"
+      },
       "ChatCitation": {
         "description": "One context source the chat answer was grounded in.\n\nToday the only citation kind is ``chunk`` (vector-retrieval hits);\n``graph`` mode also produces chunk citations because the graph\ntraversal currently seeds from the same vector hits. A future\nGraphRAG mode that seeds from entity-name matching will introduce\nan ``entity`` citation kind.",
         "properties": {
@@ -1340,6 +1378,128 @@
           "score"
         ],
         "title": "ChunkSearchResult",
+        "type": "object"
+      },
+      "ChunkTaxonomyAllocation": {
+        "description": "One LLM allocation pass over a single chunk.\n\nRows are addressed by ``id`` (deterministic: ``alloc-<version\n_id>-<chunk_id>``) so a re-allocation idempotently replaces the\nprior row. ``assignments`` may be empty when the LLM found no\nmatching category — we still persist the empty case so the audit\ntrail records \"the allocator ran and chose to abstain\" rather\nthan collapsing it with \"the allocator never ran\".\n\n``extracted_at`` is set server-side by the store on save — the\nallocator hands the allocation in with a sentinel timestamp and\nthe store stamps it with ``datetime.now(UTC)`` before INSERT.",
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessCategoryAssignment"
+            },
+            "title": "Assignments",
+            "type": "array"
+          },
+          "chunk_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "extracted_at": {
+            "format": "date-time",
+            "title": "Extracted At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          },
+          "prompt_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Prompt Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "section_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Section Id",
+            "type": "string"
+          },
+          "taxonomy_fingerprint": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Taxonomy Fingerprint",
+            "type": "string"
+          },
+          "version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "chunk_id",
+          "section_id",
+          "document_id",
+          "version_id",
+          "assignments",
+          "taxonomy_fingerprint",
+          "model_id",
+          "prompt_hash",
+          "schema_version",
+          "extracted_at"
+        ],
+        "title": "ChunkTaxonomyAllocation",
+        "type": "object"
+      },
+      "ChunkTaxonomyAllocationsListResponse": {
+        "description": "Response envelope for ``GET /knowledge/taxonomy-allocations``.\n\n``next_cursor`` follows the same opaque-cursor pattern as the\nrest of the catalog read paths — the codec lives in\n:mod:`app.services.catalog_store` and clients must treat the\nstring as opaque.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChunkTaxonomyAllocation"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "items",
+          "next_cursor"
+        ],
+        "title": "ChunkTaxonomyAllocationsListResponse",
         "type": "object"
       },
       "Claim": {
@@ -8934,6 +9094,99 @@
           }
         },
         "summary": "Get Knowledge Taxonomy"
+      }
+    },
+    "/knowledge/taxonomy-allocations": {
+      "get": {
+        "description": "List LLM business-taxonomy allocations (EPIC-1 §1.3, #340).\n\nReturns per-chunk allocation rows (chunk → category\nassignments with confidence, rationale, and taxonomy /\nprompt / model fingerprints) that the\n:class:`~app.services.business_taxonomy_allocator.BusinessTaxonomyAllocator`\nhas emitted. The v0.1 wire shape is gated by\n``schema_version`` so a future v0.2 evolution lands without\nsilently flowing through to v0.1 readers.\n\nFilters are mutually exclusive: pass ``chunk_id`` to drill\ninto one chunk's history across re-allocations, or\n``document_id`` for every chunk in a document family. With\nneither, returns every allocation in the store (the audit\n/ drift-inspection view). Supplying **both** is a 400 —\nsilent-wins behaviour is surprising and an intersection\nquery is not yet a documented contract.\n\nPagination follows the same opaque-cursor convention as the\nrest of the catalog read paths. ``next_cursor`` is ``None``\nwhen no more rows exist behind the current page. An empty\n``items`` list is a valid response (no allocations yet) and\nis returned as HTTP 200, mirroring the rest of the\nknowledge-layer read surface.",
+        "operationId": "list_knowledge_taxonomy_allocations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chunk_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chunk Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkTaxonomyAllocationsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Knowledge Taxonomy Allocations"
       }
     },
     "/knowledge/topics": {

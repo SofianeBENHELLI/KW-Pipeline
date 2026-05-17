@@ -73,6 +73,13 @@ if TYPE_CHECKING:
     # in app.services and depends on knowledge.relations, which is
     # adjacent to this module. Forward-referencing the type keeps
     # the projector's runtime imports unchanged.
+    from app.schemas.taxonomy import Taxonomy
+    from app.services.business_taxonomy_allocator import (
+        BusinessTaxonomyAllocator,
+    )
+    from app.services.chunk_taxonomy_allocation_store import (
+        ChunkTaxonomyAllocationStore,
+    )
     from app.services.claim_extractor import ClaimExtractor
     from app.services.claim_store import ClaimStore
     from app.services.document_relations_cache import DocumentRelationsCache
@@ -127,6 +134,9 @@ class KnowledgeProjector:
         claim_store: ClaimStore | None = None,
         topic_extractor: TopicExtractor | None = None,
         document_topic_store: DocumentTopicStore | None = None,
+        business_taxonomy_allocator: BusinessTaxonomyAllocator | None = None,
+        chunk_taxonomy_allocation_store: ChunkTaxonomyAllocationStore | None = None,
+        active_taxonomy: Taxonomy | None = None,
     ) -> None:
         self._graph_store = graph_store
         # Lane B (#141/#142) services. Defaulting them keeps wiring
@@ -178,6 +188,18 @@ class KnowledgeProjector:
         # for the operator-facing topic UX.
         self._topic_extractor = topic_extractor
         self._document_topic_store = document_topic_store
+        # EPIC-1 slice 1.3 (#340): LLM business-taxonomy allocator +
+        # the SQLite-backed allocation store + the active operator
+        # taxonomy. All three required for the post-projection hook
+        # to fire; any ``None`` keeps the hook a no-op (preserves
+        # pre-slice-1.3 behaviour). The active taxonomy is captured
+        # at services-build time — a re-import via
+        # ``POST /admin/taxonomy/import_yaml`` triggers a services
+        # rebuild today (no live cache invalidation), so the captured
+        # snapshot is correct for the lifetime of one process.
+        self._business_taxonomy_allocator = business_taxonomy_allocator
+        self._chunk_taxonomy_allocation_store = chunk_taxonomy_allocation_store
+        self._active_taxonomy = active_taxonomy
 
     def set_document_relations_cache(
         self,
@@ -257,6 +279,36 @@ class KnowledgeProjector:
         valid kill switch (e.g. when the LLM is not configured).
         """
         self._document_topic_store = store
+
+    def set_business_taxonomy_allocator(self, allocator: BusinessTaxonomyAllocator | None) -> None:
+        """Wire the LLM business-taxonomy allocator (EPIC-1 §1.3, #340).
+
+        Mirrors :meth:`set_topic_extractor`. The post-projection
+        allocation hook only fires when all three of
+        :attr:`_business_taxonomy_allocator`,
+        :attr:`_chunk_taxonomy_allocation_store`, and
+        :attr:`_active_taxonomy` carry non-None values.
+        """
+        self._business_taxonomy_allocator = allocator
+
+    def set_chunk_taxonomy_allocation_store(
+        self, store: ChunkTaxonomyAllocationStore | None
+    ) -> None:
+        """Wire the allocation store (EPIC-1 §1.3, #340).
+
+        See :meth:`set_business_taxonomy_allocator`.
+        """
+        self._chunk_taxonomy_allocation_store = store
+
+    def set_active_taxonomy(self, taxonomy: Taxonomy | None) -> None:
+        """Wire the active business taxonomy (EPIC-1 §1.3, #340).
+
+        See :meth:`set_business_taxonomy_allocator`. Passing ``None``
+        (no operator-imposed taxonomy configured) is a valid kill
+        switch — the LLM has nothing to map chunks against, so the
+        hook short-circuits.
+        """
+        self._active_taxonomy = taxonomy
 
     def project(
         self,
@@ -491,6 +543,47 @@ class KnowledgeProjector:
             except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
                 log.warning(
                     "knowledge.topic_extraction.failed",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        # EPIC-1 slice 1.3 (#340): LLM business-taxonomy allocation
+        # per chunk. Same fire-and-log posture as the Claim / Topic
+        # hooks above. All-three-or-nothing — the allocator without
+        # the store would throw work away, and either without a
+        # configured taxonomy has nothing to map chunks against.
+        # ``delete_for_version`` runs first so a re-projection
+        # replaces the prior batch atomically.
+        if (
+            self._business_taxonomy_allocator is not None
+            and self._chunk_taxonomy_allocation_store is not None
+            and self._active_taxonomy is not None
+            and self._active_taxonomy.categories
+        ):
+            try:
+                allocations = self._business_taxonomy_allocator.allocate(
+                    semantic,
+                    document=document,
+                    version=version,
+                    taxonomy=self._active_taxonomy,
+                )
+                self._chunk_taxonomy_allocation_store.delete_for_version(version.id)
+                if allocations:
+                    self._chunk_taxonomy_allocation_store.save_allocations(allocations)
+                log.info(
+                    "knowledge.taxonomy_allocation.written",
+                    extra={
+                        "document_id": document.id,
+                        "version_id": version.id,
+                        "allocation_count": len(allocations),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - fire-and-log boundary
+                log.warning(
+                    "knowledge.taxonomy_allocation.failed",
                     extra={
                         "document_id": document.id,
                         "version_id": version.id,

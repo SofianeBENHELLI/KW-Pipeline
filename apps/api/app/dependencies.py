@@ -9,7 +9,15 @@ from app.services.audit_event_store import (
     SQLiteAuditEventStore,
 )
 from app.services.auth import AuthService, DisabledAuthService, build_auth_service
+from app.services.business_taxonomy_allocator import (
+    BusinessTaxonomyAllocator,
+)
 from app.services.catalog_store import SQLiteCatalogStore
+from app.services.chunk_taxonomy_allocation_store import (
+    ChunkTaxonomyAllocationStore,
+    InMemoryChunkTaxonomyAllocationStore,
+    SQLiteChunkTaxonomyAllocationStore,
+)
 from app.services.claim_extractor import ClaimExtractor
 from app.services.claim_store import (
     ClaimStore,
@@ -371,6 +379,17 @@ class PipelineServices:
     # for the operator-facing topic UX (Explorer, Atlas, Orbital).
     document_topic_store: DocumentTopicStore = field(
         default_factory=InMemoryDocumentTopicStore,
+    )
+    # LLM business-taxonomy allocation store (EPIC-1 slice 1.3,
+    # #340). Always present (in-memory default for tests / the
+    # in-process demo; persistent builds wire the SQLite-backed
+    # implementation). Read by ``GET /knowledge/taxonomy-allocations``;
+    # the wiring layer constructs the allocator only when the slice
+    # 1.3 kill switch is on AND an LLM provider is configured AND a
+    # taxonomy is published — in that case the projector hook writes
+    # through this store via ``save_allocations``.
+    chunk_taxonomy_allocation_store: ChunkTaxonomyAllocationStore = field(
+        default_factory=InMemoryChunkTaxonomyAllocationStore,
     )
     # Resolved absolute path the taxonomy was read from, surfaced in
     # the route response so operators can verify which file the API
@@ -819,6 +838,53 @@ def _maybe_build_topic_extractor(
     )
 
 
+def _maybe_build_business_taxonomy_allocator(
+    settings: Settings | None = None,
+    *,
+    client: Any = None,
+    model: str | None = None,
+) -> BusinessTaxonomyAllocator | None:
+    """Build the LLM business-taxonomy allocator if enabled (EPIC-1
+    slice 1.3, #340).
+
+    Returns ``None`` unless ALL of the following hold:
+
+    1. ``KW_BUSINESS_TAXONOMY_ALLOCATOR_ENABLED`` is truthy.
+    2. The knowledge layer is on (``KW_KNOWLEDGE_LAYER_ENABLED``).
+    3. An LLM provider is configured (Gemini primary, Anthropic
+       fallback per ADR-013 §6).
+
+    The projector hook additionally gates on a published operator
+    taxonomy being present — without one, the LLM has nothing to map
+    chunks against. That gate lives in the projector rather than
+    here because the taxonomy is build-time state on
+    :class:`PipelineServices`, not env-var state on
+    :class:`Settings`.
+
+    Callers may pass a pre-built ``client`` + ``model`` for tests
+    that want to inject a fake instructor client; the production
+    factory builds a fresh one from settings.
+    """
+    settings = settings or Settings()
+    if not settings.business_taxonomy_allocator_enabled:
+        return None
+    if client is None or model is None:
+        from app.services.knowledge.instructor_client import (  # noqa: PLC0415
+            build_instructor_client,
+        )
+
+        built = build_instructor_client(settings)
+        if built is None:
+            return None
+        client, model = built
+    cap = settings.business_taxonomy_allocator_max_input_tokens_per_chunk
+    return BusinessTaxonomyAllocator(
+        client=client,
+        model=model,
+        max_input_tokens=cap,
+    )
+
+
 def _maybe_build_embedding_client(
     settings: Settings | None = None,
 ) -> EmbeddingClient | None:
@@ -1159,6 +1225,9 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     claim_store: ClaimStore = InMemoryClaimStore()
     process_store: ProcessStore = InMemoryProcessStore()
     document_topic_store: DocumentTopicStore = InMemoryDocumentTopicStore()
+    chunk_taxonomy_allocation_store: ChunkTaxonomyAllocationStore = (
+        InMemoryChunkTaxonomyAllocationStore()
+    )
     # HITL slice 1 wiring: in-memory corpus norms + sidecar store; the
     # scorer is constructed unless the kill switch is on. The lazy
     # provider sources samples from the catalog so unknown buckets
@@ -1213,6 +1282,13 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
     # extractors); see :func:`_maybe_build_topic_extractor` for
     # rationale.
     topic_extractor = _maybe_build_topic_extractor(settings)
+    # EPIC-1 slice 1.3 (#340): build the LLM business-taxonomy
+    # allocator. ``None`` unless the slice 1.3 kill switch is on AND
+    # an LLM provider is configured — the projector hook additionally
+    # gates on a published taxonomy, so a False kill switch / missing
+    # LLM / missing taxonomy all leave the hook as a no-op (preserves
+    # pre-slice-1.3 behaviour exactly).
+    business_taxonomy_allocator = _maybe_build_business_taxonomy_allocator(settings)
     # #385: wire the cache onto the projector so post-projection
     # warm fires for every validate. ``None``-safe: when the
     # knowledge layer is disabled, ``knowledge_projector`` is None
@@ -1235,6 +1311,13 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         # Same both-or-nothing posture as the Claim pair.
         knowledge_projector.set_topic_extractor(topic_extractor)
         knowledge_projector.set_document_topic_store(document_topic_store)
+        # EPIC-1 slice 1.3 (#340): wire the LLM business-taxonomy
+        # allocator + the in-memory allocation store + the active
+        # taxonomy. All three required for the hook to fire; any
+        # ``None`` keeps it a no-op.
+        knowledge_projector.set_business_taxonomy_allocator(business_taxonomy_allocator)
+        knowledge_projector.set_chunk_taxonomy_allocation_store(chunk_taxonomy_allocation_store)
+        knowledge_projector.set_active_taxonomy(taxonomy)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1280,6 +1363,7 @@ def build_services(settings: Settings | None = None) -> PipelineServices:
         claim_store=claim_store,
         process_store=process_store,
         document_topic_store=document_topic_store,
+        chunk_taxonomy_allocation_store=chunk_taxonomy_allocation_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,
@@ -1338,6 +1422,9 @@ def build_persistent_services(
     catalog_db_path = root / "catalog.sqlite3"
     process_store: ProcessStore = SQLiteProcessStore(catalog_db_path)
     document_topic_store: DocumentTopicStore = SQLiteDocumentTopicStore(catalog_db_path)
+    chunk_taxonomy_allocation_store: ChunkTaxonomyAllocationStore = (
+        SQLiteChunkTaxonomyAllocationStore(catalog_db_path)
+    )
     persisted_norms_store = SQLiteCorpusNormsStore(catalog_db_path)
     corpus_norms_store: CorpusNormsProvider = LazyCorpusNorms(
         store=persisted_norms_store,
@@ -1389,6 +1476,10 @@ def build_persistent_services(
     # no-op (pre-#411 behaviour preserved). #438: the topic extractor
     # builds its own instructor-patched client from settings.
     topic_extractor = _maybe_build_topic_extractor(settings)
+    # EPIC-1 slice 1.3 (#340): same wiring shape as build_services.
+    # ``None`` keeps the projector hook a no-op (pre-slice-1.3
+    # behaviour preserved).
+    business_taxonomy_allocator = _maybe_build_business_taxonomy_allocator(settings)
     # #385: same as build_services — wire the cache onto the
     # projector so post-projection warm fires for every validate
     # in the persistent runtime.
@@ -1408,6 +1499,12 @@ def build_persistent_services(
         # writes Topics through the persistent store.
         knowledge_projector.set_topic_extractor(topic_extractor)
         knowledge_projector.set_document_topic_store(document_topic_store)
+        # EPIC-1 slice 1.3 (#340): wire the LLM allocator + the
+        # SQLite-backed allocation store + the active taxonomy.
+        # Persistent path mirrors the in-memory wiring.
+        knowledge_projector.set_business_taxonomy_allocator(business_taxonomy_allocator)
+        knowledge_projector.set_chunk_taxonomy_allocation_store(chunk_taxonomy_allocation_store)
+        knowledge_projector.set_active_taxonomy(taxonomy)
     return PipelineServices(
         storage=storage,
         documents=documents,
@@ -1453,6 +1550,7 @@ def build_persistent_services(
         claim_store=claim_store,
         process_store=process_store,
         document_topic_store=document_topic_store,
+        chunk_taxonomy_allocation_store=chunk_taxonomy_allocation_store,
         settings=settings,
         confidence_scorer=confidence_scorer,
         hitl_router=hitl_router,

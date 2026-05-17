@@ -496,6 +496,39 @@ class Settings(BaseSettings):
             "context to identify top-level themes vs passing mentions."
         ),
     )
+    business_taxonomy_allocator_enabled_raw: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "KW_BUSINESS_TAXONOMY_ALLOCATOR_ENABLED",
+        ),
+        description=(
+            "Master kill switch for the LLM business-taxonomy "
+            "allocator (EPIC-1 slice 1.3, #340). Default unset = "
+            "disabled (the post-projection hook is a no-op). Set to "
+            "``true`` to opt in; requires the knowledge layer ON, "
+            "an LLM provider configured (Gemini primary, Anthropic "
+            "fallback per ADR-013 §6), AND a published operator "
+            "taxonomy. With any one of those missing the hook still "
+            "stays a no-op."
+        ),
+    )
+    business_taxonomy_allocator_max_input_tokens_per_chunk: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "KW_BUSINESS_TAXONOMY_ALLOCATOR_MAX_INPUT_TOKENS_PER_CHUNK",
+        ),
+        description=(
+            "Per-chunk input-character cap for the LLM business-"
+            "taxonomy allocator (EPIC-1 slice 1.3, #340). When set "
+            "to a positive value and the chunk body exceeds the cap, "
+            "the body is truncated to fit (the category block and "
+            "the allowed-ids line are load-bearing and survive "
+            "verbatim). ``0`` (the default) disables the cap — "
+            "chunks of any size are passed to the LLM. Applies "
+            "per-chunk rather than per-document because the "
+            "allocator runs one LLM call per chunk."
+        ),
+    )
     anthropic_timeout_seconds: float = Field(
         default=60.0,
         validation_alias=AliasChoices("KW_ANTHROPIC_TIMEOUT_SECONDS"),
@@ -993,6 +1026,19 @@ class Settings(BaseSettings):
     def audit_enabled(self) -> bool:
         """Truthy parse of the audit-store kill switch (#26 residual)."""
         return _truthy(self.audit_enabled_raw)
+
+    @property
+    def business_taxonomy_allocator_enabled(self) -> bool:
+        """Truthy parse of the LLM business-taxonomy allocator kill
+        switch (EPIC-1 slice 1.3, #340).
+
+        Same truthiness rules as :attr:`knowledge_layer_enabled`.
+        Operator opt-in for the per-chunk LLM allocation pass; the
+        wiring layer additionally requires the knowledge layer ON,
+        an LLM provider configured, and a published taxonomy before
+        the post-projection hook actually fires.
+        """
+        return _truthy(self.business_taxonomy_allocator_enabled_raw)
 
     @property
     def iterop_enabled(self) -> bool:
