@@ -21,7 +21,7 @@
  * react-router; clicking a tile or tab navigates without a
  * full-page reload.
  */
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Navigate,
@@ -31,6 +31,14 @@ import {
   useNavigate,
 } from "react-router-dom";
 
+import { SessionExpiredBanner, useSessionGuard } from "../../../_shared/auth";
+import {
+  clearSessionTrigger,
+  getApiBaseUrl,
+  setSessionTrigger,
+} from "../api/client";
+import { useAdminConfig } from "../api/useAdminConfig";
+import { ForceAutoCorpusBanner } from "../ui/ForceAutoCorpusBanner";
 import { CatalogView } from "./catalog/CatalogView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { ChatPanel } from "./search/ChatPanel";
@@ -65,6 +73,33 @@ export function KnowledgeForgeApp({
   // so closing the modal returns the user to a real surface, not a
   // blank page.
   const settingsRoute = location.pathname.startsWith("/kf/settings");
+
+  // ADR-019 §5: /kf/* is the default route — banners must mount here
+  // too, not just inside the legacy reviewer workbench. The provider
+  // itself lives at the app root (main.tsx) so we only register the
+  // 401 trigger + read the expired flag from the shared context.
+  const session = useSessionGuard();
+  const adminConfig = useAdminConfig(getApiBaseUrl());
+  // Guard ``hitl`` defensively — partial-shape responses must not crash
+  // the banner. Mirrors the legacy ReviewerWorkbench wiring.
+  const forceAutoActive =
+    adminConfig.status === "ok" &&
+    adminConfig.config?.hitl?.force_auto_corpus === true;
+
+  // Register the 401-triggered hook on mount; tear down on unmount so
+  // switching shells (/legacy ↔ /kf) doesn't leave a stale trigger.
+  useEffect(() => {
+    setSessionTrigger(session.trigger);
+    return () => {
+      clearSessionTrigger();
+    };
+  }, [session.trigger]);
+
+  // Reload bounces dev users onto a fresh request and bearer users
+  // through their IdP — same single behaviour as ReviewerWorkbench.
+  const handleSignInAgain = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
 
   // Pick the active top-tab from the URL so the chrome highlights the
   // right item without each route having to forward the prop.
@@ -108,6 +143,13 @@ export function KnowledgeForgeApp({
         onOpenSettings: () => setSettingsOpen(true),
       }}
     >
+      {/* Banners sit at the top of the shell so they show on every
+          /kf/* route, mirroring the legacy reviewer wiring. */}
+      <ForceAutoCorpusBanner visible={forceAutoActive} />
+      <SessionExpiredBanner
+        visible={session.expired}
+        onSignIn={handleSignInAgain}
+      />
       <Routes>
         <Route index element={<Navigate to="/kf/review" replace />} />
         <Route path="review" element={<ReviewWorkspace />} />
@@ -116,10 +158,7 @@ export function KnowledgeForgeApp({
         {/* Legacy /kf/graph deep-links land on the Review Workspace —
             graph is now a per-document tab. Corpus-wide graph
             exploration belongs to the Knowledge Explorer app. */}
-        <Route
-          path="graph/*"
-          element={<Navigate to="/kf/review" replace />}
-        />
+        <Route path="graph/*" element={<Navigate to="/kf/review" replace />} />
         <Route path="search/*" element={<SearchPanel />} />
         <Route path="chat/*" element={<ChatPanel />} />
         <Route path="admin/*" element={<AdminHub />} />
@@ -131,10 +170,7 @@ export function KnowledgeForgeApp({
       </Routes>
       <Suspense fallback={null}>
         {(settingsOpen || settingsRoute) && (
-          <SettingsModal
-            open
-            onClose={() => setSettingsOpen(false)}
-          />
+          <SettingsModal open onClose={() => setSettingsOpen(false)} />
         )}
       </Suspense>
     </DxShell>
@@ -154,10 +190,14 @@ function pickActiveTab(
 /** Top-bar tab labels → route paths. */
 function routeForTopTab(tab: TopNavTab): string {
   switch (tab) {
-    case "review": return "/kf/review";
-    case "search": return "/kf/search";
-    case "chat":   return "/kf/chat";
-    case "admin":  return "/kf/admin";
+    case "review":
+      return "/kf/review";
+    case "search":
+      return "/kf/search";
+    case "chat":
+      return "/kf/chat";
+    case "admin":
+      return "/kf/admin";
   }
 }
 
@@ -173,12 +213,18 @@ function routeForTopTab(tab: TopNavTab): string {
  */
 function routeForRailTile(tile: RailTileId): string | null {
   switch (tile) {
-    case "activity": return "/kf/admin";
-    case "upload":   return "/kf/catalog";
-    case "review":   return "/kf/review";
-    case "search":   return "/kf/search";
-    case "info":     return "/kf/review";
-    case "settings": return null; // handled separately — opens modal
+    case "activity":
+      return "/kf/admin";
+    case "upload":
+      return "/kf/catalog";
+    case "review":
+      return "/kf/review";
+    case "search":
+      return "/kf/search";
+    case "info":
+      return "/kf/review";
+    case "settings":
+      return null; // handled separately — opens modal
   }
 }
 
