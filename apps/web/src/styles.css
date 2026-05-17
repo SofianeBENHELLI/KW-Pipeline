@@ -2159,3 +2159,38 @@ pre {
   font-size: 0.7em;
   padding: 1px 6px;
 }
+
+/* Slice 5 — Lineage + Similar modals in Review. */
+.kf-lineage-list,
+.kf-similar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kf-lineage-row,
+.kf-similar-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.kf-lineage-row__meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.kf-lineage-row__pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #14532d;
+  font-size: 0.75em;
+  font-weight: 600;
+}

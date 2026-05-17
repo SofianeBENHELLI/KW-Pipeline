@@ -32,6 +32,8 @@ import type {
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiLineageResponse,
+  ApiSimilarDocumentsResponse,
   ApiProjectionStatusResponse,
   ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
@@ -1117,6 +1119,48 @@ export async function transitionTaxonomyConcept(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/lineage (EPIC-C C.3, ADR-025)
+ *
+ * Returns the document family's version history sorted ASC by
+ * ``version_number``. 404 when the document is hidden from the
+ * caller's scope set (D.5).
+ */
+export async function getDocumentLineage(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiLineageResponse> {
+  return unwrap(
+    await http.GET("/documents/{document_id}/lineage", {
+      params: { path: { document_id: documentId } },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/similar (EPIC-C C.3, ADR-025 §3)
+ *
+ * Top-K topic-Jaccard ranked neighbours, sorted by similarity DESC.
+ * Empty ``results`` with HTTP 200 is the cold-start case (no
+ * projected topics yet); we render that as a friendly empty state.
+ */
+export async function getSimilarDocuments(
+  documentId: string,
+  options: { k?: number; signal?: AbortSignal } = {},
+): Promise<ApiSimilarDocumentsResponse> {
+  const { k, signal } = options;
+  return unwrap(
+    await http.GET("/documents/{document_id}/similar", {
+      params: {
+        path: { document_id: documentId },
+        query: k !== undefined ? { k } : undefined,
+      },
+      signal,
+    }),
   );
 }
 

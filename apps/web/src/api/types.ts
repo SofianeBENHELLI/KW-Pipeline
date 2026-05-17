@@ -180,6 +180,17 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── Document lineage + similar (EPIC-C C.3, ADR-025) ────────────────────
+
+/** Response body of ``GET /documents/{id}/lineage``. */
+export type ApiLineageResponse = Schemas["LineageResponse"];
+/** One row of the lineage list. */
+export type ApiLineageVersion = Schemas["LineageVersion"];
+/** Response body of ``GET /documents/{id}/similar``. */
+export type ApiSimilarDocumentsResponse = Schemas["SimilarDocumentsResponse"];
+/** One similarity-ranked document. */
+export type ApiSimilarDocument = Schemas["SimilarDocument"];
+
 // ─── Knowledge taxonomy (public read — ADR-017) ─────────────────────────
 
 /** Merged imposed + computed taxonomy returned by

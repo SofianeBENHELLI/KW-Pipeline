@@ -27,6 +27,7 @@ import { DocGraphTab } from "./DocGraphTab";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
+import { LineageModal, SimilarDocumentsModal } from "./LineageSimilarModals";
 import { LinkedView, type LinkedViewPdf } from "./LinkedView";
 import { PipelineTab } from "./PipelineTab";
 import { ResizeHandle } from "./ResizeHandle";
@@ -144,6 +145,14 @@ export function ReviewWorkspace({
   // Local UI state — not in the URL because they aren't shareable signals.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<RailSort>({ col: "uploaded", dir: "desc" });
+  // Slice 5 — Lineage / Similar modals. Each holds the doc id so a
+  // mid-modal navigation doesn't leave a phantom modal mounted.
+  const [lineageModalDocId, setLineageModalDocId] = useState<string | null>(
+    null,
+  );
+  const [similarModalDocId, setSimilarModalDocId] = useState<string | null>(
+    null,
+  );
 
   // ── Rail width / collapse ─────────────────────────────────────────
   // Two layout knobs that persist across reloads via ``localStorage``:
@@ -398,7 +407,15 @@ export function ReviewWorkspace({
             </svg>
           </button>
         ) : null}
-        <DocHeader document={activeDoc} />
+        <DocHeader
+          document={activeDoc}
+          onShowLineage={
+            activeDoc ? () => setLineageModalDocId(activeDoc.id) : undefined
+          }
+          onShowSimilar={
+            activeDoc ? () => setSimilarModalDocId(activeDoc.id) : undefined
+          }
+        />
         <DocTabs active={tab} onChange={setTab} />
 
         {tab === "linked" && (
@@ -456,6 +473,19 @@ export function ReviewWorkspace({
           <span>[ rail · j/k row · v validate · r reject</span>
         </footer>
       </main>
+
+      {lineageModalDocId !== null && (
+        <LineageModal
+          documentId={lineageModalDocId}
+          onClose={() => setLineageModalDocId(null)}
+        />
+      )}
+      {similarModalDocId !== null && (
+        <SimilarDocumentsModal
+          documentId={similarModalDocId}
+          onClose={() => setSimilarModalDocId(null)}
+        />
+      )}
     </section>
   );
 }
