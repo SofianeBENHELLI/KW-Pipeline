@@ -16,10 +16,7 @@ import { useNavigate } from "react-router-dom";
 
 import { Btn, OrbI } from "../index";
 import "./search.css";
-import {
-  ApiError,
-  askKnowledgeChat,
-} from "../../api/client";
+import { ApiError, askKnowledgeChat } from "../../api/client";
 import type {
   ApiChatCitation,
   ApiChatMode,
@@ -106,22 +103,24 @@ export function ChatPanel(): ReactElement {
       <div className="kf-chat__messages" data-testid="kf-chat-messages">
         {turns.length === 0 && !loading && (
           <div className="kf-chat__placeholder">
-            Ask a question grounded in the indexed corpus. The assistant
-            will return inline citations to the chunks it pulled.
+            Ask a question grounded in the indexed corpus. The assistant will
+            return inline citations to the chunks it pulled.
           </div>
         )}
         {turns.map((t) => (
           <Turn
             key={t.id}
             turn={t}
-            onCitationClick={(c) =>
-              navigate(`/kf/review/${c.document_id}`)
-            }
+            onCitationClick={(c) => {
+              // Deep-link to the cited chunk, not just the document — a
+              // chat citation always names a specific chunk, and Review
+              // can scroll to it via the existing highlight pipeline.
+              const qs = new URLSearchParams({ chunk: c.chunk_id });
+              navigate(`/kf/review/${c.document_id}?${qs.toString()}`);
+            }}
           />
         ))}
-        {loading && (
-          <div className="kf-chat__loading orb-mono">…thinking</div>
-        )}
+        {loading && <div className="kf-chat__loading orb-mono">…thinking</div>}
         {disabled && (
           <div
             className="kf-chat__banner kf-chat__banner--warn"
@@ -235,7 +234,10 @@ function Turn({
         )}
         {turn.tokenUsage && (
           <div className="orb-mono kf-chat__usage">
-            tokens · {Object.entries(turn.tokenUsage).map(([k, v]) => `${k}:${v}`).join(" · ")}
+            tokens ·{" "}
+            {Object.entries(turn.tokenUsage)
+              .map(([k, v]) => `${k}:${v}`)
+              .join(" · ")}
           </div>
         )}
       </div>

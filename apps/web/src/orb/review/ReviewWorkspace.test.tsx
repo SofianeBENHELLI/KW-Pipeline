@@ -3,12 +3,28 @@
  * tab switching, sort toggling, and selection sync.
  */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import type { ApiDocument } from "../../api/types";
 import { ReviewWorkspace, sortDocs } from "./ReviewWorkspace";
+
+// Stub the PDF viewer so we can inspect the cross-highlight props the
+// chat-citation deep-link should populate without standing up pdfjs.
+const _pdfViewerPanelMock = vi.fn();
+vi.mock("../../features/pdf-viewer", () => ({
+  PdfViewerPanel: (props: Record<string, unknown>) => {
+    _pdfViewerPanelMock(props);
+    return <div data-testid="kf-pdf-viewer-stub" />;
+  },
+}));
 
 function urlOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
@@ -30,7 +46,13 @@ const DOC_A: ApiDocument = {
   created_at: "2026-05-11T14:22:08Z",
   archived_at: null,
   scopes: [
-    { kind: "project", ref: "p1", added_at: "x", added_by: "a", removed_at: null },
+    {
+      kind: "project",
+      ref: "p1",
+      added_at: "x",
+      added_by: "a",
+      removed_at: null,
+    },
   ],
   versions: [
     {
@@ -42,6 +64,35 @@ const DOC_A: ApiDocument = {
       file_size: 4096,
       sha256: "ha",
       storage_uri: "file://a",
+      status: "NEEDS_REVIEW",
+      duplicate_of_version_id: null,
+      failure_reason: null,
+      reviewer_note: null,
+      reviewed_at: null,
+      created_at: "2026-05-11T14:22:08Z",
+    },
+  ],
+};
+
+// Minimal PDF doc — exercised by the chat-citation deep-link case to
+// force the LinkedView into PDF mode so the viewer stub mounts.
+const DOC_PDF: ApiDocument = {
+  id: "doc-pdf",
+  original_filename: "policy.pdf",
+  latest_version_id: "ver-pdf",
+  created_at: "2026-05-11T14:22:08Z",
+  archived_at: null,
+  scopes: [],
+  versions: [
+    {
+      id: "ver-pdf",
+      document_id: "doc-pdf",
+      version_number: 1,
+      filename: "policy.pdf",
+      content_type: "application/pdf",
+      file_size: 4096,
+      sha256: "deadbeefcafebabe",
+      storage_uri: "file://pdf",
       status: "NEEDS_REVIEW",
       duplicate_of_version_id: null,
       failure_reason: null,
@@ -79,12 +130,18 @@ const DOC_B: ApiDocument = {
   ],
 };
 
-function renderWorkspace(initialPath: string, overrides: Partial<React.ComponentProps<typeof ReviewWorkspace>> = {}) {
+function renderWorkspace(
+  initialPath: string,
+  overrides: Partial<React.ComponentProps<typeof ReviewWorkspace>> = {},
+) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/kf/review" element={<ReviewWorkspace {...overrides} />} />
-        <Route path="/kf/review/:docId" element={<ReviewWorkspace {...overrides} />} />
+        <Route
+          path="/kf/review/:docId"
+          element={<ReviewWorkspace {...overrides} />}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -113,6 +170,21 @@ describe("<ReviewWorkspace />", () => {
         if (url.match(/\/documents\/doc-a$/)) {
           return Promise.resolve(makeJsonResponse(DOC_A));
         }
+        if (url.match(/\/documents\/doc-pdf\/graph$/)) {
+          return Promise.resolve(
+            makeJsonResponse({
+              document_id: "doc-pdf",
+              version_id: "ver-pdf",
+              generated_at: "2026-05-12T09:00:00Z",
+              schema_version: "v0.2",
+              nodes: [],
+              edges: [],
+            }),
+          );
+        }
+        if (url.match(/\/documents\/doc-pdf$/)) {
+          return Promise.resolve(makeJsonResponse(DOC_PDF));
+        }
         if (url.includes("/documents")) {
           return Promise.resolve(
             makeJsonResponse({ items: [DOC_A, DOC_B], next_cursor: null }),
@@ -131,7 +203,9 @@ describe("<ReviewWorkspace />", () => {
       expect(screen.getByText("alpha.md")).toBeInTheDocument(),
     );
     expect(screen.getByText("beta.md")).toBeInTheDocument();
-    expect(screen.getByText(/Pick a document from the rail/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Pick a document from the rail/i),
+    ).toBeInTheDocument();
   });
 
   it("clicking a row updates the URL to /kf/review/:docId", async () => {
@@ -206,9 +280,10 @@ describe("<ReviewWorkspace />", () => {
     // (URL inspection in MemoryRouter would require a Location capture
     // helper; we keep the assertion behaviour-level here).
     await waitFor(() => {
-      expect(
-        screen.getByRole("tab", { name: /Validated/ }),
-      ).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /Validated/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
   });
 
@@ -220,7 +295,9 @@ describe("<ReviewWorkspace />", () => {
 
   it("renders the rail loading state on first paint", async () => {
     const { container } = renderWorkspace("/kf/review");
-    expect(container.querySelectorAll(".kf-rail__row--skeleton").length).toBeGreaterThan(0);
+    expect(
+      container.querySelectorAll(".kf-rail__row--skeleton").length,
+    ).toBeGreaterThan(0);
     await waitFor(() =>
       expect(screen.getByText("alpha.md")).toBeInTheDocument(),
     );
@@ -236,6 +313,18 @@ describe("<ReviewWorkspace />", () => {
       name: /Batch selection/,
     });
     expect(within(region).getByText("1 selected")).toBeInTheDocument();
+  });
+
+  it("threads ?chunk= into the PDF viewer's chunk-highlight prop (chat citation deep-link)", async () => {
+    _pdfViewerPanelMock.mockClear();
+    renderWorkspace("/kf/review/doc-pdf?chunk=chunk-abc");
+    await waitFor(() =>
+      expect(screen.getByTestId("kf-pdf-viewer-stub")).toBeInTheDocument(),
+    );
+    const calls = _pdfViewerPanelMock.mock.calls;
+    const lastProps = calls[calls.length - 1][0] as Record<string, unknown>;
+    const ids = lastProps.externalHoveredChunkIds as ReadonlySet<string>;
+    expect(ids.has("chunk-abc")).toBe(true);
   });
 
   describe("rail collapse + resize", () => {
@@ -277,7 +366,9 @@ describe("<ReviewWorkspace />", () => {
         expect(screen.getByText("alpha.md")).toBeInTheDocument(),
       );
       expect(
-        document.querySelector(".kf-review")?.classList.contains("is-rail-collapsed"),
+        document
+          .querySelector(".kf-review")
+          ?.classList.contains("is-rail-collapsed"),
       ).toBe(true);
     });
 

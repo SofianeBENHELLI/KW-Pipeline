@@ -104,7 +104,12 @@ function _pdfMetaFor(doc: ApiDocument | null): LinkedViewPdf | null {
   return { versionId: candidate.id, expectedHash: candidate.sha256 };
 }
 
-const VALID_VIEWS = new Set<RailView>(["recent", "review", "validated", "failed"]);
+const VALID_VIEWS = new Set<RailView>([
+  "recent",
+  "review",
+  "validated",
+  "failed",
+]);
 const VALID_TABS = new Set<DocTab>(["linked", "pipeline", "graph"]);
 
 function parseView(raw: string | null): RailView {
@@ -136,6 +141,9 @@ export function ReviewWorkspace({
   const view = parseView(searchParams.get("view"));
   const query = searchParams.get("q") ?? "";
   const tab = parseTab(searchParams.get("tab"));
+  // ``?chunk=`` is the chat citation deep-link — the LinkedView seeds
+  // its hover state from it so the PDF auto-scrolls to the cited rect.
+  const initialChunkId = searchParams.get("chunk");
 
   // Local UI state — not in the URL because they aren't shareable signals.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -276,9 +284,7 @@ export function ReviewWorkspace({
   // We simply don't highlight it in the rail until the catalog catches
   // up.
   const activeDoc =
-    detail.document ??
-    docs.find((d) => d.id === params.docId) ??
-    null;
+    detail.document ?? docs.find((d) => d.id === params.docId) ?? null;
 
   // Pull selected rows that are no longer in the current view out of
   // the batch set so the count stays honest.
@@ -308,11 +314,7 @@ export function ReviewWorkspace({
 
   return (
     <section
-      className={
-        railCollapsed
-          ? "kf-review is-rail-collapsed"
-          : "kf-review"
-      }
+      className={railCollapsed ? "kf-review is-rail-collapsed" : "kf-review"}
       aria-label="Knowledge Forge — Review Workspace"
       style={reviewStyle}
     >
@@ -406,6 +408,7 @@ export function ReviewWorkspace({
               documentId={params.docId ?? null}
               filename={activeDoc?.original_filename}
               pdf={_pdfMetaFor(activeDoc)}
+              initialChunkId={initialChunkId}
             />
           </div>
         )}
@@ -456,10 +459,7 @@ export function ReviewWorkspace({
 }
 
 /** Sort the rail's loaded page client-side. */
-export function sortDocs(
-  list: ApiDocument[],
-  sort: RailSort,
-): ApiDocument[] {
+export function sortDocs(list: ApiDocument[], sort: RailSort): ApiDocument[] {
   const sign = sort.dir === "asc" ? 1 : -1;
   return [...list].sort((a, b) => {
     if (sort.col === "filename") {

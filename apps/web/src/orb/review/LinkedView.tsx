@@ -16,7 +16,7 @@
  * not via a global store (avoid re-render storms on hover)".
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 
 import { Btn, OrbI } from "../index";
@@ -105,6 +105,11 @@ export interface LinkedViewProps {
    *  Driven by ``ReviewWorkspace`` from the active document's latest
    *  version content type + SHA-256. */
   pdf?: LinkedViewPdf | null;
+  /** Chat citation deep-link target. Seeds the hover state on mount so
+   *  the PDF auto-scrolls to the chunk's first rect and the text-mode
+   *  span gets the ``is-hl`` flash. Operator hover overrides this once
+   *  the page is interactive. */
+  initialChunkId?: string | null;
   /** Optional fixture override — used by tests to skip the network. */
   fixture?: LinkedObjects;
   /** Loading override (lets tests force the loading branch). */
@@ -115,6 +120,7 @@ export function LinkedView({
   documentId,
   filename,
   pdf,
+  initialChunkId,
   fixture,
   loading,
 }: LinkedViewProps): ReactElement {
@@ -128,7 +134,17 @@ export function LinkedView({
   const isEmpty = !isLoading && !isError && data.chunks.length === 0;
 
   const [objKind, setObjKind] = useState<ObjKind>("Topics");
-  const [hover, setHover] = useState<Hover | null>(null);
+  // Seed from ``initialChunkId`` so a chat citation deep-link lands on
+  // the cited chunk; the operator's next hover overwrites it.
+  const [hover, setHover] = useState<Hover | null>(() =>
+    initialChunkId ? { kind: "Chunks", id: initialChunkId } : null,
+  );
+  // Re-seed when the deep-link target changes (citation-to-citation
+  // navigation keeps the same component mounted, only the search param
+  // changes — ``useState`` lazy init alone would not refire).
+  useEffect(() => {
+    if (initialChunkId) setHover({ kind: "Chunks", id: initialChunkId });
+  }, [initialChunkId]);
 
   // Doc / objects split — drag-resizable, persisted via localStorage.
   const docResize = useResizable({
@@ -143,9 +159,8 @@ export function LinkedView({
 
   // Coverage-view toggle. Persisted across reloads so an operator
   // running an audit pass doesn't have to flip it every doc.
-  const [coverageMode, setCoverageMode] = useState<boolean>(
-    _readCoverageStored,
-  );
+  const [coverageMode, setCoverageMode] =
+    useState<boolean>(_readCoverageStored);
   const toggleCoverage = useCallback(() => {
     setCoverageMode((prev) => {
       const next = !prev;
@@ -247,8 +262,8 @@ export function LinkedView({
         <div className="kf-lv__state">
           <h3>No linked objects yet</h3>
           <p>
-            This document has not been semantically projected. Validate
-            it on the Review tab to unlock the Linked View.
+            This document has not been semantically projected. Validate it on
+            the Review tab to unlock the Linked View.
           </p>
         </div>
       </section>
@@ -271,13 +286,16 @@ export function LinkedView({
           <span className="orb-mono kf-lv__hint">
             {filename ?? "document"}
             {pdf ? (
-              <> · PDF · hash <code>{pdf.expectedHash.slice(0, 12)}…</code></>
+              <>
+                {" "}
+                · PDF · hash <code>{pdf.expectedHash.slice(0, 12)}…</code>
+              </>
             ) : (
               <>
                 {" "}
                 · {data.sections.length} section
-                {data.sections.length === 1 ? "" : "s"} ·{" "}
-                {data.chunks.length} chunks
+                {data.sections.length === 1 ? "" : "s"} · {data.chunks.length}{" "}
+                chunks
               </>
             )}
           </span>
@@ -410,7 +428,8 @@ export function LinkedView({
                 chunk={c}
                 topicLabel={
                   c.topicId
-                    ? data.topics.find((t) => t.id === c.topicId)?.label ?? null
+                    ? (data.topics.find((t) => t.id === c.topicId)?.label ??
+                      null)
                     : null
                 }
                 highlit={isObjHighlit("Chunks", c.id)}
@@ -492,8 +511,7 @@ function LvSpan({
       }}
       tabIndex={0}
     >
-      {chunk.text}
-      {" "}
+      {chunk.text}{" "}
     </span>
   );
 }
@@ -554,7 +572,9 @@ function EntityCard({
       data-testid={`kf-lv-obj-Entities-${entity.id}`}
     >
       <div className="kf-lv__obj-h">
-        <span className="kf-lv__obj-kind kf-lv__obj-kind--entities">ENTITY</span>
+        <span className="kf-lv__obj-kind kf-lv__obj-kind--entities">
+          ENTITY
+        </span>
         <span className="kf-lv__obj-label">{entity.label}</span>
         <span className="orb-mono kf-lv__obj-id">{entity.id}</span>
       </div>
@@ -578,9 +598,7 @@ function ChunkCard({
   onHover: (h: Hover | null) => void;
 }): ReactElement {
   const snip =
-    chunk.text.length > 110
-      ? chunk.text.slice(0, 110) + "…"
-      : chunk.text;
+    chunk.text.length > 110 ? chunk.text.slice(0, 110) + "…" : chunk.text;
   return (
     <div
       role="button"
