@@ -294,13 +294,10 @@ class BusinessTaxonomyAllocator:
                 # section list and record list ever diverge we'd
                 # rather skip the chunk than crash the whole pass.
                 continue
-            # Note: we deliberately do NOT pass ``section`` to the
-            # deterministic extractor. The NER hookup (#190) is out
-            # of scope for slice 1.3 — when it's wired we'll thread
-            # it through here. The deterministic concepts on their
-            # own (keywords / noun phrases / acronyms / standards /
-            # heading anchors) are sufficient for the allocator's
-            # prompt.
+            # NER concepts (from the spaCy enricher, #190) would land
+            # by passing ``section=section`` here. Left for the NER
+            # integration slice to wire — the regex / keyword
+            # concepts on their own are sufficient for the allocator.
             concepts = extract_deterministic_taxonomy(record).concepts
             allocation = self._allocate_one_chunk(
                 section=section,
