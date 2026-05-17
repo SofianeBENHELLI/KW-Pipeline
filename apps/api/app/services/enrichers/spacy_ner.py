@@ -99,7 +99,7 @@ class SpacyNerEnricher:
     ) -> None:
         if nlp is None:
             try:
-                import spacy  # noqa: PLC0415
+                import spacy  # type: ignore[import-not-found]  # noqa: PLC0415
             except ImportError as exc:
                 raise RuntimeError(
                     "SpacyNerEnricher requires the optional ``ner`` extra. "
