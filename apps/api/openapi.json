@@ -1774,6 +1774,52 @@
         "title": "ConceptSuggestion",
         "type": "object"
       },
+      "ConfidenceScore": {
+        "description": "One scoring pass over a single version (ADR-023 §1, §4).\n\n``signals`` and ``weights`` are dicts keyed by the canonical\nsignal names from :mod:`app.services.confidence_scorer` so the\non-the-wire and at-rest shapes match the live config without a\ntranslation table. ``ocr_override_active`` carries the hard\noverride bit independently of ``overall`` so an audit query\n\"show me every version where OCR forced the score to 0\" doesn't\nneed to compare floats.",
+        "properties": {
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "computed_by_version": {
+            "title": "Computed By Version",
+            "type": "string"
+          },
+          "ocr_override_active": {
+            "title": "Ocr Override Active",
+            "type": "boolean"
+          },
+          "overall": {
+            "title": "Overall",
+            "type": "number"
+          },
+          "signals": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Signals",
+            "type": "object"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "overall",
+          "signals",
+          "weights",
+          "ocr_override_active",
+          "computed_at",
+          "computed_by_version"
+        ],
+        "title": "ConfidenceScore",
+        "type": "object"
+      },
       "ContributingChunkPair": {
         "description": "One chunk-level edge contributing to an aggregated doc-doc relation.\n\nThe pair carries the edge's evidence (``reason``, ``shared_keywords``)\nplus the combined #314 score so the frontend can rank pairs without\nre-running the scoring policy.",
         "properties": {
@@ -2019,6 +2065,112 @@
           "scopes"
         ],
         "title": "Document",
+        "type": "object"
+      },
+      "DocumentConfidenceResponse": {
+        "description": "Composite confidence view for one document's reported version.\n\nThe route reports on the document's ``latest_version_id`` by\ndefault. Operators inspecting historical drift can target a\nspecific version via the ``?version_id=`` query param; the\nresponse carries the resolved id so the frontend can confirm\nwhich version it's rendering.\n\n``has_score`` is ``False`` when the resolved version exists but\nno :class:`~app.schemas.validation_metadata.ConfidenceScore` was\npersisted — either the scorer was disabled\n(``KW_HITL_DISABLE_SCORER`` truthy), the version never reached\nNEEDS_REVIEW under the scorer's wiring, or the version predates\nthe scorer (legacy data). The frontend renders a \"no confidence\ndata\" empty state for the score itself.\n\n``routing_decision`` / ``validation_method`` / ``validation_actor``\nfollow the underlying :class:`ValidationMetadata` row's presence\nindependently of ``has_score``: when the scorer is disabled but\nthe HITL router still ran (so the metadata row exists with a\n``None`` score), the routing/validation outcome is still\nsurfaced. Only when no metadata row exists at all are all three\nfields ``None``.\n\n``auto_validate_threshold`` is included so the dashboard can\nrender the pass / fail visual against the operator's configured\ncut-off (``KW_HITL_AUTO_VALIDATE_THRESHOLD``, default 0.85)\nwithout a second config round-trip. It's the threshold the HITL\nrouter uses for the ``auto`` routing decision; the score being\nabove it does NOT mean the version was actually auto-validated\n(that's :attr:`validation_method`).",
+        "properties": {
+          "auto_validate_threshold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Auto Validate Threshold",
+            "type": "number"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "has_score": {
+            "title": "Has Score",
+            "type": "boolean"
+          },
+          "routing_decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "auto",
+                  "human",
+                  "external"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routing Decision"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "validation_actor": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Actor"
+          },
+          "validation_method": {
+            "anyOf": [
+              {
+                "enum": [
+                  "auto",
+                  "human",
+                  "external"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Method"
+          },
+          "version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_number": {
+            "minimum": 1.0,
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "document_id",
+          "version_id",
+          "version_number",
+          "has_score",
+          "confidence_score",
+          "routing_decision",
+          "validation_method",
+          "validation_actor",
+          "auto_validate_threshold"
+        ],
+        "title": "DocumentConfidenceResponse",
         "type": "object"
       },
       "DocumentHashCheckResponse": {
@@ -7312,6 +7464,64 @@
           }
         },
         "summary": "Get Document"
+      }
+    },
+    "/documents/{document_id}/confidence": {
+      "get": {
+        "description": "Confidence dashboard view for one document (converged plan §C.1).\n\nReturns the composite confidence score (overall + per-signal\nbreakdown), the HITL routing outcome, and the auto-validate\nthreshold this deployment is tuned to. The dashboard renders\nthis as one panel on the document detail page; nothing here\ntriggers scoring — the data has been produced by\n:class:`ConfidenceScorer` on the NEEDS_REVIEW transition since\nEPIC-A slice 1 (ADR-023).\n\n``?version_id=`` is optional. Without it the route reports on\n``document.latest_version_id`` — the natural default for the\nper-document panel. Operators inspecting drift between two\npasses pass the explicit version id; the response carries the\nresolved id so the frontend can confirm.\n\n``has_score=false`` when the resolved version exists but no\n:class:`ConfidenceScore` was persisted (scorer disabled via\n``KW_HITL_DISABLE_SCORER``, or the version predates scorer\nwiring). Routing / validation fields still surface whenever a\n:class:`ValidationMetadata` row exists; the UI renders an\nempty-state for the score itself while keeping the routing\noutcome visible.\n\nTombstone semantics mirror the sibling per-version content\nroutes (ADR-027 §3): a fully-purged document family surfaces\nas 410 Gone, an individual PURGED version surfaces as 410 with\nthe per-version tombstone envelope. Hidden-existence (D.5)\napplies to non-purged invisibility: missing document or a\nversion_id not in the family returns plain 404.",
+        "operationId": "get_document_confidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentConfidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Confidence"
       }
     },
     "/documents/{document_id}/graph": {
