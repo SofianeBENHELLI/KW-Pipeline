@@ -890,6 +890,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/confidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Confidence
+         * @description Confidence dashboard view for one document (converged plan §C.1).
+         *
+         *     Returns the composite confidence score (overall + per-signal
+         *     breakdown), the HITL routing outcome, and the auto-validate
+         *     threshold this deployment is tuned to. The dashboard renders
+         *     this as one panel on the document detail page; nothing here
+         *     triggers scoring — the data has been produced by
+         *     :class:`ConfidenceScorer` on the NEEDS_REVIEW transition since
+         *     EPIC-A slice 1 (ADR-023).
+         *
+         *     ``?version_id=`` is optional. Without it the route reports on
+         *     ``document.latest_version_id`` — the natural default for the
+         *     per-document panel. Operators inspecting drift between two
+         *     passes pass the explicit version id; the response carries the
+         *     resolved id so the frontend can confirm.
+         *
+         *     ``has_score=false`` when the resolved version exists but no
+         *     :class:`ConfidenceScore` was persisted (scorer disabled via
+         *     ``KW_HITL_DISABLE_SCORER``, or the version predates scorer
+         *     wiring). The rest of the fields are ``None`` in that case;
+         *     the UI renders an empty-state hint, not zeros.
+         *
+         *     404 when the document is missing OR not visible under the
+         *     caller's scope filter (D.5 hidden-existence). 404 also when
+         *     an explicit ``version_id`` is passed and does not belong to
+         *     this document family — prevents cross-document confidence
+         *     scraping via a known version id from another scope.
+         */
+        get: operations["get_document_confidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/graph": {
         parameters: {
             query?: never;
@@ -2975,6 +3021,39 @@ export interface components {
             suggestion_id: string;
         };
         /**
+         * ConfidenceScore
+         * @description One scoring pass over a single version (ADR-023 §1, §4).
+         *
+         *     ``signals`` and ``weights`` are dicts keyed by the canonical
+         *     signal names from :mod:`app.services.confidence_scorer` so the
+         *     on-the-wire and at-rest shapes match the live config without a
+         *     translation table. ``ocr_override_active`` carries the hard
+         *     override bit independently of ``overall`` so an audit query
+         *     "show me every version where OCR forced the score to 0" doesn't
+         *     need to compare floats.
+         */
+        ConfidenceScore: {
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+            /** Computed By Version */
+            computed_by_version: string;
+            /** Ocr Override Active */
+            ocr_override_active: boolean;
+            /** Overall */
+            overall: number;
+            /** Signals */
+            signals: {
+                [key: string]: number;
+            };
+            /** Weights */
+            weights: {
+                [key: string]: number;
+            };
+        };
+        /**
          * ContributingChunkPair
          * @description One chunk-level edge contributing to an aggregated doc-doc relation.
          *
@@ -3132,6 +3211,58 @@ export interface components {
             scopes: components["schemas"]["Scope"][];
             /** Versions */
             versions: components["schemas"]["DocumentVersion"][];
+        };
+        /**
+         * DocumentConfidenceResponse
+         * @description Composite confidence view for one document's reported version.
+         *
+         *     The route reports on the document's ``latest_version_id`` by
+         *     default. Operators inspecting historical drift can target a
+         *     specific version via the ``?version_id=`` query param; the
+         *     response carries the resolved id so the frontend can confirm
+         *     which version it's rendering.
+         *
+         *     ``has_score`` is ``False`` when the resolved version exists but
+         *     no :class:`~app.schemas.validation_metadata.ConfidenceScore` was
+         *     persisted — either the scorer was disabled
+         *     (``KW_HITL_DISABLE_SCORER`` truthy), the version never reached
+         *     NEEDS_REVIEW under the scorer's wiring, or the version predates
+         *     the scorer (legacy data). In all three cases the rest of the
+         *     fields below are ``None`` and the frontend should render a "no
+         *     confidence data" empty state rather than zeros.
+         *
+         *     ``auto_validate_threshold`` is included so the dashboard can
+         *     render the pass / fail visual against the operator's configured
+         *     cut-off (``KW_HITL_AUTO_VALIDATE_THRESHOLD``, default 0.85)
+         *     without a second config round-trip. It's the threshold the HITL
+         *     router uses for the ``auto`` routing decision; the score being
+         *     above it does NOT mean the version was actually auto-validated
+         *     (that's :attr:`validation_method`).
+         */
+        DocumentConfidenceResponse: {
+            /** Auto Validate Threshold */
+            auto_validate_threshold: number;
+            confidence_score: components["schemas"]["ConfidenceScore"] | null;
+            /** Document Id */
+            document_id: string;
+            /** Has Score */
+            has_score: boolean;
+            /** Routing Decision */
+            routing_decision: ("auto" | "human" | "external") | null;
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /** Validation Actor */
+            validation_actor: string | null;
+            /** Validation Method */
+            validation_method: ("auto" | "human" | "external") | null;
+            /** Version Id */
+            version_id: string;
+            /** Version Number */
+            version_number: number;
         };
         /**
          * DocumentHashCheckResponse
@@ -6081,6 +6212,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Document"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_confidence: {
+        parameters: {
+            query?: {
+                version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentConfidenceResponse"];
                 };
             };
             /** @description Validation Error */

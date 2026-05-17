@@ -41,6 +41,7 @@ from app.schemas.document import (
     SimilarDocument,
     SimilarDocumentsResponse,
 )
+from app.schemas.document_confidence import DocumentConfidenceResponse
 from app.schemas.document_topic import DOCUMENT_TOPIC_SCHEMA_VERSION
 from app.schemas.extraction import ExtractionJobSnapshot, NormalizedRect, RawExtraction
 from app.schemas.scope import DocumentScopesResponse, ScopeRef
@@ -848,6 +849,90 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(status_code=404, detail="Document not found.")
         assert_can_access_document(request=request, document_id=document_id, user=current_user)
         return _build_lineage_response(document)
+
+    @router.get(
+        "/documents/{document_id}/confidence",
+        operation_id="get_document_confidence",
+        response_model=DocumentConfidenceResponse,
+    )
+    def get_document_confidence(
+        request: Request,
+        document_id: str,
+        version_id: str | None = Query(default=None, max_length=200),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Confidence dashboard view for one document (converged plan §C.1).
+
+        Returns the composite confidence score (overall + per-signal
+        breakdown), the HITL routing outcome, and the auto-validate
+        threshold this deployment is tuned to. The dashboard renders
+        this as one panel on the document detail page; nothing here
+        triggers scoring — the data has been produced by
+        :class:`ConfidenceScorer` on the NEEDS_REVIEW transition since
+        EPIC-A slice 1 (ADR-023).
+
+        ``?version_id=`` is optional. Without it the route reports on
+        ``document.latest_version_id`` — the natural default for the
+        per-document panel. Operators inspecting drift between two
+        passes pass the explicit version id; the response carries the
+        resolved id so the frontend can confirm.
+
+        ``has_score=false`` when the resolved version exists but no
+        :class:`ConfidenceScore` was persisted (scorer disabled via
+        ``KW_HITL_DISABLE_SCORER``, or the version predates scorer
+        wiring). The rest of the fields are ``None`` in that case;
+        the UI renders an empty-state hint, not zeros.
+
+        404 when the document is missing OR not visible under the
+        caller's scope filter (D.5 hidden-existence). 404 also when
+        an explicit ``version_id`` is passed and does not belong to
+        this document family — prevents cross-document confidence
+        scraping via a known version id from another scope.
+        """
+        document = services.documents.get_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
+
+        target_version_id = document.latest_version_id if version_id is None else version_id
+
+        version = next(
+            (v for v in document.versions if v.id == target_version_id),
+            None,
+        )
+        if version is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(f"Version {target_version_id!r} not found in document {document_id!r}."),
+            )
+
+        metadata = services.validation_metadata.get(version.id)
+        threshold = services.settings.hitl_auto_validate_threshold
+
+        if metadata is None or metadata.confidence_score is None:
+            return DocumentConfidenceResponse(
+                document_id=document.id,
+                version_id=version.id,
+                version_number=version.version_number,
+                has_score=False,
+                confidence_score=None,
+                routing_decision=metadata.routing_decision if metadata else None,
+                validation_method=metadata.validation_method if metadata else None,
+                validation_actor=metadata.validation_actor if metadata else None,
+                auto_validate_threshold=threshold,
+            )
+
+        return DocumentConfidenceResponse(
+            document_id=document.id,
+            version_id=version.id,
+            version_number=version.version_number,
+            has_score=True,
+            confidence_score=metadata.confidence_score,
+            routing_decision=metadata.routing_decision,
+            validation_method=metadata.validation_method,
+            validation_actor=metadata.validation_actor,
+            auto_validate_threshold=threshold,
+        )
 
     @router.get(
         "/documents/{document_id}/similar",
