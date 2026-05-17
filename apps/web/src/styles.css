@@ -2144,3 +2144,18 @@ pre {
   gap: 8px;
   margin-top: 8px;
 }
+
+/* Slice 4 — taxonomy mode pill at the top of the orb rail. */
+.dx-rail-taxonomy-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 0;
+  text-decoration: none;
+}
+
+.dx-rail-taxonomy-pill .state-pill {
+  font-size: 0.7em;
+  padding: 1px 6px;
+}

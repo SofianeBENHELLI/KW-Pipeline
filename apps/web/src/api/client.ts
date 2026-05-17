@@ -42,6 +42,7 @@ import type {
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiTaxonomyResponse,
   ApiTaxonomyState,
   ApiTaxonomyVersion,
   ApiTaxonomyVersionListResponse,
@@ -1116,6 +1117,23 @@ export async function transitionTaxonomyConcept(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * GET /knowledge/taxonomy
+ *
+ * Public read of the merged (imposed + computed) taxonomy. ADR-017.
+ * Never 404s — an unconfigured deployment returns
+ * ``is_configured=false`` with an empty categories list.
+ */
+export async function getKnowledgeTaxonomy(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyResponse> {
+  return unwrap(
+    await http.GET("/knowledge/taxonomy", {
+      signal: options.signal,
+    }),
   );
 }
 

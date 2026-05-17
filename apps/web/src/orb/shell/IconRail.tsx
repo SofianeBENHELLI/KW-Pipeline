@@ -21,9 +21,13 @@ import {
   Settings,
   Upload,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { OrbI } from "../atoms/icons";
+import { ApiError, getKnowledgeTaxonomy } from "../../api/client";
+import type { ApiTaxonomyResponse } from "../../api/types";
 
 export type RailTileId =
   | "activity"
@@ -86,11 +90,66 @@ export function IconRail({
 
   return (
     <nav className="dx-rail" aria-label="Primary navigation">
+      <TaxonomyModePill />
       {TOP_TILES.map(renderTile)}
       <div className="dx-rail-divider" aria-hidden="true" />
       {MID_TILES.map(renderTile)}
       <div className="dx-rail-spacer" />
       {renderTile(BOTTOM_TILE)}
     </nav>
+  );
+}
+
+/**
+ * Active-taxonomy badge at the top of the rail. Cheap probe of
+ * ``GET /knowledge/taxonomy`` so the operator sees "this deployment
+ * has a taxonomy wired up" at a glance from every Knowledge Forge
+ * surface. Clicking the pill jumps to ``/admin/taxonomy`` for the
+ * lineage view + transition actions.
+ *
+ * The route doesn't surface version_number / state directly — the
+ * versioning ADR-018 §6 follow-up will widen the response. Until
+ * then we render is_configured + source_path; the click-through
+ * gives operators access to the full lineage when they want it.
+ */
+function TaxonomyModePill(): ReactElement | null {
+  const [data, setData] = useState<ApiTaxonomyResponse | null>(null);
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getKnowledgeTaxonomy({ signal: controller.signal })
+      .then((response) => setData(response))
+      .catch((err: unknown) => {
+        // AbortError on unmount is fine; everything else hides the pill.
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (err instanceof ApiError && err.status === 401) return;
+        setErrored(true);
+      });
+    return () => controller.abort();
+  }, []);
+
+  if (errored || data === null) return null;
+
+  const label = data.is_configured ? "configured" : "empty";
+  const stateModifier = data.is_configured
+    ? "state-pill--validated"
+    : "state-pill--draft";
+  const tooltip = data.source_path
+    ? `Source: ${data.source_path}`
+    : data.is_configured
+      ? "Topic-clustering only (no YAML)"
+      : "No taxonomy configured";
+
+  return (
+    <Link
+      to="/admin/taxonomy"
+      className="dx-rail-taxonomy-pill"
+      title={tooltip}
+      data-testid="taxonomy-mode-pill"
+      aria-label={`Taxonomy ${label}`}
+    >
+      <span className={`state-pill ${stateModifier}`}>tax · {label}</span>
+    </Link>
   );
 }

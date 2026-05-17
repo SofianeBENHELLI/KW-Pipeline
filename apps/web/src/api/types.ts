@@ -180,6 +180,14 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── Knowledge taxonomy (public read — ADR-017) ─────────────────────────
+
+/** Merged imposed + computed taxonomy returned by
+ *  ``GET /knowledge/taxonomy``. ``source_path`` is the YAML path when
+ *  the imposed half is loaded; ``is_configured=false`` only when both
+ *  halves are empty. */
+export type ApiTaxonomyResponse = Schemas["TaxonomyResponse"];
+
 // ─── Admin / Taxonomy versioning (EPIC-1 §1.8, ADR-018) ──────────────────
 
 /** One versioned taxonomy resource — wraps the existing ``Taxonomy``
