@@ -322,6 +322,36 @@ describe("<LinkedView />", () => {
         expect(screen.getByTestId("kf-lv-obj-Topics-t1").className).not.toMatch(/is-hl/);
       });
 
+      it("threads initialChunkId into the PDF panel as externalSelectedChunkIds (chat deep-link)", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+            initialChunkId="c2"
+          />,
+        );
+        const props = _lastPdfPanelProps();
+        const selected = props.externalSelectedChunkIds as ReadonlySet<string>;
+        expect(selected.has("c2")).toBe(true);
+        expect(selected.size).toBe(1);
+      });
+
+      it("omits the deep-link selection when no initialChunkId is set", () => {
+        _pdfViewerPanelMock.mockClear();
+        render(
+          <LinkedView
+            documentId="doc-1"
+            filename="policy.pdf"
+            pdf={{ versionId: "v-1", expectedHash: "abc" }}
+            fixture={FIXTURE}
+          />,
+        );
+        expect(_lastPdfPanelProps().externalSelectedChunkIds).toBeNull();
+      });
+
       it("hovering a Chunk card lights up just that chunk in the PDF", () => {
         _pdfViewerPanelMock.mockClear();
         render(

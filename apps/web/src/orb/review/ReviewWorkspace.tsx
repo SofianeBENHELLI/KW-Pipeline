@@ -136,6 +136,10 @@ export function ReviewWorkspace({
   const view = parseView(searchParams.get("view"));
   const query = searchParams.get("q") ?? "";
   const tab = parseTab(searchParams.get("tab"));
+  // Chat citations deep-link in as ``/kf/review/{docId}?chunk=…``;
+  // the value flows into LinkedView so the PDF overlay can scroll +
+  // highlight the cited rect on landing (#447 follow-up).
+  const initialChunkId = searchParams.get("chunk");
 
   // Local UI state — not in the URL because they aren't shareable signals.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -406,6 +410,7 @@ export function ReviewWorkspace({
               documentId={params.docId ?? null}
               filename={activeDoc?.original_filename}
               pdf={_pdfMetaFor(activeDoc)}
+              initialChunkId={initialChunkId}
             />
           </div>
         )}

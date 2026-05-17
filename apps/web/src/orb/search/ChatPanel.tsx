@@ -114,9 +114,7 @@ export function ChatPanel(): ReactElement {
           <Turn
             key={t.id}
             turn={t}
-            onCitationClick={(c) =>
-              navigate(`/kf/review/${c.document_id}`)
-            }
+            onCitationClick={(c) => navigate(citationHref(c))}
           />
         ))}
         {loading && (
@@ -168,6 +166,21 @@ export function ChatPanel(): ReactElement {
       </footer>
     </section>
   );
+}
+
+/**
+ * Build the deep-link href for a citation. Appends ``?chunk=`` (and
+ * ``?section=`` when the backend returns one) so the Review workspace
+ * lands on the correct row + scrolls the PDF rect into view. Without
+ * the chunk parameter the operator drops onto the top of the doc and
+ * has to hunt the citation manually (#447 follow-up).
+ */
+export function citationHref(c: ApiChatCitation): string {
+  const params = new URLSearchParams();
+  if (c.chunk_id) params.set("chunk", c.chunk_id);
+  if (c.section_id) params.set("section", c.section_id);
+  const qs = params.toString();
+  return `/kf/review/${c.document_id}${qs ? `?${qs}` : ""}`;
 }
 
 function ModeToggle({

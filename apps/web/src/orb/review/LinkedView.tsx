@@ -109,6 +109,10 @@ export interface LinkedViewProps {
   fixture?: LinkedObjects;
   /** Loading override (lets tests force the loading branch). */
   loading?: boolean;
+  /** Deep-link target: chunk id to highlight + scroll into view on
+   *  mount. Sourced from the ``?chunk=`` URL param when a chat citation
+   *  lands here (#447 follow-up). */
+  initialChunkId?: string | null;
 }
 
 export function LinkedView({
@@ -117,6 +121,7 @@ export function LinkedView({
   pdf,
   fixture,
   loading,
+  initialChunkId,
 }: LinkedViewProps): ReactElement {
   const live = useLinkedObjects(fixture ? null : documentId);
   const data = fixture ?? live.data;
@@ -183,6 +188,16 @@ export function LinkedView({
     }
     return _EMPTY_SET;
   }, [hover, data]);
+
+  // Deep-link selection set. Wrap the URL-supplied ``initialChunkId``
+  // in a singleton set so the shared viewer's selection prop sees a
+  // stable reference and the scroll-to-rect effect lands on the cited
+  // chunk on mount. ``null`` falls back to the frozen empty set so the
+  // PDF panel doesn't see prop churn when no deep link is active.
+  const deepLinkSelectedChunkIds = useMemo<ReadonlySet<string>>(() => {
+    if (!initialChunkId) return _EMPTY_SET;
+    return new Set([initialChunkId]);
+  }, [initialChunkId]);
 
   // Bridge "PDF rect → right-pane card" highlight. The shared viewer
   // hands us the chunk id under the cursor (or ``null`` on
@@ -308,6 +323,11 @@ export function LinkedView({
               expectedHash={pdf.expectedHash}
               hideBuiltInSidePanel
               externalHoveredChunkIds={highlightedChunkIds}
+              externalSelectedChunkIds={
+                deepLinkSelectedChunkIds.size > 0
+                  ? deepLinkSelectedChunkIds
+                  : null
+              }
               onHoverChunk={handlePdfHoverChunk}
               coverageMode={coverageMode}
             />
