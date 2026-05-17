@@ -44,9 +44,10 @@ class TestRRFPrimitive:
         assert ids[2] == "c"
 
     def test_tie_broken_by_chunk_id_ascending(self) -> None:
-        # Both lists rank "z" and "a" at the same positions →
-        # identical fused score → tie-break on id ascending.
-        fused = reciprocal_rank_fusion([["z", "a"], ["z", "a"]])
+        # ``z`` is rank-1 in list A, rank-2 in list B; ``a`` is the mirror.
+        # Both accumulate ``1/(60+1) + 1/(60+2)`` → identical fused score →
+        # tie-break on chunk_id ascending puts ``a`` ahead of ``z``.
+        fused = reciprocal_rank_fusion([["z", "a"], ["a", "z"]])
         assert [pair[0] for pair in fused] == ["a", "z"]
 
     def test_higher_rank_wins(self) -> None:

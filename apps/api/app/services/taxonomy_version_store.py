@@ -77,9 +77,7 @@ class TaxonomyVersionStoreProtocol(Protocol):
 
     def list_for_taxonomy(self, *, taxonomy_id: str) -> list[TaxonomyVersion]: ...
 
-    def active_validated(
-        self, *, taxonomy_id: str
-    ) -> TaxonomyVersion | None: ...
+    def active_validated(self, *, taxonomy_id: str) -> TaxonomyVersion | None: ...
 
     def upsert(self, version: TaxonomyVersion) -> None: ...
 
@@ -92,9 +90,7 @@ class IllegalTaxonomyTransition(Exception):
     """
 
     def __init__(self, *, from_state: str, to_state: str, kind: str) -> None:
-        super().__init__(
-            f"Illegal {kind} transition: {from_state!r} → {to_state!r}."
-        )
+        super().__init__(f"Illegal {kind} transition: {from_state!r} → {to_state!r}.")
         self.from_state = from_state
         self.to_state = to_state
         self.kind = kind
@@ -108,9 +104,7 @@ class InMemoryTaxonomyVersionStore:
     def __init__(self) -> None:
         self._versions: dict[tuple[str, int], TaxonomyVersion] = {}
 
-    def get(
-        self, *, taxonomy_id: str, version_number: int
-    ) -> TaxonomyVersion | None:
+    def get(self, *, taxonomy_id: str, version_number: int) -> TaxonomyVersion | None:
         return self._versions.get((taxonomy_id, version_number))
 
     def list_for_taxonomy(self, *, taxonomy_id: str) -> list[TaxonomyVersion]:
@@ -120,9 +114,7 @@ class InMemoryTaxonomyVersionStore:
             key=lambda v: v.version_number,
         )
 
-    def active_validated(
-        self, *, taxonomy_id: str
-    ) -> TaxonomyVersion | None:
+    def active_validated(self, *, taxonomy_id: str) -> TaxonomyVersion | None:
         """The most recent non-ARCHIVED ``VALIDATED_*`` version, or ``None``.
 
         ADR-018 §4: "active" is implicit — derived from
@@ -132,9 +124,7 @@ class InMemoryTaxonomyVersionStore:
         ``(taxonomy_id, state, version_number DESC)``.
         """
         candidates = [
-            v
-            for v in self.list_for_taxonomy(taxonomy_id=taxonomy_id)
-            if v.state == "VALIDATED_V1"
+            v for v in self.list_for_taxonomy(taxonomy_id=taxonomy_id) if v.state == "VALIDATED_V1"
         ]
         return candidates[-1] if candidates else None
 
@@ -175,12 +165,8 @@ def create_draft(
         )
     else:
         existing = store.list_for_taxonomy(taxonomy_id=taxonomy_id)
-        next_version_number = (
-            max((v.version_number for v in existing), default=0) + 1
-        )
-        source_tree = (
-            source_version.taxonomy if source_version is not None else Taxonomy()
-        )
+        next_version_number = max((v.version_number for v in existing), default=0) + 1
+        source_tree = source_version.taxonomy if source_version is not None else Taxonomy()
         draft = TaxonomyVersion(
             taxonomy_id=taxonomy_id,
             version_number=next_version_number,
@@ -458,9 +444,7 @@ def transition_concept(
         }
         if to_state == "MERGED":
             if merge_target_id is None:
-                raise ValueError(
-                    "merge_target_id is required when transitioning to MERGED."
-                )
+                raise ValueError("merge_target_id is required when transitioning to MERGED.")
             update_fields["merge_target_id"] = merge_target_id
         transitioned = s.model_copy(update=update_fields)
         updated_suggestions.append(transitioned)
@@ -496,9 +480,7 @@ def _require(
 ) -> TaxonomyVersion:
     version = store.get(taxonomy_id=taxonomy_id, version_number=version_number)
     if version is None:
-        raise KeyError(
-            f"TaxonomyVersion ({taxonomy_id!r}, {version_number}) not found."
-        )
+        raise KeyError(f"TaxonomyVersion ({taxonomy_id!r}, {version_number}) not found.")
     return version
 
 

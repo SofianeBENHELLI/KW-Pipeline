@@ -3,6 +3,7 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -486,7 +487,7 @@ def create_app(
     install_audit_handler(services.audit_events)
 
     app.state.services = services
-    cors_kwargs: dict[str, object] = {
+    cors_kwargs: dict[str, Any] = {
         "allow_origins": _allowed_origins(),
         "allow_credentials": False,
         "allow_methods": ["GET", "POST", "OPTIONS"],
