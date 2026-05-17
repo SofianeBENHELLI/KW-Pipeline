@@ -180,6 +180,22 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── KW Explorer (ADR-028) ──────────────────────────────────────────────
+
+/** Atlas response — corpus summary blocks. */
+export type ApiAtlasResponse = Schemas["AtlasResponse"];
+export type ApiAtlasTopicSummary = Schemas["AtlasTopicSummary"];
+export type ApiAtlasValidationCoverage = Schemas["AtlasValidationCoverage"];
+/** Topic index page (LLM-extracted document themes). */
+export type ApiDocumentTopic = Schemas["DocumentTopic"];
+export type ApiDocumentTopicsListResponse =
+  Schemas["DocumentTopicsListResponse"];
+/** Focused-lens neighborhood for one root (topic / doc / chunk). */
+export type ApiFocusedNeighborhood = Schemas["FocusedNeighborhood"];
+/** Explorer search facet response — five groups (chunks / docs / topics
+ *  / entities / relations). */
+export type ApiExploreSearchResponse = Schemas["ExploreSearchResponse"];
+
 // ─── Admin reconcile (ADR-006 §5, #40) ──────────────────────────────────
 
 /** Response body of ``POST /admin/reconcile``. */

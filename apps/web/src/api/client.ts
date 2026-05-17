@@ -20,6 +20,7 @@ import type {
   ApiAdminAuditEventsResponse,
   ApiAdminHITLStateResponse,
   ApiArchivedDocumentsResponse,
+  ApiAtlasResponse,
   ApiAutoPromoteResult,
   ApiBatchUploadResult,
   ApiChatMode,
@@ -29,7 +30,10 @@ import type {
   ApiConceptSuggestionState,
   ApiDocument,
   ApiDocumentHashCheck,
+  ApiDocumentTopicsListResponse,
   ApiDocumentVersion,
+  ApiExploreSearchResponse,
+  ApiFocusedNeighborhood,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
   ApiLineageResponse,
@@ -1120,6 +1124,106 @@ export async function transitionTaxonomyConcept(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * GET /knowledge/atlas (ADR-028 — KW Explorer)
+ *
+ * Corpus-level summary blocks: top topics, validation coverage,
+ * recent imports, bridge documents, candidate outlier relations. All
+ * counts are filtered to the caller's accessible documents.
+ */
+export async function getKnowledgeAtlas(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiAtlasResponse> {
+  return unwrap(
+    await http.GET("/knowledge/atlas", { signal: options.signal }),
+  );
+}
+
+/**
+ * GET /knowledge/topics (ADR-031 — LLM-extracted document themes)
+ *
+ * Returns the document themes the topic extractor has emitted.
+ * Empty list with HTTP 200 is the cold-start case (no extractor pass
+ * yet). Cursor-paginated. ``document_id`` filters to per-doc topics.
+ */
+export interface ListKnowledgeTopicsOptions {
+  documentId?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+export async function listKnowledgeTopics(
+  options: ListKnowledgeTopicsOptions = {},
+): Promise<ApiDocumentTopicsListResponse> {
+  const { documentId, cursor, limit, signal } = options;
+  const query: Record<string, string | number> = {};
+  if (documentId) query.document_id = documentId;
+  if (cursor) query.cursor = cursor;
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/knowledge/topics", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/neighborhood (ADR-028 — focused lens)
+ *
+ * Returns a BFS-bounded subgraph rooted at the supplied node. Nodes
+ * + edges + truncation metadata for the rendering caller.
+ */
+export interface GetNeighborhoodOptions {
+  rootKind: "document" | "topic" | "chunk";
+  rootId: string;
+  depth?: number;
+  edgeLimit?: number;
+  minStrength?: number;
+  signal?: AbortSignal;
+}
+export async function getKnowledgeNeighborhood(
+  options: GetNeighborhoodOptions,
+): Promise<ApiFocusedNeighborhood> {
+  const { rootKind, rootId, depth, edgeLimit, minStrength, signal } = options;
+  return unwrap(
+    await http.GET("/knowledge/neighborhood", {
+      params: {
+        query: {
+          root_kind: rootKind,
+          root_id: rootId,
+          depth,
+          edge_limit: edgeLimit,
+          min_strength: minStrength,
+        },
+      },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/explore/search (ADR-028 — corpus hybrid search)
+ *
+ * Five groups in one envelope (chunks / documents / topics / entities
+ * / relations). Empty groups for facets the v0.1 backend hasn't
+ * surfaced yet.
+ */
+export async function searchKnowledgeExplore(
+  q: string,
+  options: { limit?: number; signal?: AbortSignal } = {},
+): Promise<ApiExploreSearchResponse> {
+  const { limit, signal } = options;
+  const query: Record<string, string | number> = { q };
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/knowledge/explore/search", {
+      params: { query: query as never },
+      signal,
+    }),
   );
 }
 

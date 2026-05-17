@@ -2194,3 +2194,37 @@ pre {
   font-size: 0.75em;
   font-weight: 600;
 }
+
+/* Slice 7 — KW Explorer surfaces (Atlas / Topics / Topic detail). */
+.kf-explore-topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kf-explore-topic-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kf-explore-topic-row .text-button {
+  text-align: left;
+  width: 100%;
+}
+
+.kf-explore-lens {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.kf-explore-inspector {
+  padding: 12px;
+  border-left: 1px solid var(--border);
+  font-size: 0.9em;
+}

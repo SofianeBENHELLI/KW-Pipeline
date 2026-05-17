@@ -40,6 +40,7 @@ import {
 import { useAdminConfig } from "../api/useAdminConfig";
 import { ForceAutoBanner } from "./catalog/Banners";
 import { CatalogView } from "./catalog/CatalogView";
+import { ExploreView } from "./explore/ExploreView";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { ChatPanel } from "./search/ChatPanel";
 import { SearchPanel } from "./search/SearchPanel";
@@ -153,6 +154,7 @@ export function KnowledgeForgeApp({
           path="graph/*"
           element={<Navigate to="/kf/review" replace />}
         />
+        <Route path="explore/*" element={<ExploreView />} />
         <Route path="search/*" element={<SearchPanel />} />
         <Route path="chat/*" element={<ChatPanel />} />
         <Route path="admin/*" element={<AdminHub />} />
