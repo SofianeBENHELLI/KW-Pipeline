@@ -918,14 +918,17 @@ export interface paths {
          *     ``has_score=false`` when the resolved version exists but no
          *     :class:`ConfidenceScore` was persisted (scorer disabled via
          *     ``KW_HITL_DISABLE_SCORER``, or the version predates scorer
-         *     wiring). The rest of the fields are ``None`` in that case;
-         *     the UI renders an empty-state hint, not zeros.
+         *     wiring). Routing / validation fields still surface whenever a
+         *     :class:`ValidationMetadata` row exists; the UI renders an
+         *     empty-state for the score itself while keeping the routing
+         *     outcome visible.
          *
-         *     404 when the document is missing OR not visible under the
-         *     caller's scope filter (D.5 hidden-existence). 404 also when
-         *     an explicit ``version_id`` is passed and does not belong to
-         *     this document family — prevents cross-document confidence
-         *     scraping via a known version id from another scope.
+         *     Tombstone semantics mirror the sibling per-version content
+         *     routes (ADR-027 §3): a fully-purged document family surfaces
+         *     as 410 Gone, an individual PURGED version surfaces as 410 with
+         *     the per-version tombstone envelope. Hidden-existence (D.5)
+         *     applies to non-purged invisibility: missing document or a
+         *     version_id not in the family returns plain 404.
          */
         get: operations["get_document_confidence"];
         put?: never;
@@ -3227,9 +3230,16 @@ export interface components {
          *     persisted — either the scorer was disabled
          *     (``KW_HITL_DISABLE_SCORER`` truthy), the version never reached
          *     NEEDS_REVIEW under the scorer's wiring, or the version predates
-         *     the scorer (legacy data). In all three cases the rest of the
-         *     fields below are ``None`` and the frontend should render a "no
-         *     confidence data" empty state rather than zeros.
+         *     the scorer (legacy data). The frontend renders a "no confidence
+         *     data" empty state for the score itself.
+         *
+         *     ``routing_decision`` / ``validation_method`` / ``validation_actor``
+         *     follow the underlying :class:`ValidationMetadata` row's presence
+         *     independently of ``has_score``: when the scorer is disabled but
+         *     the HITL router still ran (so the metadata row exists with a
+         *     ``None`` score), the routing/validation outcome is still
+         *     surfaced. Only when no metadata row exists at all are all three
+         *     fields ``None``.
          *
          *     ``auto_validate_threshold`` is included so the dashboard can
          *     render the pass / fail visual against the operator's configured
