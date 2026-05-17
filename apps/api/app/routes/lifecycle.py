@@ -901,13 +901,10 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             None,
         )
         if version is None:
-            raise HTTPException(
-                status_code=404,
-                detail=(f"Version {target_version_id!r} not found in document {document_id!r}."),
-            )
+            raise HTTPException(status_code=404, detail="Version not found in document.")
 
         metadata = services.validation_metadata.get(version.id)
-        threshold = services.settings.hitl_auto_validate_threshold
+        threshold = Settings().hitl_auto_validate_threshold
 
         if metadata is None or metadata.confidence_score is None:
             return DocumentConfidenceResponse(
