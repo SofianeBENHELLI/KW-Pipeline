@@ -73,18 +73,22 @@ def _upload(
     *,
     filename: str = "policy.txt",
     content: bytes | None = None,
+    document_id: str | None = None,
 ) -> str:
-    """Seed a single uploaded version and return ``(document_id, version_id)``.
+    """Seed a version and return ``(document_id, version_id)``.
 
     Defaults the content body to the filename so two separate
     ``_upload(filename="doc1.txt")`` / ``_upload(filename="doc2.txt")``
-    calls don't sha256-dedupe into the same family.
+    calls don't sha256-dedupe into the same family. Pass
+    ``document_id`` to attach a v2 to an existing family (matches
+    ``test_routes_lineage._land_in_needs_review``).
     """
     body = content if content is not None else filename.encode("utf-8") + b" body"
     version = services.documents.upload(
         filename=filename,
         content_type="text/plain",
         content=body,
+        document_id=document_id,
     )
     _link_personal_scope(services, version.document_id)
     return version.document_id, version.id
@@ -181,38 +185,54 @@ def test_returns_empty_state_when_scorer_disabled(app_and_services) -> None:
 # ─── Explicit version_id ───────────────────────────────────────────────
 
 
-def test_explicit_version_id_matches_default_call(app_and_services) -> None:
-    """When ``?version_id=`` is supplied with the same id as the
-    document's ``latest_version_id``, the route returns the same
-    payload as the default call. Proves the query parameter is read
-    and resolved correctly — the cross-family 404 test below
-    independently proves the parameter is gated. A multi-version
-    happy-path needs an in-family v2 upload path which
-    ``DocumentService.upload`` does not expose; covering that path
-    is deferred to whichever route adds explicit version replacement."""
+def test_explicit_version_id_resolves_to_requested_version(app_and_services) -> None:
+    """``?version_id=<v1>`` returns v1's score even when v2 is the
+    latest. Default call resolves to latest_version_id (v2's score);
+    explicit query overrides to the supplied id. Proves the
+    parameter resolves into ``document.versions`` correctly, not
+    just that it is *read* (which the cross-family 404 test covers
+    independently).
+
+    Multi-version setup uses the same ``services.documents.upload(
+    document_id=...)`` path the lineage tests use to attach v2 to
+    an existing family."""
     app, services = app_and_services
-    document_id, version_id = _upload(services)
+    document_id, v1_id = _upload(services, content=b"first body")
+    _, v2_id = _upload(services, content=b"second body", document_id=document_id)
+    assert v1_id != v2_id
     services.validation_metadata.upsert(
         ValidationMetadata(
-            version_id=version_id,
-            confidence_score=_make_score(overall=0.77),
+            version_id=v1_id,
+            confidence_score=_make_score(overall=0.60),
+            routing_decision="human",
+        )
+    )
+    services.validation_metadata.upsert(
+        ValidationMetadata(
+            version_id=v2_id,
+            confidence_score=_make_score(overall=0.92),
             routing_decision="auto",
-            validation_method="auto",
-            validation_actor="system:hitl_auto_promote",
         )
     )
     client = TestClient(app)
     default_response = client.get(f"/documents/{document_id}/confidence")
-    explicit_response = client.get(
-        f"/documents/{document_id}/confidence?version_id={version_id}",
-    )
-    assert default_response.status_code == 200
-    assert explicit_response.status_code == 200
-    assert default_response.json() == explicit_response.json()
-    parsed = DocumentConfidenceResponse.model_validate(explicit_response.json())
-    assert parsed.version_id == version_id
-    assert parsed.confidence_score is not None
-    assert parsed.confidence_score.overall == 0.77
+    explicit_v1 = client.get(f"/documents/{document_id}/confidence?version_id={v1_id}")
+    explicit_v2 = client.get(f"/documents/{document_id}/confidence?version_id={v2_id}")
+
+    default_parsed = DocumentConfidenceResponse.model_validate(default_response.json())
+    v1_parsed = DocumentConfidenceResponse.model_validate(explicit_v1.json())
+    v2_parsed = DocumentConfidenceResponse.model_validate(explicit_v2.json())
+
+    # Default resolves to the latest (v2).
+    assert default_parsed.version_id == v2_id
+    assert default_parsed.confidence_score is not None
+    assert default_parsed.confidence_score.overall == 0.92
+    # Explicit ?version_id=v1 resolves to v1's row, not the latest.
+    assert v1_parsed.version_id == v1_id
+    assert v1_parsed.confidence_score is not None
+    assert v1_parsed.confidence_score.overall == 0.60
+    # Explicit ?version_id=v2 matches the default call exactly.
+    assert v2_parsed.model_dump() == default_parsed.model_dump()
 
 
 def test_explicit_version_id_in_another_family_returns_404(app_and_services) -> None:
@@ -226,6 +246,29 @@ def test_explicit_version_id_in_another_family_returns_404(app_and_services) -> 
     response = client.get(f"/documents/{doc1_id}/confidence?version_id={doc2_v_id}")
     assert response.status_code == 404, response.text
     assert "not found in document" in response.json()["detail"].lower()
+
+
+# ─── PURGED tombstone handling (ADR-027 §3) ────────────────────────────
+
+
+def test_returns_410_when_resolved_version_is_purged(app_and_services) -> None:
+    """A version flipped to ``PURGED`` surfaces as 410 Gone with the
+    ``KW_PURGED`` envelope — same shape sibling per-version content
+    routes (extraction/markdown/raw/semantic) emit. Mirrors the
+    convention in ``test_purged_reads_return_410.py``."""
+    app, services = app_and_services
+    document_id, version_id = _upload(services)
+    services.documents.catalog.purge_version_artifacts(
+        document_id,
+        version_id,
+        tombstone_uri=f"tombstone:purged:{document_id}:{version_id}:2026-05-17T12:00:00+00:00",
+        purged_at=datetime(2026, 5, 17, 12, 0, tzinfo=UTC),
+        actor="cascade",
+    )
+    client = TestClient(app)
+    response = client.get(f"/documents/{document_id}/confidence")
+    assert response.status_code == 410, response.text
+    assert response.json()["error"]["code"] == "KW_PURGED"
 
 
 # ─── 404s ──────────────────────────────────────────────────────────────

@@ -48,9 +48,16 @@ class DocumentConfidenceResponse(BaseModel):
     persisted — either the scorer was disabled
     (``KW_HITL_DISABLE_SCORER`` truthy), the version never reached
     NEEDS_REVIEW under the scorer's wiring, or the version predates
-    the scorer (legacy data). In all three cases the rest of the
-    fields below are ``None`` and the frontend should render a "no
-    confidence data" empty state rather than zeros.
+    the scorer (legacy data). The frontend renders a "no confidence
+    data" empty state for the score itself.
+
+    ``routing_decision`` / ``validation_method`` / ``validation_actor``
+    follow the underlying :class:`ValidationMetadata` row's presence
+    independently of ``has_score``: when the scorer is disabled but
+    the HITL router still ran (so the metadata row exists with a
+    ``None`` score), the routing/validation outcome is still
+    surfaced. Only when no metadata row exists at all are all three
+    fields ``None``.
 
     ``auto_validate_threshold`` is included so the dashboard can
     render the pass / fail visual against the operator's configured

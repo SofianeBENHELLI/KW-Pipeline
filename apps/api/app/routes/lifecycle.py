@@ -858,7 +858,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
     def get_document_confidence(
         request: Request,
         document_id: str,
-        version_id: str | None = Query(default=None, max_length=200),
+        version_id: str | None = Query(default=None, min_length=1, max_length=200),
         current_user: User = Depends(require_viewer),
     ) -> Any:
         """Confidence dashboard view for one document (converged plan §C.1).
@@ -880,54 +880,55 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         ``has_score=false`` when the resolved version exists but no
         :class:`ConfidenceScore` was persisted (scorer disabled via
         ``KW_HITL_DISABLE_SCORER``, or the version predates scorer
-        wiring). The rest of the fields are ``None`` in that case;
-        the UI renders an empty-state hint, not zeros.
+        wiring). Routing / validation fields still surface whenever a
+        :class:`ValidationMetadata` row exists; the UI renders an
+        empty-state for the score itself while keeping the routing
+        outcome visible.
 
-        404 when the document is missing OR not visible under the
-        caller's scope filter (D.5 hidden-existence). 404 also when
-        an explicit ``version_id`` is passed and does not belong to
-        this document family — prevents cross-document confidence
-        scraping via a known version id from another scope.
+        Tombstone semantics mirror the sibling per-version content
+        routes (ADR-027 §3): a fully-purged document family surfaces
+        as 410 Gone, an individual PURGED version surfaces as 410 with
+        the per-version tombstone envelope. Hidden-existence (D.5)
+        applies to non-purged invisibility: missing document or a
+        version_id not in the family returns plain 404.
         """
         document = services.documents.get_document(document_id)
         if document is None:
+            archived = services.documents.catalog._get_document_including_archived(  # type: ignore[attr-defined]
+                document_id,
+            )
+            if archived is not None and _all_versions_purged(archived):
+                raise _purged_document_error(document_id)
             raise HTTPException(status_code=404, detail="Document not found.")
         assert_can_access_document(request=request, document_id=document_id, user=current_user)
 
         target_version_id = document.latest_version_id if version_id is None else version_id
 
-        version = next(
-            (v for v in document.versions if v.id == target_version_id),
-            None,
-        )
-        if version is None:
-            raise HTTPException(status_code=404, detail="Version not found in document.")
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=target_version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Version not found in document.") from exc
+
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
 
         metadata = services.validation_metadata.get(version.id)
         threshold = Settings().hitl_auto_validate_threshold
 
-        if metadata is None or metadata.confidence_score is None:
-            return DocumentConfidenceResponse(
-                document_id=document.id,
-                version_id=version.id,
-                version_number=version.version_number,
-                has_score=False,
-                confidence_score=None,
-                routing_decision=metadata.routing_decision if metadata else None,
-                validation_method=metadata.validation_method if metadata else None,
-                validation_actor=metadata.validation_actor if metadata else None,
-                auto_validate_threshold=threshold,
-            )
-
+        confidence_score = metadata.confidence_score if metadata is not None else None
         return DocumentConfidenceResponse(
             document_id=document.id,
             version_id=version.id,
             version_number=version.version_number,
-            has_score=True,
-            confidence_score=metadata.confidence_score,
-            routing_decision=metadata.routing_decision,
-            validation_method=metadata.validation_method,
-            validation_actor=metadata.validation_actor,
+            has_score=confidence_score is not None,
+            confidence_score=confidence_score,
+            routing_decision=metadata.routing_decision if metadata is not None else None,
+            validation_method=metadata.validation_method if metadata is not None else None,
+            validation_actor=metadata.validation_actor if metadata is not None else None,
             auto_validate_threshold=threshold,
         )
 
