@@ -40,6 +40,7 @@ import type {
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiTaxonomy,
   ApiTaxonomyVersion,
   ApiTaxonomyVersionListResponse,
   ApiUnarchiveResponse,
@@ -49,7 +50,8 @@ import type {
 
 // ─── Base URL + transport ────────────────────────────────────────────────────
 
-const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const BASE_URL: string =
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 /** Resolved API base URL — exposed so the Settings surface can show
  *  what's actually being targeted at runtime. Build-time only; the
@@ -241,14 +243,10 @@ function unwrap<T>(result: {
   const { response, error } = result;
   // openapi-fetch parsed the JSON for us — `error` is the body shape.
   const body =
-    error && typeof error === "object"
-      ? (error as ResponseBodyShape)
-      : null;
+    error && typeof error === "object" ? (error as ResponseBodyShape) : null;
   const { detail, code, retryable, remediation } = fieldsFromBody(
     body,
-    typeof error === "string" && error.length > 0
-      ? error
-      : response.statusText,
+    typeof error === "string" && error.length > 0 ? error : response.statusText,
   );
   throw new ApiError(response.status, detail, code, retryable, remediation);
 }
@@ -332,10 +330,14 @@ export async function getDocument(
 export async function checkDocumentHash(
   sha256: string,
 ): Promise<ApiDocumentHashCheck> {
-  const { data, error, response } = await http.GET("/documents/by-hash/{sha256}", {
-    params: { path: { sha256 } },
-  });
-  if (error !== undefined || data === undefined) throw await asApiError(response);
+  const { data, error, response } = await http.GET(
+    "/documents/by-hash/{sha256}",
+    {
+      params: { path: { sha256 } },
+    },
+  );
+  if (error !== undefined || data === undefined)
+    throw await asApiError(response);
   return data;
 }
 
@@ -451,10 +453,13 @@ export async function getExtraction(
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiRawExtraction> {
   return unwrap(
-    await http.GET("/documents/{document_id}/versions/{version_id}/extraction", {
-      params: { path: { document_id: documentId, version_id: versionId } },
-      signal: options.signal,
-    }),
+    await http.GET(
+      "/documents/{document_id}/versions/{version_id}/extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
   );
 }
 
@@ -564,7 +569,9 @@ export async function getMarkdown(
       parseAs: "text",
     },
   );
-  return unwrap(result as { data?: string; error?: unknown; response: Response });
+  return unwrap(
+    result as { data?: string; error?: unknown; response: Response },
+  );
 }
 
 // ─── Review endpoints ─────────────────────────────────────────────────────────
@@ -666,13 +673,10 @@ export async function getProjectionStatus(
   versionId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiProjectionStatusResponse | null> {
-  const result = await http.GET(
-    "/knowledge/projection_status/{version_id}",
-    {
-      params: { path: { version_id: versionId } },
-      signal: options.signal,
-    },
-  );
+  const result = await http.GET("/knowledge/projection_status/{version_id}", {
+    params: { path: { version_id: versionId } },
+    signal: options.signal,
+  });
   if (result.response.status === 404) return null;
   return unwrap(result);
 }
@@ -1020,6 +1024,33 @@ export async function listTaxonomyVersions(
 }
 
 /**
+ * GET /knowledge/taxonomy
+ *
+ * Returns the currently-active taxonomy version (ADR-018 §PR #346) —
+ * the cosmetic mode badge in the left rail consumes ``taxonomy_id``,
+ * ``version_number``, ``state``, and ``version_label`` to render
+ * "operator context at a glance" near the top of the shell.
+ *
+ * The route is unauthenticated (the rail is reachable to non-admins);
+ * 403 / 503 responses fall through to the caller as ``ApiError`` so
+ * the badge can render-nothing instead of a noisy banner. The current
+ * wire shape on this path doesn't surface lifecycle metadata via the
+ * generated typings, so we drop down to native fetch and cast — the
+ * route response is documented as ``ApiTaxonomy`` (alias of
+ * ``TaxonomyVersion``) for forward-compatibility.
+ */
+export async function getActiveTaxonomy(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomy> {
+  const response = await fetch(`${BASE_URL}/knowledge/taxonomy`, {
+    method: "GET",
+    signal: options.signal,
+  });
+  if (!response.ok) throw await asApiError(response);
+  return (await response.json()) as ApiTaxonomy;
+}
+
+/**
  * GET /admin/taxonomy/versions/{taxonomy_id}/{version_number}
  *
  * Admin-only. Returns the single version at the requested coordinate.
@@ -1031,17 +1062,14 @@ export async function getTaxonomyVersion(
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiTaxonomyVersion> {
   return unwrap(
-    await http.GET(
-      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}",
-      {
-        params: {
-          path: {
-            taxonomy_id: taxonomyId,
-            version_number: versionNumber,
-          },
+    await http.GET("/admin/taxonomy/versions/{taxonomy_id}/{version_number}", {
+      params: {
+        path: {
+          taxonomy_id: taxonomyId,
+          version_number: versionNumber,
         },
-        signal: options.signal,
       },
-    ),
+      signal: options.signal,
+    }),
   );
 }

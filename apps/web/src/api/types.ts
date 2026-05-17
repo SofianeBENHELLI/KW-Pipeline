@@ -120,8 +120,7 @@ export type ApiOrbitalPurgeDocumentResponse =
   Schemas["OrbitalPurgeDocumentResponse"];
 
 /** Response body of ``POST /admin/orbital/purge_all`` (#292 — bulk override). */
-export type ApiOrbitalPurgeAllResponse =
-  Schemas["OrbitalPurgeAllResponse"];
+export type ApiOrbitalPurgeAllResponse = Schemas["OrbitalPurgeAllResponse"];
 
 /**
  * Operator-typed phrase the bulk-purge route demands as a second
@@ -209,6 +208,14 @@ export type ApiConceptSuggestionState = ApiConceptSuggestion["state"];
  *  by ``version_number`` ascending. */
 export type ApiTaxonomyVersionListResponse =
   Schemas["TaxonomyVersionListResponse"];
+
+/** Currently-active taxonomy descriptor surfaced by
+ *  ``GET /knowledge/taxonomy`` — the rail badge consumes only the
+ *  lifecycle metadata (id, version number, state, label) and ignores
+ *  the embedded category tree, so the alias points at the same
+ *  ``TaxonomyVersion`` payload reused across the admin lineage view
+ *  (ADR-018 §PR #346). */
+export type ApiTaxonomy = ApiTaxonomyVersion;
 
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 

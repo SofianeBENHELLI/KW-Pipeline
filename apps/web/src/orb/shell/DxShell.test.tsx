@@ -7,11 +7,33 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import axe from "axe-core";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DxShell } from "./DxShell";
 import { IconRail } from "./IconRail";
 import { TopBar } from "./TopBar";
+
+// IconRail / DxShell now host the cosmetic TaxonomyModeBadge which
+// uses ``useNavigate`` and fetches on mount — wrap every render in a
+// MemoryRouter and stub fetch so the rest of these specs stay focused
+// on the chrome (ADR-018 §PR #346).
+function renderInRouter(ui: ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
+beforeEach(() => {
+  // 503 keeps the badge silent — these tests don't probe its presence.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response("{}", {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+});
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("<TopBar />", () => {
   it("defaults brand to 'Knowledge Forge'", () => {
@@ -27,7 +49,9 @@ describe("<TopBar />", () => {
   it("renders the four top-nav tabs (Review, Search, Chat, Admin)", () => {
     render(<TopBar />);
     for (const label of ["Review", "Search", "Chat", "Admin"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: new RegExp(label) }),
+      ).toBeInTheDocument();
     }
   });
 
@@ -75,7 +99,7 @@ describe("<TopBar />", () => {
 
 describe("<IconRail />", () => {
   it("renders the six rail tiles", () => {
-    render(<IconRail />);
+    renderInRouter(<IconRail />);
     for (const label of [
       "Activity",
       "Upload",
@@ -90,19 +114,19 @@ describe("<IconRail />", () => {
 
   it("never exposes a corpus-level Graph rail tile", () => {
     // Same scope rule as the top-bar — graph is per-document only.
-    render(<IconRail />);
+    renderInRouter(<IconRail />);
     expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
   });
 
   it("marks the active tile (defaults to 'review')", () => {
-    render(<IconRail />);
+    renderInRouter(<IconRail />);
     const active = screen.getByRole("button", { name: "Review" });
     expect(active).toHaveAttribute("aria-current", "page");
     expect(active).toHaveClass("is-active");
   });
 
   it("respects an explicit active tile", () => {
-    render(<IconRail active="upload" />);
+    renderInRouter(<IconRail active="upload" />);
     expect(screen.getByRole("button", { name: "Upload" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -111,7 +135,7 @@ describe("<IconRail />", () => {
 
   it("invokes onSelect with the tile id", () => {
     const onSelect = vi.fn();
-    render(<IconRail onSelect={onSelect} />);
+    renderInRouter(<IconRail onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     expect(onSelect).toHaveBeenCalledWith("upload");
   });
@@ -119,7 +143,7 @@ describe("<IconRail />", () => {
 
 describe("<DxShell />", () => {
   it("scopes children under .orb-app with theme + density attrs", () => {
-    const { container } = render(
+    const { container } = renderInRouter(
       <DxShell theme="dark" density="dense">
         <p>hello</p>
       </DxShell>,
@@ -132,7 +156,7 @@ describe("<DxShell />", () => {
   });
 
   it("uses light/compact defaults", () => {
-    const { container } = render(
+    const { container } = renderInRouter(
       <DxShell>
         <p>x</p>
       </DxShell>,
@@ -143,7 +167,7 @@ describe("<DxShell />", () => {
   });
 
   it("forwards top-bar props (product = Knowledge Forge by default)", () => {
-    render(
+    renderInRouter(
       <DxShell>
         <p>x</p>
       </DxShell>,
@@ -152,7 +176,7 @@ describe("<DxShell />", () => {
   });
 
   it("hides the rail when showRail=false", () => {
-    render(
+    renderInRouter(
       <DxShell showRail={false}>
         <p>x</p>
       </DxShell>,
@@ -161,7 +185,7 @@ describe("<DxShell />", () => {
   });
 
   it("has no axe-core a11y violations in the default render", async () => {
-    const { container } = render(
+    const { container } = renderInRouter(
       <DxShell topBar={{ crumb: "kw-pipeline · alpha", initials: "KF" }}>
         <div>workspace body</div>
       </DxShell>,

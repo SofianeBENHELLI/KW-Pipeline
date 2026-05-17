@@ -14,16 +14,11 @@
  * the Review Workspace; corpus-wide exploration is the scope of the
  * Knowledge Explorer app (`apps/explorer`).
  */
-import {
-  Activity,
-  CircleHelp,
-  FileText,
-  Settings,
-  Upload,
-} from "lucide-react";
+import { Activity, CircleHelp, FileText, Settings, Upload } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
 import { OrbI } from "../atoms/icons";
+import { TaxonomyModeBadge } from "./TaxonomyModeBadge";
 
 export type RailTileId =
   | "activity"
@@ -43,14 +38,30 @@ const SZ = 16 as const;
 const SW = 1.4 as const;
 
 const TOP_TILES: RailTile[] = [
-  { id: "activity", label: "Activity",     icon: <Activity   size={SZ} strokeWidth={SW} /> },
-  { id: "upload",   label: "Upload",       icon: <Upload     size={SZ} strokeWidth={SW} /> },
+  {
+    id: "activity",
+    label: "Activity",
+    icon: <Activity size={SZ} strokeWidth={SW} />,
+  },
+  {
+    id: "upload",
+    label: "Upload",
+    icon: <Upload size={SZ} strokeWidth={SW} />,
+  },
 ];
 
 const MID_TILES: RailTile[] = [
-  { id: "review",   label: "Review",       icon: <FileText   size={SZ} strokeWidth={SW} /> },
-  { id: "search",   label: "Search",       icon: OrbI.search },
-  { id: "info",     label: "Document",     icon: <CircleHelp size={SZ} strokeWidth={SW} /> },
+  {
+    id: "review",
+    label: "Review",
+    icon: <FileText size={SZ} strokeWidth={SW} />,
+  },
+  { id: "search", label: "Search", icon: OrbI.search },
+  {
+    id: "info",
+    label: "Document",
+    icon: <CircleHelp size={SZ} strokeWidth={SW} />,
+  },
 ];
 
 const BOTTOM_TILE: RailTile = {
@@ -86,6 +97,8 @@ export function IconRail({
 
   return (
     <nav className="dx-rail" aria-label="Primary navigation">
+      {/* Cosmetic taxonomy-version badge per ADR-018 §PR #346. */}
+      <TaxonomyModeBadge />
       {TOP_TILES.map(renderTile)}
       <div className="dx-rail-divider" aria-hidden="true" />
       {MID_TILES.map(renderTile)}
