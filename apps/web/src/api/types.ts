@@ -180,6 +180,36 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── Admin / Taxonomy versioning (EPIC-1 §1.8, ADR-018) ──────────────────
+
+/** One versioned taxonomy resource — wraps the existing ``Taxonomy``
+ *  tree with lifecycle metadata (``state``, ``version_number``,
+ *  ``state_changed_at``, ``created_by``). Returned by the
+ *  ``GET /admin/taxonomy/versions/{tid}/{vnum}`` route and as each
+ *  entry in the lineage list response. */
+export type ApiTaxonomyVersion = Schemas["TaxonomyVersion"];
+
+/** ``DRAFT | CANDIDATE_V0 | VALIDATED_V1 | ARCHIVED | DISCARDED`` —
+ *  the lifecycle state machine pinned by ADR-018 §2. Re-exported off
+ *  the version payload so consumers can switch on the literal
+ *  exhaustively without importing the raw schema module. */
+export type ApiTaxonomyState = ApiTaxonomyVersion["state"];
+
+/** One proposed concept attached to a DRAFT version. The state lives
+ *  on its own per-suggestion FSM (ADR-018 §5); ``merge_target_id`` is
+ *  required when ``state === "MERGED"``. */
+export type ApiConceptSuggestion = Schemas["ConceptSuggestion"];
+
+/** ``NEW | UNDER_REVIEW | ACCEPTED | REJECTED | MERGED | DEFERRED`` —
+ *  per-suggestion FSM. Re-exported off the suggestion payload to keep
+ *  the import surface symmetric with the version state above. */
+export type ApiConceptSuggestionState = ApiConceptSuggestion["state"];
+
+/** Lineage-list payload: every version of one ``taxonomy_id`` sorted
+ *  by ``version_number`` ascending. */
+export type ApiTaxonomyVersionListResponse =
+  Schemas["TaxonomyVersionListResponse"];
+
 // ─── Knowledge chat (Phase 3 grounded RAG / GraphRAG / Hybrid) ─────────────
 
 export type ApiChatRequest = Schemas["ChatRequest"];

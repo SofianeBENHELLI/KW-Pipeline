@@ -61,6 +61,13 @@ const HUB_CARDS: readonly HubCard[] = [
       "Filter the audit event store by event, actor, and time range.",
     testId: "admin-hub-card-audit",
   },
+  {
+    href: "/admin/taxonomy",
+    title: "Taxonomy versions",
+    description:
+      "Inspect the DRAFT → CANDIDATE → VALIDATED → ARCHIVED lineage for a taxonomy.",
+    testId: "admin-hub-card-taxonomy",
+  },
 ];
 
 export function AdminHubView() {

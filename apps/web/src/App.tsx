@@ -355,6 +355,7 @@ export function useDocumentCatalog(): DocumentCatalog {
  *  - ``/admin/archive`` — Archive listing + per-doc actions (D.9).
  *  - ``/admin/hitl`` — HITL routing dashboard (#215, EPIC-A close-out).
  *  - ``/admin/audit`` — Audit log viewer (#206 follow-up).
+ *  - ``/admin/taxonomy`` — Taxonomy versions lineage (EPIC-1 §1.9).
  *
  * Each handler 403s on a non-admin token and the page renders a
  * "Forbidden" state for that envelope. We never derive admin role
@@ -385,6 +386,11 @@ const AdminAuditView = lazy(() =>
 const AdminHubView = lazy(() =>
   import("./features/admin/AdminHubView").then((mod) => ({
     default: mod.AdminHubView,
+  })),
+);
+const AdminTaxonomyView = lazy(() =>
+  import("./features/admin/AdminTaxonomyView").then((mod) => ({
+    default: mod.AdminTaxonomyView,
   })),
 );
 
@@ -429,6 +435,14 @@ export default function App() {
         element={
           <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
             <AdminAuditView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/taxonomy"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminTaxonomyView />
           </Suspense>
         }
       />
