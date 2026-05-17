@@ -9,10 +9,7 @@ import {
 } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import "./styles.css";
-import {
-  SessionExpiredBanner,
-  useSessionGuard,
-} from "../../_shared/auth";
+import { SessionExpiredBanner, useSessionGuard } from "../../_shared/auth";
 import {
   ApiError,
   clearSessionTrigger,
@@ -147,7 +144,8 @@ export function useDocumentCatalog(): DocumentCatalog {
   const [error, setError] = useState<ApiError | string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastMutationAt, setLastMutationAt] = useState(0);
-  const [filter, setFilterState] = useState<CatalogFilter>(EMPTY_CATALOG_FILTER);
+  const [filter, setFilterState] =
+    useState<CatalogFilter>(EMPTY_CATALOG_FILTER);
 
   // Mirror filter state into a ref so the in-flight dedup callbacks
   // see the latest values without forcing the callbacks themselves to
@@ -427,7 +425,9 @@ export default function App() {
       <Route
         path="/admin/audit"
         element={
-          <Suspense fallback={<div className="kw-loading">Loading admin view…</div>}>
+          <Suspense
+            fallback={<div className="kw-loading">Loading admin view…</div>}
+          >
             <AdminAuditView />
           </Suspense>
         }
@@ -442,7 +442,11 @@ export default function App() {
       <Route
         path="/kf/*"
         element={
-          <Suspense fallback={<div className="kw-loading">Loading Knowledge Forge…</div>}>
+          <Suspense
+            fallback={
+              <div className="kw-loading">Loading Knowledge Forge…</div>
+            }
+          >
             <KnowledgeForgeApp />
           </Suspense>
         }
@@ -466,8 +470,7 @@ export default function App() {
  * `window.location.search`.
  */
 function RootRedirect(): ReactElement {
-  const search =
-    typeof window !== "undefined" ? window.location.search : "";
+  const search = typeof window !== "undefined" ? window.location.search : "";
   return <Navigate to={`/kf/review${search}`} replace />;
 }
 
@@ -551,13 +554,17 @@ function ReviewerWorkbench() {
   // hidden; the bulk modal toggles via its own boolean.
   const [purgeTarget, setPurgeTarget] = useState<ApiDocument | null>(null);
   const [purgeAllOpen, setPurgeAllOpen] = useState(false);
-  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
-  const [batchProgress, setBatchProgress] = useState<ReadonlyMap<string, BatchItemState>>(
-    () => new Map(),
-  );
-  const [batchFailures, setBatchFailures] = useState<ReadonlyArray<BatchFailure>>([]);
+  const [batchProgress, setBatchProgress] = useState<
+    ReadonlyMap<string, BatchItemState>
+  >(() => new Map());
+  const [batchFailures, setBatchFailures] = useState<
+    ReadonlyArray<BatchFailure>
+  >([]);
 
   const handlePurgeRequest = useCallback((document: ApiDocument) => {
     setPurgeTarget(document);
@@ -584,14 +591,17 @@ function ReviewerWorkbench() {
     bumpMutation();
   }, [refreshAll, refreshSelected, bumpMutation]);
 
-  const handleToggleBatchDocument = useCallback((documentId: string, checked: boolean) => {
-    setSelectedBatchIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(documentId);
-      else next.delete(documentId);
-      return next;
-    });
-  }, []);
+  const handleToggleBatchDocument = useCallback(
+    (documentId: string, checked: boolean) => {
+      setSelectedBatchIds((prev) => {
+        const next = new Set(prev);
+        if (checked) next.add(documentId);
+        else next.delete(documentId);
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleClearBatchSelection = useCallback(() => {
     setSelectedBatchIds(new Set());
@@ -626,7 +636,8 @@ function ReviewerWorkbench() {
     try {
       for (const doc of targets) {
         const version =
-          doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[0];
+          doc.versions.find((v) => v.id === doc.latest_version_id) ??
+          doc.versions[0];
         if (!version) {
           setItem(doc.id, {
             status: "failed",
@@ -727,7 +738,10 @@ function ReviewerWorkbench() {
 
   if (loadingDocuments && documents.length === 0) {
     return (
-      <main className="app-shell" aria-label="Orbital document review workbench">
+      <main
+        className="app-shell"
+        aria-label="Orbital document review workbench"
+      >
         {banner}
         <p className="muted" role="status" aria-live="polite">
           Loading documents…
@@ -739,7 +753,10 @@ function ReviewerWorkbench() {
   if (error !== null && documents.length === 0) {
     const message = error instanceof ApiError ? error.detail : error;
     return (
-      <main className="app-shell" aria-label="Orbital document review workbench">
+      <main
+        className="app-shell"
+        aria-label="Orbital document review workbench"
+      >
         {banner}
         <div className="notice danger" role="alert">
           <strong>Failed to load documents</strong>
@@ -759,7 +776,10 @@ function ReviewerWorkbench() {
   return (
     <main className="app-shell" aria-label="Orbital document review workbench">
       {banner}
-      <DeepLinkErrorBanner message={deepLinkError} onDismiss={clearDeepLinkError} />
+      <DeepLinkErrorBanner
+        message={deepLinkError}
+        onDismiss={clearDeepLinkError}
+      />
       <PipelineWidget
         documents={documents}
         selectedDocumentId={selectedId ?? ""}
@@ -804,10 +824,14 @@ function ReviewerWorkbench() {
           refreshError={refreshError}
           lastMutationAt={lastMutationAt}
           onMutationCompleted={handleMutationCompleted}
+          onSelectDocument={selectDocument}
         />
       ) : (
         <section className="workspace">
-          <p className="muted">No documents found. Import documents from the Forge widget to get started.</p>
+          <p className="muted">
+            No documents found. Import documents from the Forge widget to get
+            started.
+          </p>
         </section>
       )}
       <SearchPanel

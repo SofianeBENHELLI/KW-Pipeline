@@ -27,6 +27,7 @@ import type {
   ApiChunkSearchResponse,
   ApiDocument,
   ApiDocumentHashCheck,
+  ApiDocumentLineage,
   ApiDocumentVersion,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
@@ -40,6 +41,7 @@ import type {
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiSimilarDocuments,
   ApiUnarchiveResponse,
   ApiUploadResponse,
   ListDocumentsResponse,
@@ -47,7 +49,8 @@ import type {
 
 // ─── Base URL + transport ────────────────────────────────────────────────────
 
-const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const BASE_URL: string =
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 /** Resolved API base URL — exposed so the Settings surface can show
  *  what's actually being targeted at runtime. Build-time only; the
@@ -239,14 +242,10 @@ function unwrap<T>(result: {
   const { response, error } = result;
   // openapi-fetch parsed the JSON for us — `error` is the body shape.
   const body =
-    error && typeof error === "object"
-      ? (error as ResponseBodyShape)
-      : null;
+    error && typeof error === "object" ? (error as ResponseBodyShape) : null;
   const { detail, code, retryable, remediation } = fieldsFromBody(
     body,
-    typeof error === "string" && error.length > 0
-      ? error
-      : response.statusText,
+    typeof error === "string" && error.length > 0 ? error : response.statusText,
   );
   throw new ApiError(response.status, detail, code, retryable, remediation);
 }
@@ -312,6 +311,55 @@ export async function getDocument(
 }
 
 /**
+ * GET /documents/{document_id}/lineage (EPIC-C C.3, ADR-025)
+ *
+ * Returns the version-history projection for a document family — every
+ * :class:`DocumentVersion` plus the derived ``is_latest`` and
+ * ``superseded_by_version_id`` fields the Review header's Lineage
+ * modal needs filled in. Versions arrive sorted ASC by
+ * ``version_number`` so the UI renders v1 → vN top-to-bottom without
+ * re-sorting. 403/404 collapse to the same envelope by design (D.5
+ * hidden-existence rule).
+ */
+export async function getDocumentLineage(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiDocumentLineage> {
+  return unwrap(
+    await http.GET("/documents/{document_id}/lineage", {
+      params: { path: { document_id: documentId } },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/similar (EPIC-C C.3, ADR-025 §3)
+ *
+ * Top-K topic-Jaccard neighbours for one document. Returns an empty
+ * ``results`` list with HTTP 200 when the query document has no topics
+ * yet (cold-start) — the modal renders "no similar documents" in that
+ * case rather than erroring. ``k`` defaults to the server-side ceiling;
+ * call sites that want fewer rows pass it explicitly.
+ */
+export async function getSimilarDocuments(
+  documentId: string,
+  options: { k?: number; signal?: AbortSignal } = {},
+): Promise<ApiSimilarDocuments> {
+  const query: Record<string, number> = {};
+  if (options.k !== undefined) query.k = options.k;
+  return unwrap(
+    await http.GET("/documents/{document_id}/similar", {
+      params: {
+        path: { document_id: documentId },
+        query: query as never,
+      },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
  * POST /documents/upload
  * Streams a file to the backend and returns the created DocumentVersion.
  *
@@ -330,10 +378,14 @@ export async function getDocument(
 export async function checkDocumentHash(
   sha256: string,
 ): Promise<ApiDocumentHashCheck> {
-  const { data, error, response } = await http.GET("/documents/by-hash/{sha256}", {
-    params: { path: { sha256 } },
-  });
-  if (error !== undefined || data === undefined) throw await asApiError(response);
+  const { data, error, response } = await http.GET(
+    "/documents/by-hash/{sha256}",
+    {
+      params: { path: { sha256 } },
+    },
+  );
+  if (error !== undefined || data === undefined)
+    throw await asApiError(response);
   return data;
 }
 
@@ -449,10 +501,13 @@ export async function getExtraction(
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiRawExtraction> {
   return unwrap(
-    await http.GET("/documents/{document_id}/versions/{version_id}/extraction", {
-      params: { path: { document_id: documentId, version_id: versionId } },
-      signal: options.signal,
-    }),
+    await http.GET(
+      "/documents/{document_id}/versions/{version_id}/extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
   );
 }
 
@@ -562,7 +617,9 @@ export async function getMarkdown(
       parseAs: "text",
     },
   );
-  return unwrap(result as { data?: string; error?: unknown; response: Response });
+  return unwrap(
+    result as { data?: string; error?: unknown; response: Response },
+  );
 }
 
 // ─── Review endpoints ─────────────────────────────────────────────────────────
@@ -664,13 +721,10 @@ export async function getProjectionStatus(
   versionId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<ApiProjectionStatusResponse | null> {
-  const result = await http.GET(
-    "/knowledge/projection_status/{version_id}",
-    {
-      params: { path: { version_id: versionId } },
-      signal: options.signal,
-    },
-  );
+  const result = await http.GET("/knowledge/projection_status/{version_id}", {
+    params: { path: { version_id: versionId } },
+    signal: options.signal,
+  });
   if (result.response.status === 404) return null;
   return unwrap(result);
 }

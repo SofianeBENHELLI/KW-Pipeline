@@ -6,8 +6,9 @@
  * - "(N versions)" caption beside the title when N > 1, hidden at N == 1.
  * - "of N total" suffix on the active-version line when N > 1.
  *
- * The lineage modal (#217 C.5) is deliberately not exercised — that
- * needs the /documents/{id}/lineage endpoint and is deferred.
+ * The dedicated Lineage / Similar modals (EPIC-C C.3) are covered by
+ * LineageModal.test.tsx / SimilarDocumentsModal.test.tsx — this file
+ * just pins the inline header chrome.
  */
 
 import { render, screen, waitFor } from "@testing-library/react";

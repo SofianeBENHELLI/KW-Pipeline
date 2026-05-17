@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiDocument, ApiRawExtraction, ApiSemanticDocument } from "../../api/types";
+import type {
+  ApiDocument,
+  ApiRawExtraction,
+  ApiSemanticDocument,
+} from "../../api/types";
 import {
   ApiError,
   getExtraction,
@@ -12,11 +16,13 @@ import { ScopeChip } from "../../ui/ScopeChip";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { KnowledgeGraphView } from "../graph";
 import { PdfViewerPanel } from "../pdf-viewer";
+import { LineageModal } from "./LineageModal";
 import { ProjectionStatusPill } from "./ProjectionStatusPill";
 import { ReviewActions } from "./ReviewActions";
 import { SemanticAssetList } from "./SemanticAssetList";
 import { SemanticSectionList } from "./SemanticSectionList";
 import { SemanticWarningList } from "./SemanticWarningList";
+import { SimilarDocumentsModal } from "./SimilarDocumentsModal";
 import { useProjectionStatus } from "./useProjectionStatus";
 
 interface ReviewWorkspaceProps {
@@ -25,6 +31,10 @@ interface ReviewWorkspaceProps {
   refreshError?: string | null;
   lastMutationAt?: number;
   onMutationCompleted?: () => void | Promise<void>;
+  /** Optional — wired from the App.tsx catalog hook so the Lineage /
+   *  Similar modals can hand the workspace's selection over to a
+   *  neighbour / family-root id when the operator clicks a row. */
+  onSelectDocument?: (documentId: string) => void;
 }
 
 export function ReviewWorkspace({
@@ -33,16 +43,25 @@ export function ReviewWorkspace({
   refreshError = null,
   lastMutationAt = 0,
   onMutationCompleted,
+  onSelectDocument,
 }: ReviewWorkspaceProps) {
   const version = latestVersion(document);
   const documentId = document.id;
   const versionId = version.id;
   // Total version count for the lineage hint (#59 + EPIC-C #217 UX
-  // surface). Lineage modal is deferred until /documents/{id}/lineage
-  // exists — for now we just render the count alongside the active
-  // version number.
+  // surface). The Review header now exposes a dedicated Lineage modal
+  // backed by ``GET /documents/{id}/lineage`` (EPIC-C C.3); the
+  // inline count stays as a quick-scan signal alongside the modal
+  // trigger.
   const totalVersions = document.versions.length;
   const latestVersionNumber = latestVersion(document).version_number;
+
+  // Lineage + Similar modal open state. Each modal owns its own fetch
+  // so the bookkeeping here is the boolean trigger + a single banner
+  // slot the modals push 403/404 errors into.
+  const [lineageOpen, setLineageOpen] = useState(false);
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const [extraction, setExtraction] = useState<ApiRawExtraction | null>(null);
   const [semantic, setSemantic] = useState<ApiSemanticDocument | null>(null);
@@ -50,7 +69,9 @@ export function ReviewWorkspace({
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [reviewerNote, setReviewerNote] = useState("");
-  const [reviewBusy, setReviewBusy] = useState<"validate" | "reject" | null>(null);
+  const [reviewBusy, setReviewBusy] = useState<"validate" | "reject" | null>(
+    null,
+  );
   const [reviewError, setReviewError] = useState<string | null>(null);
   // Bumped after every successful validate so the projection-status
   // hook restarts polling from a fresh window. Without this bump, a
@@ -110,12 +131,18 @@ export function ReviewWorkspace({
 
         if (firstError !== null) {
           setDetailError(
-            firstError instanceof Error ? firstError.message : "Failed to load document details.",
+            firstError instanceof Error
+              ? firstError.message
+              : "Failed to load document details.",
           );
         }
       } catch (err: unknown) {
         if (!controller.signal.aborted) {
-          setDetailError(err instanceof Error ? err.message : "Failed to load document details.");
+          setDetailError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load document details.",
+          );
         }
       } finally {
         if (!controller.signal.aborted) setLoadingDetails(false);
@@ -195,10 +222,7 @@ export function ReviewWorkspace({
                 is extended to carry ``scopes`` (D.5). */}
             <ScopeChip scopes={documentScopes(document)} />
             {totalVersions > 1 ? (
-              <span
-                className="version-count muted"
-                data-testid="version-count"
-              >
+              <span className="version-count muted" data-testid="version-count">
                 {" "}
                 ({totalVersions} versions)
               </span>
@@ -207,9 +231,12 @@ export function ReviewWorkspace({
           <p className="muted">
             Version {version.version_number}
             {totalVersions > 1 ? (
-              <span data-testid="version-of-total"> of {totalVersions} total</span>
-            ) : null}
-            {" "}&mdash; SHA-256 {version.sha256.slice(0, 12)}
+              <span data-testid="version-of-total">
+                {" "}
+                of {totalVersions} total
+              </span>
+            ) : null}{" "}
+            &mdash; SHA-256 {version.sha256.slice(0, 12)}
           </p>
         </div>
         <div className="workspace-header-meta">
@@ -223,9 +250,69 @@ export function ReviewWorkspace({
               <span className="spinner" aria-hidden="true" /> Refreshing…
             </span>
           ) : null}
+          {/* EPIC-C C.3 — Lineage + Similar Documents modals. Buttons
+              sit in the header-meta row so they're co-located with the
+              status badge the reviewer is already looking at. Each
+              modal owns its own fetch; this header just owns the
+              boolean triggers. */}
+          <div className="review-header-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setModalError(null);
+                setLineageOpen(true);
+              }}
+              data-testid="open-lineage"
+            >
+              Lineage
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setModalError(null);
+                setSimilarOpen(true);
+              }}
+              data-testid="open-similar"
+            >
+              Similar documents
+            </button>
+          </div>
           <StatusBadge status={version.status} />
         </div>
       </header>
+
+      {modalError !== null ? (
+        <div
+          className="notice danger"
+          role="alert"
+          data-testid="modal-error-banner"
+        >
+          <strong>Modal failed</strong>
+          <span>{modalError}</span>
+        </div>
+      ) : null}
+
+      {lineageOpen ? (
+        <LineageModal
+          documentId={documentId}
+          filename={document.original_filename}
+          onClose={() => setLineageOpen(false)}
+          onSelectDocument={onSelectDocument}
+          onError={setModalError}
+        />
+      ) : null}
+
+      {similarOpen ? (
+        <SimilarDocumentsModal
+          documentId={documentId}
+          filename={document.original_filename}
+          onClose={() => setSimilarOpen(false)}
+          onSelectDocument={onSelectDocument}
+          onError={setModalError}
+        />
+      ) : null}
 
       {refreshError ? (
         <div className="notice warning" role="alert">
@@ -263,9 +350,13 @@ export function ReviewWorkspace({
             <h3>Raw extraction</h3>
           </div>
           {loadingDetails ? (
-            <p className="muted" role="status">Loading…</p>
+            <p className="muted" role="status">
+              Loading…
+            </p>
           ) : (
-            <pre>{extraction?.text ?? "No extraction output is available."}</pre>
+            <pre>
+              {extraction?.text ?? "No extraction output is available."}
+            </pre>
           )}
         </article>
 
@@ -274,7 +365,9 @@ export function ReviewWorkspace({
             <h3>Semantic output</h3>
           </div>
           {loadingDetails ? (
-            <p className="muted" role="status">Loading…</p>
+            <p className="muted" role="status">
+              Loading…
+            </p>
           ) : semantic !== null ? (
             <>
               {/* Validation status stays in its own one-row block —
@@ -284,7 +377,9 @@ export function ReviewWorkspace({
               <dl className="semantic-list">
                 <div>
                   <dt>Validation</dt>
-                  <dd data-testid="sem-validation">{semantic.validation_status}</dd>
+                  <dd data-testid="sem-validation">
+                    {semantic.validation_status}
+                  </dd>
                 </div>
               </dl>
 
@@ -300,7 +395,9 @@ export function ReviewWorkspace({
                 data-testid="sem-sections-subpanel"
               >
                 <h4 id="sem-sections-heading" className="sem-subpanel__heading">
-                  Sections{semantic.sections.length > 0 && ` · ${semantic.sections.length}`}
+                  Sections
+                  {semantic.sections.length > 0 &&
+                    ` · ${semantic.sections.length}`}
                 </h4>
                 <SemanticSectionList sections={semantic.sections} />
               </section>
@@ -311,7 +408,8 @@ export function ReviewWorkspace({
                 data-testid="sem-assets-subpanel"
               >
                 <h4 id="sem-assets-heading" className="sem-subpanel__heading">
-                  Assets{semantic.assets.length > 0 && ` · ${semantic.assets.length}`}
+                  Assets
+                  {semantic.assets.length > 0 && ` · ${semantic.assets.length}`}
                 </h4>
                 <SemanticAssetList assets={semantic.assets} />
               </section>
@@ -322,7 +420,9 @@ export function ReviewWorkspace({
                 data-testid="sem-warnings-subpanel"
               >
                 <h4 id="sem-warnings-heading" className="sem-subpanel__heading">
-                  Warnings{semantic.warnings.length > 0 && ` · ${semantic.warnings.length}`}
+                  Warnings
+                  {semantic.warnings.length > 0 &&
+                    ` · ${semantic.warnings.length}`}
                 </h4>
                 <SemanticWarningList warnings={semantic.warnings} />
               </section>
@@ -337,9 +437,13 @@ export function ReviewWorkspace({
             <h3>Markdown preview</h3>
           </div>
           {loadingDetails ? (
-            <p className="muted" role="status">Loading…</p>
+            <p className="muted" role="status">
+              Loading…
+            </p>
           ) : (
-            <pre>{semantic?.markdown ?? "Markdown preview is not available."}</pre>
+            <pre>
+              {semantic?.markdown ?? "Markdown preview is not available."}
+            </pre>
           )}
         </article>
 

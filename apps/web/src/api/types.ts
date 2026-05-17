@@ -71,6 +71,16 @@ export type ApiChunkLocation = Schemas["ChunkLocation"];
 export type ApiChunkLocationsResponse = Schemas["ChunkLocationsResponse"];
 export type ApiChunkSource = ApiChunkLocation["source"];
 
+// ─── Lineage + Similar documents (EPIC-C C.3, ADR-025 §3) ─────────────────
+// Surfaced by ``GET /documents/{id}/lineage`` and
+// ``GET /documents/{id}/similar``. Powers the Review header's two
+// modals: a flat ascending version chain and the top-K Jaccard-ranked
+// neighbours by topic overlap.
+export type ApiLineageVersion = Schemas["LineageVersion"];
+export type ApiDocumentLineage = Schemas["LineageResponse"];
+export type ApiSimilarDocument = Schemas["SimilarDocument"];
+export type ApiSimilarDocuments = Schemas["SimilarDocumentsResponse"];
+
 // ─── Knowledge graph ─────────────────────────────────────────────────────────
 
 export type ApiGraphNode = Schemas["GraphNode"];
@@ -120,8 +130,7 @@ export type ApiOrbitalPurgeDocumentResponse =
   Schemas["OrbitalPurgeDocumentResponse"];
 
 /** Response body of ``POST /admin/orbital/purge_all`` (#292 — bulk override). */
-export type ApiOrbitalPurgeAllResponse =
-  Schemas["OrbitalPurgeAllResponse"];
+export type ApiOrbitalPurgeAllResponse = Schemas["OrbitalPurgeAllResponse"];
 
 /**
  * Operator-typed phrase the bulk-purge route demands as a second

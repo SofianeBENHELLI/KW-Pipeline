@@ -1982,3 +1982,117 @@ pre {
   outline: 2px solid var(--action);
   outline-offset: 1px;
 }
+
+/* Review header — Lineage + Similar Documents actions (EPIC-C C.3).
+   The two buttons sit in the workspace-header-meta row alongside the
+   refresh indicator + status badge, so the styling stays light: a
+   secondary-button look matched to the existing reviewer chrome. */
+.review-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-header-actions .secondary-button {
+  padding: 4px 10px;
+  font-size: 0.82rem;
+}
+
+/* Lineage modal — flat version list (v1 → vN). Each row is a
+   button so keyboard operators can tab to it; the .row-btn fills the
+   row so the entire surface is clickable. */
+.lineage-card,
+.similar-card {
+  max-width: 640px;
+}
+
+.lineage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lineage-row {
+  margin: 0;
+}
+
+.lineage-row__btn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lineage-row__btn:hover,
+.lineage-row__btn:focus {
+  border-color: var(--action);
+  outline: none;
+}
+
+.lineage-row__filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineage-row__version {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.lineage-row__date {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lineage-row__badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--action);
+  color: #fff;
+}
+
+/* Similar documents — compact 3-column table. */
+.similar-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.similar-table th,
+.similar-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.similar-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.similar-cell--confidence {
+  font-variant-numeric: tabular-nums;
+  width: 96px;
+}
+
+.similar-cell--open {
+  width: 64px;
+  text-align: right;
+}
