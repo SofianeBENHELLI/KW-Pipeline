@@ -16,6 +16,7 @@ const ALL_OFF = {
   validate: false,
   reject: false,
   demote: false,
+  "retry-extraction": false,
 };
 
 describe("<FsmActions />", () => {
@@ -293,5 +294,97 @@ describe("<FsmActions />", () => {
     const rerun = screen.getByTestId("kf-fsm-semantic-rerun");
     expect(rerun).toHaveAttribute("aria-busy", "true");
     expect(rerun).toHaveTextContent(/Re-running…/);
+  });
+
+  it("Retry-extraction button is HIDDEN on non-FAILED versions", () => {
+    render(
+      <FsmActions
+        gates={ALL_OFF}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    // The row is gated on `gates["retry-extraction"]` so we should
+    // see neither the row container nor the button itself.
+    expect(screen.queryByTestId("kf-fsm-retry-row")).toBeNull();
+    expect(screen.queryByTestId("kf-fsm-retry-extraction")).toBeNull();
+  });
+
+  it("Retry-extraction button is VISIBLE + enabled when the gate is open (FAILED)", () => {
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const btn = screen.getByTestId("kf-fsm-retry-extraction");
+    expect(btn).not.toBeDisabled();
+    expect(btn).toHaveTextContent(/Retry extraction/);
+  });
+
+  it("clicking Retry extraction fires onRun('retry-extraction')", () => {
+    const onRun = vi.fn();
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="idle"
+        activeAction={null}
+        error={null}
+        onRun={onRun}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("kf-fsm-retry-extraction"));
+    expect(onRun).toHaveBeenCalledWith("retry-extraction");
+  });
+
+  it("Retry-extraction button shows 'Retrying…' + aria-busy while in flight", () => {
+    render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="running"
+        activeAction="retry-extraction"
+        error={null}
+        onRun={() => {}}
+      />,
+    );
+    const btn = screen.getByTestId("kf-fsm-retry-extraction");
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    expect(btn).toHaveTextContent(/Retrying…/);
+  });
+
+  it("retry-extraction error (409 / 503) surfaces in the inline error banner", () => {
+    // The banner is generic — any error with a useful message renders
+    // here. Pin both the 409 (already running) and 503 (queue full)
+    // envelopes since the brief calls them out by name.
+    const { rerender } = render(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="error"
+        activeAction={null}
+        error={new Error("API 409: extraction already running")}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("kf-fsm-error")).toHaveTextContent(/409/);
+    expect(screen.getByTestId("kf-fsm-error")).toHaveTextContent(
+      /already running/,
+    );
+
+    rerender(
+      <FsmActions
+        gates={{ ...ALL_OFF, "retry-extraction": true }}
+        status="error"
+        activeAction={null}
+        error={new Error("API 503: extraction queue full")}
+        onRun={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("kf-fsm-error")).toHaveTextContent(/503/);
+    expect(screen.getByTestId("kf-fsm-error")).toHaveTextContent(/queue full/);
   });
 });

@@ -138,6 +138,19 @@
   color: var(--orb-fg-dim);
   letter-spacing: 0.04em;
 }
+.orb-app .kf-fsm__retry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--orb-rule);
+}
+.orb-app .kf-fsm__retry-hint {
+  font-size: 10px;
+  color: var(--orb-fg-dim);
+  letter-spacing: 0.04em;
+}
 
 /* ── Document detail / Versions ──────────────────────────────── */
 

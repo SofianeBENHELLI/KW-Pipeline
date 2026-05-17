@@ -146,6 +146,13 @@ export type ApiBucketState = Schemas["BucketState"];
  *  surfaced inline on the dashboard's "Run pass" trigger. */
 export type ApiAutoPromoteResult = Schemas["AutoPromoteResult"];
 
+// ─── Admin / Reconcile (ADR-006 §5, #40) ───────────────────────────────────
+
+/** Result envelope of ``POST /admin/reconcile``. Counts the versions
+ *  flipped FAILED in this pass; ``skipped_inline`` is true when
+ *  ``KW_EXTRACTION_INLINE=true`` (the pass is a no-op by design). */
+export type ApiReconcileResult = Schemas["ReconcileResult"];
+
 // ─── Admin / Audit log viewer (#206 follow-up) ────────────────────────────
 
 /** One row in the Admin Audit Log Viewer table. ``actor`` is projected

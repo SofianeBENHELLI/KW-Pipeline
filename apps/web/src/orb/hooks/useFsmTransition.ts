@@ -26,6 +26,7 @@ import {
   generateSemantic,
   rejectVersion,
   resetVersionToReview,
+  retryExtraction,
   validateVersion,
 } from "../../api/client";
 
@@ -35,7 +36,8 @@ export type FsmAction =
   | "semantic-rerun"
   | "validate"
   | "reject"
-  | "demote";
+  | "demote"
+  | "retry-extraction";
 
 export type FsmStatus = "idle" | "running" | "ok" | "error";
 
@@ -55,6 +57,14 @@ export interface FsmGates {
   reject: boolean;
   /** True when the current status is VALIDATED or REJECTED. */
   demote: boolean;
+  /**
+   * True when the current status is ``FAILED``. Drives the dedicated
+   * "Retry extraction" affordance that calls the backend's
+   * ``/retry-extraction`` route (#87) — distinct from ``extract``
+   * because the retry route reuses the same FAILED row rather than
+   * driving a fresh STORED → EXTRACTING transition.
+   */
+  "retry-extraction": boolean;
 }
 
 const _RERUN_STATES = new Set<string>([
@@ -73,6 +83,7 @@ export function computeGates(status: string | null | undefined): FsmGates {
     validate: status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
     reject: status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
     demote: status === "VALIDATED" || status === "REJECTED",
+    "retry-extraction": status === "FAILED",
   };
 }
 
@@ -122,6 +133,8 @@ export function useFsmTransition(
     try {
       if (action === "extract") {
         await extractVersion(documentId, versionId);
+      } else if (action === "retry-extraction") {
+        await retryExtraction(documentId, versionId);
       } else if (action === "semantic" || action === "semantic-rerun") {
         // "semantic-rerun" calls the same endpoint as "semantic" — the
         // backend distinguishes via the cached row's recorded

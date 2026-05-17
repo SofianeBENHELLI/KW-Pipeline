@@ -57,6 +57,8 @@ const DISABLED_REASONS: Record<FsmAction, string> = {
     "Available only when the version is in NEEDS_REVIEW or SEMANTIC_READY.",
   demote:
     "Re-open is available only on a VALIDATED or REJECTED version — drives it back to NEEDS_REVIEW.",
+  "retry-extraction":
+    "Retry is available only on a FAILED version — re-queues the same row through the extraction pipeline.",
 };
 
 export function FsmActions({
@@ -199,6 +201,30 @@ export function FsmActions({
           demote VALIDATED or REJECTED → NEEDS_REVIEW
         </span>
       </div>
+
+      {/* Retry-extraction surfaces ONLY when the version is in FAILED
+          (gate carries the literal). Unlike demote we don't keep the
+          button mounted-but-disabled — a FAILED version is the only
+          shape where the retry route applies, so showing it elsewhere
+          would imply a recovery path that doesn't exist. */}
+      {gates["retry-extraction"] && (
+        <div className="kf-fsm__retry" data-testid="kf-fsm-retry-row">
+          <Btn
+            kind="primary"
+            icon={OrbI.refresh}
+            xs
+            disabled={status === "running"}
+            onClick={() => onRun("retry-extraction")}
+            aria-busy={inflight("retry-extraction")}
+            data-testid="kf-fsm-retry-extraction"
+          >
+            {inflight("retry-extraction") ? "Retrying…" : "Retry extraction"}
+          </Btn>
+          <span className="kf-fsm__retry-hint orb-mono">
+            re-queue this FAILED version through the extraction pipeline
+          </span>
+        </div>
+      )}
 
       <textarea
         className="kf-fsm__note"

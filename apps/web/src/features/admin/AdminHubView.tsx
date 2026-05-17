@@ -61,6 +61,13 @@ const HUB_CARDS: readonly HubCard[] = [
       "Filter the audit event store by event, actor, and time range.",
     testId: "admin-hub-card-audit",
   },
+  {
+    href: "/admin/reconcile",
+    title: "Reconcile queue",
+    description:
+      "Drain the stuck-extraction queue — flip QUEUED / EXTRACTING rows to FAILED so operators can recover them.",
+    testId: "admin-hub-card-reconcile",
+  },
 ];
 
 export function AdminHubView() {

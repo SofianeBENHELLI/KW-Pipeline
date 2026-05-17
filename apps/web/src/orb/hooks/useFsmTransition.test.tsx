@@ -17,42 +17,42 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 describe("computeGates", () => {
   it("STORED → only Extract enabled", () => {
     expect(computeGates("STORED")).toEqual({
-      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false, "retry-extraction": false,
     });
   });
-  it("FAILED → only Extract enabled (allows retry)", () => {
+  it("FAILED → Extract + retry-extraction enabled", () => {
     expect(computeGates("FAILED")).toEqual({
-      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: true, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false, "retry-extraction": true,
     });
   });
   it("EXTRACTED → only Semantic enabled", () => {
     expect(computeGates("EXTRACTED")).toEqual({
-      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false, "retry-extraction": false,
     });
   });
   it("NEEDS_REVIEW → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("NEEDS_REVIEW")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
+      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false, "retry-extraction": false,
     });
   });
   it("SEMANTIC_READY → Validate + Reject + Re-run enabled", () => {
     expect(computeGates("SEMANTIC_READY")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false,
+      extract: false, semantic: false, "semantic-rerun": true, validate: true, reject: true, demote: false, "retry-extraction": false,
     });
   });
   it("VALIDATED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("VALIDATED")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
+      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true, "retry-extraction": false,
     });
   });
   it("REJECTED → Demote + Re-run enabled (re-open + method-switch paths)", () => {
     expect(computeGates("REJECTED")).toEqual({
-      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true,
+      extract: false, semantic: false, "semantic-rerun": true, validate: false, reject: false, demote: true, "retry-extraction": false,
     });
   });
   it("null status → nothing enabled", () => {
     expect(computeGates(null)).toEqual({
-      extract: false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, semantic: false, "semantic-rerun": false, validate: false, reject: false, demote: false, "retry-extraction": false,
     });
   });
 });
@@ -75,7 +75,7 @@ describe("useFsmTransition", () => {
       }),
     );
     expect(result.current.gates).toEqual({
-      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false,
+      extract: false, semantic: true, "semantic-rerun": false, validate: false, reject: false, demote: false, "retry-extraction": false,
     });
   });
 
@@ -271,5 +271,82 @@ describe("useFsmTransition", () => {
     });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.current.status).toBe("idle");
+  });
+
+  it("dispatches `retry-extraction` against /retry-extraction when status is FAILED", async () => {
+    let capturedUrl = "";
+    let capturedMethod = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL): Promise<Response> => {
+        const req = input as Request;
+        capturedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : req.url;
+        capturedMethod = req.method ?? "";
+        return Promise.resolve(makeJsonResponse({ ok: true }));
+      },
+    );
+    const onAfter = vi.fn();
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "FAILED",
+        onAfter,
+      }),
+    );
+    await act(async () => {
+      await result.current.run("retry-extraction");
+    });
+    expect(result.current.status).toBe("ok");
+    expect(capturedUrl).toMatch(/\/retry-extraction$/);
+    expect(capturedMethod).toBe("POST");
+    expect(onAfter).toHaveBeenCalledWith("retry-extraction");
+  });
+
+  it("`retry-extraction` no-ops when status is not FAILED", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockClear();
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "STORED",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("retry-extraction");
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.status).toBe("idle");
+  });
+
+  it("`retry-extraction` surfaces a fetch failure (e.g. 409 / 503) as an error state", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse(
+        {
+          error: {
+            code: "KW_QUEUE_FULL",
+            message: "extraction queue is at capacity",
+          },
+        },
+        503,
+      ),
+    );
+    const { result } = renderHook(() =>
+      useFsmTransition({
+        documentId: "doc-1",
+        versionId: "ver-1",
+        currentStatus: "FAILED",
+      }),
+    );
+    await act(async () => {
+      await result.current.run("retry-extraction");
+    });
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).not.toBeNull();
   });
 });

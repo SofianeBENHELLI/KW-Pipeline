@@ -39,7 +39,7 @@ function renderHub() {
 describe("AdminHubView", () => {
   beforeEach(() => navigateMock.mockReset());
 
-  it("renders the three v1 admin cards with title + description", () => {
+  it("renders all four admin cards with title + description", () => {
     renderHub();
 
     expect(screen.getByText("Administration")).toBeInTheDocument();
@@ -48,13 +48,14 @@ describe("AdminHubView", () => {
     ).toBeInTheDocument();
 
     const grid = screen.getByTestId("admin-hub-grid");
-    // 3 cards in v1 — archive / hitl / audit. Each has a testid so
-    // we can pin the count even if titles drift.
-    expect(grid.querySelectorAll("[data-testid^='admin-hub-card-']")).toHaveLength(3);
+    // 4 cards — archive / hitl / audit / reconcile. Each has a testid
+    // so we can pin the count even if titles drift.
+    expect(grid.querySelectorAll("[data-testid^='admin-hub-card-']")).toHaveLength(4);
 
     expect(screen.getByTestId("admin-hub-card-archive")).toBeInTheDocument();
     expect(screen.getByTestId("admin-hub-card-hitl")).toBeInTheDocument();
     expect(screen.getByTestId("admin-hub-card-audit")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-hub-card-reconcile")).toBeInTheDocument();
 
     // Sub-line copy is what an admin scans for; spot-check each.
     expect(
@@ -65,6 +66,9 @@ describe("AdminHubView", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Filter the audit event store/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Drain the stuck-extraction queue/),
     ).toBeInTheDocument();
   });
 
@@ -80,7 +84,10 @@ describe("AdminHubView", () => {
     fireEvent.click(screen.getByTestId("admin-hub-card-audit"));
     expect(navigateMock).toHaveBeenCalledWith("/admin/audit");
 
-    expect(navigateMock).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByTestId("admin-hub-card-reconcile"));
+    expect(navigateMock).toHaveBeenCalledWith("/admin/reconcile");
+
+    expect(navigateMock).toHaveBeenCalledTimes(4);
   });
 
   it("renders the role footer note", () => {

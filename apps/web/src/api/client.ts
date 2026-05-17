@@ -37,6 +37,7 @@ import type {
   ApiExtractionJobSnapshot,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
+  ApiReconcileResult,
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
@@ -436,6 +437,32 @@ export async function extractVersion(
       params: { path: { document_id: documentId, version_id: versionId } },
       signal: options.signal,
     }),
+  );
+}
+
+/**
+ * POST /documents/{document_id}/versions/{version_id}/retry-extraction
+ *
+ * Retry extraction for a previously-FAILED version (#87, ADR-006 PR-2).
+ * Returns the fresh ``ApiRawExtraction`` (HTTP 200) when the API runs
+ * extraction inline, or an ``ApiExtractionJobSnapshot`` (HTTP 202) when
+ * extraction is queued. The route 409s if the version is not in FAILED
+ * (the review states stay frozen — retry never bypasses the gate),
+ * 503s with ``KW_QUEUE_FULL`` when the async queue is at capacity.
+ */
+export async function retryExtraction(
+  documentId: string,
+  versionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiRawExtraction | ApiExtractionJobSnapshot> {
+  return unwrap(
+    await http.POST(
+      "/documents/{document_id}/versions/{version_id}/retry-extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
   );
 }
 
@@ -925,6 +952,27 @@ export async function runAutoPromotePass(
   return unwrap(
     await http.POST("/admin/hitl/run_auto_promote_pass", {
       params: { query: query as never },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/reconcile (#40, ADR-006 §5)
+ *
+ * Admin-only. Runtime trigger for the stuck-extraction scan — every
+ * version stuck in ``QUEUED_FOR_EXTRACTION`` or ``EXTRACTING`` is
+ * flipped to ``FAILED`` so the operator can recover it via the
+ * per-version retry-extraction route. ``skipped_inline`` is true when
+ * ``KW_EXTRACTION_INLINE=true`` (inline mode never enqueues, so the
+ * pass is a no-op by design). 503 with ``KW_HITL_DISABLED``-style
+ * envelope when the admin surface is unwired.
+ */
+export async function runReconcile(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiReconcileResult> {
+  return unwrap(
+    await http.POST("/admin/reconcile", {
       signal: options.signal,
     }),
   );
