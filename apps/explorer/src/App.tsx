@@ -550,18 +550,12 @@ export default function App(): React.ReactElement {
   );
 
   const openDoc = openDocId ? docById(snapshot, openDocId) ?? null : null;
-  const docChunks = openDoc ? chunksForDoc(snapshot, openDoc.id) : [];
-  const navChunk = useCallback(
-    (delta: number) => {
-      if (!docChunks.length) return;
-      const idx = highlightChunk ? docChunks.findIndex((c) => c.id === highlightChunk) : -1;
-      const next = (idx + delta + docChunks.length) % docChunks.length;
-      const target = docChunks[next];
-      setHighlightChunk(target.id);
-      setSelected({ kind: "chunk", id: target.id, chunk: target });
-    },
-    [docChunks, highlightChunk],
-  );
+  // ``navChunk`` (prev/next within the open doc's chunks) was wired
+  // to the old DocViewer's chunk navigator. The new ChunkListPanel
+  // exposes the chunks as a clickable list directly, so the explicit
+  // navigator and its ``docChunks`` derived value are gone too.
+  // ``chunksForDoc`` is still imported for ``ChunkListPanel``'s own
+  // internal use.
 
   const searchResults = useMemo(() => {
     if (!search) return null;
