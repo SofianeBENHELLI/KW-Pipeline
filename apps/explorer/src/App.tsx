@@ -1282,6 +1282,21 @@ export default function App(): React.ReactElement {
                 apiBaseUrl={apiBaseUrl}
                 refreshTick={refreshTick}
                 selectedId={selected?.kind === "doc" ? selected.id : null}
+                focusedDocumentId={
+                  focusRoot?.kind === "doc" ? focusRoot.id : null
+                }
+                onFocusDocument={(apiDoc: ApiDocument) => {
+                  // Scope the catalog (and the graph) to this single
+                  // document via the existing focusRoot mechanism so
+                  // the "Focused: <doc>" chip + back/home navigation
+                  // already wired in App.tsx remain the only way out.
+                  const known = docById(snapshot, apiDoc.id);
+                  focusFromNode({
+                    kind: "doc",
+                    id: apiDoc.id,
+                    doc: known ?? undefined,
+                  });
+                }}
                 onOpenLineage={(apiDoc: ApiDocument) => {
                   // Prefer the explorer snapshot copy so we get a
                   // fully-fledged ExplorerDocument (cluster, hue,

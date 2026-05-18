@@ -52,6 +52,21 @@ interface Props {
    * route the modal — clicking the v{N} badge then becomes inert.
    */
   onOpenLineage?: (doc: Document) => void;
+  /**
+   * When non-null, scope the catalog to a single document — only
+   * that row renders (plus an empty state if it isn't in the
+   * current page). Wired by App.tsx to the active ``focusRoot``
+   * when its ``kind === "doc"`` so a double-click in the table or
+   * the graph keeps the catalog in sync with the focus chip.
+   */
+  focusedDocumentId?: string | null;
+  /**
+   * Double-click handler — scopes the catalog (and the focus
+   * chip) to just this document. Single click still
+   * ``onSelectDocument``s as before; the two fire together on a
+   * double-click and the App handles the ordering.
+   */
+  onFocusDocument?: (doc: Document) => void;
 }
 
 function classifyExt(filename: string): DocTypeKey {
@@ -103,6 +118,8 @@ export const Catalog: React.FC<Props> = ({
   selectedId,
   onSelectDocument,
   onOpenLineage,
+  focusedDocumentId,
+  onFocusDocument,
 }) => {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -161,6 +178,16 @@ export const Catalog: React.FC<Props> = ({
     });
     return next;
   }, [items, sortKey, sortDir]);
+
+  // When the App's ``focusRoot`` is a single document, scope the
+  // table to just that row so the catalog mirrors the focus chip —
+  // the user double-clicked to "see only this document". Falls back
+  // to the full sorted list whenever the focus is null or scoped to
+  // a non-doc kind (cluster / chunk / concept).
+  const visibleItems = useMemo(() => {
+    if (!focusedDocumentId) return sortedItems;
+    return sortedItems.filter((d) => d.id === focusedDocumentId);
+  }, [sortedItems, focusedDocumentId]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -282,7 +309,7 @@ export const Catalog: React.FC<Props> = ({
             </tr>
           </thead>
           <tbody>
-            {sortedItems.map((doc) => {
+            {visibleItems.map((doc) => {
               const latest =
                 doc.versions.find((v) => v.id === doc.latest_version_id) ??
                 doc.versions[doc.versions.length - 1];
@@ -298,6 +325,14 @@ export const Catalog: React.FC<Props> = ({
                   data-doc-id={doc.id}
                   aria-selected={isSelected}
                   onClick={() => onSelectDocument(doc)}
+                  onDoubleClick={
+                    onFocusDocument ? () => onFocusDocument(doc) : undefined
+                  }
+                  title={
+                    onFocusDocument
+                      ? "Click to select · double-click to scope to this document"
+                      : undefined
+                  }
                 >
                   <td className="kx-cat-name" title={doc.original_filename}>
                     <span className="kx-cat-fname">{doc.original_filename}</span>
