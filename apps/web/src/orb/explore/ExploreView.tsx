@@ -418,10 +418,6 @@ function TopicDetailPage(): ReactElement {
     [neighborhood],
   );
 
-  if (error instanceof ApiError && error.status === 403) {
-    return _forbiddenShell(error.detail);
-  }
-
   const selectedEdge = useMemo(() => {
     if (selectedNodeId === null || neighborhood === null) return null;
     return (
@@ -431,6 +427,10 @@ function TopicDetailPage(): ReactElement {
       ) ?? null
     );
   }, [neighborhood, selectedNodeId]);
+
+  if (error instanceof ApiError && error.status === 403) {
+    return _forbiddenShell(error.detail);
+  }
 
   return (
     <main className="app-shell" aria-label="Explorer topic detail">
