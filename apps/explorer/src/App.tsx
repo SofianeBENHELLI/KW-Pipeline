@@ -31,7 +31,7 @@ import {
 } from "../../_shared/auth";
 import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/GraphCanvas";
 import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
-import { DocViewer } from "./components/DocViewer";
+import { ChunkListPanel } from "./components/ChunkListPanel";
 import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
 import { SearchResults, type SearchHit } from "./components/SearchResults";
@@ -550,18 +550,12 @@ export default function App(): React.ReactElement {
   );
 
   const openDoc = openDocId ? docById(snapshot, openDocId) ?? null : null;
-  const docChunks = openDoc ? chunksForDoc(snapshot, openDoc.id) : [];
-  const navChunk = useCallback(
-    (delta: number) => {
-      if (!docChunks.length) return;
-      const idx = highlightChunk ? docChunks.findIndex((c) => c.id === highlightChunk) : -1;
-      const next = (idx + delta + docChunks.length) % docChunks.length;
-      const target = docChunks[next];
-      setHighlightChunk(target.id);
-      setSelected({ kind: "chunk", id: target.id, chunk: target });
-    },
-    [docChunks, highlightChunk],
-  );
+  // ``navChunk`` (prev/next within the open doc's chunks) was wired
+  // to the old DocViewer's chunk navigator. The new ChunkListPanel
+  // exposes the chunks as a clickable list directly, so the explicit
+  // navigator and its ``docChunks`` derived value are gone too.
+  // ``chunksForDoc`` is still imported for ``ChunkListPanel``'s own
+  // internal use.
 
   const searchResults = useMemo(() => {
     if (!search) return null;
@@ -1282,6 +1276,21 @@ export default function App(): React.ReactElement {
                 apiBaseUrl={apiBaseUrl}
                 refreshTick={refreshTick}
                 selectedId={selected?.kind === "doc" ? selected.id : null}
+                focusedDocumentId={
+                  focusRoot?.kind === "doc" ? focusRoot.id : null
+                }
+                onFocusDocument={(apiDoc: ApiDocument) => {
+                  // Scope the catalog (and the graph) to this single
+                  // document via the existing focusRoot mechanism so
+                  // the "Focused: <doc>" chip + back/home navigation
+                  // already wired in App.tsx remain the only way out.
+                  const known = docById(snapshot, apiDoc.id);
+                  focusFromNode({
+                    kind: "doc",
+                    id: apiDoc.id,
+                    doc: known ?? undefined,
+                  });
+                }}
                 onOpenLineage={(apiDoc: ApiDocument) => {
                   // Prefer the explorer snapshot copy so we get a
                   // fully-fledged ExplorerDocument (cluster, hue,
@@ -1363,13 +1372,21 @@ export default function App(): React.ReactElement {
 
         {tweaks.layoutMode === "split" && tweaks.showViewer && (
           <aside className="kx-right" aria-label="Document viewer and details">
-            <DocViewer
+            <ChunkListPanel
               snapshot={snapshot}
               doc={openDoc}
               highlightChunkId={highlightChunk}
-              onPrevChunk={() => navChunk(-1)}
-              onNextChunk={() => navChunk(1)}
+              hoveredChunkId={hovered}
+              // Match the original DocViewer paragraph-click
+              // semantics: clicking a chunk pins it via
+              // ``highlightChunk`` so the row + the DetailPanel
+              // chunks-list both light up, but the document stays
+              // the active selection (DetailPanel keeps showing
+              // the doc-view, not the chunk-view). The graph's
+              // bidirectional cross-highlight rides on
+              // ``hoveredId`` instead — see ``onHoverChunk`` below.
               onSelectChunk={setHighlightChunk}
+              onHoverChunk={setHovered}
             />
             <DetailPanel
               snapshot={snapshot}

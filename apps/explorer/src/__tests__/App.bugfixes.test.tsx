@@ -139,8 +139,14 @@ describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
   });
 
   // ── Bug B ────────────────────────────────────────────────────────────────
-  describe("Bug B — chunk ↔ text cross-highlight", () => {
-    it("clicking a chunk row in the doc-detail panel highlights the matching paragraph in the viewer", async () => {
+  // Note: this describe block originally pinned chunk ↔ paragraph
+  // cross-highlight when the right column rendered DocViewer (page
+  // cards with paragraph rows). The right column now renders
+  // ``ChunkListPanel`` instead — paragraphs are gone — so the tests
+  // assert chunk ↔ chunk-row cross-highlight between DetailPanel's
+  // ``kx-doc-chunks`` list and the new ``kx-chunklist-rows`` list.
+  describe("Bug B — chunk-row ↔ chunks-panel cross-highlight", () => {
+    it("clicking a chunk row in the doc-detail panel highlights the matching row in the chunks panel", async () => {
       render(<App />);
       await waitFor(() => {
         // "People & HR" is rendered both in the cluster list and in
@@ -176,22 +182,25 @@ describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
       expect(c1_2).not.toBeNull();
       fireEvent.click(c1_2!);
 
-      // The DocViewer paragraph anchored to c1.2 (page 7, paras 0/1/2)
-      // must now carry the kx-hl class. We pick para 0 — the first
-      // anchored paragraph — and check its class list.
+      // The chunks-panel row for c1.2 must now carry the
+      // ``kx-chunk-row--sel`` class so the new cross-highlight
+      // surface fires when the operator picks a chunk from the
+      // doc-detail list.
       await waitFor(() => {
-        const para = document.querySelector('.kx-para[data-chunk-id="c1.2"]');
-        expect(para).not.toBeNull();
-        expect(para!.classList.contains("kx-hl")).toBe(true);
+        const row = document.querySelector(
+          '.kx-chunklist-rows .kx-chunk-row[aria-selected="true"]',
+        );
+        expect(row).not.toBeNull();
+        expect(row!.classList.contains("kx-chunk-row--sel")).toBe(true);
       });
 
-      // And the panel row reflects the same active state.
+      // And the doc-detail row reflects the same active state.
       await waitFor(() => {
         expect(c1_2!.classList.contains("kx-on")).toBe(true);
       });
     });
 
-    it("clicking a paragraph in the viewer surfaces the matching chunk row as active in the panel", async () => {
+    it("clicking a chunk row in the chunks panel surfaces the matching row in the doc-detail panel", async () => {
       render(<App />);
       await waitFor(() => {
         // "People & HR" is rendered both in the cluster list and in
@@ -201,10 +210,10 @@ describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
         expect(document.querySelector(".kx-cluster-list")).not.toBeNull();
       });
 
-      // Open d1 so the viewer renders the SAMPLE_DOC_CONTENT["d1"]
-      // pages. The default selection is null, so the doc detail
-      // panel only renders once we click the doc. We pick the first
-      // doc row in the (auto-expanded) HR cluster — that's d1.
+      // Open d1 so the right column scopes ``ChunkListPanel`` to
+      // d1's chunks. The default selection is null, so the doc
+      // detail panel only renders once we click the doc. We pick
+      // the first doc row in the (auto-expanded) HR cluster — that's d1.
       const clusterList = await waitFor(() => {
         const list = document.querySelector(".kx-cluster-list");
         expect(list).not.toBeNull();
@@ -219,31 +228,40 @@ describe("Knowledge Explorer — bug fixes (2026-05-04)", () => {
 
       await screen.findByTestId("kx-doc-chunks");
 
-      // The c1.3 anchor sits on page 11, paragraph 0. Click that
-      // paragraph in the viewer.
-      const para = document.querySelector('.kx-para[data-chunk-id="c1.3"]') as HTMLElement | null;
-      expect(para).not.toBeNull();
-      // ``kx-para-link`` is the affordance class our fix adds to
-      // anchored paragraphs — confirms the paragraph is wired.
-      expect(para!.classList.contains("kx-para-link")).toBe(true);
-      fireEvent.click(para!);
+      // Locate c1.3 in the chunks panel by finding the row whose
+      // label matches the sample fixture ("Equipment & stipend").
+      // ``chunksForDoc`` returns the four c1.* rows in source order;
+      // we pick by label text rather than index so a future fixture
+      // reorder doesn't silently target the wrong chunk.
+      const panel = document.querySelector(".kx-chunklist-rows");
+      expect(panel).not.toBeNull();
+      const labels = Array.from(
+        panel!.querySelectorAll(".kx-chunk-row-label"),
+      ) as HTMLElement[];
+      const c1_3Idx = labels.findIndex((l) =>
+        l.textContent?.toLowerCase().includes("equipment"),
+      );
+      expect(c1_3Idx).toBeGreaterThanOrEqual(0);
+      const rows = panel!.querySelectorAll(".kx-chunk-row");
+      const row = rows[c1_3Idx] as HTMLElement;
+      fireEvent.click(row);
 
-      // The matching panel row now carries kx-on / aria-selected so
-      // the user can see which chunk was just highlighted.
-      const chunksList = screen.getByTestId("kx-doc-chunks");
-      const c1_3 = chunksList.querySelector('[data-chunk-id="c1.3"]') as HTMLElement | null;
+      // The matching doc-detail panel row now carries kx-on /
+      // aria-selected so the user can see which chunk was just
+      // highlighted via the cross-highlight round-trip.
+      const detailChunksList = screen.getByTestId("kx-doc-chunks");
+      const c1_3 = detailChunksList.querySelector('[data-chunk-id="c1.3"]') as HTMLElement | null;
       expect(c1_3).not.toBeNull();
       await waitFor(() => {
         expect(c1_3!.classList.contains("kx-on")).toBe(true);
         expect(c1_3!.getAttribute("aria-selected")).toBe("true");
       });
 
-      // Visual scroll behaviour (.kx-para → smooth scrollTo on the
-      // viewer body, panel row → scrollIntoView) is exercised by the
-      // effect; the ``scrollIntoView`` mock above asserts the call
-      // happened. We don't assert pixel positions because jsdom
-      // doesn't lay the page out — the visual behaviour is verified
-      // manually via ``npm run start``.
+      // Visual scroll behaviour (chunks panel row → scrollIntoView,
+      // doc-detail row → scrollIntoView) is exercised by the
+      // ``isSelected`` effect; the ``scrollIntoView`` mock above
+      // asserts the call happened. We don't assert pixel positions
+      // because jsdom doesn't lay the page out.
       expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
     });
   });

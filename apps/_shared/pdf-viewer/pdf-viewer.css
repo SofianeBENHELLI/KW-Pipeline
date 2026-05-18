@@ -364,6 +364,31 @@
   word-break: break-all;
 }
 
+/* Calm inline hint above the PDF when the version is uploaded but
+   has no chunk catalog yet (STORED → extraction not run). The PDF
+   itself still renders below so the operator can confirm the upload
+   looks right while they queue the extract. Distinct from the
+   ``tombstone`` alert styling — this is informational, not a fault. */
+.pdf-viewer-pending {
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-info, #bae6fd);
+  border-radius: 6px;
+  background: var(--surface-info, #f0f9ff);
+  color: var(--text-info, #075985);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pdf-viewer-pending strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.pdf-viewer-pending p {
+  margin: 0;
+}
+
 @media (max-width: 960px) {
   .pdf-chunk-viewer {
     grid-template-columns: 1fr;
