@@ -196,8 +196,9 @@
     <h1>KW-Pipeline</h1>
     <p class="tagline">
       Plateforme d'ingestion documentaire qui transforme tes PDF, DOCX et PPTX en
-      graphe de connaissance gouverné — extraction, sémantique LLM, validation
-      humaine, et exploration via le 3DEXPERIENCE.
+      graphe de connaissance gouverné — extraction, sémantique LLM, allocation
+      taxonomique business (EPIC-1), validation humaine HITL, et exploration
+      via le 3DEXPERIENCE.
     </p>
   </header>
 
@@ -211,8 +212,8 @@
 
     <a class="card" data-deploy-kind="orbital" href="#" target="_blank" rel="noopener">
       <span class="label">Workbench</span>
-      <h2>Orbital · Review</h2>
-      <p>App web où tu uploades, déclenches l'extraction et valides chaque version. Lit + écrit. Déployée sur S3 (eu-north-1).</p>
+      <h2>Orbital · Review + Admin</h2>
+      <p>App web où tu uploades, valides, et explores. Inclut désormais <code>/admin/taxonomy</code> pour la lineage du versioning (DRAFT → CANDIDATE → VALIDATED → ARCHIVED, EPIC-1 §1.9). Lit + écrit. Déployée sur S3 (eu-north-1).</p>
       <span class="url"></span>
     </a>
 
@@ -247,8 +248,8 @@
 
     <h4 style="margin:18px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 1 — App launcher (Safari recommandé)</h4>
     <div class="launch-grid">
-      <a class="btn" href="file:///Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Launch%20KW%20Backend.app">▶ Lancer le backend (API)</a>
-      <a class="btn secondary" href="file:///Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Launch%20KW%20Frontend.app">▶ Lancer le frontend (Orbital)</a>
+      <a class="btn" href="file:///Users/sxz/code/kw-pipeline/Launch%20KW%20Backend.app">▶ Lancer le backend (API)</a>
+      <a class="btn secondary" href="file:///Users/sxz/code/kw-pipeline/Launch%20KW%20Frontend.app">▶ Lancer le frontend (Orbital)</a>
     </div>
     <p class="note">
       La première fois, macOS bloque l'app non signée : <strong>clic-droit sur le .app dans Finder → Ouvrir → Ouvrir</strong> (une seule fois). Ensuite le bouton fonctionne.
@@ -256,8 +257,8 @@
 
     <h4 style="margin:24px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 2 — Copier la commande puis coller dans Terminal</h4>
     <div class="launch-grid">
-      <button class="btn" type="button" onclick="copyCmd(this, '/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Demo Backend.command')">📋 Copier la commande backend</button>
-      <button class="btn secondary" type="button" onclick="copyCmd(this, '/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/Demo Frontend.command')">📋 Copier la commande frontend</button>
+      <button class="btn" type="button" onclick="copyCmd(this, '/Users/sxz/code/kw-pipeline/Demo Backend.command')">📋 Copier la commande backend</button>
+      <button class="btn secondary" type="button" onclick="copyCmd(this, '/Users/sxz/code/kw-pipeline/Demo Frontend.command')">📋 Copier la commande frontend</button>
     </div>
     <p class="note">
       Ouvre Terminal (<kbd>Cmd+Space</kbd> → "Terminal") et colle (<kbd>Cmd+V</kbd>) puis <kbd>Entrée</kbd>.
@@ -265,7 +266,7 @@
 
     <h4 style="margin:24px 0 8px 0;font-size:13px;color:var(--ds-blue-900);text-transform:uppercase;letter-spacing:0.08em;">Méthode 3 — Commande npm directe (fallback)</h4>
     <div class="launch-grid">
-      <button class="btn secondary" type="button" onclick="copyRaw(this, 'cd \'/Users/sxz/Documents/Codex/2026-04-28/connect-to-my-giyt-hub-repo/apps/web\' &amp;&amp; npm run dev')">📋 Copier <code>npm run dev</code> (Orbital)</button>
+      <button class="btn secondary" type="button" onclick="copyRaw(this, 'cd \'/Users/sxz/code/kw-pipeline/apps/web\' &amp;&amp; npm run dev')">📋 Copier <code>npm run dev</code> (Orbital)</button>
     </div>
     <p class="note">
       Si les méthodes ci-dessus échouent : colle dans Terminal et lance le serveur Vite à la main. L'URL <code>http://localhost:5173/</code> sera disponible quand tu vois <code>VITE ready</code>.
