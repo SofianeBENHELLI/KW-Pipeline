@@ -33,7 +33,7 @@ import type {
   ChunkLocationsResponse,
 } from "../../../../_shared/pdf-viewer";
 
-import { listDocumentChunks } from "../../api/client";
+import { ApiError, listDocumentChunks } from "../../api/client";
 
 // pdfjs-dist exposes a moving target for the API namespace; we
 // import the whole module and grab what we need at runtime to keep
@@ -85,6 +85,12 @@ type LoadState =
   | { kind: "ready"; response: ChunkLocationsResponse }
   | { kind: "hash_mismatch"; serverHash: string; expectedHash: string }
   | { kind: "no_rects"; parserVersion: string }
+  // A version that exists but hasn't been extracted yet — STORED
+  // status, no raw_extractions row. The PDF still renders (the
+  // operator can confirm the upload looks right), just without
+  // overlays. Distinct from ``error`` so the viewer can show a
+  // calm "extraction pending" hint instead of an alert banner.
+  | { kind: "not_extracted" }
   | { kind: "error"; message: string };
 
 // Upper bound on the render scale — caps how much pdfjs upscales tiny
@@ -164,6 +170,15 @@ export function PdfChunkViewer({
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
+        // A STORED-but-not-yet-extracted version surfaces as
+        // 404 KW_NOT_FOUND from listDocumentChunks (the route reads
+        // raw_extractions, which is empty until extraction runs).
+        // Render the PDF without overlays + a calm hint, rather than
+        // hiding the document behind a red "could not load" alert.
+        if (err instanceof ApiError && err.status === 404) {
+          setLoad({ kind: "not_extracted" });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         setLoad({ kind: "error", message });
       });
@@ -185,7 +200,11 @@ export function PdfChunkViewer({
   // + highlight layer.
   const [pdfDoc, setPdfDoc] = useState<PdfDocumentProxy | null>(null);
   useEffect(() => {
-    if (load.kind !== "ready") return;
+    // Load the PDF whenever we have something to render — either a
+    // full chunk catalog (``ready``) or just the raw bytes for a
+    // not-yet-extracted version (``not_extracted``). The other
+    // states are terminal alerts; loading pdfjs for them wastes work.
+    if (load.kind !== "ready" && load.kind !== "not_extracted") return;
     let cancelled = false;
     let activePdf: PdfDocumentProxy | null = null;
 
@@ -330,18 +349,31 @@ export function PdfChunkViewer({
     );
   }
 
+  const isNotExtracted = load.kind === "not_extracted";
   return (
     <section
       className={[
         "pdf-chunk-viewer",
         hideBuiltInSidePanel ? "is-solo" : "",
         coverageMode ? "is-coverage" : "",
+        isNotExtracted ? "is-not-extracted" : "",
       ]
         .filter(Boolean)
         .join(" ")}
       aria-label="PDF chunk viewer"
     >
       <div className="pdf-pages-pane">
+        {isNotExtracted ? (
+          <div className="pdf-viewer-pending" role="status">
+            <strong>Extraction not run yet.</strong>
+            <p>
+              The PDF is rendered below from the uploaded bytes. Run
+              extraction (Pipeline &amp; FSM tab) to populate the chunk
+              catalog so highlights and the right-pane chunk list light
+              up.
+            </p>
+          </div>
+        ) : null}
         <div className="pdf-pages-scroll" ref={pagesContainerRef}>
           {pdfDoc &&
             Array.from({ length: pdfDoc.numPages }, (_, idx) => idx + 1).map(
