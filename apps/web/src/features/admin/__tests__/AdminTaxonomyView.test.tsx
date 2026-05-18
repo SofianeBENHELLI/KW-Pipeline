@@ -367,8 +367,10 @@ describe("AdminTaxonomyView — lifecycle actions (slice 3)", () => {
     expect(screen.getByTestId("taxonomy-validate-3")).toBeDisabled();
     expect(screen.getByTestId("taxonomy-discard-3")).toBeDisabled();
 
-    // Synthesize is the slice 3 stub — always disabled until #477.
-    expect(screen.getByTestId("taxonomy-synthesize-1")).toBeDisabled();
+    // Synthesize is enabled on DRAFT, disabled on every other state.
+    expect(screen.getByTestId("taxonomy-synthesize-1")).not.toBeDisabled();
+    expect(screen.getByTestId("taxonomy-synthesize-2")).toBeDisabled();
+    expect(screen.getByTestId("taxonomy-synthesize-3")).toBeDisabled();
   });
 
   it("clicking Promote POSTs to the transition route and refetches", async () => {
@@ -403,6 +405,94 @@ describe("AdminTaxonomyView — lifecycle actions (slice 3)", () => {
     expect(JSON.parse(postBody ?? "{}")).toMatchObject({
       to_state: "CANDIDATE_V0",
     });
+  });
+
+  it("clicking Synthesize POSTs to the synthesize route and refetches", async () => {
+    let postUrl = "";
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/synthesize")) {
+          postUrl = url;
+          return makeJsonResponse(
+            makeVersion({
+              version_number: 1,
+              state: "DRAFT",
+              taxonomy: {
+                schema_version: "v0.1",
+                categories: [
+                  {
+                    id: "battery",
+                    label: "Battery",
+                    description: "Synthesized.",
+                    source: "imposed",
+                    subcategories: [],
+                  },
+                ],
+              } as ApiTaxonomyVersion["taxonomy"],
+            }),
+          );
+        }
+        getCount += 1;
+        return makeJsonResponse({
+          taxonomy_id: "tx-1",
+          versions: [makeVersion({ version_number: 1, state: "DRAFT" })],
+        });
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    fireEvent.click(await screen.findByTestId("taxonomy-synthesize-1"));
+    await waitFor(() => expect(postUrl).toContain("/synthesize"));
+    expect(postUrl).toContain("/admin/taxonomy/versions/tx-1/1/synthesize");
+    // Initial load + post-synthesis refetch.
+    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(2));
+  });
+
+  it("a 503 KW_LLM_DISABLED on synthesize surfaces the inline error banner", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = urlOf(input);
+        const method =
+          input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (method === "POST" && url.includes("/synthesize")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: {
+                  code: "KW_LLM_DISABLED",
+                  message: "BusinessTaxonomyCreator is not wired.",
+                  status: 503,
+                  retryable: false,
+                  remediation: "Set KW_LLM_PROVIDER and restart.",
+                },
+                detail: "BusinessTaxonomyCreator is not wired.",
+              }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        return Promise.resolve(
+          makeJsonResponse({
+            taxonomy_id: "tx-1",
+            versions: [makeVersion({ version_number: 1, state: "DRAFT" })],
+          }),
+        );
+      },
+    );
+    renderView("/admin/taxonomy?taxonomy_id=tx-1");
+    fireEvent.click(await screen.findByTestId("taxonomy-synthesize-1"));
+    expect(
+      await screen.findByTestId("taxonomy-action-error"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("BusinessTaxonomyCreator is not wired."),
+    ).toBeInTheDocument();
   });
 
   it("a 409 illegal-transition envelope surfaces the inline error banner", async () => {
@@ -560,9 +650,7 @@ describe("AdminTaxonomyView — lifecycle actions (slice 3)", () => {
     );
     renderView("/admin/taxonomy?taxonomy_id=tx-1");
     fireEvent.click(await screen.findByTestId("taxonomy-concepts-toggle-1"));
-    expect(
-      screen.getByTestId("taxonomy-concepts-panel-1"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("taxonomy-concepts-panel-1")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("taxonomy-concept-accept-sug-1"));
     await waitFor(() => expect(postUrl).toContain("/concepts/"));
     expect(postUrl).toContain(

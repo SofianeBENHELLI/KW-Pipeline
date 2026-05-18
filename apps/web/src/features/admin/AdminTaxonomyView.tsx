@@ -35,6 +35,7 @@ import {
   ApiError,
   createTaxonomyDraft,
   listTaxonomyVersions,
+  synthesizeTaxonomy,
   transitionTaxonomyConcept,
   transitionTaxonomyVersion,
 } from "../../api/client";
@@ -218,8 +219,8 @@ function ValidateModal({
       >
         <p className="muted">
           Promoting <code>{taxonomyId}</code> v{versionNumber} to the active
-          taxonomy. Optionally attach a display label that downstream
-          consumers will see.
+          taxonomy. Optionally attach a display label that downstream consumers
+          will see.
         </p>
         <label htmlFor="taxonomy-validate-label" className="muted">
           Version label (optional)
@@ -260,16 +261,13 @@ function ValidateModal({
 interface CreateDraftModalProps {
   busy: boolean;
   onClose: () => void;
-  onSubmit: (
-    body: { taxonomy_id?: string; source_version_number?: number },
-  ) => void;
+  onSubmit: (body: {
+    taxonomy_id?: string;
+    source_version_number?: number;
+  }) => void;
 }
 
-function CreateDraftModal({
-  busy,
-  onClose,
-  onSubmit,
-}: CreateDraftModalProps) {
+function CreateDraftModal({ busy, onClose, onSubmit }: CreateDraftModalProps) {
   const [taxonomyId, setTaxonomyId] = useState("");
   const [sourceVersion, setSourceVersion] = useState("");
   return (
@@ -292,8 +290,8 @@ function CreateDraftModal({
       >
         <p className="muted">
           Empty fields mint a fresh lineage with an empty tree. Provide a
-          <code> taxonomy_id</code> to add a version to an existing lineage,
-          and a source version number to inherit its tree.
+          <code> taxonomy_id</code> to add a version to an existing lineage, and
+          a source version number to inherit its tree.
         </p>
         <label htmlFor="taxonomy-draft-id" className="muted">
           Taxonomy ID (optional)
@@ -514,6 +512,26 @@ export function AdminTaxonomyView() {
         if (err instanceof ApiError) setActionError(err);
         else if (err instanceof Error) setActionError(err.message);
         else setActionError("Transition failed.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [appliedId, loadVersions],
+  );
+
+  const runSynthesize = useCallback(
+    async (versionNumber: number) => {
+      if (!appliedId) return;
+      const actionKey = `v${versionNumber}:SYNTHESIZE`;
+      setActionBusy(actionKey);
+      setActionError(null);
+      try {
+        await synthesizeTaxonomy(appliedId, versionNumber);
+        await loadVersions(appliedId);
+      } catch (err: unknown) {
+        if (err instanceof ApiError) setActionError(err);
+        else if (err instanceof Error) setActionError(err.message);
+        else setActionError("Synthesis failed.");
       } finally {
         setActionBusy(null);
       }
@@ -762,6 +780,7 @@ export function AdminTaxonomyView() {
                   onDiscard={() =>
                     void runVersionTransition(v.version_number, "DISCARDED")
                   }
+                  onSynthesize={() => void runSynthesize(v.version_number)}
                   onAcceptConcept={(s) =>
                     void runConceptTransition(
                       v.version_number,
@@ -801,9 +820,7 @@ export function AdminTaxonomyView() {
           taxonomyId={appliedId}
           versionNumber={validateModal.versionNumber}
           defaultLabel={validateModal.defaultLabel}
-          busy={
-            actionBusy === `v${validateModal.versionNumber}:VALIDATED_V1`
-          }
+          busy={actionBusy === `v${validateModal.versionNumber}:VALIDATED_V1`}
           onClose={() => setValidateModal(null)}
           onSubmit={(label) => {
             const vn = validateModal.versionNumber;
@@ -857,6 +874,7 @@ interface VersionRowGroupProps {
   onValidate: () => void;
   onArchive: () => void;
   onDiscard: () => void;
+  onSynthesize: () => void;
   onAcceptConcept: (s: ApiConceptSuggestion) => void;
   onRejectConcept: (s: ApiConceptSuggestion) => void;
   onDeferConcept: (s: ApiConceptSuggestion) => void;
@@ -873,6 +891,7 @@ function VersionRowGroup({
   onValidate,
   onArchive,
   onDiscard,
+  onSynthesize,
   onAcceptConcept,
   onRejectConcept,
   onDeferConcept,
@@ -904,8 +923,7 @@ function VersionRowGroup({
               data-testid={`taxonomy-concepts-toggle-${v.version_number}`}
               aria-expanded={isExpanded}
             >
-              {v.suggestions.length}{" "}
-              {isExpanded ? "▾" : "▸"}
+              {v.suggestions.length} {isExpanded ? "▾" : "▸"}
             </button>
           ) : (
             v.suggestions.length
@@ -972,19 +990,27 @@ function VersionRowGroup({
           >
             {inflight("DISCARDED") ? "Discarding…" : "Discard"}
           </button>
-          {/* Synthesize ships in #477 — the slice 3 audit pre-empted
-              the route. Render the button as a disabled stub so the
-              affordance is visible; flip to enabled once
-              ``admin_taxonomy_synthesize`` lands in
-              ``api/generated/schema.ts``. */}
+          {/* Synthesize is DRAFT-only — the route 409s on any other
+              state, and the creator silently no-ops without any
+              ACCEPTED/MERGED suggestions, so a fresh DRAFT with
+              nothing accepted is the path of least surprise. The
+              backend (#477) is the source of truth for the gates;
+              the disabled checks here mirror it for UX clarity. */}
           <button
             type="button"
             className="text-button"
-            disabled
-            title="Synthesize ships in #477"
+            disabled={v.state !== "DRAFT" || anyBusy}
+            onClick={onSynthesize}
+            title={
+              v.state === "DRAFT"
+                ? "Run the LLM over accepted suggestions and write the tree back onto this draft."
+                : "Synthesize only runs on DRAFT versions."
+            }
             data-testid={`taxonomy-synthesize-${v.version_number}`}
           >
-            Synthesize
+            {busyKey === `v${v.version_number}:SYNTHESIZE`
+              ? "Synthesizing…"
+              : "Synthesize"}
           </button>
         </td>
       </tr>
@@ -1090,9 +1116,7 @@ function ConceptsTable({
               <button
                 type="button"
                 className="text-button"
-                disabled={
-                  !canTransitionConceptTo(s.state, "MERGED") || anyBusy
-                }
+                disabled={!canTransitionConceptTo(s.state, "MERGED") || anyBusy}
                 onClick={() => onMerge(s)}
                 data-testid={`taxonomy-concept-merge-${s.suggestion_id}`}
               >
