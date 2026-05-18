@@ -31,7 +31,7 @@ import {
 } from "../../_shared/auth";
 import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/GraphCanvas";
 import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
-import { DocViewer } from "./components/DocViewer";
+import { ChunkListPanel } from "./components/ChunkListPanel";
 import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
 import { SearchResults, type SearchHit } from "./components/SearchResults";
@@ -1378,13 +1378,21 @@ export default function App(): React.ReactElement {
 
         {tweaks.layoutMode === "split" && tweaks.showViewer && (
           <aside className="kx-right" aria-label="Document viewer and details">
-            <DocViewer
+            <ChunkListPanel
               snapshot={snapshot}
               doc={openDoc}
               highlightChunkId={highlightChunk}
-              onPrevChunk={() => navChunk(-1)}
-              onNextChunk={() => navChunk(1)}
+              hoveredChunkId={hovered}
+              // Match the original DocViewer paragraph-click
+              // semantics: clicking a chunk pins it via
+              // ``highlightChunk`` so the row + the DetailPanel
+              // chunks-list both light up, but the document stays
+              // the active selection (DetailPanel keeps showing
+              // the doc-view, not the chunk-view). The graph's
+              // bidirectional cross-highlight rides on
+              // ``hoveredId`` instead — see ``onHoverChunk`` below.
               onSelectChunk={setHighlightChunk}
+              onHoverChunk={setHovered}
             />
             <DetailPanel
               snapshot={snapshot}
