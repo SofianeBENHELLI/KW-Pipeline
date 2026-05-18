@@ -25,7 +25,6 @@ import {
 } from "./api/client";
 import type { ApiDocument } from "./api/types";
 import { useAdminConfig } from "./api/useAdminConfig";
-import { ChatPanel } from "./features/chat";
 // Knowledge Forge — full Orbital redesign. New route family `/kf/*`
 // shipped over PRs 1-8 (codename Orbital, user-visible Knowledge
 // Forge). The legacy reviewer workbench remains the `*` catch-all
@@ -38,7 +37,6 @@ import { PipelineWidget } from "./features/pipeline/PipelineWidget";
 import { PurgeAllDialog } from "./features/purge/PurgeAllDialog";
 import { PurgeDialog } from "./features/purge/PurgeDialog";
 import { ReviewWorkspace } from "./features/review/ReviewWorkspace";
-import { SearchPanel } from "./features/search";
 import { SettingsLauncher } from "./features/settings/SettingsLauncher";
 // SettingsModal pulls in the shared DemoToggle (446 LOC) + the admin
 // config form, which is only needed when the user clicks the gear.
@@ -393,6 +391,11 @@ const AdminTaxonomyView = lazy(() =>
     default: mod.AdminTaxonomyView,
   })),
 );
+const AdminReconcileView = lazy(() =>
+  import("./features/admin/AdminReconcileView").then((mod) => ({
+    default: mod.AdminReconcileView,
+  })),
+);
 
 // Shared Suspense fallback for every lazy admin route. Hoisted out
 // of the JSX so the literal isn't inlined three times in the initial
@@ -443,6 +446,14 @@ export default function App() {
         element={
           <Suspense fallback={ADMIN_FALLBACK}>
             <AdminTaxonomyView />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/reconcile"
+        element={
+          <Suspense fallback={ADMIN_FALLBACK}>
+            <AdminReconcileView />
           </Suspense>
         }
       />
@@ -824,12 +835,6 @@ function ReviewerWorkbench() {
           <p className="muted">No documents found. Import documents from the Forge widget to get started.</p>
         </section>
       )}
-      <SearchPanel
-        onSelectResult={(result) => selectDocument(result.document_id)}
-      />
-      <ChatPanel
-        onSelectCitation={(citation) => selectDocument(citation.document_id)}
-      />
       <SettingsLauncher onClick={() => setSettingsOpen(true)} />
       {/* The modal only mounts (and only fetches its lazy chunk) the
           first time the user opens it. Suspense fallback is null

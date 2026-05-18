@@ -266,9 +266,18 @@ export function PdfChunkViewer({
   useLayoutEffect(() => {
     if (load.kind !== "ready") return;
     const items = load.response.items;
+    // Target chain (most-to-least sticky):
+    //   1. Internal click selection (operator picked a chunk).
+    //   2. External selection set — used by chat-citation deep links
+    //      (?chunk=…) so the cited rect scrolls into view on mount.
+    //   3. External hover set (right-pane Topic/Entity highlight).
+    //   4. Internal hover.
     const target =
       (selection.selectedChunkId
         ? items.find((c) => c.chunk_id === selection.selectedChunkId)
+        : null) ??
+      (externalSelectedChunkIds && externalSelectedChunkIds.size > 0
+        ? items.find((c) => externalSelectedChunkIds.has(c.chunk_id))
         : null) ??
       (externalHoveredChunkIds && externalHoveredChunkIds.size > 0
         ? items.find((c) => externalHoveredChunkIds.has(c.chunk_id))
@@ -299,6 +308,7 @@ export function PdfChunkViewer({
     selection.selectedChunkId,
     selection.hoveredChunkId,
     externalHoveredChunkIds,
+    externalSelectedChunkIds,
     load,
   ]);
 

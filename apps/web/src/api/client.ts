@@ -20,16 +20,24 @@ import type {
   ApiAdminAuditEventsResponse,
   ApiAdminHITLStateResponse,
   ApiArchivedDocumentsResponse,
+  ApiAtlasResponse,
   ApiAutoPromoteResult,
   ApiBatchUploadResult,
   ApiChatMode,
   ApiChatResponse,
   ApiChunkSearchResponse,
+  ApiConceptSuggestion,
+  ApiConceptSuggestionState,
   ApiDocument,
   ApiDocumentHashCheck,
+  ApiDocumentTopicsListResponse,
   ApiDocumentVersion,
+  ApiExploreSearchResponse,
+  ApiFocusedNeighborhood,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiLineageResponse,
+  ApiSimilarDocumentsResponse,
   ApiProjectionStatusResponse,
   ApiOrbitalPurgeAllResponse,
   ApiOrbitalPurgeDocumentResponse,
@@ -37,9 +45,12 @@ import type {
   ApiExtractionJobSnapshot,
   ApiPurgeBatchResponse,
   ApiRawExtraction,
+  ApiReconcileResult,
   ApiRelinkScopeRequest,
   ApiRelinkScopeResponse,
   ApiSemanticDocument,
+  ApiTaxonomyResponse,
+  ApiTaxonomyState,
   ApiTaxonomyVersion,
   ApiTaxonomyVersionListResponse,
   ApiUnarchiveResponse,
@@ -1043,5 +1054,294 @@ export async function getTaxonomyVersion(
         signal: options.signal,
       },
     ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition
+ *
+ * Drives a TaxonomyVersion to its next lifecycle state (ADR-018 §2).
+ * 409 on illegal transitions, 400 on missing fields, 503 KW_LLM_DISABLED
+ * when the synthesize path is the prerequisite.
+ */
+export async function transitionTaxonomyVersion(
+  taxonomyId: string,
+  versionNumber: number,
+  body: {
+    to_state: ApiTaxonomyState;
+    version_label?: string | null;
+    reason?: string | null;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/versions/{tid}/{vnum}/concepts/{cid}/transition
+ *
+ * Drives one ``ConceptSuggestion`` through its lifecycle (ADR-018 §5).
+ * ``merge_target_id`` is required when ``to_state === "MERGED"`` and
+ * rejected for every other target. 409 on illegal moves.
+ */
+export async function transitionTaxonomyConcept(
+  taxonomyId: string,
+  versionNumber: number,
+  suggestionId: string,
+  body: {
+    to_state: ApiConceptSuggestionState;
+    merge_target_id?: string | null;
+    reason?: string | null;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiConceptSuggestion> {
+  return unwrap(
+    await http.POST(
+      "/admin/taxonomy/versions/{taxonomy_id}/{version_number}/concepts/{suggestion_id}/transition",
+      {
+        params: {
+          path: {
+            taxonomy_id: taxonomyId,
+            version_number: versionNumber,
+            suggestion_id: suggestionId,
+          },
+        },
+        body,
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * GET /knowledge/atlas (ADR-028 — KW Explorer)
+ *
+ * Corpus-level summary blocks: top topics, validation coverage,
+ * recent imports, bridge documents, candidate outlier relations. All
+ * counts are filtered to the caller's accessible documents.
+ */
+export async function getKnowledgeAtlas(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiAtlasResponse> {
+  return unwrap(
+    await http.GET("/knowledge/atlas", { signal: options.signal }),
+  );
+}
+
+/**
+ * GET /knowledge/topics (ADR-031 — LLM-extracted document themes)
+ *
+ * Returns the document themes the topic extractor has emitted.
+ * Empty list with HTTP 200 is the cold-start case (no extractor pass
+ * yet). Cursor-paginated. ``document_id`` filters to per-doc topics.
+ */
+export interface ListKnowledgeTopicsOptions {
+  documentId?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+export async function listKnowledgeTopics(
+  options: ListKnowledgeTopicsOptions = {},
+): Promise<ApiDocumentTopicsListResponse> {
+  const { documentId, cursor, limit, signal } = options;
+  const query: Record<string, string | number> = {};
+  if (documentId) query.document_id = documentId;
+  if (cursor) query.cursor = cursor;
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/knowledge/topics", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/neighborhood (ADR-028 — focused lens)
+ *
+ * Returns a BFS-bounded subgraph rooted at the supplied node. Nodes
+ * + edges + truncation metadata for the rendering caller.
+ */
+export interface GetNeighborhoodOptions {
+  rootKind: "document" | "topic" | "chunk";
+  rootId: string;
+  depth?: number;
+  edgeLimit?: number;
+  minStrength?: number;
+  signal?: AbortSignal;
+}
+export async function getKnowledgeNeighborhood(
+  options: GetNeighborhoodOptions,
+): Promise<ApiFocusedNeighborhood> {
+  const { rootKind, rootId, depth, edgeLimit, minStrength, signal } = options;
+  return unwrap(
+    await http.GET("/knowledge/neighborhood", {
+      params: {
+        query: {
+          root_kind: rootKind,
+          root_id: rootId,
+          depth,
+          edge_limit: edgeLimit,
+          min_strength: minStrength,
+        },
+      },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/explore/search (ADR-028 — corpus hybrid search)
+ *
+ * Five groups in one envelope (chunks / documents / topics / entities
+ * / relations). Empty groups for facets the v0.1 backend hasn't
+ * surfaced yet.
+ */
+export async function searchKnowledgeExplore(
+  q: string,
+  options: { limit?: number; signal?: AbortSignal } = {},
+): Promise<ApiExploreSearchResponse> {
+  const { limit, signal } = options;
+  const query: Record<string, string | number> = { q };
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/knowledge/explore/search", {
+      params: { query: query as never },
+      signal,
+    }),
+  );
+}
+
+/**
+ * POST /documents/{document_id}/versions/{version_id}/retry-extraction (#87)
+ *
+ * Retries extraction for a previously-FAILED version. 200 in inline
+ * mode with the fresh RawExtraction; 202 in async mode with a
+ * job snapshot; 409 if the version isn't in FAILED.
+ */
+export async function retryExtraction(
+  documentId: string,
+  versionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiRawExtraction | ApiExtractionJobSnapshot> {
+  return unwrap(
+    await http.POST(
+      "/documents/{document_id}/versions/{version_id}/retry-extraction",
+      {
+        params: { path: { document_id: documentId, version_id: versionId } },
+        signal: options.signal,
+      },
+    ),
+  );
+}
+
+/**
+ * POST /admin/reconcile (ADR-006 §5, #40)
+ *
+ * Admin-only. Re-runs the stuck-extraction recovery pass. Returns
+ * ``recovered_count`` + ``skipped_inline`` (true when
+ * KW_EXTRACTION_INLINE=true — the pass is a no-op by design).
+ */
+export async function runReconcilePass(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiReconcileResult> {
+  return unwrap(
+    await http.POST("/admin/reconcile", {
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/lineage (EPIC-C C.3, ADR-025)
+ *
+ * Returns the document family's version history sorted ASC by
+ * ``version_number``. 404 when the document is hidden from the
+ * caller's scope set (D.5).
+ */
+export async function getDocumentLineage(
+  documentId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiLineageResponse> {
+  return unwrap(
+    await http.GET("/documents/{document_id}/lineage", {
+      params: { path: { document_id: documentId } },
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/similar (EPIC-C C.3, ADR-025 §3)
+ *
+ * Top-K topic-Jaccard ranked neighbours, sorted by similarity DESC.
+ * Empty ``results`` with HTTP 200 is the cold-start case (no
+ * projected topics yet); we render that as a friendly empty state.
+ */
+export async function getSimilarDocuments(
+  documentId: string,
+  options: { k?: number; signal?: AbortSignal } = {},
+): Promise<ApiSimilarDocumentsResponse> {
+  const { k, signal } = options;
+  return unwrap(
+    await http.GET("/documents/{document_id}/similar", {
+      params: {
+        path: { document_id: documentId },
+        query: k !== undefined ? { k } : undefined,
+      },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /knowledge/taxonomy
+ *
+ * Public read of the merged (imposed + computed) taxonomy. ADR-017.
+ * Never 404s — an unconfigured deployment returns
+ * ``is_configured=false`` with an empty categories list.
+ */
+export async function getKnowledgeTaxonomy(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyResponse> {
+  return unwrap(
+    await http.GET("/knowledge/taxonomy", {
+      signal: options.signal,
+    }),
+  );
+}
+
+/**
+ * POST /admin/taxonomy/drafts
+ *
+ * Mints a new ``DRAFT`` taxonomy version. Three modes per ADR-018 §2:
+ *  - empty body → fresh ``taxonomy_id``, empty tree, ``version_number=1``
+ *  - ``taxonomy_id`` only → next version for that id, empty tree
+ *  - both → next version inheriting the source's tree
+ */
+export async function createTaxonomyDraft(
+  body: { taxonomy_id?: string | null; source_version_number?: number | null } = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiTaxonomyVersion> {
+  return unwrap(
+    await http.POST("/admin/taxonomy/drafts", {
+      body,
+      signal: options.signal,
+    }),
   );
 }

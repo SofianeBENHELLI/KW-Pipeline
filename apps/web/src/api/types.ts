@@ -180,6 +180,46 @@ export type ApiPurgeBatchResponse = Schemas["PurgeBatchResponse"];
 /** Per-document row inside a purge_batch response. */
 export type ApiPurgeBatchResult = Schemas["PurgeBatchResult"];
 
+// ─── KW Explorer (ADR-028) ──────────────────────────────────────────────
+
+/** Atlas response — corpus summary blocks. */
+export type ApiAtlasResponse = Schemas["AtlasResponse"];
+export type ApiAtlasTopicSummary = Schemas["AtlasTopicSummary"];
+export type ApiAtlasValidationCoverage = Schemas["AtlasValidationCoverage"];
+/** Topic index page (LLM-extracted document themes). */
+export type ApiDocumentTopic = Schemas["DocumentTopic"];
+export type ApiDocumentTopicsListResponse =
+  Schemas["DocumentTopicsListResponse"];
+/** Focused-lens neighborhood for one root (topic / doc / chunk). */
+export type ApiFocusedNeighborhood = Schemas["FocusedNeighborhood"];
+/** Explorer search facet response — five groups (chunks / docs / topics
+ *  / entities / relations). */
+export type ApiExploreSearchResponse = Schemas["ExploreSearchResponse"];
+
+// ─── Admin reconcile (ADR-006 §5, #40) ──────────────────────────────────
+
+/** Response body of ``POST /admin/reconcile``. */
+export type ApiReconcileResult = Schemas["ReconcileResult"];
+
+// ─── Document lineage + similar (EPIC-C C.3, ADR-025) ────────────────────
+
+/** Response body of ``GET /documents/{id}/lineage``. */
+export type ApiLineageResponse = Schemas["LineageResponse"];
+/** One row of the lineage list. */
+export type ApiLineageVersion = Schemas["LineageVersion"];
+/** Response body of ``GET /documents/{id}/similar``. */
+export type ApiSimilarDocumentsResponse = Schemas["SimilarDocumentsResponse"];
+/** One similarity-ranked document. */
+export type ApiSimilarDocument = Schemas["SimilarDocument"];
+
+// ─── Knowledge taxonomy (public read — ADR-017) ─────────────────────────
+
+/** Merged imposed + computed taxonomy returned by
+ *  ``GET /knowledge/taxonomy``. ``source_path`` is the YAML path when
+ *  the imposed half is loaded; ``is_configured=false`` only when both
+ *  halves are empty. */
+export type ApiTaxonomyResponse = Schemas["TaxonomyResponse"];
+
 // ─── Admin / Taxonomy versioning (EPIC-1 §1.8, ADR-018) ──────────────────
 
 /** One versioned taxonomy resource — wraps the existing ``Taxonomy``

@@ -28,6 +28,10 @@ export interface DocHeaderProps {
   onRefresh?: () => void;
   /** Right-aligned projection-status pill (PR 4 wires real values). */
   projectionPill?: { text: string; tone?: "ok" | "warn" | "err" };
+  /** Slice 5 — open the version-lineage modal for the active doc. */
+  onShowLineage?: () => void;
+  /** Slice 5 — open the similar-documents side panel for the active doc. */
+  onShowSimilar?: () => void;
 }
 
 export function DocHeader({
@@ -36,6 +40,8 @@ export function DocHeader({
   onCopyLink,
   onRefresh,
   projectionPill,
+  onShowLineage,
+  onShowSimilar,
 }: DocHeaderProps): ReactElement {
   if (!document) {
     return (
@@ -91,6 +97,24 @@ export function DocHeader({
         </div>
 
         <div className="kf-doch__actions">
+          {onShowLineage && (
+            <Btn
+              kind="ghost"
+              onClick={onShowLineage}
+              data-testid="kf-doch-lineage"
+            >
+              Lineage
+            </Btn>
+          )}
+          {onShowSimilar && (
+            <Btn
+              kind="ghost"
+              onClick={onShowSimilar}
+              data-testid="kf-doch-similar"
+            >
+              Similar documents
+            </Btn>
+          )}
           <Btn kind="ghost" icon={OrbI.link} onClick={onCopyLink}>
             Copy link
           </Btn>

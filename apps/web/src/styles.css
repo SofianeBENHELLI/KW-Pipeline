@@ -2091,3 +2091,140 @@ pre {
   border-color: #ef4444;
   color: #7f1d1d;
 }
+
+/* Slice 3 — taxonomy lifecycle action surface. */
+.taxonomy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.taxonomy-actions button {
+  white-space: nowrap;
+}
+
+.taxonomy-concepts-row {
+  background: var(--panel-muted);
+}
+
+.taxonomy-concepts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.taxonomy-concepts-table th,
+.taxonomy-concepts-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.9em;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+
+.modal-body label {
+  font-size: 0.85em;
+}
+
+.modal-body input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font: inherit;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Slice 4 — taxonomy mode pill at the top of the orb rail. */
+.dx-rail-taxonomy-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 0;
+  text-decoration: none;
+}
+
+.dx-rail-taxonomy-pill .state-pill {
+  font-size: 0.7em;
+  padding: 1px 6px;
+}
+
+/* Slice 5 — Lineage + Similar modals in Review. */
+.kf-lineage-list,
+.kf-similar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kf-lineage-row,
+.kf-similar-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.kf-lineage-row__meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.kf-lineage-row__pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #14532d;
+  font-size: 0.75em;
+  font-weight: 600;
+}
+
+/* Slice 7 — KW Explorer surfaces (Atlas / Topics / Topic detail). */
+.kf-explore-topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kf-explore-topic-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kf-explore-topic-row .text-button {
+  text-align: left;
+  width: 100%;
+}
+
+.kf-explore-lens {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.kf-explore-inspector {
+  padding: 12px;
+  border-left: 1px solid var(--border);
+  font-size: 0.9em;
+}

@@ -26,11 +26,13 @@ import {
   generateSemantic,
   rejectVersion,
   resetVersionToReview,
+  retryExtraction,
   validateVersion,
 } from "../../api/client";
 
 export type FsmAction =
   | "extract"
+  | "retry-extraction"
   | "semantic"
   | "semantic-rerun"
   | "validate"
@@ -41,6 +43,9 @@ export type FsmStatus = "idle" | "running" | "ok" | "error";
 
 export interface FsmGates {
   extract: boolean;
+  /** True when the version is in FAILED — wires the dedicated
+   *  ``retry-extraction`` button surfaced on every FAILED row. */
+  "retry-extraction": boolean;
   semantic: boolean;
   /**
    * True once semantic output already exists (NEEDS_REVIEW /
@@ -68,6 +73,7 @@ const _RERUN_STATES = new Set<string>([
 export function computeGates(status: string | null | undefined): FsmGates {
   return {
     extract: status === "STORED" || status === "FAILED",
+    "retry-extraction": status === "FAILED",
     semantic: status === "EXTRACTED",
     "semantic-rerun": status != null && _RERUN_STATES.has(status),
     validate: status === "NEEDS_REVIEW" || status === "SEMANTIC_READY",
@@ -122,6 +128,8 @@ export function useFsmTransition(
     try {
       if (action === "extract") {
         await extractVersion(documentId, versionId);
+      } else if (action === "retry-extraction") {
+        await retryExtraction(documentId, versionId);
       } else if (action === "semantic" || action === "semantic-rerun") {
         // "semantic-rerun" calls the same endpoint as "semantic" — the
         // backend distinguishes via the cached row's recorded

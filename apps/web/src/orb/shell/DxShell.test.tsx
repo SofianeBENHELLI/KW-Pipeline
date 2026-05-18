@@ -5,13 +5,21 @@
  * marking, the click handlers, and theme/density attribute scoping.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import axe from "axe-core";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import { DxShell } from "./DxShell";
 import { IconRail } from "./IconRail";
 import { TopBar } from "./TopBar";
+
+function makeJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 describe("<TopBar />", () => {
   it("defaults brand to 'Knowledge Forge'", () => {
@@ -114,6 +122,47 @@ describe("<IconRail />", () => {
     render(<IconRail onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     expect(onSelect).toHaveBeenCalledWith("upload");
+  });
+});
+
+describe("<IconRail /> — taxonomy mode pill (slice 4)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders the configured pill when /knowledge/taxonomy resolves", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({
+        is_configured: true,
+        categories: [],
+        schema_version: "v0.1",
+        source_path: "/etc/kw/taxonomy.yaml",
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <IconRail />
+      </MemoryRouter>,
+    );
+    const pill = await screen.findByTestId("taxonomy-mode-pill");
+    expect(pill).toHaveTextContent("configured");
+    expect(pill).toHaveAttribute("href", "/admin/taxonomy");
+    expect(pill).toHaveAttribute("title", "Source: /etc/kw/taxonomy.yaml");
+  });
+
+  it("hides the pill on a fetch error so the rail keeps working", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeJsonResponse({}, 500),
+    );
+    render(
+      <MemoryRouter>
+        <IconRail />
+      </MemoryRouter>,
+    );
+    // Wait long enough for the catch to fire — then the pill must
+    // remain absent. The rest of the rail still renders.
+    await waitFor(() => {
+      expect(screen.queryByTestId("taxonomy-mode-pill")).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
   });
 });
 
