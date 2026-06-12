@@ -18,11 +18,12 @@ from app.services.knowledge.high_value_chunks import (
     HighValueChunksService,
 )
 
-
 _NOW = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
 
 
-def _section(section_id: str, *, heading: str = "Heading", text: str = "Lorem ipsum.") -> SemanticSection:
+def _section(
+    section_id: str, *, heading: str = "Heading", text: str = "Lorem ipsum."
+) -> SemanticSection:
     return SemanticSection(id=section_id, heading=heading, text=text)
 
 
@@ -89,13 +90,13 @@ def test_rank_returns_chunks_sorted_by_score_desc() -> None:
         _section("c-3", text="A third."),
     )
     # c-2 has many claims; c-1 and c-3 have none.
-    claims = [
-        _claim(f"claim-{i}", provenance_chunk_ids=["c-2"])
-        for i in range(4)
-    ]
+    claims = [_claim(f"claim-{i}", provenance_chunk_ids=["c-2"]) for i in range(4)]
     service = HighValueChunksService()
     ranked = service.rank(
-        semantic=semantic, claims=claims, processes=[], limit=10,
+        semantic=semantic,
+        claims=claims,
+        processes=[],
+        limit=10,
     )
     assert ranked[0].chunk_id == "c-2"
     assert ranked[0].claim_count == 4
@@ -106,7 +107,10 @@ def test_rank_breaks_ties_by_chunk_id_asc() -> None:
     """Two chunks with identical scores tie-break deterministically."""
     semantic = _semantic(_section("c-b"), _section("c-a"))
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=10,
     )
     # Both have zero counts → tie → chunk_id ASC.
     assert [r.chunk_id for r in ranked] == ["c-a", "c-b"]
@@ -115,7 +119,10 @@ def test_rank_breaks_ties_by_chunk_id_asc() -> None:
 def test_rank_honours_limit() -> None:
     semantic = _semantic(*(_section(f"c-{i}") for i in range(5)))
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=3,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=3,
     )
     assert len(ranked) == 3
 
@@ -123,7 +130,10 @@ def test_rank_honours_limit() -> None:
 def test_rank_returns_empty_for_empty_semantic_document() -> None:
     semantic = _semantic()
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=10,
     )
     assert ranked == []
 
@@ -131,7 +141,10 @@ def test_rank_returns_empty_for_empty_semantic_document() -> None:
 def test_rank_returns_empty_when_limit_is_zero() -> None:
     semantic = _semantic(_section("c-1"))
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=0,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=0,
     )
     assert ranked == []
 
@@ -147,7 +160,10 @@ def test_rank_counts_claims_per_chunk() -> None:
         _claim("k3", provenance_chunk_ids=["c-2"]),
     ]
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=claims, processes=[], limit=10,
+        semantic=semantic,
+        claims=claims,
+        processes=[],
+        limit=10,
     )
     by_id = {r.chunk_id: r for r in ranked}
     assert by_id["c-1"].claim_count == 2
@@ -163,7 +179,10 @@ def test_rank_ignores_stale_chunk_ids_in_claims() -> None:
         _claim("k-stale", provenance_chunk_ids=["c-stale"]),
     ]
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=claims, processes=[], limit=10,
+        semantic=semantic,
+        claims=claims,
+        processes=[],
+        limit=10,
     )
     assert ranked[0].claim_count == 1
 
@@ -178,7 +197,10 @@ def test_rank_counts_process_steps_per_chunk() -> None:
         ]
     )
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[process], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[process],
+        limit=10,
     )
     by_id = {r.chunk_id: r for r in ranked}
     assert by_id["c-1"].process_step_count == 2
@@ -209,7 +231,10 @@ def test_rank_counts_entity_mentions_via_claim_subjects_and_objects() -> None:
         ),
     ]
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=claims, processes=[], limit=10,
+        semantic=semantic,
+        claims=claims,
+        processes=[],
+        limit=10,
     )
     assert ranked[0].entity_mention_count == 3  # alpha, beta, gamma
 
@@ -222,7 +247,10 @@ def test_rank_includes_graph_degree_from_chunk_relations() -> None:
         _section("c-3", text="Completely unrelated content about cooking pasta"),
     )
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=10,
     )
     by_id = {r.chunk_id: r for r in ranked}
     # c-1 and c-2 must share at least one edge (shared standard / keywords).
@@ -250,7 +278,10 @@ def test_score_is_weighted_sum_of_normalised_signals() -> None:
     # too. process_steps + graph_degree are 0 across the doc.
     claim = _claim("k1", provenance_chunk_ids=["c-1"])
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[claim], processes=[], limit=10,
+        semantic=semantic,
+        claims=[claim],
+        processes=[],
+        limit=10,
     )
     top = ranked[0]
     assert top.chunk_id == "c-1"
@@ -265,7 +296,10 @@ def test_response_carries_per_signal_normalised_contribution() -> None:
     )
     claims = [_claim("k1", provenance_chunk_ids=["c-1"])]
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=claims, processes=[], limit=10,
+        semantic=semantic,
+        claims=claims,
+        processes=[],
+        limit=10,
     )
     top = next(r for r in ranked if r.chunk_id == "c-1")
     assert top.signals.claims == pytest.approx(1.0)
@@ -280,7 +314,10 @@ def test_snippet_is_capped_with_ellipsis() -> None:
     long_text = "alpha " * 200  # > 240 chars
     semantic = _semantic(_section("c-1", text=long_text))
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=10,
     )
     assert ranked[0].snippet.endswith("…")
     assert len(ranked[0].snippet) <= 240
@@ -289,6 +326,9 @@ def test_snippet_is_capped_with_ellipsis() -> None:
 def test_snippet_collapses_whitespace() -> None:
     semantic = _semantic(_section("c-1", text="alpha\n\n  beta   gamma"))
     ranked = HighValueChunksService().rank(
-        semantic=semantic, claims=[], processes=[], limit=10,
+        semantic=semantic,
+        claims=[],
+        processes=[],
+        limit=10,
     )
     assert ranked[0].snippet == "alpha beta gamma"

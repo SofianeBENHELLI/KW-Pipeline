@@ -54,13 +54,16 @@ def _land_in_needs_review(services, *, filename: str = "policy.txt") -> tuple[st
     )
     _link_personal_scope(services, version.document_id)
     services.extraction_jobs.extract(
-        document_id=version.document_id, version_id=version.id,
+        document_id=version.document_id,
+        version_id=version.id,
     )
     services.semantic_outputs.generate(
-        document_id=version.document_id, version_id=version.id,
+        document_id=version.document_id,
+        version_id=version.id,
     )
     refreshed = services.documents.get_version(
-        document_id=version.document_id, version_id=version.id,
+        document_id=version.document_id,
+        version_id=version.id,
     )
     assert refreshed.status == DocumentVersionStatus.NEEDS_REVIEW
     return version.document_id, version.id
@@ -164,7 +167,8 @@ def test_returns_ranked_items_with_signal_breakdown(app_and_services) -> None:
     document_id, version_id = _land_in_needs_review(services)
     # Find a chunk id to attach a claim and a process step to.
     semantic = services.semantic_outputs.get(
-        document_id=document_id, version_id=version_id,
+        document_id=document_id,
+        version_id=version_id,
     )
     target_chunk_id = semantic.sections[0].id
     _save_claim(
@@ -239,11 +243,7 @@ def test_limit_out_of_range_returns_422(app_and_services) -> None:
     app, services = app_and_services
     document_id, _ = _land_in_needs_review(services)
     client = TestClient(app)
-    too_high = client.get(
-        f"/documents/{document_id}/high-value-chunks?limit=101"
-    )
-    too_low = client.get(
-        f"/documents/{document_id}/high-value-chunks?limit=0"
-    )
+    too_high = client.get(f"/documents/{document_id}/high-value-chunks?limit=101")
+    too_low = client.get(f"/documents/{document_id}/high-value-chunks?limit=0")
     assert too_high.status_code == 422
     assert too_low.status_code == 422

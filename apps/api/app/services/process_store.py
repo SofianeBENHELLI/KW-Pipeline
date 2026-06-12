@@ -25,7 +25,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Protocol
+from typing import Protocol
 
 from app.schemas.process import Process, ProcessStep, ProcessSummary
 from app.services.catalog_store import (
@@ -33,6 +33,12 @@ from app.services.catalog_store import (
     _decode_cursor,
     _encode_cursor,
 )
+
+# Module-level alias so methods can annotate ``-> ProcessList``.
+# Inside the store classes a plain ``list[Process]`` would resolve
+# against the Protocol's ``list`` *method* (which shadows the
+# builtin in class scope) and fail mypy's valid-type check.
+ProcessList = list[Process]
 
 # Default page size for ``ProcessStore.list``. Matches the
 # Explorer's other list views; the route layer accepts an explicit
@@ -84,7 +90,7 @@ class ProcessStore(Protocol):
         decoded — the route layer maps that to HTTP 400.
         """
 
-    def list_for_version(self, version_id: str) -> List[Process]:
+    def list_for_version(self, version_id: str) -> ProcessList:
         """Return every Process owned by ``version_id`` with its
         ordered step list hydrated.
 
@@ -95,10 +101,11 @@ class ProcessStore(Protocol):
         without pagination is the right fit. Order is
         ``(created_at ASC, id ASC)`` for parity with :meth:`list`.
 
-        The ``List[...]`` capitalisation is intentional: the
-        Protocol's ``list`` method shadows the builtin inside the
-        class scope, so a lowercase ``list[Process]`` annotation
-        would resolve to that method instead of the builtin.
+        The return annotation goes through the module-level
+        ``ProcessList`` alias: in class scope a plain
+        ``list[Process]`` would resolve against this Protocol's
+        ``list`` *method* (which shadows the builtin) and fail
+        mypy's valid-type check.
         """
 
     def delete_for_version(self, version_id: str) -> int:
@@ -184,7 +191,7 @@ class InMemoryProcessStore:
             del self._processes[process_id]
         return len(doomed)
 
-    def list_for_version(self, version_id: str) -> List[Process]:
+    def list_for_version(self, version_id: str) -> ProcessList:
         items = [
             process for process in self._processes.values() if process.version_id == version_id
         ]
@@ -322,7 +329,7 @@ class SQLiteProcessStore:
             next_cursor = None
         return summaries, next_cursor
 
-    def list_for_version(self, version_id: str) -> List[Process]:
+    def list_for_version(self, version_id: str) -> ProcessList:
         # One pass over ``processes`` (filtered on the ``version_id``
         # index from migration 0013), then a second pass joining in
         # ``process_steps`` ordered by step_number per process. The
