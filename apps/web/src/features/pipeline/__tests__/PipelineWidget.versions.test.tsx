@@ -36,6 +36,7 @@ function makeVersion(versionNumber: number): ApiDocumentVersion {
 function makeDocument(versionNumbers: number[]): ApiDocument {
   const versions = versionNumbers.map(makeVersion);
   return {
+    origin: "operator",
     id: "doc-001",
     original_filename: "test.txt",
     latest_version_id: versions[versions.length - 1].id,

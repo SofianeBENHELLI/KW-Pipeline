@@ -1802,3 +1802,40 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ── Sprint 1: demo/operator separation ─────────────────────────── */
+.kx-demo-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  vertical-align: middle;
+}
+.kx-demo-visibility {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.kx-demo-visibility--hidden {
+  color: var(--kx-dim, #8b93a7);
+  background: rgba(139, 147, 167, 0.1);
+  border-color: rgba(139, 147, 167, 0.35);
+}
+.kx-demo-visibility:hover {
+  filter: brightness(1.12);
+}

@@ -11,6 +11,7 @@ import type { ApiDocument } from "../../api/types";
 
 function makeDoc(overrides: Partial<ApiDocument> & { id: string }): ApiDocument {
   return {
+    origin: "operator",
     id: overrides.id,
     original_filename: overrides.original_filename ?? `${overrides.id}.txt`,
     latest_version_id: overrides.latest_version_id ?? `ver-${overrides.id}`,

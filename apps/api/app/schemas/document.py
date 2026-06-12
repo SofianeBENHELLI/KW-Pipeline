@@ -13,6 +13,13 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+# Provenance of a document family: operator uploads vs the bundled
+# demo corpus (Explorer enterprise plan, Sprint 1). A type alias so
+# the catalog store / demo service signatures and the Document field
+# stay in lockstep.
+DocumentOrigin = Literal["operator", "demo"]
+
+
 class DocumentVersion(BaseModel):
     """One immutable binary upload in the catalog."""
 
@@ -54,6 +61,14 @@ class Document(BaseModel):
     inline test fixtures, ``with_first_version``) terse — those callers
     still serialize a present-but-empty list, which the OpenAPI
     contract marks as required (defaults required = wire-honest).
+
+    ``origin`` separates the bundled demo corpus from operator data
+    (Explorer enterprise plan, Sprint 1). ``demo`` rows are written by
+    the demo-toggle loader (stamped post-load by filename) and
+    backfilled by migration ``0016_document_origin``; everything else
+    is ``operator``. Read surfaces use it for the DEMO badge and the
+    ``include_demo=false`` list filter so demo fixtures can never be
+    mistaken for production documents again.
     """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
@@ -63,6 +78,7 @@ class Document(BaseModel):
     archived_at: datetime | None = None
     versions: list[DocumentVersion] = Field(default_factory=list)
     scopes: list[Scope] = Field(default_factory=list)
+    origin: DocumentOrigin = "operator"
 
     @classmethod
     def with_first_version(cls, version: DocumentVersion) -> Self:

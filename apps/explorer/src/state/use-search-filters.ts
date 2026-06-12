@@ -23,6 +23,7 @@ import { widget } from "@widget-lab/3ddashboard-utils";
 
 const VALIDATED_KEY = "kx-search-validated-only";
 const SCORE_THRESHOLD_KEY = "kx-search-score-threshold";
+const HIDE_DEMO_KEY = "kx-hide-demo-docs";
 
 const DEFAULT_VALIDATED_ONLY = true;
 const DEFAULT_SCORE_THRESHOLD = 0;
@@ -60,6 +61,17 @@ function readScoreThreshold(): number {
   return clampThreshold(parsed);
 }
 
+function readHideDemo(): boolean | null {
+  const raw = safeGet(HIDE_DEMO_KEY);
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  // No stored preference → null. The App resolves null to its
+  // "auto" rule: hide demo rows only when the corpus mixes demo and
+  // operator documents, so a pure-demo environment stays visible
+  // right after "Load demo" while a production corpus never mixes.
+  return null;
+}
+
 export function clampThreshold(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_SCORE_THRESHOLD;
   if (value < MIN_SCORE_THRESHOLD) return MIN_SCORE_THRESHOLD;
@@ -70,22 +82,40 @@ export function clampThreshold(value: number): number {
 export interface SearchFilters {
   validatedOnly: boolean;
   scoreThreshold: number;
+  /**
+   * Demo-data visibility (Explorer Sprint 1). ``true`` hides demo
+   * rows, ``false`` shows them, ``null`` means the operator never
+   * chose — the App applies the auto rule (hide only when demo and
+   * operator docs coexist).
+   */
+  hideDemo: boolean | null;
   setValidatedOnly: (next: boolean) => void;
   setScoreThreshold: (next: number) => void;
+  setHideDemo: (next: boolean) => void;
 }
 
 export function useSearchFilters(): SearchFilters {
   // Lazy initialiser so the widget read happens once on mount, not on
   // every re-render. Both reads are bounded — ``safeGet`` swallows the
   // host's "no widget" exception and returns ``null``.
-  const [validatedOnly, setValidatedOnlyState] = useState<boolean>(() => readValidatedOnly());
-  const [scoreThreshold, setScoreThresholdState] = useState<number>(() => readScoreThreshold());
+  const [validatedOnly, setValidatedOnlyState] = useState<boolean>(() =>
+    readValidatedOnly(),
+  );
+  const [scoreThreshold, setScoreThresholdState] = useState<number>(() =>
+    readScoreThreshold(),
+  );
+  const [hideDemo, setHideDemoState] = useState<boolean | null>(() =>
+    readHideDemo(),
+  );
 
   const setValidatedOnly = useCallback((next: boolean) => {
     setValidatedOnlyState(next);
   }, []);
   const setScoreThreshold = useCallback((next: number) => {
     setScoreThresholdState(clampThreshold(next));
+  }, []);
+  const setHideDemo = useCallback((next: boolean) => {
+    setHideDemoState(next);
   }, []);
 
   // Persist changes asynchronously so the host doesn't block React's
@@ -96,6 +126,18 @@ export function useSearchFilters(): SearchFilters {
   useEffect(() => {
     safeSet(SCORE_THRESHOLD_KEY, String(scoreThreshold));
   }, [scoreThreshold]);
+  useEffect(() => {
+    // Only persist explicit choices — null (auto) must keep reading
+    // as "no stored preference" on the next mount.
+    if (hideDemo !== null) safeSet(HIDE_DEMO_KEY, hideDemo ? "true" : "false");
+  }, [hideDemo]);
 
-  return { validatedOnly, scoreThreshold, setValidatedOnly, setScoreThreshold };
+  return {
+    validatedOnly,
+    scoreThreshold,
+    hideDemo,
+    setValidatedOnly,
+    setScoreThreshold,
+    setHideDemo,
+  };
 }

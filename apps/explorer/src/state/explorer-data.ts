@@ -155,6 +155,14 @@ export interface ExplorerDocument {
     sha256?: string;
     duplicateOfVersionId?: string | null;
   }>;
+  /**
+   * Demo/operator provenance (Explorer Sprint 1). ``"demo"`` rows
+   * come from the bundled demo-toggle corpus; the Catalog renders a
+   * DEMO badge and the hide-demo filter drops them from every
+   * surface. Optional — the sample corpus and pre-0016 backends
+   * read as ``"operator"``.
+   */
+  origin?: "operator" | "demo";
 }
 
 export type DocEdgeType = "reference" | "similar" | "contains" | "contradict";
@@ -208,81 +216,434 @@ export interface DocContent {
 // ─── Sample corpus (fallback — kept verbatim from data.jsx) ──────────────────
 
 export const SAMPLE_DOCUMENTS: ExplorerDocument[] = [
-  { id: "d1",  title: "Global Hybrid Work Policy v4",            type: "pdf",  source: "SharePoint", date: "2026-02-14", chunks: 84,  cluster: "hr",      x: 0.16, y: 0.22, confidence: 0.92 },
-  { id: "d2",  title: "Performance Review Cycle — FY26 Guide",   type: "doc",  source: "SharePoint", date: "2026-01-28", chunks: 56,  cluster: "hr",      x: 0.10, y: 0.42, confidence: 0.89 },
-  { id: "d3",  title: "Onboarding Handbook",                     type: "wiki", source: "Confluence", date: "2026-03-05", chunks: 71,  cluster: "hr",      x: 0.22, y: 0.58, confidence: 0.86 },
-  { id: "d4",  title: "Atlas — PRD: Federated Search",           type: "doc",  source: "Confluence", date: "2026-02-22", chunks: 92,  cluster: "product", x: 0.40, y: 0.16, confidence: 0.93 },
-  { id: "d5",  title: "Q2 Roadmap Review",                       type: "ppt",  source: "SharePoint", date: "2026-03-12", chunks: 48,  cluster: "product", x: 0.54, y: 0.12, confidence: 0.88 },
-  { id: "d6",  title: "User Research — Search Findings",         type: "pdf",  source: "SharePoint", date: "2026-02-09", chunks: 63,  cluster: "product", x: 0.46, y: 0.30, confidence: 0.90 },
-  { id: "d7",  title: "Product Strategy 2026",                   type: "ppt",  source: "SharePoint", date: "2026-01-15", chunks: 41,  cluster: "product", x: 0.62, y: 0.26, confidence: 0.87 },
-  { id: "d8",  title: "Platform Architecture — RFC 142",         type: "md",   source: "Local Drive",date: "2026-02-27", chunks: 102, cluster: "eng",     x: 0.74, y: 0.34, confidence: 0.94 },
-  { id: "d9",  title: "Vector DB Migration Plan",                type: "doc",  source: "Confluence", date: "2026-03-08", chunks: 58,  cluster: "eng",     x: 0.86, y: 0.42, confidence: 0.91 },
-  { id: "d10", title: "Eng All-Hands — March",                   type: "post", source: "SWYM",       date: "2026-03-30", chunks: 18,  cluster: "eng",     x: 0.78, y: 0.54, confidence: 0.82 },
-  { id: "d11", title: "Data Processing Agreement Template",      type: "pdf",  source: "ENOVIA",     date: "2026-02-19", chunks: 39,  cluster: "legal",   x: 0.34, y: 0.74, confidence: 0.93 },
-  { id: "d12", title: "GDPR Compliance Memo",                    type: "doc",  source: "SharePoint", date: "2026-03-18", chunks: 47,  cluster: "legal",   x: 0.22, y: 0.84, confidence: 0.91 },
-  { id: "d13", title: "AI Usage Policy",                         type: "wiki", source: "Confluence", date: "2026-03-22", chunks: 33,  cluster: "legal",   x: 0.48, y: 0.82, confidence: 0.88 },
-  { id: "d14", title: "FY26 Budget Plan",                        type: "ppt",  source: "SharePoint", date: "2026-01-22", chunks: 52,  cluster: "finance", x: 0.62, y: 0.74, confidence: 0.89 },
-  { id: "d15", title: "Vendor Spend Analysis Q1",                type: "pdf",  source: "SharePoint", date: "2026-03-05", chunks: 28,  cluster: "finance", x: 0.74, y: 0.82, confidence: 0.85 },
-  { id: "d16", title: "EU AI Act — Reference Notes",             type: "web",  source: "Web",        date: "2026-02-11", chunks: 22,  cluster: "legal",   x: 0.06, y: 0.66, confidence: 0.80 },
+  {
+    id: "d1",
+    title: "Global Hybrid Work Policy v4",
+    type: "pdf",
+    source: "SharePoint",
+    date: "2026-02-14",
+    chunks: 84,
+    cluster: "hr",
+    x: 0.16,
+    y: 0.22,
+    confidence: 0.92,
+  },
+  {
+    id: "d2",
+    title: "Performance Review Cycle — FY26 Guide",
+    type: "doc",
+    source: "SharePoint",
+    date: "2026-01-28",
+    chunks: 56,
+    cluster: "hr",
+    x: 0.1,
+    y: 0.42,
+    confidence: 0.89,
+  },
+  {
+    id: "d3",
+    title: "Onboarding Handbook",
+    type: "wiki",
+    source: "Confluence",
+    date: "2026-03-05",
+    chunks: 71,
+    cluster: "hr",
+    x: 0.22,
+    y: 0.58,
+    confidence: 0.86,
+  },
+  {
+    id: "d4",
+    title: "Atlas — PRD: Federated Search",
+    type: "doc",
+    source: "Confluence",
+    date: "2026-02-22",
+    chunks: 92,
+    cluster: "product",
+    x: 0.4,
+    y: 0.16,
+    confidence: 0.93,
+  },
+  {
+    id: "d5",
+    title: "Q2 Roadmap Review",
+    type: "ppt",
+    source: "SharePoint",
+    date: "2026-03-12",
+    chunks: 48,
+    cluster: "product",
+    x: 0.54,
+    y: 0.12,
+    confidence: 0.88,
+  },
+  {
+    id: "d6",
+    title: "User Research — Search Findings",
+    type: "pdf",
+    source: "SharePoint",
+    date: "2026-02-09",
+    chunks: 63,
+    cluster: "product",
+    x: 0.46,
+    y: 0.3,
+    confidence: 0.9,
+  },
+  {
+    id: "d7",
+    title: "Product Strategy 2026",
+    type: "ppt",
+    source: "SharePoint",
+    date: "2026-01-15",
+    chunks: 41,
+    cluster: "product",
+    x: 0.62,
+    y: 0.26,
+    confidence: 0.87,
+  },
+  {
+    id: "d8",
+    title: "Platform Architecture — RFC 142",
+    type: "md",
+    source: "Local Drive",
+    date: "2026-02-27",
+    chunks: 102,
+    cluster: "eng",
+    x: 0.74,
+    y: 0.34,
+    confidence: 0.94,
+  },
+  {
+    id: "d9",
+    title: "Vector DB Migration Plan",
+    type: "doc",
+    source: "Confluence",
+    date: "2026-03-08",
+    chunks: 58,
+    cluster: "eng",
+    x: 0.86,
+    y: 0.42,
+    confidence: 0.91,
+  },
+  {
+    id: "d10",
+    title: "Eng All-Hands — March",
+    type: "post",
+    source: "SWYM",
+    date: "2026-03-30",
+    chunks: 18,
+    cluster: "eng",
+    x: 0.78,
+    y: 0.54,
+    confidence: 0.82,
+  },
+  {
+    id: "d11",
+    title: "Data Processing Agreement Template",
+    type: "pdf",
+    source: "ENOVIA",
+    date: "2026-02-19",
+    chunks: 39,
+    cluster: "legal",
+    x: 0.34,
+    y: 0.74,
+    confidence: 0.93,
+  },
+  {
+    id: "d12",
+    title: "GDPR Compliance Memo",
+    type: "doc",
+    source: "SharePoint",
+    date: "2026-03-18",
+    chunks: 47,
+    cluster: "legal",
+    x: 0.22,
+    y: 0.84,
+    confidence: 0.91,
+  },
+  {
+    id: "d13",
+    title: "AI Usage Policy",
+    type: "wiki",
+    source: "Confluence",
+    date: "2026-03-22",
+    chunks: 33,
+    cluster: "legal",
+    x: 0.48,
+    y: 0.82,
+    confidence: 0.88,
+  },
+  {
+    id: "d14",
+    title: "FY26 Budget Plan",
+    type: "ppt",
+    source: "SharePoint",
+    date: "2026-01-22",
+    chunks: 52,
+    cluster: "finance",
+    x: 0.62,
+    y: 0.74,
+    confidence: 0.89,
+  },
+  {
+    id: "d15",
+    title: "Vendor Spend Analysis Q1",
+    type: "pdf",
+    source: "SharePoint",
+    date: "2026-03-05",
+    chunks: 28,
+    cluster: "finance",
+    x: 0.74,
+    y: 0.82,
+    confidence: 0.85,
+  },
+  {
+    id: "d16",
+    title: "EU AI Act — Reference Notes",
+    type: "web",
+    source: "Web",
+    date: "2026-02-11",
+    chunks: 22,
+    cluster: "legal",
+    x: 0.06,
+    y: 0.66,
+    confidence: 0.8,
+  },
 ];
 
 export const SAMPLE_DOC_EDGES: ExplorerDocEdge[] = [
-  { a: "d1",  b: "d2",  type: "reference",  weight: 0.7 },
-  { a: "d1",  b: "d3",  type: "reference",  weight: 0.8 },
-  { a: "d2",  b: "d3",  type: "similar",    weight: 0.65 },
-  { a: "d4",  b: "d5",  type: "reference",  weight: 0.85 },
-  { a: "d4",  b: "d6",  type: "reference",  weight: 0.9 },
-  { a: "d5",  b: "d7",  type: "similar",    weight: 0.7 },
-  { a: "d6",  b: "d7",  type: "reference",  weight: 0.55 },
-  { a: "d4",  b: "d8",  type: "reference",  weight: 0.75 },
-  { a: "d8",  b: "d9",  type: "contains",   weight: 0.85 },
-  { a: "d8",  b: "d10", type: "reference",  weight: 0.5 },
-  { a: "d9",  b: "d10", type: "similar",    weight: 0.55 },
-  { a: "d11", b: "d12", type: "reference",  weight: 0.85 },
-  { a: "d11", b: "d13", type: "similar",    weight: 0.7 },
-  { a: "d12", b: "d13", type: "reference",  weight: 0.75 },
-  { a: "d13", b: "d16", type: "reference",  weight: 0.7 },
-  { a: "d12", b: "d16", type: "reference",  weight: 0.6 },
-  { a: "d14", b: "d15", type: "contains",   weight: 0.8 },
-  { a: "d14", b: "d7",  type: "reference",  weight: 0.5 },
-  { a: "d4",  b: "d13", type: "reference",  weight: 0.6 },
-  { a: "d8",  b: "d11", type: "reference",  weight: 0.45 },
-  { a: "d6",  b: "d12", type: "contradict", weight: 0.4 },
+  { a: "d1", b: "d2", type: "reference", weight: 0.7 },
+  { a: "d1", b: "d3", type: "reference", weight: 0.8 },
+  { a: "d2", b: "d3", type: "similar", weight: 0.65 },
+  { a: "d4", b: "d5", type: "reference", weight: 0.85 },
+  { a: "d4", b: "d6", type: "reference", weight: 0.9 },
+  { a: "d5", b: "d7", type: "similar", weight: 0.7 },
+  { a: "d6", b: "d7", type: "reference", weight: 0.55 },
+  { a: "d4", b: "d8", type: "reference", weight: 0.75 },
+  { a: "d8", b: "d9", type: "contains", weight: 0.85 },
+  { a: "d8", b: "d10", type: "reference", weight: 0.5 },
+  { a: "d9", b: "d10", type: "similar", weight: 0.55 },
+  { a: "d11", b: "d12", type: "reference", weight: 0.85 },
+  { a: "d11", b: "d13", type: "similar", weight: 0.7 },
+  { a: "d12", b: "d13", type: "reference", weight: 0.75 },
+  { a: "d13", b: "d16", type: "reference", weight: 0.7 },
+  { a: "d12", b: "d16", type: "reference", weight: 0.6 },
+  { a: "d14", b: "d15", type: "contains", weight: 0.8 },
+  { a: "d14", b: "d7", type: "reference", weight: 0.5 },
+  { a: "d4", b: "d13", type: "reference", weight: 0.6 },
+  { a: "d8", b: "d11", type: "reference", weight: 0.45 },
+  { a: "d6", b: "d12", type: "contradict", weight: 0.4 },
 ];
 
 export const SAMPLE_CHUNKS: ExplorerChunk[] = [
-  { id: "c1.1",  doc: "d1",  label: "Office attendance baseline",                page: 4,  kind: "section",   confidence: 0.95, summary: "Employees are expected on-site at least 3 days per week, with team-defined anchor days." },
-  { id: "c1.2",  doc: "d1",  label: "Remote work eligibility",                   page: 7,  kind: "paragraph", confidence: 0.91, summary: "Fully remote roles require VP approval and are reviewed annually." },
-  { id: "c1.3",  doc: "d1",  label: "Equipment & stipend",                       page: 11, kind: "section",   confidence: 0.88, summary: "Home office stipend of €500 with 3-year refresh cycle." },
-  { id: "c1.4",  doc: "d1",  label: "Cross-border work limits",                  page: 16, kind: "paragraph", confidence: 0.86, summary: "Working from non-home jurisdiction is capped at 30 days per calendar year." },
-  { id: "c4.1",  doc: "d4",  label: "Problem statement",                         page: 2,  kind: "section",   confidence: 0.94, summary: "Knowledge workers spend ~21% of their week searching for internal information." },
-  { id: "c4.2",  doc: "d4",  label: "Target metrics",                            page: 5,  kind: "section",   confidence: 0.92, summary: "Reduce mean time-to-answer by 40%; achieve 80% recall on labeled benchmark." },
-  { id: "c4.3",  doc: "d4",  label: "Privacy & access controls",                 page: 12, kind: "paragraph", confidence: 0.90, summary: "Per-source ACL enforcement at query time; no cross-tenant leakage." },
-  { id: "c8.1",  doc: "d8",  label: "Service topology",                          page: 3,  kind: "section",   confidence: 0.93, summary: "Three-plane separation: ingest, index, query. gRPC between planes, Kafka for backpressure." },
-  { id: "c8.2",  doc: "d8",  label: "Embedding model selection",                 page: 9,  kind: "section",   confidence: 0.91, summary: "1024-dim multilingual encoder; cosine similarity; nightly re-embedding pipeline." },
-  { id: "c8.3",  doc: "d8",  label: "Cost envelope",                             page: 18, kind: "paragraph", confidence: 0.86, summary: "$0.018 per 1k embeddings amortized at projected Q3 volume." },
-  { id: "c12.1", doc: "d12", label: "Lawful basis — legitimate interest",        page: 3,  kind: "section",   confidence: 0.93, summary: "Internal search indexing relies on legitimate interest under Art. 6(1)(f)." },
-  { id: "c12.2", doc: "d12", label: "Data minimization",                         page: 6,  kind: "section",   confidence: 0.90, summary: "Personal identifiers are stripped from chunks before vector storage where feasible." },
+  {
+    id: "c1.1",
+    doc: "d1",
+    label: "Office attendance baseline",
+    page: 4,
+    kind: "section",
+    confidence: 0.95,
+    summary:
+      "Employees are expected on-site at least 3 days per week, with team-defined anchor days.",
+  },
+  {
+    id: "c1.2",
+    doc: "d1",
+    label: "Remote work eligibility",
+    page: 7,
+    kind: "paragraph",
+    confidence: 0.91,
+    summary:
+      "Fully remote roles require VP approval and are reviewed annually.",
+  },
+  {
+    id: "c1.3",
+    doc: "d1",
+    label: "Equipment & stipend",
+    page: 11,
+    kind: "section",
+    confidence: 0.88,
+    summary: "Home office stipend of €500 with 3-year refresh cycle.",
+  },
+  {
+    id: "c1.4",
+    doc: "d1",
+    label: "Cross-border work limits",
+    page: 16,
+    kind: "paragraph",
+    confidence: 0.86,
+    summary:
+      "Working from non-home jurisdiction is capped at 30 days per calendar year.",
+  },
+  {
+    id: "c4.1",
+    doc: "d4",
+    label: "Problem statement",
+    page: 2,
+    kind: "section",
+    confidence: 0.94,
+    summary:
+      "Knowledge workers spend ~21% of their week searching for internal information.",
+  },
+  {
+    id: "c4.2",
+    doc: "d4",
+    label: "Target metrics",
+    page: 5,
+    kind: "section",
+    confidence: 0.92,
+    summary:
+      "Reduce mean time-to-answer by 40%; achieve 80% recall on labeled benchmark.",
+  },
+  {
+    id: "c4.3",
+    doc: "d4",
+    label: "Privacy & access controls",
+    page: 12,
+    kind: "paragraph",
+    confidence: 0.9,
+    summary:
+      "Per-source ACL enforcement at query time; no cross-tenant leakage.",
+  },
+  {
+    id: "c8.1",
+    doc: "d8",
+    label: "Service topology",
+    page: 3,
+    kind: "section",
+    confidence: 0.93,
+    summary:
+      "Three-plane separation: ingest, index, query. gRPC between planes, Kafka for backpressure.",
+  },
+  {
+    id: "c8.2",
+    doc: "d8",
+    label: "Embedding model selection",
+    page: 9,
+    kind: "section",
+    confidence: 0.91,
+    summary:
+      "1024-dim multilingual encoder; cosine similarity; nightly re-embedding pipeline.",
+  },
+  {
+    id: "c8.3",
+    doc: "d8",
+    label: "Cost envelope",
+    page: 18,
+    kind: "paragraph",
+    confidence: 0.86,
+    summary: "$0.018 per 1k embeddings amortized at projected Q3 volume.",
+  },
+  {
+    id: "c12.1",
+    doc: "d12",
+    label: "Lawful basis — legitimate interest",
+    page: 3,
+    kind: "section",
+    confidence: 0.93,
+    summary:
+      "Internal search indexing relies on legitimate interest under Art. 6(1)(f).",
+  },
+  {
+    id: "c12.2",
+    doc: "d12",
+    label: "Data minimization",
+    page: 6,
+    kind: "section",
+    confidence: 0.9,
+    summary:
+      "Personal identifiers are stripped from chunks before vector storage where feasible.",
+  },
 ];
 
 export const SAMPLE_CONCEPTS: ExplorerConcept[] = [
-  { id: "k1", name: "Hybrid work",       kind: "policy",      freq: 27, confidence: 0.92, syn: ["flexible work", "remote-first"] },
-  { id: "k2", name: "Federated search",  kind: "product",     freq: 31, confidence: 0.94, syn: ["enterprise search", "unified search"] },
-  { id: "k3", name: "Vector embeddings", kind: "engineering", freq: 24, confidence: 0.91, syn: ["dense retrieval"] },
-  { id: "k4", name: "Access control",    kind: "engineering", freq: 19, confidence: 0.90, syn: ["ACL", "permissions"] },
-  { id: "k5", name: "GDPR",              kind: "regulatory",  freq: 22, confidence: 0.93, syn: ["data protection regulation"] },
-  { id: "k6", name: "Time-to-answer",    kind: "metric",      freq: 14, confidence: 0.88, syn: ["TTA"] },
-  { id: "k7", name: "Onboarding",        kind: "process",     freq: 12, confidence: 0.86, syn: ["new hire ramp"] },
-  { id: "k8", name: "AI Act compliance", kind: "regulatory",  freq: 11, confidence: 0.85, syn: ["EU AI Act"] },
-  { id: "k9", name: "Vendor spend",      kind: "finance",     freq: 9,  confidence: 0.83, syn: ["procurement spend"] },
+  {
+    id: "k1",
+    name: "Hybrid work",
+    kind: "policy",
+    freq: 27,
+    confidence: 0.92,
+    syn: ["flexible work", "remote-first"],
+  },
+  {
+    id: "k2",
+    name: "Federated search",
+    kind: "product",
+    freq: 31,
+    confidence: 0.94,
+    syn: ["enterprise search", "unified search"],
+  },
+  {
+    id: "k3",
+    name: "Vector embeddings",
+    kind: "engineering",
+    freq: 24,
+    confidence: 0.91,
+    syn: ["dense retrieval"],
+  },
+  {
+    id: "k4",
+    name: "Access control",
+    kind: "engineering",
+    freq: 19,
+    confidence: 0.9,
+    syn: ["ACL", "permissions"],
+  },
+  {
+    id: "k5",
+    name: "GDPR",
+    kind: "regulatory",
+    freq: 22,
+    confidence: 0.93,
+    syn: ["data protection regulation"],
+  },
+  {
+    id: "k6",
+    name: "Time-to-answer",
+    kind: "metric",
+    freq: 14,
+    confidence: 0.88,
+    syn: ["TTA"],
+  },
+  {
+    id: "k7",
+    name: "Onboarding",
+    kind: "process",
+    freq: 12,
+    confidence: 0.86,
+    syn: ["new hire ramp"],
+  },
+  {
+    id: "k8",
+    name: "AI Act compliance",
+    kind: "regulatory",
+    freq: 11,
+    confidence: 0.85,
+    syn: ["EU AI Act"],
+  },
+  {
+    id: "k9",
+    name: "Vendor spend",
+    kind: "finance",
+    freq: 9,
+    confidence: 0.83,
+    syn: ["procurement spend"],
+  },
 ];
 
 export const SAMPLE_CHUNK_CONCEPT: ChunkConceptLink[] = [
-  ["c1.1", "k1"], ["c1.2", "k1"], ["c1.4", "k1"],
-  ["c4.1", "k2"], ["c4.2", "k2"], ["c4.2", "k6"],
-  ["c8.1", "k2"], ["c8.2", "k3"],
-  ["c4.3", "k4"], ["c8.1", "k4"],
-  ["c12.1", "k5"], ["c12.2", "k5"], ["c12.2", "k4"],
+  ["c1.1", "k1"],
+  ["c1.2", "k1"],
+  ["c1.4", "k1"],
+  ["c4.1", "k2"],
+  ["c4.2", "k2"],
+  ["c4.2", "k6"],
+  ["c8.1", "k2"],
+  ["c8.2", "k3"],
+  ["c4.3", "k4"],
+  ["c8.1", "k4"],
+  ["c12.1", "k5"],
+  ["c12.2", "k5"],
+  ["c12.2", "k4"],
   ["c12.1", "k8"],
 ];
 
@@ -300,28 +661,44 @@ export const SAMPLE_DOC_CONTENT: Record<string, DocContent> = {
   d1: {
     title: "Global Hybrid Work Policy v4",
     pages: [
-      { n: 4,  heading: "2.1  Office attendance baseline", paras: [
-        "All employees in roles classified as Hybrid are expected on-site for a minimum of three (3) working days per calendar week, averaged over a rolling four-week window.",
-        "Each team shall define two team-wide anchor days during which in-person collaboration is prioritized; remaining on-site days are at the employee's discretion.",
-        "Exceptions for medical, caregiving, or accessibility reasons follow the process defined in Annex B and are handled confidentially by People Operations.",
-      ] },
-      { n: 7,  heading: "2.4  Remote work eligibility", paras: [
-        "Roles classified as Fully Remote require explicit Vice-President sponsorship and are subject to annual review against current business needs.",
-        "Conversion of an existing Hybrid role to Fully Remote requires a written justification, manager support, and HRBP review.",
-        "Fully Remote employees are expected to participate in scheduled in-person gatherings (offsites, planning weeks) at company expense.",
-      ] },
-      { n: 11, heading: "3.2  Equipment & stipend", paras: [
-        "Each Hybrid or Fully Remote employee is entitled to a one-time home office stipend of €500 (or local equivalent), refreshed every three (3) years.",
-        "Standard equipment provisioning includes a laptop, external monitor, keyboard, and headset, owned by the company and returned upon separation.",
-      ] },
-      { n: 16, heading: "4.1  Cross-border work", paras: [
-        "Employees may work from a jurisdiction outside their country of employment for no more than thirty (30) calendar days per year, subject to manager approval.",
-        "Stays exceeding 30 days require coordination with Tax & Mobility and may require a temporary assignment letter.",
-      ] },
+      {
+        n: 4,
+        heading: "2.1  Office attendance baseline",
+        paras: [
+          "All employees in roles classified as Hybrid are expected on-site for a minimum of three (3) working days per calendar week, averaged over a rolling four-week window.",
+          "Each team shall define two team-wide anchor days during which in-person collaboration is prioritized; remaining on-site days are at the employee's discretion.",
+          "Exceptions for medical, caregiving, or accessibility reasons follow the process defined in Annex B and are handled confidentially by People Operations.",
+        ],
+      },
+      {
+        n: 7,
+        heading: "2.4  Remote work eligibility",
+        paras: [
+          "Roles classified as Fully Remote require explicit Vice-President sponsorship and are subject to annual review against current business needs.",
+          "Conversion of an existing Hybrid role to Fully Remote requires a written justification, manager support, and HRBP review.",
+          "Fully Remote employees are expected to participate in scheduled in-person gatherings (offsites, planning weeks) at company expense.",
+        ],
+      },
+      {
+        n: 11,
+        heading: "3.2  Equipment & stipend",
+        paras: [
+          "Each Hybrid or Fully Remote employee is entitled to a one-time home office stipend of €500 (or local equivalent), refreshed every three (3) years.",
+          "Standard equipment provisioning includes a laptop, external monitor, keyboard, and headset, owned by the company and returned upon separation.",
+        ],
+      },
+      {
+        n: 16,
+        heading: "4.1  Cross-border work",
+        paras: [
+          "Employees may work from a jurisdiction outside their country of employment for no more than thirty (30) calendar days per year, subject to manager approval.",
+          "Stays exceeding 30 days require coordination with Tax & Mobility and may require a temporary assignment letter.",
+        ],
+      },
     ],
     chunkAnchors: {
-      "c1.1": { page: 4,  paras: [0, 1, 2] },
-      "c1.2": { page: 7,  paras: [0, 1, 2] },
+      "c1.1": { page: 4, paras: [0, 1, 2] },
+      "c1.2": { page: 7, paras: [0, 1, 2] },
       "c1.3": { page: 11, paras: [0, 1] },
       "c1.4": { page: 16, paras: [0, 1] },
     },
@@ -329,62 +706,94 @@ export const SAMPLE_DOC_CONTENT: Record<string, DocContent> = {
   d4: {
     title: "Atlas — PRD: Federated Search",
     pages: [
-      { n: 2,  heading: "1.  Problem statement", paras: [
-        "Internal research conducted in Q4 indicates that knowledge workers across the organisation spend approximately 21% of their working week searching for, or recreating, information that already exists somewhere inside the company.",
-        "Existing point search tools are siloed by source system (SharePoint, Confluence, ENOVIA, SWYM) and require employees to know in advance where the answer is likely to live.",
-        "The result is duplicated work, inconsistent answers to the same question, and slow ramp time for new hires and cross-functional contributors.",
-      ] },
-      { n: 5,  heading: "2.  Target metrics", paras: [
-        "Reduce median Time-To-Answer (TTA) for the Top-200 internal questions by at least 40%, measured against the FY25 baseline.",
-        "Achieve 80% recall and 65% precision at rank-5 on the labeled internal benchmark maintained by the Search Quality team.",
-        "Maintain a query latency P95 below 800 ms for federated results across at least four source systems.",
-      ] },
-      { n: 12, heading: "4.3  Privacy & access controls", paras: [
-        "Access control lists are enforced at query time, on a per-source basis, using the user's effective permissions in the source system of record.",
-        "Index storage is partitioned per source system; cross-tenant or cross-source result leakage is treated as a P0 incident.",
-        "Personal data inside indexed chunks is subject to the data minimization principles described in §4.4.",
-      ] },
+      {
+        n: 2,
+        heading: "1.  Problem statement",
+        paras: [
+          "Internal research conducted in Q4 indicates that knowledge workers across the organisation spend approximately 21% of their working week searching for, or recreating, information that already exists somewhere inside the company.",
+          "Existing point search tools are siloed by source system (SharePoint, Confluence, ENOVIA, SWYM) and require employees to know in advance where the answer is likely to live.",
+          "The result is duplicated work, inconsistent answers to the same question, and slow ramp time for new hires and cross-functional contributors.",
+        ],
+      },
+      {
+        n: 5,
+        heading: "2.  Target metrics",
+        paras: [
+          "Reduce median Time-To-Answer (TTA) for the Top-200 internal questions by at least 40%, measured against the FY25 baseline.",
+          "Achieve 80% recall and 65% precision at rank-5 on the labeled internal benchmark maintained by the Search Quality team.",
+          "Maintain a query latency P95 below 800 ms for federated results across at least four source systems.",
+        ],
+      },
+      {
+        n: 12,
+        heading: "4.3  Privacy & access controls",
+        paras: [
+          "Access control lists are enforced at query time, on a per-source basis, using the user's effective permissions in the source system of record.",
+          "Index storage is partitioned per source system; cross-tenant or cross-source result leakage is treated as a P0 incident.",
+          "Personal data inside indexed chunks is subject to the data minimization principles described in §4.4.",
+        ],
+      },
     ],
     chunkAnchors: {
-      "c4.1": { page: 2,  paras: [0, 1, 2] },
-      "c4.2": { page: 5,  paras: [0, 1, 2] },
+      "c4.1": { page: 2, paras: [0, 1, 2] },
+      "c4.2": { page: 5, paras: [0, 1, 2] },
       "c4.3": { page: 12, paras: [0, 1, 2] },
     },
   },
   d8: {
     title: "Platform Architecture — RFC 142",
     pages: [
-      { n: 3,  heading: "## Service topology", paras: [
-        "The platform is decomposed along three planes: an Ingest plane responsible for source connectors and chunking, an Index plane responsible for embedding and storage, and a Query plane responsible for retrieval and fusion.",
-        "Inter-plane communication uses gRPC for synchronous calls and Kafka topics for asynchronous, backpressure-tolerant work such as embedding jobs and re-indexing.",
-        "Each plane is independently scalable and has its own SLOs; cross-plane SLOs are tracked at the user-visible Query level.",
-      ] },
-      { n: 9,  heading: "## Embedding model", paras: [
-        "We standardize on a 1024-dimensional multilingual encoder for all text chunks, using cosine similarity at query time.",
-        "A nightly re-embedding pipeline reprocesses chunks whose source documents changed, with a hard upper bound of 14 days between any chunk write and its corresponding embedding update.",
-      ] },
-      { n: 18, heading: "## Cost envelope", paras: [
-        "At projected Q3 volume (≈ 2.4 B chunks), embedding cost amortizes to $0.018 per 1k chunks on the current vendor contract.",
-        "Storage cost in the vector database is dominated by index overhead, not raw vectors; we estimate a 1.6× multiplier over raw float32 size.",
-      ] },
+      {
+        n: 3,
+        heading: "## Service topology",
+        paras: [
+          "The platform is decomposed along three planes: an Ingest plane responsible for source connectors and chunking, an Index plane responsible for embedding and storage, and a Query plane responsible for retrieval and fusion.",
+          "Inter-plane communication uses gRPC for synchronous calls and Kafka topics for asynchronous, backpressure-tolerant work such as embedding jobs and re-indexing.",
+          "Each plane is independently scalable and has its own SLOs; cross-plane SLOs are tracked at the user-visible Query level.",
+        ],
+      },
+      {
+        n: 9,
+        heading: "## Embedding model",
+        paras: [
+          "We standardize on a 1024-dimensional multilingual encoder for all text chunks, using cosine similarity at query time.",
+          "A nightly re-embedding pipeline reprocesses chunks whose source documents changed, with a hard upper bound of 14 days between any chunk write and its corresponding embedding update.",
+        ],
+      },
+      {
+        n: 18,
+        heading: "## Cost envelope",
+        paras: [
+          "At projected Q3 volume (≈ 2.4 B chunks), embedding cost amortizes to $0.018 per 1k chunks on the current vendor contract.",
+          "Storage cost in the vector database is dominated by index overhead, not raw vectors; we estimate a 1.6× multiplier over raw float32 size.",
+        ],
+      },
     ],
     chunkAnchors: {
-      "c8.1": { page: 3,  paras: [0, 1, 2] },
-      "c8.2": { page: 9,  paras: [0, 1] },
+      "c8.1": { page: 3, paras: [0, 1, 2] },
+      "c8.2": { page: 9, paras: [0, 1] },
       "c8.3": { page: 18, paras: [0, 1] },
     },
   },
   d12: {
     title: "GDPR Compliance Memo",
     pages: [
-      { n: 3, heading: "2.  Lawful basis", paras: [
-        "Indexing of internal documents for the purpose of employee-facing federated search is performed on the basis of legitimate interest under Article 6(1)(f) GDPR.",
-        "A balancing test has been completed and is recorded with the DPO; the assessment concludes that employee expectations are met provided source-system access controls are honored at query time.",
-      ] },
-      { n: 6, heading: "3.  Data minimization", paras: [
-        "Where technically feasible, personal identifiers (full names of non-public individuals, direct contact details) are removed or hashed before chunks are written to vector storage.",
-        "Free-text chunks that cannot be safely minimized are excluded from federated search by source-system policy and routed only to authorized internal tools.",
-      ] },
+      {
+        n: 3,
+        heading: "2.  Lawful basis",
+        paras: [
+          "Indexing of internal documents for the purpose of employee-facing federated search is performed on the basis of legitimate interest under Article 6(1)(f) GDPR.",
+          "A balancing test has been completed and is recorded with the DPO; the assessment concludes that employee expectations are met provided source-system access controls are honored at query time.",
+        ],
+      },
+      {
+        n: 6,
+        heading: "3.  Data minimization",
+        paras: [
+          "Where technically feasible, personal identifiers (full names of non-public individuals, direct contact details) are removed or hashed before chunks are written to vector storage.",
+          "Free-text chunks that cannot be safely minimized are excluded from federated search by source-system policy and routed only to authorized internal tools.",
+        ],
+      },
     ],
     chunkAnchors: {
       "c12.1": { page: 3, paras: [0, 1] },
@@ -447,33 +856,56 @@ export const SAMPLE_SNAPSHOT: ExplorerSnapshot = {
 
 // ─── Look-up helpers (stateless; bind a snapshot at the call site) ───────────
 
-export function docById(snap: ExplorerSnapshot, id: string): ExplorerDocument | undefined {
+export function docById(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerDocument | undefined {
   return snap.documents.find((d) => d.id === id);
 }
-export function chunkById(snap: ExplorerSnapshot, id: string): ExplorerChunk | undefined {
+export function chunkById(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerChunk | undefined {
   return snap.chunks.find((c) => c.id === id);
 }
-export function conceptById(snap: ExplorerSnapshot, id: string): ExplorerConcept | undefined {
+export function conceptById(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerConcept | undefined {
   return snap.concepts.find((k) => k.id === id);
 }
-export function conceptsForChunk(snap: ExplorerSnapshot, id: string): ExplorerConcept[] {
+export function conceptsForChunk(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerConcept[] {
   return snap.chunkConcept
     .filter(([c]) => c === id)
     .map(([, k]) => conceptById(snap, k))
     .filter((x): x is ExplorerConcept => Boolean(x));
 }
-export function chunksForConcept(snap: ExplorerSnapshot, id: string): ExplorerChunk[] {
+export function chunksForConcept(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerChunk[] {
   return snap.chunkConcept
     .filter(([, k]) => k === id)
     .map(([c]) => chunkById(snap, c))
     .filter((x): x is ExplorerChunk => Boolean(x));
 }
-export function chunksForDoc(snap: ExplorerSnapshot, id: string): ExplorerChunk[] {
+export function chunksForDoc(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerChunk[] {
   return snap.chunks.filter((c) => c.doc === id);
 }
-export function docsForConcept(snap: ExplorerSnapshot, id: string): ExplorerDocument[] {
+export function docsForConcept(
+  snap: ExplorerSnapshot,
+  id: string,
+): ExplorerDocument[] {
   const docIds = new Set(chunksForConcept(snap, id).map((c) => c.doc));
-  return [...docIds].map((d) => docById(snap, d)).filter((x): x is ExplorerDocument => Boolean(x));
+  return [...docIds]
+    .map((d) => docById(snap, d))
+    .filter((x): x is ExplorerDocument => Boolean(x));
 }
 
 /**
@@ -498,8 +930,12 @@ export function filterSnapshot(
   const keptDocIds = new Set(documents.map((d) => d.id));
   const chunks = snap.chunks.filter((c) => keptDocIds.has(c.doc));
   const keptChunkIds = new Set(chunks.map((c) => c.id));
-  const docEdges = snap.docEdges.filter((e) => keptDocIds.has(e.a) && keptDocIds.has(e.b));
-  const chunkConcept = snap.chunkConcept.filter(([cid]) => keptChunkIds.has(cid));
+  const docEdges = snap.docEdges.filter(
+    (e) => keptDocIds.has(e.a) && keptDocIds.has(e.b),
+  );
+  const chunkConcept = snap.chunkConcept.filter(([cid]) =>
+    keptChunkIds.has(cid),
+  );
   return {
     ...snap,
     documents,
@@ -524,16 +960,20 @@ export function adaptDocument(
   index: number,
   total: number,
 ): ExplorerDocument {
-  const latest = doc.versions.find((v) => v.id === doc.latest_version_id) ?? doc.versions[doc.versions.length - 1];
+  const latest =
+    doc.versions.find((v) => v.id === doc.latest_version_id) ??
+    doc.versions[doc.versions.length - 1];
   const ct = latest?.content_type ?? "";
   const fname = latest?.filename ?? doc.original_filename;
   const type = classifyContentType(ct, fname);
   const profileType = semantic?.document_profile.document_type;
-  const cluster = profileType && profileType !== "unknown" ? profileType : "unknown";
+  const cluster =
+    profileType && profileType !== "unknown" ? profileType : "unknown";
   const chunks = extraction?.sections.length ?? semantic?.sections.length ?? 0;
   const confidence = semantic
     ? semantic.assets.length > 0
-      ? semantic.assets.reduce((a, b) => a + b.confidence, 0) / semantic.assets.length
+      ? semantic.assets.reduce((a, b) => a + b.confidence, 0) /
+        semantic.assets.length
       : 0.85
     : 0.7;
   // Place documents on a deterministic ring while we don't have force-
@@ -563,7 +1003,9 @@ export function adaptDocument(
     // ``v{N}`` + ``(N versions)`` without re-fetching the doc.
     versionCount: doc.versions.length,
     latestVersion:
-      latest?.version_number ?? doc.versions[doc.versions.length - 1]?.version_number ?? 1,
+      latest?.version_number ??
+      doc.versions[doc.versions.length - 1]?.version_number ??
+      1,
     versions: doc.versions.map((v) => ({
       id: v.id,
       versionNumber: v.version_number,
@@ -573,6 +1015,7 @@ export function adaptDocument(
       sha256: v.sha256,
       duplicateOfVersionId: v.duplicate_of_version_id,
     })),
+    origin: doc.origin ?? "operator",
   };
 }
 
@@ -581,7 +1024,8 @@ function storageSourceLabel(storageUri: string | undefined): string {
   if (storageUri.startsWith("memory://")) return "In-memory";
   if (storageUri.startsWith("file://")) return "Local Drive";
   if (storageUri.startsWith("s3://")) return "S3";
-  if (storageUri.startsWith("http://") || storageUri.startsWith("https://")) return "Web";
+  if (storageUri.startsWith("http://") || storageUri.startsWith("https://"))
+    return "Web";
   // Unknown scheme — surface verbatim instead of inventing an origin.
   const scheme = storageUri.split("://", 1)[0];
   return scheme || "Unknown";
@@ -648,13 +1092,16 @@ function classifyContentType(ct: string, filename: string): DocTypeKey {
  * so the UI can later branch on it. Separating ``topic`` from
  * ``concept`` is tracked as a follow-up to ADR-017.
  */
-export function adaptGraph(page: KnowledgeGraphPage | KnowledgeGraphProjection | null): {
+export function adaptGraph(
+  page: KnowledgeGraphPage | KnowledgeGraphProjection | null,
+): {
   concepts: ExplorerConcept[];
   chunkConcept: ChunkConceptLink[];
   conceptEdges: ConceptEdge[];
   docEdges: ExplorerDocEdge[];
 } {
-  if (!page) return { concepts: [], chunkConcept: [], conceptEdges: [], docEdges: [] };
+  if (!page)
+    return { concepts: [], chunkConcept: [], conceptEdges: [], docEdges: [] };
 
   const concepts: ExplorerConcept[] = page.nodes
     .filter((n) => isConceptKind(n.kind))
@@ -665,7 +1112,10 @@ export function adaptGraph(page: KnowledgeGraphPage | KnowledgeGraphProjection |
       // Don't fabricate a frequency — leave at 0 when the projector
       // didn't write one. The renderer can hide the ×N counter when
       // the value is 0 rather than show a misleading ×1.
-      freq: numProp(n.properties, "frequency") ?? numProp(n.properties, "count") ?? 0,
+      freq:
+        numProp(n.properties, "frequency") ??
+        numProp(n.properties, "count") ??
+        0,
       // Default 1.0 when the projector produces a deterministic
       // node (topics) — it's not a "we guessed" 0.85; leaving it
       // unset would force callers to handle ``undefined`` everywhere.
@@ -690,7 +1140,10 @@ export function adaptGraph(page: KnowledgeGraphPage | KnowledgeGraphProjection |
   const conceptEdges: ConceptEdge[] = [];
   // (docA, docB, kind) → accumulated weight. Keys are normalised to
   // (min, max, kind) so an A↔B and B↔A pair collapse to one entry.
-  const docEdgeAcc = new Map<string, { a: string; b: string; type: DocEdgeType; weight: number }>();
+  const docEdgeAcc = new Map<
+    string,
+    { a: string; b: string; type: DocEdgeType; weight: number }
+  >();
 
   for (const e of page.edges) {
     const aIsConcept = conceptIds.has(e.source_id);
@@ -757,14 +1210,22 @@ function numProp(props: Record<string, unknown>, key: string): number | null {
   return typeof v === "number" ? v : null;
 }
 
-function stringProp(props: Record<string, unknown>, key: string): string | null {
+function stringProp(
+  props: Record<string, unknown>,
+  key: string,
+): string | null {
   const v = props[key];
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
-function stringArrayProp(props: Record<string, unknown>, key: string): string[] | null {
+function stringArrayProp(
+  props: Record<string, unknown>,
+  key: string,
+): string[] | null {
   const v = props[key];
-  return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : null;
+  return Array.isArray(v)
+    ? v.filter((s): s is string => typeof s === "string")
+    : null;
 }
 
 /**
@@ -781,7 +1242,13 @@ export function adaptDocContent(
   if (!extraction) {
     return {
       title: doc.original_filename,
-      pages: [{ n: 1, heading: doc.original_filename, paras: ["No extraction available for this version yet."] }],
+      pages: [
+        {
+          n: 1,
+          heading: doc.original_filename,
+          paras: ["No extraction available for this version yet."],
+        },
+      ],
       chunkAnchors: {},
     };
   }
@@ -806,7 +1273,16 @@ export function adaptDocContent(
   }
   return {
     title: doc.original_filename,
-    pages: pages.length > 0 ? pages : [{ n: 1, heading: extraction.parser_name, paras: [extraction.text || "(empty)"] }],
+    pages:
+      pages.length > 0
+        ? pages
+        : [
+            {
+              n: 1,
+              heading: extraction.parser_name,
+              paras: [extraction.text || "(empty)"],
+            },
+          ],
     chunkAnchors,
   };
 }
@@ -829,10 +1305,15 @@ export function adaptDocContent(
  * left rail is one level deep — but they're carried forward so a
  * future drill-down can render them without another fetch.
  */
-export function adaptTaxonomy(
-  response: TaxonomyResponse | null,
-): { clusters: Record<string, ClusterMeta>; categories: TaxonomyCategory[] } {
-  if (!response || !response.is_configured || response.categories.length === 0) {
+export function adaptTaxonomy(response: TaxonomyResponse | null): {
+  clusters: Record<string, ClusterMeta>;
+  categories: TaxonomyCategory[];
+} {
+  if (
+    !response ||
+    !response.is_configured ||
+    response.categories.length === 0
+  ) {
     return { clusters: {}, categories: [] };
   }
   const clusters: Record<string, ClusterMeta> = {};
@@ -869,6 +1350,9 @@ export function hashHueDeterministic(s: string): number {
 function splitParagraphs(text: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
-  const paragraphs = trimmed.split(/\n{2,}/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length > 0);
+  const paragraphs = trimmed
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 0);
   return paragraphs.length > 0 ? paragraphs : [trimmed];
 }

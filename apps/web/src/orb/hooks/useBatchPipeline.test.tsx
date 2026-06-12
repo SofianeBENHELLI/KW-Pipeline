@@ -33,6 +33,7 @@ type DocStatus = ApiDocument["versions"][number]["status"];
 function fixtureDoc(id: string, status: DocStatus = "STORED"): ApiDocument {
   return {
     id,
+    origin: "operator",
     original_filename: `${id}.txt`,
     latest_version_id: `ver-${id}`,
     created_at: "2026-05-12T08:00:00Z",

@@ -17,6 +17,7 @@ import { VersionList } from "./VersionList";
 
 function fixtureDoc(): ApiDocument {
   return {
+    origin: "operator",
     id: "doc-1",
     original_filename: "policy.txt",
     latest_version_id: "ver-2",

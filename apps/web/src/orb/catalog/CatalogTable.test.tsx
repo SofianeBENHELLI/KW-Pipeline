@@ -10,6 +10,7 @@ import type { ApiDocument } from "../../api/types";
 import { CatalogTable } from "./CatalogTable";
 
 const DOC_A: ApiDocument = {
+  origin: "operator",
   id: "doc-a",
   original_filename: "alpha.md",
   latest_version_id: "ver-a",

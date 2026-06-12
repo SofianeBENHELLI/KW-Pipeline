@@ -11,6 +11,7 @@ import { DocHeader } from "./DocHeader";
 
 function fixtureDoc(): ApiDocument {
   return {
+    origin: "operator",
     id: "doc-policy-001",
     original_filename: "supplier-quality-policy.txt",
     latest_version_id: "ver-policy-002",

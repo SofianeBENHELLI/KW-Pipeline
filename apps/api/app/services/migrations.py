@@ -756,6 +756,93 @@ def _migrate_0015_chunk_taxonomy_allocations(conn: sqlite3.Connection) -> None:
     )
 
 
+# Frozen snapshot of the demo-loader fixture filenames at the time
+# migration 0016 shipped. Migrations must never import live code (the
+# demo loader's constants move under its feet and hard-exit when the
+# scripts/ directory is missing), so the backfill carries its own
+# copy. New demo rows after this migration are stamped by the demo
+# service itself (``DemoDatasetService._run_loader`` /
+# :meth:`CatalogStore.mark_documents_origin`); this list only has to
+# cover rows that existed before the ``origin`` column did.
+_0016_DEMO_FIXTURE_FILENAMES: tuple[str, ...] = (
+    "quality_iso9001_handbook.txt",
+    "quality_audit_findings_2026q1.txt",
+    "quality_corrective_action_log.txt",
+    "supplier_qualification_checklist.txt",
+    "customer_renewal_brief.txt",
+    "customer_success_playbook.txt",
+    "engineering_change_request_4471.txt",
+    "engineering_design_review_minutes.txt",
+    "automotive_battery_hv_architecture.txt",
+    "automotive_adas_l2plus_feature_definition.txt",
+    "automotive_vehicle_dynamics_targets.txt",
+    "automotive_ee_architecture_overview.txt",
+    "automotive_bom_top_level.txt",
+    "manufacturing_body_shop_welding_cell.txt",
+    "manufacturing_paint_shop_process_spec.txt",
+    "manufacturing_final_assembly_takt.txt",
+    "manufacturing_mes_scada_integration.txt",
+    "manufacturing_line_balancing_trim.txt",
+    "vv_hil_strategy_adas.txt",
+    "vv_crash_test_plan_euroncap.txt",
+    "vv_durability_validation_240cycles.txt",
+    "vv_iso26262_asild_verification.txt",
+    "sourcing_tier1_scorecard_q2.txt",
+    "sourcing_dual_sourcing_igbt.txt",
+    "sourcing_rfq_inverter.txt",
+    "marketing_customer_segment_urban_ev.txt",
+    "marketing_brand_positioning_suv.txt",
+    "marketing_launch_plan_press_kit.txt",
+    "simulation_cfd_aero_analysis.txt",
+    "simulation_crash_frontal_results.txt",
+    "simulation_nvh_powertrain.txt",
+    "cyber_unece_r155_policy.txt",
+    "cyber_tara_hmi.txt",
+    "homologation_euro7_emissions_plan.txt",
+    "homologation_type_approval_roadmap_eu.txt",
+    "supplier_onboarding_policy_v1.txt",
+    "supplier_onboarding_policy_v2.txt",
+    "supplier_onboarding_policy_v3.txt",
+    "ecu_software_architecture_v1.txt",
+    "ecu_software_architecture_v2.txt",
+    "ecu_software_architecture_v3.txt",
+    "engineering_change_request.pdf",
+    "weekly_quality_review.docx",
+    "supplier_onboarding_policy_v1_renamed.txt",
+)
+
+
+def _migrate_0016_document_origin(conn: sqlite3.Connection) -> None:
+    """Demo/operator provenance on document families (Explorer Sprint 1).
+
+    The demo-toggle loader uploads its 44 fixture documents into the
+    same catalog as operator data, identified only by filename — so
+    demo rows were indistinguishable from production rows on every
+    read surface. This migration makes provenance first-class:
+
+    * ``documents.origin`` — ``'operator'`` (default) or ``'demo'``.
+    * Backfill: pre-existing rows whose ``original_filename`` matches
+      the frozen fixture snapshot above flip to ``'demo'``.
+    * Partial index on the ``'demo'`` minority value so the
+      ``include_demo=false`` read filter stays cheap on large
+      operator catalogs.
+
+    Forward writes are owned by the demo service (stamp-after-load and
+    stamp-on-reset), not the upload route — operator uploads always
+    land as ``'operator'`` via the column default.
+    """
+    conn.execute("ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'operator'")
+    placeholders = ", ".join("?" for _ in _0016_DEMO_FIXTURE_FILENAMES)
+    conn.execute(
+        f"UPDATE documents SET origin = 'demo' WHERE original_filename IN ({placeholders})",
+        _0016_DEMO_FIXTURE_FILENAMES,
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_origin "
+        "ON documents (origin) WHERE origin != 'operator'"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0001_initial", _migrate_0001_initial),
     ("0002_add_review_columns", _migrate_0002_add_review_columns),
@@ -772,6 +859,7 @@ MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("0013_processes", _migrate_0013_processes),
     ("0014_document_topics", _migrate_0014_document_topics),
     ("0015_chunk_taxonomy_allocations", _migrate_0015_chunk_taxonomy_allocations),
+    ("0016_document_origin", _migrate_0016_document_origin),
 ]
 
 # The set of table names that the legacy ``_initialize`` approach created.

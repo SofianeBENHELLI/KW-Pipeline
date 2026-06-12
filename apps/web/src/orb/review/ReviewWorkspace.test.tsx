@@ -24,6 +24,7 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 }
 
 const DOC_A: ApiDocument = {
+  origin: "operator",
   id: "doc-a",
   original_filename: "alpha.md",
   latest_version_id: "ver-a",
@@ -53,6 +54,7 @@ const DOC_A: ApiDocument = {
 };
 
 const DOC_B: ApiDocument = {
+  origin: "operator",
   id: "doc-b",
   original_filename: "beta.md",
   latest_version_id: "ver-b",

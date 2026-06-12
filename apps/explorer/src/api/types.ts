@@ -49,6 +49,13 @@ export interface Document {
   latest_version_id: string;
   created_at: string;
   versions: DocumentVersion[];
+  /**
+   * Demo/operator provenance (Explorer Sprint 1). ``"demo"`` rows
+   * come from the bundled demo-toggle corpus; everything else is
+   * ``"operator"``. Optional so the widget tolerates backends that
+   * predate migration 0016 — absent reads as ``"operator"``.
+   */
+  origin?: "operator" | "demo";
 }
 
 export interface DocumentListResponse {

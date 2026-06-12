@@ -36,6 +36,7 @@ function ver(overrides: Partial<ApiDocumentVersion> = {}): ApiDocumentVersion {
 
 function doc(overrides: Partial<ApiDocument> = {}): ApiDocument {
   return {
+    origin: "operator",
     id: "doc-1",
     original_filename: "x.txt",
     latest_version_id: "ver-1",

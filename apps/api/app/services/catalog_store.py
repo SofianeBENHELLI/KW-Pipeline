@@ -7,14 +7,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from app.models.document import (
     ALLOWED_PREDECESSORS,
     DocumentVersionStatus,
     IllegalTransition,
 )
-from app.schemas.document import Document, DocumentVersion
+from app.schemas.document import Document, DocumentOrigin, DocumentVersion
 from app.schemas.extraction import RawExtraction
 from app.schemas.scope import Scope
 from app.schemas.semantic_document import SemanticDocument
@@ -369,6 +369,26 @@ class CatalogStore(Protocol):
         not persisted on the document row (the audit row carries it)
         but is part of the contract so callers and instrumentation
         agree on the shape.
+        """
+
+    def mark_documents_origin(
+        self,
+        filenames: frozenset[str],
+        *,
+        origin: DocumentOrigin,
+    ) -> int:
+        """Stamp ``documents.origin`` on every row whose
+        ``original_filename`` is in ``filenames``.
+
+        Owned by the demo-toggle service (Explorer Sprint 1): the
+        loader uploads through the public HTTP route (which always
+        writes ``origin='operator'`` via the column default), so the
+        service stamps the rows by filename after a successful load —
+        and again on reset, so rows from a crashed mid-flight load
+        still get tagged before they're archived. Idempotent; returns
+        the number of rows whose origin actually changed. Archived
+        rows are included so a reset→re-load cycle can't strand
+        mistagged rows.
         """
 
     def unarchive_document(
@@ -797,6 +817,22 @@ class InMemoryCatalogStore:
         # preserved (audit-faithful). Return the row either way.
         return document
 
+    def mark_documents_origin(
+        self,
+        filenames: frozenset[str],
+        *,
+        origin: DocumentOrigin,
+    ) -> int:
+        # In-place mutation mirrors ``flag_document_archived`` — held
+        # references observe the transition. Archived rows included by
+        # design (see the Protocol docstring).
+        changed = 0
+        for document in self.documents.values():
+            if document.original_filename in filenames and document.origin != origin:
+                document.origin = origin
+                changed += 1
+        return changed
+
     def unarchive_document(
         self,
         document_id: str,
@@ -956,14 +992,16 @@ class SQLiteCatalogStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO documents (id, original_filename, latest_version_id, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO documents
+                    (id, original_filename, latest_version_id, created_at, origin)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     document.id,
                     document.original_filename,
                     document.latest_version_id,
                     document.created_at.isoformat(),
+                    document.origin,
                 ),
             )
             self._insert_version(connection, version)
@@ -1392,6 +1430,15 @@ class SQLiteCatalogStore:
         # ``None`` via ``row.keys()`` would also work, but the explicit
         # guard documents the column contract.
         archived_at = row["archived_at"] if "archived_at" in row.keys() else None  # noqa: SIM118 — sqlite3.Row supports `in` only via .keys()
+        # Migration 0016 guarantees ``origin`` on every row; the guard
+        # mirrors the ``archived_at`` contract note above. The cast is
+        # sound because the column only ever receives DocumentOrigin
+        # values (default + ``mark_documents_origin`` are the only
+        # writers).
+        origin = cast(
+            "DocumentOrigin",
+            row["origin"] if "origin" in row.keys() else "operator",  # noqa: SIM118
+        )
         return Document(
             id=row["id"],
             original_filename=row["original_filename"],
@@ -1400,6 +1447,7 @@ class SQLiteCatalogStore:
             archived_at=archived_at,
             versions=versions,
             scopes=scopes if scopes is not None else [],
+            origin=origin,
         )
 
     def _batch_list_scopes(
@@ -1668,6 +1716,31 @@ class SQLiteCatalogStore:
         refreshed = self._get_document_including_archived(document_id)
         assert refreshed is not None  # we just confirmed existence
         return refreshed
+
+    def mark_documents_origin(
+        self,
+        filenames: frozenset[str],
+        *,
+        origin: DocumentOrigin,
+    ) -> int:
+        # Single UPDATE; archived rows intentionally included (see the
+        # Protocol docstring). The ``origin != ?`` predicate makes the
+        # returned rowcount mean "rows actually changed" so re-stamping
+        # is an honest no-op.
+        if not filenames:
+            return 0
+        names = tuple(filenames)
+        placeholders = ", ".join("?" for _ in names)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE documents
+                SET origin = ?
+                WHERE original_filename IN ({placeholders}) AND origin != ?
+                """,
+                (origin, *names, origin),
+            )
+            return int(cursor.rowcount)
 
     def list_archived_documents(
         self,

@@ -23,6 +23,7 @@ function makeJsonResponse(body: unknown, status = 200): Response {
 
 function makeDocument(status: DocumentVersionStatus): ApiDocument {
   return {
+    origin: "operator",
     id: "doc-001",
     original_filename: "test.txt",
     latest_version_id: "ver-001",

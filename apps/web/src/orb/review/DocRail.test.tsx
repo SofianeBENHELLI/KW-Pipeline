@@ -11,6 +11,7 @@ import { DocRail, type RailSort } from "./DocRail";
 
 const FIXTURE_DOCS: ApiDocument[] = [
   {
+    origin: "operator",
     id: "doc-a",
     original_filename: "alpha.md",
     latest_version_id: "ver-a",
@@ -39,6 +40,7 @@ const FIXTURE_DOCS: ApiDocument[] = [
     ],
   },
   {
+    origin: "operator",
     id: "doc-b",
     original_filename: "beta.md",
     latest_version_id: "ver-b",

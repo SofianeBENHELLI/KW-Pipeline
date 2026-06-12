@@ -102,7 +102,10 @@ async function request<T>(
   init: RequestInit & { baseUrl?: string } = {},
 ): Promise<T> {
   const baseUrl = init.baseUrl ?? getApiBaseUrl();
-  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, init);
+  const response = await fetchWithRetry(
+    baseUrl.replace(/\/$/, "") + path,
+    init,
+  );
   if (!response.ok) throw await asApiError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -113,14 +116,19 @@ async function requestText(
   init: RequestInit & { baseUrl?: string } = {},
 ): Promise<string> {
   const baseUrl = init.baseUrl ?? getApiBaseUrl();
-  const response = await fetchWithRetry(baseUrl.replace(/\/$/, "") + path, init);
+  const response = await fetchWithRetry(
+    baseUrl.replace(/\/$/, "") + path,
+    init,
+  );
   if (!response.ok) throw await asApiError(response);
   return response.text();
 }
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
-export function getHealth(opts: { baseUrl?: string; signal?: AbortSignal } = {}): Promise<Health> {
+export function getHealth(
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<Health> {
   return request<Health>("/health", opts);
 }
 
@@ -164,6 +172,12 @@ export function listDocuments(
     cursor?: string;
     status?: string[];
     q?: string;
+    /**
+     * When false, asks the backend to drop demo-corpus rows
+     * (``include_demo=false``, Explorer Sprint 1). Omitted/true
+     * keeps the legacy everything-visible behaviour.
+     */
+    includeDemo?: boolean;
     baseUrl?: string;
     signal?: AbortSignal;
   } = {},
@@ -174,6 +188,7 @@ export function listDocuments(
   if (opts.status && opts.status.length > 0) {
     for (const value of opts.status) params.append("status", value);
   }
+  if (opts.includeDemo === false) params.set("include_demo", "false");
   const trimmedQ = opts.q?.trim() ?? "";
   if (trimmedQ.length > 0) params.set("q", trimmedQ);
   return request<DocumentListResponse>(`/documents?${params.toString()}`, {
@@ -254,7 +269,12 @@ export function getKnowledgeTaxonomy(
 }
 
 export function getKnowledgeGraph(
-  opts: { limit?: number; cursor?: string; baseUrl?: string; signal?: AbortSignal } = {},
+  opts: {
+    limit?: number;
+    cursor?: string;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<KnowledgeGraphPage> {
   const params = new URLSearchParams();
   params.set("limit", String(opts.limit ?? 200));
@@ -294,11 +314,13 @@ export function exploreSearch(
 ): Promise<ExploreSearchResponse> {
   const params = new URLSearchParams();
   params.set("q", query);
-  if (opts.chunkLimit !== undefined) params.set("chunk_limit", String(opts.chunkLimit));
+  if (opts.chunkLimit !== undefined)
+    params.set("chunk_limit", String(opts.chunkLimit));
   if (opts.documentLimit !== undefined) {
     params.set("document_limit", String(opts.documentLimit));
   }
-  if (opts.topicLimit !== undefined) params.set("topic_limit", String(opts.topicLimit));
+  if (opts.topicLimit !== undefined)
+    params.set("topic_limit", String(opts.topicLimit));
   if (opts.contributingChunksPerDocument !== undefined) {
     params.set(
       "contributing_chunks_per_document",

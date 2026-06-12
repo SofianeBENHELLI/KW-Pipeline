@@ -98,6 +98,7 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         cursor: str | None = None,
         status: list[str] | None = Query(default=None),
         q: str | None = Query(default=None, max_length=200),
+        include_demo: bool = Query(default=True),
         caller_scopes: tuple[ScopeRef, ...] = Depends(get_caller_scopes),
         _user: User = Depends(require_viewer),
     ) -> Any:
@@ -110,6 +111,12 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
         - ``q`` is a case-insensitive substring match against the
           document's ``original_filename``. Trims whitespace; an empty
           string after trim is treated as "no filter".
+        - ``include_demo=false`` drops rows the demo-toggle loader
+          owns (``origin='demo'``, Explorer Sprint 1) so production
+          views can't mix fixture data with operator documents. Applied
+          post-fetch like the scoped status/filename filters, so a page
+          may come back shorter than ``limit`` while ``next_cursor``
+          still advances — same caveat those filters already carry.
         - Filters apply before pagination. Re-walking with a different
           filter requires dropping the cursor.
 
@@ -160,6 +167,8 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
                 status_code=400,
                 detail=f"Invalid cursor: {exc}",
             ) from exc
+        if not include_demo:
+            items = [doc for doc in items if doc.origin != "demo"]
         return {"items": items, "next_cursor": next_cursor}
 
     @router.get(

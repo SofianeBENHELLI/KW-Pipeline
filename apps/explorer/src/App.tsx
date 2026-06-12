@@ -23,14 +23,25 @@
  * everything below this layer reads the same `ExplorerSnapshot`.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
+import { SessionExpiredBanner, useSessionGuard } from "../../_shared/auth";
 import {
-  SessionExpiredBanner,
-  useSessionGuard,
-} from "../../_shared/auth";
-import { GraphCanvas, type FocusRoot, type NodeSelection } from "./components/GraphCanvas";
-import { DetailPanel, type DetailAction, type DetailNode } from "./components/DetailPanel";
+  GraphCanvas,
+  type FocusRoot,
+  type NodeSelection,
+} from "./components/GraphCanvas";
+import {
+  DetailPanel,
+  type DetailAction,
+  type DetailNode,
+} from "./components/DetailPanel";
 import { ChunkListPanel } from "./components/ChunkListPanel";
 import { Catalog, VersionBadges } from "./components/Catalog";
 import { Icon, NAVY2 } from "./components/icons";
@@ -68,7 +79,11 @@ import { useExplorerData } from "./state/use-explorer-data";
 
 type ViewId = "corpus" | "concepts" | "catalog";
 
-const VIEWS: Array<{ id: ViewId; label: string; icon: "globe" | "concept" | "doc" }> = [
+const VIEWS: Array<{
+  id: ViewId;
+  label: string;
+  icon: "globe" | "concept" | "doc";
+}> = [
   { id: "corpus", label: "Corpus Overview", icon: "globe" },
   { id: "concepts", label: "Concept Map", icon: "concept" },
   { id: "catalog", label: "Catalog", icon: "doc" },
@@ -137,8 +152,12 @@ export default function App(): React.ReactElement {
   const [selected, setSelected] = useState<NodeSelection | null>(null);
   const [openDocId, setOpenDocId] = useState<string | null>(null);
   const [highlightChunk, setHighlightChunk] = useState<string | null>(null);
-  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(() => new Set());
-  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(() => new Set());
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [conceptFocus, setConceptFocus] = useState<string>("");
   const [depth, setDepth] = useState<number>(3);
   const [search, setSearch] = useState<string>("");
@@ -146,8 +165,14 @@ export default function App(): React.ReactElement {
   // typeahead (``searchResults`` below) stays as a fallback when the
   // backend reports the route disabled (KW_VECTOR_SEARCH_DISABLED).
   // #320 partial — both filter knobs persist via the widget store.
-  const { validatedOnly, scoreThreshold, setValidatedOnly, setScoreThreshold } =
-    useSearchFilters();
+  const {
+    validatedOnly,
+    scoreThreshold,
+    hideDemo,
+    setValidatedOnly,
+    setScoreThreshold,
+    setHideDemo,
+  } = useSearchFilters();
   const exploreSnapshot = useExploreSearch(search, { apiBaseUrl });
   const [hovered, setHovered] = useState<string | null>(null);
   const [focusRoot, setFocusRoot] = useState<FocusRoot | null>(null);
@@ -158,17 +183,20 @@ export default function App(): React.ReactElement {
   // applied state actually consumed by the cluster rail and graph.
   // The Apply button copies draft → applied. Selection alone never
   // affects the visible corpus until the operator clicks Apply.
-  const [filters, setFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
-    () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
-  );
-  const [draftFilters, setDraftFilters] = useState<{ types: Set<string>; sources: Set<string> }>(
-    () => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }),
-  );
+  const [filters, setFilters] = useState<{
+    types: Set<string>;
+    sources: Set<string>;
+  }>(() => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }));
+  const [draftFilters, setDraftFilters] = useState<{
+    types: Set<string>;
+    sources: Set<string>;
+  }>(() => ({ types: new Set(Object.keys(DOC_TYPES)), sources: new Set() }));
   const filtersDirty = useMemo(() => {
     if (draftFilters.types.size !== filters.types.size) return true;
     for (const t of draftFilters.types) if (!filters.types.has(t)) return true;
     if (draftFilters.sources.size !== filters.sources.size) return true;
-    for (const s of draftFilters.sources) if (!filters.sources.has(s)) return true;
+    for (const s of draftFilters.sources)
+      if (!filters.sources.has(s)) return true;
     return false;
   }, [draftFilters, filters]);
   const applyFilters = useCallback(() => {
@@ -195,13 +223,27 @@ export default function App(): React.ReactElement {
   // "no source filter" (all sources pass) — that's the convention for
   // a dynamic chip set; ``filters.types`` is the inverse (every entry
   // in DOC_TYPES is opt-out so the empty set means "hide everything").
+  // Demo/operator separation (Explorer Sprint 1). ``hideDemo`` is the
+  // operator's persisted choice; ``null`` resolves to the auto rule:
+  // hide demo rows only when they coexist with operator documents, so
+  // a production corpus never silently mixes in fixture data while a
+  // pure-demo environment stays visible right after "Load demo".
+  const demoDocCount = useMemo(
+    () => snapshot.documents.filter((d) => d.origin === "demo").length,
+    [snapshot],
+  );
+  const operatorDocCount = snapshot.documents.length - demoDocCount;
+  const effectiveHideDemo =
+    hideDemo ?? (demoDocCount > 0 && operatorDocCount > 0);
   const docPassesFilters = useCallback(
     (d: ExplorerDocument) => {
+      if (effectiveHideDemo && d.origin === "demo") return false;
       if (!filters.types.has(d.type)) return false;
-      if (filters.sources.size > 0 && !filters.sources.has(d.source)) return false;
+      if (filters.sources.size > 0 && !filters.sources.has(d.source))
+        return false;
       return true;
     },
-    [filters],
+    [filters, effectiveHideDemo],
   );
   // Snapshot projected through the active filter — fed to ``GraphCanvas``
   // so the graph view honours the DOCUMENT TYPE / SOURCE checkboxes
@@ -219,7 +261,8 @@ export default function App(): React.ReactElement {
   // in the DetailPanel "VERSIONS" section can mount the same modal.
   // Null when closed; carries the full ExplorerDocument so the modal
   // can render directly from ``doc.versions`` without re-fetching.
-  const [lineageDocument, setLineageDocument] = useState<ExplorerDocument | null>(null);
+  const [lineageDocument, setLineageDocument] =
+    useState<ExplorerDocument | null>(null);
   const closeLineage = useCallback(() => setLineageDocument(null), []);
 
   // #318 partial — when the user clicks a doc-to-doc edge in the
@@ -320,7 +363,10 @@ export default function App(): React.ReactElement {
     },
     [snapshot],
   );
-  const expandAllClusters = useCallback(() => setExpandedClusters(new Set(allClusters)), [allClusters]);
+  const expandAllClusters = useCallback(
+    () => setExpandedClusters(new Set(allClusters)),
+    [allClusters],
+  );
   const collapseAll = useCallback(() => {
     setExpandedClusters(new Set());
     setExpandedDocs(new Set());
@@ -377,10 +423,14 @@ export default function App(): React.ReactElement {
   const focusFromNode = useCallback(
     (n: NodeSelection) => {
       let label = "";
-      if (n.kind === "cluster") label = CLUSTERS[n.cluster ?? n.id]?.label ?? n.id;
-      else if (n.kind === "doc") label = (n.doc ?? docById(snapshot, n.id))?.title ?? n.id;
-      else if (n.kind === "chunk") label = (n.chunk ?? chunkById(snapshot, n.id))?.label ?? n.id;
-      else if (n.kind === "concept") label = (n.concept ?? conceptById(snapshot, n.id))?.name ?? n.id;
+      if (n.kind === "cluster")
+        label = CLUSTERS[n.cluster ?? n.id]?.label ?? n.id;
+      else if (n.kind === "doc")
+        label = (n.doc ?? docById(snapshot, n.id))?.title ?? n.id;
+      else if (n.kind === "chunk")
+        label = (n.chunk ?? chunkById(snapshot, n.id))?.label ?? n.id;
+      else if (n.kind === "concept")
+        label = (n.concept ?? conceptById(snapshot, n.id))?.name ?? n.id;
       const next: FocusRoot = {
         kind: n.kind,
         id: n.kind === "cluster" ? (n.cluster ?? n.id) : n.id,
@@ -518,7 +568,14 @@ export default function App(): React.ReactElement {
     (action: DetailAction) => {
       if (action.kind === "focusRoot") {
         const n = action.node;
-        focusFromNode({ kind: n.kind, id: n.id, doc: n.doc, chunk: n.chunk, concept: n.concept, cluster: n.cluster });
+        focusFromNode({
+          kind: n.kind,
+          id: n.id,
+          doc: n.doc,
+          chunk: n.chunk,
+          concept: n.concept,
+          cluster: n.cluster,
+        });
         return;
       }
       if (action.kind === "expand") {
@@ -549,7 +606,7 @@ export default function App(): React.ReactElement {
     [focusFromNode, snapshot],
   );
 
-  const openDoc = openDocId ? docById(snapshot, openDocId) ?? null : null;
+  const openDoc = openDocId ? (docById(snapshot, openDocId) ?? null) : null;
   // ``navChunk`` (prev/next within the open doc's chunks) was wired
   // to the old DocViewer's chunk navigator. The new ChunkListPanel
   // exposes the chunks as a clickable list directly, so the explicit
@@ -564,16 +621,16 @@ export default function App(): React.ReactElement {
     // adjacent fields so a query like "compliance" matches a doc by
     // its source/cluster, a chunk by its summary/kind, or a concept
     // by its synonyms/kind.
-    const docMatch = (d: typeof snapshot.documents[number]): boolean =>
+    const docMatch = (d: (typeof snapshot.documents)[number]): boolean =>
       d.title.toLowerCase().includes(q) ||
       d.cluster.toLowerCase().includes(q) ||
       d.source.toLowerCase().includes(q) ||
       d.type.toLowerCase().includes(q);
-    const conceptMatch = (k: typeof snapshot.concepts[number]): boolean =>
+    const conceptMatch = (k: (typeof snapshot.concepts)[number]): boolean =>
       k.name.toLowerCase().includes(q) ||
       k.kind.toLowerCase().includes(q) ||
       k.syn.some((s) => s.toLowerCase().includes(q));
-    const chunkMatch = (c: typeof snapshot.chunks[number]): boolean =>
+    const chunkMatch = (c: (typeof snapshot.chunks)[number]): boolean =>
       c.label.toLowerCase().includes(q) ||
       c.summary.toLowerCase().includes(q) ||
       c.kind.toLowerCase().includes(q);
@@ -594,10 +651,22 @@ export default function App(): React.ReactElement {
     return {
       kind: selected.kind,
       id: selected.id,
-      doc: selected.kind === "doc" ? selected.doc ?? docById(snapshot, selected.id) : undefined,
-      chunk: selected.kind === "chunk" ? selected.chunk ?? chunkById(snapshot, selected.id) : undefined,
-      concept: selected.kind === "concept" ? selected.concept ?? conceptById(snapshot, selected.id) : undefined,
-      cluster: selected.kind === "cluster" ? selected.cluster ?? selected.id : undefined,
+      doc:
+        selected.kind === "doc"
+          ? (selected.doc ?? docById(snapshot, selected.id))
+          : undefined,
+      chunk:
+        selected.kind === "chunk"
+          ? (selected.chunk ?? chunkById(snapshot, selected.id))
+          : undefined,
+      concept:
+        selected.kind === "concept"
+          ? (selected.concept ?? conceptById(snapshot, selected.id))
+          : undefined,
+      cluster:
+        selected.kind === "cluster"
+          ? (selected.cluster ?? selected.id)
+          : undefined,
     };
   }, [selected, snapshot]);
 
@@ -635,14 +704,22 @@ export default function App(): React.ReactElement {
       return `${expandedClusters.size}/${allClusters.length} CLUSTERS · ${expandedDocs.size}/${snapshot.documents.length} DOCS EXPANDED`;
     }
     return `CONCEPT · ${conceptById(snapshot, conceptFocus)?.name ?? "—"}`;
-  }, [view, expandedClusters, expandedDocs, allClusters, snapshot, conceptFocus]);
+  }, [
+    view,
+    expandedClusters,
+    expandedDocs,
+    allClusters,
+    snapshot,
+    conceptFocus,
+  ]);
 
   const breadCrumbSelected = useMemo(() => {
     if (!detailNode) return null;
     if (detailNode.doc) return detailNode.doc.title;
     if (detailNode.chunk) return detailNode.chunk.label;
     if (detailNode.concept) return detailNode.concept.name;
-    if (detailNode.cluster) return CLUSTERS[detailNode.cluster]?.label ?? detailNode.cluster;
+    if (detailNode.cluster)
+      return CLUSTERS[detailNode.cluster]?.label ?? detailNode.cluster;
     return null;
   }, [detailNode]);
 
@@ -726,7 +803,11 @@ export default function App(): React.ReactElement {
             aria-label="Search corpus"
           />
           {search && (
-            <button className="kx-search-x" onClick={() => setSearch("")} aria-label="Clear search">
+            <button
+              className="kx-search-x"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+            >
               <Icon name="x" size={11} />
             </button>
           )}
@@ -796,7 +877,10 @@ export default function App(): React.ReactElement {
                 }}
                 render={(d) => (
                   <>
-                    <span className="kx-doc-chip kx-sm" style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}>
+                    <span
+                      className="kx-doc-chip kx-sm"
+                      style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}
+                    >
                       {DOC_TYPES[d.type]?.short ?? "DOC"}
                     </span>
                     {d.title}
@@ -848,7 +932,10 @@ export default function App(): React.ReactElement {
                   </>
                 )}
               />
-              {searchResults.docs.length + searchResults.concepts.length + searchResults.chunks.length === 0 && (
+              {searchResults.docs.length +
+                searchResults.concepts.length +
+                searchResults.chunks.length ===
+                0 && (
                 <div className="kx-search-empty">
                   No matches for &quot;<b>{search}</b>&quot;
                 </div>
@@ -907,8 +994,8 @@ export default function App(): React.ReactElement {
             )}
             {data.mode === "empty" && (
               <div className="kx-empty-banner">
-                <Icon name="info" size={11} /> No documents yet. Upload one via Orbital
-                to populate the corpus.
+                <Icon name="info" size={11} /> No documents yet. Upload one via
+                Orbital to populate the corpus.
               </div>
             )}
             {/* #321 — knowledge-graph cursor walk hit its page
@@ -924,8 +1011,34 @@ export default function App(): React.ReactElement {
                 data-testid="kx-graph-truncated-banner"
                 title="Refine clusters or use search to focus on specific documents"
               >
-                <Icon name="info" size={11} /> Graph truncated — showing first ~5,000 nodes
+                <Icon name="info" size={11} /> Graph truncated — showing first
+                ~5,000 nodes
               </div>
+            )}
+            {/* Sprint 1 — demo/operator separation. Only rendered
+                when demo rows exist; the chip states what is hidden
+                or shown and flips the persisted preference. */}
+            {demoDocCount > 0 && (
+              <button
+                type="button"
+                className={
+                  "kx-demo-visibility" +
+                  (effectiveHideDemo ? " kx-demo-visibility--hidden" : "")
+                }
+                data-testid="kx-demo-visibility-toggle"
+                onClick={() => setHideDemo(!effectiveHideDemo)}
+                title={
+                  effectiveHideDemo
+                    ? `${demoDocCount} demo document(s) hidden — click to show them alongside operator data`
+                    : `${demoDocCount} demo document(s) visible — click to hide them`
+                }
+              >
+                <Icon name={effectiveHideDemo ? "info" : "warn"} size={11} />{" "}
+                Demo data ·{" "}
+                {effectiveHideDemo
+                  ? `hidden (${demoDocCount})`
+                  : `shown (${demoDocCount})`}
+              </button>
             )}
           </Section>
 
@@ -936,10 +1049,18 @@ export default function App(): React.ReactElement {
                 <span className="kx-mono kx-mute">
                   {expandedClusters.size}/{allClusters.length}
                 </span>
-                <button className="kx-mini-btn" onClick={expandAllClusters} title="Expand all clusters">
+                <button
+                  className="kx-mini-btn"
+                  onClick={expandAllClusters}
+                  title="Expand all clusters"
+                >
                   <Icon name="expand" size={11} />
                 </button>
-                <button className="kx-mini-btn" onClick={collapseAll} title="Collapse all">
+                <button
+                  className="kx-mini-btn"
+                  onClick={collapseAll}
+                  title="Collapse all"
+                >
                   <Icon name="collapse" size={11} />
                 </button>
               </div>
@@ -948,10 +1069,18 @@ export default function App(): React.ReactElement {
                 <span className="kx-mono kx-mute">
                   {expandedDocs.size}/{snapshot.documents.length}
                 </span>
-                <button className="kx-mini-btn" onClick={expandAllDocs} title="Expand all docs to chunks">
+                <button
+                  className="kx-mini-btn"
+                  onClick={expandAllDocs}
+                  title="Expand all docs to chunks"
+                >
                   <Icon name="expand" size={11} />
                 </button>
-                <button className="kx-mini-btn" onClick={collapseAllDocs} title="Collapse all docs">
+                <button
+                  className="kx-mini-btn"
+                  onClick={collapseAllDocs}
+                  title="Collapse all docs"
+                >
                   <Icon name="collapse" size={11} />
                 </button>
               </div>
@@ -979,11 +1108,19 @@ export default function App(): React.ReactElement {
                 if (docs.length === 0 && source !== "imposed") return null;
                 return (
                   <div key={ck} className="kx-cl-block">
-                    <div className={"kx-cl-row" + (isExp ? " kx-on" : "")} onClick={() => toggleCluster(ck)}>
-                      <Icon name={isExp ? "chevron-down" : "chevron-right"} size={11} />
+                    <div
+                      className={"kx-cl-row" + (isExp ? " kx-on" : "")}
+                      onClick={() => toggleCluster(ck)}
+                    >
+                      <Icon
+                        name={isExp ? "chevron-down" : "chevron-right"}
+                        size={11}
+                      />
                       <span
                         className="kx-cl-dot"
-                        style={{ background: `oklch(0.78 0.06 ${meta?.hue ?? 200})` }}
+                        style={{
+                          background: `oklch(0.78 0.06 ${meta?.hue ?? 200})`,
+                        }}
                       />
                       <span className="kx-cl-name">{meta?.label ?? ck}</span>
                       <ClusterSourceBadge source={source} />
@@ -996,7 +1133,10 @@ export default function App(): React.ReactElement {
                           return (
                             <div
                               key={d.id}
-                              className={"kx-cl-doc" + (selected?.id === d.id ? " kx-on" : "")}
+                              className={
+                                "kx-cl-doc" +
+                                (selected?.id === d.id ? " kx-on" : "")
+                              }
                               onClick={() => selectById(d.id, "doc")}
                             >
                               <button
@@ -1005,24 +1145,35 @@ export default function App(): React.ReactElement {
                                   e.stopPropagation();
                                   toggleDoc(d.id);
                                 }}
-                                title={dExp ? "Collapse chunks" : "Expand to chunks"}
-                                aria-label={dExp ? "Collapse chunks" : "Expand to chunks"}
+                                title={
+                                  dExp ? "Collapse chunks" : "Expand to chunks"
+                                }
+                                aria-label={
+                                  dExp ? "Collapse chunks" : "Expand to chunks"
+                                }
                               >
                                 <Icon name={dExp ? "minus" : "plus"} size={9} />
                               </button>
                               <span
                                 className="kx-doc-chip kx-sm"
-                                style={{ background: DOC_TYPES[d.type]?.color ?? "#888" }}
+                                style={{
+                                  background:
+                                    DOC_TYPES[d.type]?.color ?? "#888",
+                                }}
                               >
                                 {DOC_TYPES[d.type]?.short ?? "DOC"}
                               </span>
-                              <span className="kx-cl-doc-t">{truncate(d.title, 22)}</span>
+                              <span className="kx-cl-doc-t">
+                                {truncate(d.title, 22)}
+                              </span>
                               <VersionBadges
                                 versionCount={d.versionCount ?? 1}
                                 latest={d.latestVersion ?? 1}
                                 onOpenLineage={() => setLineageDocument(d)}
                               />
-                              <span className="kx-mono kx-mute">{d.chunks}</span>
+                              <span className="kx-mono kx-mute">
+                                {d.chunks}
+                              </span>
                             </div>
                           );
                         })}
@@ -1086,7 +1237,9 @@ export default function App(): React.ReactElement {
                 <button
                   type="button"
                   className="kx-mini-btn"
-                  onClick={() => setDraftFilters((f) => ({ ...f, sources: new Set() }))}
+                  onClick={() =>
+                    setDraftFilters((f) => ({ ...f, sources: new Set() }))
+                  }
                   title="Clear all source filters (show every source)"
                   aria-label="Clear source filters"
                 >
@@ -1097,7 +1250,8 @@ export default function App(): React.ReactElement {
           >
             {knownSources.length === 0 ? (
               <p className="kx-tax-status" style={{ marginTop: 0 }}>
-                No sources known yet — they appear here once documents are uploaded.
+                No sources known yet — they appear here once documents are
+                uploaded.
               </p>
             ) : (
               knownSources.map((src) => (
@@ -1113,7 +1267,9 @@ export default function App(): React.ReactElement {
                     })
                   }
                   label={src}
-                  count={snapshot.documents.filter((d) => d.source === src).length}
+                  count={
+                    snapshot.documents.filter((d) => d.source === src).length
+                  }
                 />
               ))
             )}
@@ -1200,7 +1356,9 @@ export default function App(): React.ReactElement {
                   <>
                     <Icon name="focus" size={11} />
                     <span className="kx-nav-label">{focusRoot.label}</span>
-                    <span className="kx-mono kx-mute">depth {DEPTH_LABEL(depth)}</span>
+                    <span className="kx-mono kx-mute">
+                      depth {DEPTH_LABEL(depth)}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -1210,21 +1368,33 @@ export default function App(): React.ReactElement {
                 )}
               </div>
               {history.length > 0 && (
-                <span className="kx-mono kx-mute kx-nav-trail">{history.length} back</span>
+                <span className="kx-mono kx-mute kx-nav-trail">
+                  {history.length} back
+                </span>
               )}
             </div>
             <div className="kx-bread">
               <Icon name="compass" size={12} stroke={NAVY2} />
               <span className="kx-mono">{breadCrumb}</span>
               {breadCrumbSelected && <span className="kx-bread-sep">›</span>}
-              {breadCrumbSelected && <span className="kx-bread-cur">{breadCrumbSelected}</span>}
+              {breadCrumbSelected && (
+                <span className="kx-bread-cur">{breadCrumbSelected}</span>
+              )}
             </div>
             <div className="kx-canvas-tools">
-              <button className="kx-tool-btn" onClick={expandAllClusters} title="Expand all clusters">
+              <button
+                className="kx-tool-btn"
+                onClick={expandAllClusters}
+                title="Expand all clusters"
+              >
                 <Icon name="expand" size={12} />
                 Expand clusters
               </button>
-              <button className="kx-tool-btn" onClick={collapseAll} title="Collapse all">
+              <button
+                className="kx-tool-btn"
+                onClick={collapseAll}
+                title="Collapse all"
+              >
                 <Icon name="collapse" size={12} />
                 Collapse all
               </button>
@@ -1258,12 +1428,20 @@ export default function App(): React.ReactElement {
                 <span className="kx-pill kx-pill-focus">
                   <Icon name="focus" size={11} />
                   Focused: {focusRoot.label}
-                  <button onClick={goHome} title="Clear focus" aria-label="Clear focus">
+                  <button
+                    onClick={goHome}
+                    title="Clear focus"
+                    aria-label="Clear focus"
+                  >
                     <Icon name="x" size={10} />
                   </button>
                 </span>
               )}
-              <button className="kx-tool-btn" onClick={reset} title="Reset selection and focus">
+              <button
+                className="kx-tool-btn"
+                onClick={reset}
+                title="Reset selection and focus"
+              >
                 <Icon name="reset" size={12} />
                 Reset
               </button>
@@ -1275,6 +1453,7 @@ export default function App(): React.ReactElement {
               <Catalog
                 apiBaseUrl={apiBaseUrl}
                 refreshTick={refreshTick}
+                hideDemo={effectiveHideDemo}
                 selectedId={selected?.kind === "doc" ? selected.id : null}
                 focusedDocumentId={
                   focusRoot?.kind === "doc" ? focusRoot.id : null
@@ -1361,11 +1540,14 @@ export default function App(): React.ReactElement {
               <Icon name="shield" size={11} stroke="#3F8E60" /> READ-ONLY
             </div>
             <div className="kx-canvas-foot">
-              <span className="kx-foot-l">VIEW</span> <span className="kx-mono">{view.toUpperCase()}</span>
+              <span className="kx-foot-l">VIEW</span>{" "}
+              <span className="kx-mono">{view.toUpperCase()}</span>
               <span className="kx-foot-l">·</span>
-              <span className="kx-foot-l">NODES</span> <span className="kx-mono">{visibleNodeCount}</span>
+              <span className="kx-foot-l">NODES</span>{" "}
+              <span className="kx-mono">{visibleNodeCount}</span>
               <span className="kx-foot-l">·</span>
-              <span className="kx-foot-l">DEPTH</span> <span className="kx-mono">{DEPTH_LABEL(depth)}</span>
+              <span className="kx-foot-l">DEPTH</span>{" "}
+              <span className="kx-mono">{DEPTH_LABEL(depth)}</span>
             </div>
           </div>
         </section>
@@ -1400,7 +1582,13 @@ export default function App(): React.ReactElement {
         )}
       </div>
 
-      {tweaksOpen && <TweaksOverlay tweaks={tweaks} setTweak={setTweak} onClose={() => setTweaksOpen(false)} />}
+      {tweaksOpen && (
+        <TweaksOverlay
+          tweaks={tweaks}
+          setTweak={setTweak}
+          onClose={() => setTweaksOpen(false)}
+        />
+      )}
       <SettingsModal
         apiBaseUrl={apiBaseUrl}
         open={settingsOpen}
@@ -1463,11 +1651,11 @@ function toLineageOnlyDocument(apiDoc: ApiDocument): ExplorerDocument {
 
 // ─── Sub-components (kept inline because they're tightly coupled) ────────────
 
-const Section: React.FC<{ title: string; right?: React.ReactNode; children: React.ReactNode }> = ({
-  title,
-  right,
-  children,
-}) => (
+const Section: React.FC<{
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, right, children }) => (
   <div className="kx-sec">
     <div className="kx-sec-t">
       <span>{title}</span>
@@ -1494,18 +1682,24 @@ const Stat: React.FC<{ n: number; l: string }> = ({ n, l }) => (
  * Tooltip explains the source so the affordance is discoverable
  * without opening a modal.
  */
-const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({ source }) => {
+const ClusterSourceBadge: React.FC<{ source: "computed" | "imposed" }> = ({
+  source,
+}) => {
   const isImposed = source === "imposed";
   return (
     <span
-      className={"kx-cl-src" + (isImposed ? " kx-cl-src-imposed" : " kx-cl-src-auto")}
+      className={
+        "kx-cl-src" + (isImposed ? " kx-cl-src-imposed" : " kx-cl-src-auto")
+      }
       title={
         isImposed
           ? "Imposed by operator (YAML taxonomy)"
           : "Auto-deduced from topic clustering"
       }
       data-testid={isImposed ? "kx-cl-src-imposed" : "kx-cl-src-auto"}
-      aria-label={isImposed ? "imposed taxonomy category" : "auto-deduced cluster"}
+      aria-label={
+        isImposed ? "imposed taxonomy category" : "auto-deduced cluster"
+      }
     >
       {isImposed ? "imposed" : "auto"}
     </span>
@@ -1581,7 +1775,9 @@ const TaxonomyImporter: React.FC<TaxonomyImporterProps> = ({ apiBaseUrl }) => {
       const response = await getKnowledgeTaxonomy({ baseUrl: apiBaseUrl });
       const yamlText = taxonomyResponseToYaml(response);
       triggerYamlDownload(yamlText, taxonomyExportFilename());
-      setStatus(`Exported ${response.categories.length} top-level categories to YAML.`);
+      setStatus(
+        `Exported ${response.categories.length} top-level categories to YAML.`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStatus(`Export failed: ${message}`);
@@ -1593,8 +1789,9 @@ const TaxonomyImporter: React.FC<TaxonomyImporterProps> = ({ apiBaseUrl }) => {
   return (
     <div className="kx-tax-importer">
       <p className="kx-tax-help">
-        Import an external taxonomy. Supported standards: SKOS (RDF/XML, Turtle, JSON-LD), CSV, YAML.
-        Export rounds the current merged taxonomy back to YAML for offline editing.
+        Import an external taxonomy. Supported standards: SKOS (RDF/XML, Turtle,
+        JSON-LD), CSV, YAML. Export rounds the current merged taxonomy back to
+        YAML for offline editing.
       </p>
       <div className="kx-tax-actions">
         <button type="button" className="kx-tax-btn" onClick={onPick}>
@@ -1632,7 +1829,13 @@ interface FilterRowProps {
   count: number;
 }
 
-const FilterRow: React.FC<FilterRowProps> = ({ checked, onChange, color, label, count }) => (
+const FilterRow: React.FC<FilterRowProps> = ({
+  checked,
+  onChange,
+  color,
+  label,
+  count,
+}) => (
   <label className="kx-filter">
     <span className={"kx-check" + (checked ? " kx-on" : "")} onClick={onChange}>
       {checked && <Icon name="check" size={9} stroke="white" />}
@@ -1703,7 +1906,11 @@ interface TweaksOverlayProps {
   onClose: () => void;
 }
 
-const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose }) => (
+const TweaksOverlay: React.FC<TweaksOverlayProps> = ({
+  tweaks,
+  setTweak,
+  onClose,
+}) => (
   <div
     role="dialog"
     aria-label="Tweaks"
@@ -1720,11 +1927,22 @@ const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose
       padding: 14,
     }}
   >
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 10,
+      }}
+    >
       <div className="kx-mono kx-mute" style={{ letterSpacing: "0.12em" }}>
         TWEAKS
       </div>
-      <button className="kx-icon-btn" onClick={onClose} aria-label="Close tweaks">
+      <button
+        className="kx-icon-btn"
+        onClick={onClose}
+        aria-label="Close tweaks"
+      >
         <Icon name="x" size={12} />
       </button>
     </div>
@@ -1760,7 +1978,10 @@ const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose
       />
     </TweaksRow>
     <TweaksRow label="Cluster halos">
-      <Toggle value={tweaks.showClusters} onChange={(v) => setTweak("showClusters", v)} />
+      <Toggle
+        value={tweaks.showClusters}
+        onChange={(v) => setTweak("showClusters", v)}
+      />
     </TweaksRow>
     {/*
       Bug C — "Viewer panel" used to live here. It's now a first-class
@@ -1769,13 +1990,27 @@ const TweaksOverlay: React.FC<TweaksOverlayProps> = ({ tweaks, setTweak, onClose
       relocation is UI-only.
     */}
     <TweaksRow label="Confidence heatmap">
-      <Toggle value={tweaks.showConfHeat} onChange={(v) => setTweak("showConfHeat", v)} />
+      <Toggle
+        value={tweaks.showConfHeat}
+        onChange={(v) => setTweak("showConfHeat", v)}
+      />
     </TweaksRow>
   </div>
 );
 
-const TweaksRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", fontSize: 12 }}>
+const TweaksRow: React.FC<{ label: string; children: React.ReactNode }> = ({
+  label,
+  children,
+}) => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "6px 0",
+      fontSize: 12,
+    }}
+  >
     <span style={{ color: "var(--ink-2)" }}>{label}</span>
     {children}
   </div>
@@ -1787,7 +2022,11 @@ interface SegmentedRadioProps {
   options: Array<{ value: string; label: string }>;
 }
 
-const SegmentedRadio: React.FC<SegmentedRadioProps> = ({ value, onChange, options }) => (
+const SegmentedRadio: React.FC<SegmentedRadioProps> = ({
+  value,
+  onChange,
+  options,
+}) => (
   <div className="kx-views" style={{ padding: 1 }}>
     {options.map((o) => (
       <button
@@ -1802,7 +2041,10 @@ const SegmentedRadio: React.FC<SegmentedRadioProps> = ({ value, onChange, option
   </div>
 );
 
-const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({ value, onChange }) => (
+const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
+  value,
+  onChange,
+}) => (
   <button
     className={"kx-check" + (value ? " kx-on" : "")}
     onClick={() => onChange(!value)}

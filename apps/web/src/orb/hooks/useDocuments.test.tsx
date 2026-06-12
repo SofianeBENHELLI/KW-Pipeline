@@ -29,6 +29,7 @@ const EMPTY_PAGE: ListDocumentsResponse = { items: [], next_cursor: null };
 const ONE_DOC: ListDocumentsResponse = {
   items: [
     {
+      origin: "operator",
       id: "doc-1",
       original_filename: "x.txt",
       latest_version_id: "ver-1",

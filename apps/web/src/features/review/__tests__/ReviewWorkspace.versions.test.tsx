@@ -56,6 +56,7 @@ function makeDocument(
     makeVersion(n, idx === versionNumbers.length - 1 ? latestStatus : "VALIDATED"),
   );
   return {
+    origin: "operator",
     id: "doc-001",
     original_filename: "test.txt",
     latest_version_id: versions[versions.length - 1].id,

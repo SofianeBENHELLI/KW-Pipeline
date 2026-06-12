@@ -782,6 +782,12 @@ export interface paths {
          *     - ``q`` is a case-insensitive substring match against the
          *       document's ``original_filename``. Trims whitespace; an empty
          *       string after trim is treated as "no filter".
+         *     - ``include_demo=false`` drops rows the demo-toggle loader
+         *       owns (``origin='demo'``, Explorer Sprint 1) so production
+         *       views can't mix fixture data with operator documents. Applied
+         *       post-fetch like the scoped status/filename filters, so a page
+         *       may come back shorter than ``limit`` while ``next_cursor``
+         *       still advances — same caveat those filters already carry.
          *     - Filters apply before pagination. Re-walking with a different
          *       filter requires dropping the cursor.
          *
@@ -3235,6 +3241,14 @@ export interface components {
          *     inline test fixtures, ``with_first_version``) terse — those callers
          *     still serialize a present-but-empty list, which the OpenAPI
          *     contract marks as required (defaults required = wire-honest).
+         *
+         *     ``origin`` separates the bundled demo corpus from operator data
+         *     (Explorer enterprise plan, Sprint 1). ``demo`` rows are written by
+         *     the demo-toggle loader (stamped post-load by filename) and
+         *     backfilled by migration ``0016_document_origin``; everything else
+         *     is ``operator``. Read surfaces use it for the DEMO badge and the
+         *     ``include_demo=false`` list filter so demo fixtures can never be
+         *     mistaken for production documents again.
          */
         Document: {
             /** Archived At */
@@ -3248,6 +3262,12 @@ export interface components {
             id: string;
             /** Latest Version Id */
             latest_version_id: string;
+            /**
+             * Origin
+             * @default operator
+             * @enum {string}
+             */
+            origin: "operator" | "demo";
             /** Original Filename */
             original_filename: string;
             /** Scopes */
@@ -6206,6 +6226,7 @@ export interface operations {
                 cursor?: string | null;
                 status?: string[] | null;
                 q?: string | null;
+                include_demo?: boolean;
                 scope_kind?: string | null;
                 scope_ref?: string | null;
             };

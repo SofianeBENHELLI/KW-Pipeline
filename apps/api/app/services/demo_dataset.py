@@ -313,6 +313,11 @@ class DemoDatasetService:
         want the bytes gone too. The KG subgraph is left to the
         existing archive cascade (out of scope for the toggle).
         """
+        # Re-stamp provenance before archiving so rows left behind by a
+        # crashed mid-flight load (which never reached the post-load
+        # stamp) still get tagged ``origin='demo'`` on their way out.
+        self._catalog.mark_documents_origin(DEMO_FIXTURE_FILENAMES, origin="demo")
+
         archived_at = datetime.now(UTC)
         for document in self._iter_documents(include_archived=False):
             if document.original_filename in DEMO_FIXTURE_FILENAMES:
@@ -423,6 +428,17 @@ class DemoDatasetService:
                 state["last_error"] = _truncate(str(exc), limit=500)
                 self._write_state(state)
             return
+
+        # Stamp provenance on the freshly-loaded rows (Explorer Sprint
+        # 1). The loader uploads through the public HTTP route, which
+        # always writes ``origin='operator'`` via the column default —
+        # the post-load stamp by fixture filename is what makes demo
+        # rows first-class distinguishable on every read surface.
+        try:
+            stamped = self._catalog.mark_documents_origin(DEMO_FIXTURE_FILENAMES, origin="demo")
+            log.info("demo_dataset.load.origin_stamped", extra={"rows": stamped})
+        except Exception:  # noqa: BLE001 — stamping must not wedge the toggle
+            log.exception("demo_dataset.load.origin_stamp_failed")
 
         with _STATE_LOCK:
             state = self._read_state()

@@ -13,6 +13,7 @@ import { documentScopes } from "./document";
 
 function makeDocument(overrides: Partial<ApiDocument> = {}): ApiDocument {
   return {
+    origin: "operator",
     id: "doc-001",
     original_filename: "test.txt",
     latest_version_id: "ver-001",

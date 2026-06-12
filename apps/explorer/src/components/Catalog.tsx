@@ -28,12 +28,24 @@ const SEARCH_DEBOUNCE_MS = 250;
 // EXTRACTING, EXTRACTED, SEMANTIC_READY) is internal pipeline state
 // that an operator-facing catalog rarely filters on. The ``All``
 // chip means no ``?status=`` query param.
-const STATUS_FILTERS: { id: string; label: string; statuses: DocumentVersionStatus[] }[] = [
+const STATUS_FILTERS: {
+  id: string;
+  label: string;
+  statuses: DocumentVersionStatus[];
+}[] = [
   { id: "all", label: "All", statuses: [] },
   { id: "uploaded", label: "Uploaded", statuses: ["UPLOADED"] },
-  { id: "review", label: "Needs review", statuses: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"] },
+  {
+    id: "review",
+    label: "Needs review",
+    statuses: ["NEEDS_REVIEW", "DUPLICATE_DETECTED"],
+  },
   { id: "validated", label: "Validated", statuses: ["VALIDATED"] },
-  { id: "rejected", label: "Rejected/Failed", statuses: ["REJECTED", "FAILED"] },
+  {
+    id: "rejected",
+    label: "Rejected/Failed",
+    statuses: ["REJECTED", "FAILED"],
+  },
 ];
 
 type SortKey = "filename" | "status" | "versions" | "latest" | "ingested";
@@ -67,6 +79,13 @@ interface Props {
    * double-click and the App handles the ordering.
    */
   onFocusDocument?: (doc: Document) => void;
+  /**
+   * Sprint 1 demo/operator separation — when true, demo-corpus
+   * rows (``origin === "demo"``) are dropped from the table so the
+   * catalog matches the graph's hide-demo state. Rows that remain
+   * visible carry a DEMO badge either way.
+   */
+  hideDemo?: boolean;
 }
 
 function classifyExt(filename: string): DocTypeKey {
@@ -120,6 +139,7 @@ export const Catalog: React.FC<Props> = ({
   onOpenLineage,
   focusedDocumentId,
   onFocusDocument,
+  hideDemo = false,
 }) => {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -128,7 +148,10 @@ export const Catalog: React.FC<Props> = ({
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
+    const t = window.setTimeout(
+      () => setDebouncedQuery(query),
+      SEARCH_DEBOUNCE_MS,
+    );
     return () => window.clearTimeout(t);
   }, [query]);
 
@@ -159,9 +182,11 @@ export const Catalog: React.FC<Props> = ({
           return sign * (a.versions.length - b.versions.length);
         case "latest": {
           const al =
-            a.versions.find((v) => v.id === a.latest_version_id)?.version_number ?? 0;
+            a.versions.find((v) => v.id === a.latest_version_id)
+              ?.version_number ?? 0;
           const bl =
-            b.versions.find((v) => v.id === b.latest_version_id)?.version_number ?? 0;
+            b.versions.find((v) => v.id === b.latest_version_id)
+              ?.version_number ?? 0;
           return sign * (al - bl);
         }
         case "status": {
@@ -173,7 +198,11 @@ export const Catalog: React.FC<Props> = ({
         }
         case "ingested":
         default:
-          return sign * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+          return (
+            sign *
+            (new Date(a.created_at).getTime() -
+              new Date(b.created_at).getTime())
+          );
       }
     });
     return next;
@@ -185,9 +214,12 @@ export const Catalog: React.FC<Props> = ({
   // to the full sorted list whenever the focus is null or scoped to
   // a non-doc kind (cluster / chunk / concept).
   const visibleItems = useMemo(() => {
-    if (!focusedDocumentId) return sortedItems;
-    return sortedItems.filter((d) => d.id === focusedDocumentId);
-  }, [sortedItems, focusedDocumentId]);
+    const base = hideDemo
+      ? sortedItems.filter((d) => d.origin !== "demo")
+      : sortedItems;
+    if (!focusedDocumentId) return base;
+    return base.filter((d) => d.id === focusedDocumentId);
+  }, [sortedItems, focusedDocumentId, hideDemo]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -214,7 +246,11 @@ export const Catalog: React.FC<Props> = ({
             aria-label="Search filenames"
           />
         </div>
-        <div className="kx-cat-chips" role="tablist" aria-label="Filter by status">
+        <div
+          className="kx-cat-chips"
+          role="tablist"
+          aria-label="Filter by status"
+        >
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.id}
@@ -256,7 +292,11 @@ export const Catalog: React.FC<Props> = ({
                 className="kx-cat-col-name"
                 onClick={() => toggleSort("filename")}
                 aria-sort={
-                  sortKey === "filename" ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+                  sortKey === "filename"
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
                 }
               >
                 Filename{sortIndicator("filename")}
@@ -266,7 +306,11 @@ export const Catalog: React.FC<Props> = ({
                 className="kx-cat-col-status"
                 onClick={() => toggleSort("status")}
                 aria-sort={
-                  sortKey === "status" ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+                  sortKey === "status"
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
                 }
               >
                 Status{sortIndicator("status")}
@@ -288,7 +332,11 @@ export const Catalog: React.FC<Props> = ({
                 className="kx-cat-col-latest"
                 onClick={() => toggleSort("latest")}
                 aria-sort={
-                  sortKey === "latest" ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+                  sortKey === "latest"
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
                 }
               >
                 Latest{sortIndicator("latest")}
@@ -313,7 +361,8 @@ export const Catalog: React.FC<Props> = ({
               const latest =
                 doc.versions.find((v) => v.id === doc.latest_version_id) ??
                 doc.versions[doc.versions.length - 1];
-              const status = latest?.status ?? ("UPLOADED" as DocumentVersionStatus);
+              const status =
+                latest?.status ?? ("UPLOADED" as DocumentVersionStatus);
               const ext = classifyExt(doc.original_filename);
               const meta = DOC_TYPES[ext];
               const isSelected = selectedId === doc.id;
@@ -335,7 +384,18 @@ export const Catalog: React.FC<Props> = ({
                   }
                 >
                   <td className="kx-cat-name" title={doc.original_filename}>
-                    <span className="kx-cat-fname">{doc.original_filename}</span>
+                    <span className="kx-cat-fname">
+                      {doc.original_filename}
+                    </span>
+                    {doc.origin === "demo" && (
+                      <span
+                        className="kx-demo-badge"
+                        data-testid="kx-demo-badge"
+                        title="Bundled demo-corpus document — not operator data"
+                      >
+                        DEMO
+                      </span>
+                    )}
                     <VersionBadges
                       versionCount={versionCount}
                       latest={latest?.version_number ?? 1}
@@ -354,7 +414,9 @@ export const Catalog: React.FC<Props> = ({
                     </span>
                   </td>
                   <td className="kx-cat-status">
-                    <span className={"kx-cat-badge " + statusClass(status)}>{status}</span>
+                    <span className={"kx-cat-badge " + statusClass(status)}>
+                      {status}
+                    </span>
                   </td>
                   <td className="kx-cat-versions">
                     <span className="kx-mono">{versionCount}</span>
@@ -363,9 +425,13 @@ export const Catalog: React.FC<Props> = ({
                     ) : null}
                   </td>
                   <td className="kx-cat-latest">
-                    <span className="kx-mono">v{latest?.version_number ?? 1}</span>
+                    <span className="kx-mono">
+                      v{latest?.version_number ?? 1}
+                    </span>
                   </td>
-                  <td className="kx-cat-date">{formatRelative(doc.created_at)}</td>
+                  <td className="kx-cat-date">
+                    {formatRelative(doc.created_at)}
+                  </td>
                 </tr>
               );
             })}
@@ -425,7 +491,10 @@ export const VersionBadges: React.FC<{
           v{latest}
         </button>
       ) : (
-        <span className="kx-ver-badge kx-mono" title={`Latest version v${latest}`}>
+        <span
+          className="kx-ver-badge kx-mono"
+          title={`Latest version v${latest}`}
+        >
           v{latest}
         </span>
       )}

@@ -46,6 +46,7 @@ const FIXTURE_VERSION = {
 };
 
 const FIXTURE_DOC: ApiDocument = {
+  origin: "operator",
   id: "doc-1",
   original_filename: "policy.txt",
   latest_version_id: "ver-1",
