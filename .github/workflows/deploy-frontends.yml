@@ -1,0 +1,177 @@
+name: Deploy frontends
+
+# Manual one-click deploy of the three S3-hosted frontends:
+#
+#   orbital   — apps/web (Vite SPA)        → 3dx-knowledge-orbital/<ver>/ + latest/
+#   widget    — apps/widget (3DX tile)     → 3dx-knowledgeforge/<ver>/
+#   explorer  — apps/explorer (3DX tile)   → 3dx-knowledge-explorer/<ver>/
+#
+# Each job drives the corresponding scripts/deploy-*.sh so CI and the
+# workstation path stay one source of truth. The backend is NOT
+# deployed here — it runs on the operator workstation behind a
+# Cloudflare Tunnel (docs/runbook/workstation-deploy.md).
+#
+# Required repository secrets:
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+#       IAM user/role with s3:PutObject + s3:ListBucket on
+#       s3://3dx-kwforge-widgets (account 467685081786, eu-north-1).
+#
+# Required repository variable:
+#   KW_API_BASE_URL
+#       Public backend URL the bundles bake in at build time
+#       (e.g. https://kw-api.benhelli.org). The workflow input of the
+#       same name overrides it per-run.
+#
+# Widget + Explorer additionally need @widget-lab/3ddashboard-utils,
+# which is NOT in this repo (DS-internal package; see
+# apps/widget/.npmrc). Provide ONE of:
+#   WIDGET_LAB_REPO (variable)  — "owner/repo" of a private GitHub
+#       mirror of the package source; cloned into
+#       .kw-pipeline/3ddashboard-utils where the file: dep expects it.
+#       Private mirrors also need WIDGET_LAB_REPO_TOKEN (secret) — a
+#       read-only PAT.
+#   WIDGET_LAB_REGISTRY_TOKEN (secret) — auth token for the DS GitLab
+#       npm registry (itgit.dsone.3ds.com); the job rewrites the dep
+#       to the registry version for the build.
+# Without either, the orbital job still works; widget/explorer fail
+# fast with a pointer to this header.
+#
+# demo.html note: the deploy scripts try to update the repo-root
+# demo.html tile links. In CI that edit is discarded with the runner —
+# refresh it from a workstation deploy when the URLs change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "Which frontends to deploy"
+        type: choice
+        default: all
+        options: [all, orbital, widget, explorer]
+      version:
+        description: "Version tag override (e.g. v0.3.1). Empty = package.json version."
+        type: string
+        required: false
+        default: ""
+      api_base_url:
+        description: "Backend URL override. Empty = KW_API_BASE_URL repository variable."
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontends
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: eu-north-1
+  EFFECTIVE_API_BASE_URL: ${{ inputs.api_base_url != '' && inputs.api_base_url || vars.KW_API_BASE_URL }}
+
+jobs:
+  orbital:
+    name: Deploy Orbital (apps/web)
+    if: inputs.targets == 'all' || inputs.targets == 'orbital'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Preflight
+        run: |
+          if [ -z "$EFFECTIVE_API_BASE_URL" ]; then
+            echo "::error::Set the KW_API_BASE_URL repository variable (or the api_base_url input) to the public backend URL."
+            exit 1
+          fi
+          aws sts get-caller-identity > /dev/null
+
+      - name: Build + deploy to S3
+        env:
+          VITE_API_BASE_URL: ${{ env.EFFECTIVE_API_BASE_URL }}
+        run: scripts/deploy-orbital.sh ${{ inputs.version }}
+
+  widget:
+    name: Deploy KnowledgeForge widget (apps/widget)
+    if: inputs.targets == 'all' || inputs.targets == 'widget'
+    runs-on: ubuntu-latest
+    # When orbital deploys in the same run it refreshes the latest/
+    # alias the widget links to — order them so the link is never
+    # momentarily stale. skipped() orbital (targets == 'widget') is
+    # fine; always() keeps this job from being cancelled with it.
+    needs: [orbital]
+    steps:
+      - uses: actions/checkout@v6
+        if: ${{ !cancelled() && (needs.orbital.result == 'success' || needs.orbital.result == 'skipped') }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() && (needs.orbital.result == 'success' || needs.orbital.result == 'skipped') }}
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/widget/package-lock.json
+
+      - name: Provision @widget-lab/3ddashboard-utils
+        if: ${{ !cancelled() && (needs.orbital.result == 'success' || needs.orbital.result == 'skipped') }}
+        env:
+          WIDGET_LAB_REPO: ${{ vars.WIDGET_LAB_REPO }}
+          WIDGET_LAB_REPO_TOKEN: ${{ secrets.WIDGET_LAB_REPO_TOKEN }}
+          WIDGET_LAB_REGISTRY_TOKEN: ${{ secrets.WIDGET_LAB_REGISTRY_TOKEN }}
+        run: bash .github/scripts/provision-widget-lab.sh apps/widget
+
+      - name: Preflight
+        if: ${{ !cancelled() && (needs.orbital.result == 'success' || needs.orbital.result == 'skipped') }}
+        run: |
+          if [ -z "$EFFECTIVE_API_BASE_URL" ]; then
+            echo "::error::Set the KW_API_BASE_URL repository variable (or the api_base_url input) to the public backend URL."
+            exit 1
+          fi
+          aws sts get-caller-identity > /dev/null
+
+      - name: Build + deploy to S3
+        if: ${{ !cancelled() && (needs.orbital.result == 'success' || needs.orbital.result == 'skipped') }}
+        env:
+          KW_API_BASE_URL: ${{ env.EFFECTIVE_API_BASE_URL }}
+          KW_ORBITAL_URL: https://3dx-kwforge-widgets.s3.eu-north-1.amazonaws.com/3dx-knowledge-orbital/latest/index.html
+        run: scripts/deploy-widget.sh ${{ inputs.version }}
+
+  explorer:
+    name: Deploy Knowledge Explorer (apps/explorer)
+    if: inputs.targets == 'all' || inputs.targets == 'explorer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/explorer/package-lock.json
+
+      - name: Provision @widget-lab/3ddashboard-utils
+        env:
+          WIDGET_LAB_REPO: ${{ vars.WIDGET_LAB_REPO }}
+          WIDGET_LAB_REPO_TOKEN: ${{ secrets.WIDGET_LAB_REPO_TOKEN }}
+          WIDGET_LAB_REGISTRY_TOKEN: ${{ secrets.WIDGET_LAB_REGISTRY_TOKEN }}
+        run: bash .github/scripts/provision-widget-lab.sh apps/explorer
+
+      - name: Preflight
+        run: |
+          if [ -z "$EFFECTIVE_API_BASE_URL" ]; then
+            echo "::error::Set the KW_API_BASE_URL repository variable (or the api_base_url input) to the public backend URL."
+            exit 1
+          fi
+          aws sts get-caller-identity > /dev/null
+
+      - name: Build + deploy to S3
+        env:
+          KW_API_BASE_URL: ${{ env.EFFECTIVE_API_BASE_URL }}
+        run: scripts/deploy-explorer.sh ${{ inputs.version }}
