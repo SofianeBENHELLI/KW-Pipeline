@@ -968,6 +968,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/high-value-chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document High Value Chunks
+         * @description Rank the chunks of one version by a composite importance
+         *     score (converged plan §C.2).
+         *
+         *     The score is a weighted sum of four normalised signals —
+         *     claim count, process-step count, chunk-relation graph
+         *     degree, and entity-mention density — surfaced on the wire
+         *     per-chunk so the UI can explain *why* a chunk ranks high.
+         *     Defaults to ``document.latest_version_id``; operators
+         *     inspecting drift between two passes pass the explicit
+         *     version id.
+         *
+         *     Cold-start documents (extraction has not run yet, or the
+         *     version produced no semantic output) return an empty
+         *     ``items`` list with HTTP 200 — the UI renders that as a
+         *     friendly "no chunks yet" state. Tombstone semantics mirror
+         *     the sibling per-version content routes (ADR-027 §3): a
+         *     fully-purged document family surfaces as 410 Gone, an
+         *     individual PURGED version surfaces as 410 with the
+         *     per-version tombstone envelope. Hidden-existence (D.5)
+         *     applies to non-purged invisibility: missing document or a
+         *     version_id not in the family returns plain 404.
+         */
+        get: operations["get_document_high_value_chunks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/lineage": {
         parameters: {
             query?: never;
@@ -3805,6 +3845,102 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * HighValueChunk
+         * @description One ranked chunk row.
+         *
+         *     ``score`` is the composite importance, ``signals`` carries the
+         *     per-component contributions for explainability, and the raw
+         *     counts (``claim_count`` / ``process_step_count`` / …) are
+         *     surfaced so the UI doesn't have to multiply back the
+         *     normalisation.
+         *
+         *     ``heading`` and ``snippet`` come from the semantic document
+         *     section the chunk maps to (per ADR-031 chunks today are 1:1
+         *     with sections); the snippet is a deterministic prefix capped at
+         *     240 chars so an operator can recognise the content without
+         *     needing to fetch the full section.
+         */
+        HighValueChunk: {
+            /** Char Count */
+            char_count: number;
+            /** Chunk Id */
+            chunk_id: string;
+            /** Claim Count */
+            claim_count: number;
+            /** Entity Mention Count */
+            entity_mention_count: number;
+            /** Graph Degree */
+            graph_degree: number;
+            /** Heading */
+            heading: string;
+            /** Process Step Count */
+            process_step_count: number;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string;
+            signals: components["schemas"]["HighValueChunkSignals"];
+            /** Snippet */
+            snippet: string;
+        };
+        /**
+         * HighValueChunkSignals
+         * @description Per-component normalised contribution to the composite score.
+         *
+         *     Every field lives in ``[0, 1]``: it's the raw count for this
+         *     chunk divided by the document's per-component max. A score of
+         *     ``1.0`` means "the densest chunk in this document on this
+         *     signal". The composite ``score`` on the parent row is a
+         *     weighted sum; the weights are exposed on the response so
+         *     operators can inspect the formula.
+         */
+        HighValueChunkSignals: {
+            /** Claims */
+            claims: number;
+            /** Entity Density */
+            entity_density: number;
+            /** Graph Degree */
+            graph_degree: number;
+            /** Process Steps */
+            process_steps: number;
+        };
+        /**
+         * HighValueChunksResponse
+         * @description Response envelope for ``GET /documents/{id}/high-value-chunks``.
+         *
+         *     ``items`` is sorted by ``score`` DESC then ``chunk_id`` ASC so
+         *     ties tie-break deterministically. The list is truncated to
+         *     ``limit`` rows; the route enforces the cap via Query validation
+         *     so the wire stays bounded.
+         *
+         *     ``weights`` is the formula the ranker used — surfacing it on
+         *     the wire means an operator can inspect and (in a future
+         *     iteration) override the weighting without re-deploying.
+         */
+        HighValueChunksResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Items */
+            items: components["schemas"]["HighValueChunk"][];
+            /**
+             * Schema Version
+             * @default v0.1
+             * @constant
+             */
+            schema_version: "v0.1";
+            /**
+             * Total Chunks
+             * @description Number of chunks in the version (the pool the ranker scored).
+             */
+            total_chunks: number;
+            /** Version Id */
+            version_id: string;
+            /** Version Number */
+            version_number: number;
+            /** @description Weights applied to the normalised per-component signals when computing the composite score. Exposed on the wire for transparency. */
+            weights: components["schemas"]["HighValueChunkSignals"];
+        };
         /** HitlConfig */
         HitlConfig: {
             /**
@@ -6286,6 +6422,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeGraphProjection"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_high_value_chunks: {
+        parameters: {
+            query?: {
+                version_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighValueChunksResponse"];
                 };
             };
             /** @description Validation Error */

@@ -44,6 +44,7 @@ from app.schemas.document import (
 from app.schemas.document_confidence import DocumentConfidenceResponse
 from app.schemas.document_topic import DOCUMENT_TOPIC_SCHEMA_VERSION
 from app.schemas.extraction import ExtractionJobSnapshot, NormalizedRect, RawExtraction
+from app.schemas.high_value_chunks import HighValueChunksResponse
 from app.schemas.scope import DocumentScopesResponse, ScopeRef
 from app.schemas.semantic_document import SemanticDocument
 from app.services.auth import (
@@ -60,6 +61,7 @@ from app.services.document_service import DocumentService
 from app.services.extraction_job_service import ExtractionFailed
 from app.services.extraction_worker import ExtractionRequest, QueueFull
 from app.services.idempotency_store import hash_json_body
+from app.services.knowledge.high_value_chunks import HighValueChunksService
 from app.services.semantic_output_service import (
     SemanticGenerationFailed,
     UnknownSemanticMethod,
@@ -930,6 +932,103 @@ def build_lifecycle_router(services: PipelineServices) -> APIRouter:
             validation_method=metadata.validation_method if metadata is not None else None,
             validation_actor=metadata.validation_actor if metadata is not None else None,
             auto_validate_threshold=threshold,
+        )
+
+    @router.get(
+        "/documents/{document_id}/high-value-chunks",
+        operation_id="get_document_high_value_chunks",
+        response_model=HighValueChunksResponse,
+    )
+    def get_document_high_value_chunks(
+        request: Request,
+        document_id: str,
+        version_id: str | None = Query(default=None, min_length=1, max_length=200),
+        limit: int = Query(default=20, ge=1, le=100),
+        current_user: User = Depends(require_viewer),
+    ) -> Any:
+        """Rank the chunks of one version by a composite importance
+        score (converged plan §C.2).
+
+        The score is a weighted sum of four normalised signals —
+        claim count, process-step count, chunk-relation graph
+        degree, and entity-mention density — surfaced on the wire
+        per-chunk so the UI can explain *why* a chunk ranks high.
+        Defaults to ``document.latest_version_id``; operators
+        inspecting drift between two passes pass the explicit
+        version id.
+
+        Cold-start documents (extraction has not run yet, or the
+        version produced no semantic output) return an empty
+        ``items`` list with HTTP 200 — the UI renders that as a
+        friendly "no chunks yet" state. Tombstone semantics mirror
+        the sibling per-version content routes (ADR-027 §3): a
+        fully-purged document family surfaces as 410 Gone, an
+        individual PURGED version surfaces as 410 with the
+        per-version tombstone envelope. Hidden-existence (D.5)
+        applies to non-purged invisibility: missing document or a
+        version_id not in the family returns plain 404.
+        """
+        document = services.documents.get_document(document_id)
+        if document is None:
+            archived = services.documents.catalog._get_document_including_archived(  # type: ignore[attr-defined]
+                document_id,
+            )
+            if archived is not None and _all_versions_purged(archived):
+                raise _purged_document_error(document_id)
+            raise HTTPException(status_code=404, detail="Document not found.")
+        assert_can_access_document(request=request, document_id=document_id, user=current_user)
+
+        target_version_id = document.latest_version_id if version_id is None else version_id
+
+        try:
+            version = _get_version_including_archived(
+                services=services,
+                document_id=document_id,
+                version_id=target_version_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Version not found in document.") from exc
+
+        if version.status is DocumentVersionStatus.PURGED:
+            raise _purged_version_error(document_id=document_id, version=version)
+
+        # Cold-start cases collapse to an empty items list with HTTP
+        # 200. The semantic document is the chunk pool the ranker
+        # operates over; if extraction hasn't produced one yet
+        # (UPLOADED / EXTRACTING / FAILED), there's nothing to rank.
+        try:
+            semantic = services.semantic_outputs.get(
+                document_id=document.id,
+                version_id=version.id,
+            )
+        except (FileNotFoundError, KeyError):
+            return HighValueChunksResponse(
+                document_id=document.id,
+                version_id=version.id,
+                version_number=version.version_number,
+                total_chunks=0,
+                weights=HighValueChunksService().weights,
+                items=[],
+            )
+
+        # The ranker is stateless and cheap to instantiate per call
+        # — same posture as the sibling EPIC-C similarity service.
+        ranker = HighValueChunksService()
+        claims = services.claim_store.list_for_version(version.id)
+        processes = services.process_store.list_for_version(version.id)
+        items = ranker.rank(
+            semantic=semantic,
+            claims=claims,
+            processes=processes,
+            limit=limit,
+        )
+        return HighValueChunksResponse(
+            document_id=document.id,
+            version_id=version.id,
+            version_number=version.version_number,
+            total_chunks=len(semantic.sections),
+            weights=ranker.weights,
+            items=items,
         )
 
     @router.get(

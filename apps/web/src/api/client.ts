@@ -37,6 +37,7 @@ import type {
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
   ApiDocumentConfidenceResponse,
+  ApiHighValueChunksResponse,
   ApiLineageResponse,
   ApiSimilarDocumentsResponse,
   ApiProjectionStatusResponse,
@@ -1359,6 +1360,42 @@ export async function getDocumentConfidence(
       params: {
         path: { document_id: documentId },
         query: versionId !== undefined ? { version_id: versionId } : undefined,
+      },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/high-value-chunks (converged plan §C.2)
+ *
+ * Returns the top-K chunks of a document version ranked by a
+ * composite importance score (claims + process-step count + chunk
+ * graph degree + entity-mention density). Defaults to the document's
+ * latest version; pass ``versionId`` to inspect a historical pass.
+ * ``limit`` is clamped server-side to ``[1, 100]``.
+ *
+ * Cold-start documents (no semantic output yet) come back with
+ * ``items: []`` and HTTP 200 — the UI renders that as a friendly
+ * "extraction has not produced chunks yet" state.
+ */
+export async function getDocumentHighValueChunks(
+  documentId: string,
+  options: {
+    versionId?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiHighValueChunksResponse> {
+  const { versionId, limit, signal } = options;
+  const query: Record<string, string | number> = {};
+  if (versionId !== undefined) query.version_id = versionId;
+  if (limit !== undefined) query.limit = limit;
+  return unwrap(
+    await http.GET("/documents/{document_id}/high-value-chunks", {
+      params: {
+        path: { document_id: documentId },
+        query: Object.keys(query).length > 0 ? (query as never) : undefined,
       },
       signal,
     }),

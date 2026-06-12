@@ -25,7 +25,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import List, Protocol
 
 from app.schemas.process import Process, ProcessStep, ProcessSummary
 from app.services.catalog_store import (
@@ -82,6 +82,23 @@ class ProcessStore(Protocol):
 
         Raises :class:`InvalidCursor` when ``cursor`` cannot be
         decoded — the route layer maps that to HTTP 400.
+        """
+
+    def list_for_version(self, version_id: str) -> List[Process]:
+        """Return every Process owned by ``version_id`` with its
+        ordered step list hydrated.
+
+        Used by the high-value chunks ranker (converged plan §C.2)
+        to fan out per-chunk step counts over one version's
+        processes. Result set is bounded by what the SOP extractor
+        produces for one document version, so an in-process list
+        without pagination is the right fit. Order is
+        ``(created_at ASC, id ASC)`` for parity with :meth:`list`.
+
+        The ``List[...]`` capitalisation is intentional: the
+        Protocol's ``list`` method shadows the builtin inside the
+        class scope, so a lowercase ``list[Process]`` annotation
+        would resolve to that method instead of the builtin.
         """
 
     def delete_for_version(self, version_id: str) -> int:
@@ -166,6 +183,13 @@ class InMemoryProcessStore:
         for process_id in doomed:
             del self._processes[process_id]
         return len(doomed)
+
+    def list_for_version(self, version_id: str) -> List[Process]:
+        items = [
+            process for process in self._processes.values() if process.version_id == version_id
+        ]
+        items.sort(key=lambda p: (p.created_at, p.id))
+        return items
 
 
 class SQLiteProcessStore:
@@ -297,6 +321,43 @@ class SQLiteProcessStore:
         else:
             next_cursor = None
         return summaries, next_cursor
+
+    def list_for_version(self, version_id: str) -> List[Process]:
+        # One pass over ``processes`` (filtered on the ``version_id``
+        # index from migration 0013), then a second pass joining in
+        # ``process_steps`` ordered by step_number per process. The
+        # result set is one document version's worth of SOPs — a
+        # bounded fan-out, so we materialise it in-memory.
+        with self._connect() as connection:
+            process_rows = connection.execute(
+                """
+                SELECT id, title, document_id, version_id,
+                       schema_version, created_at
+                FROM processes
+                WHERE version_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (version_id,),
+            ).fetchall()
+            if not process_rows:
+                return []
+            process_ids = [row["id"] for row in process_rows]
+            placeholders = ",".join("?" * len(process_ids))
+            step_rows = connection.execute(
+                f"""
+                SELECT process_id, step_number, title, body,
+                       preconditions_json, outcomes_json,
+                       referenced_tool_id, source_reference_ids_json
+                FROM process_steps
+                WHERE process_id IN ({placeholders})
+                ORDER BY process_id ASC, step_number ASC
+                """,
+                process_ids,
+            ).fetchall()
+        steps_by_process: dict[str, list[sqlite3.Row]] = {}
+        for row in step_rows:
+            steps_by_process.setdefault(row["process_id"], []).append(row)
+        return [_row_to_process(row, steps_by_process.get(row["id"], [])) for row in process_rows]
 
     def delete_for_version(self, version_id: str) -> int:
         with self._connect() as connection:

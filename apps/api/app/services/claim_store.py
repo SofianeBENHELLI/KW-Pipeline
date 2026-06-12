@@ -84,6 +84,20 @@ class ClaimStore(Protocol):
         ``detail``).
         """
 
+    def list_for_version(self, version_id: str) -> list[Claim]:
+        """Return every claim sourced from ``version_id`` in a single
+        batch (no pagination).
+
+        Used by aggregation surfaces — most notably the high-value
+        chunks ranker (converged plan §C.2) — that need to fan out
+        per-chunk counts over a single version's claims. The result
+        set is bounded by what the extractor produces for one
+        document, so an in-process list is the right fit; pagination
+        is reserved for the per-subject browse path. Order is
+        ``(extracted_at ASC, id ASC)`` for parity with
+        :meth:`list_for_subject`.
+        """
+
     def delete_for_version(self, version_id: str) -> int:
         """Remove every claim sourced from ``version_id``.
 
@@ -133,6 +147,11 @@ class InMemoryClaimStore:
             tail = page[-1]
             next_cursor = _encode_cursor((tail.extracted_at, tail.id))
         return page, next_cursor
+
+    def list_for_version(self, version_id: str) -> list[Claim]:
+        items = [c for c in self._claims if c.version_id == version_id]
+        items.sort(key=lambda c: (c.extracted_at, c.id))
+        return items
 
     def delete_for_version(self, version_id: str) -> int:
         before = len(self._claims)
@@ -226,6 +245,21 @@ class SQLiteClaimStore:
             tail = items[-1]
             next_cursor = _encode_cursor((tail.extracted_at, tail.id))
         return items, next_cursor
+
+    def list_for_version(self, version_id: str) -> list[Claim]:
+        # Walks the ``idx_claims_version_id`` index from migration
+        # 0012. No pagination — see Protocol docstring for the
+        # bounded-fan-out rationale.
+        sql = (
+            "SELECT id, document_id, version_id, subject_entity_id, predicate, "
+            "object_value, object_entity_id, confidence, schema_version, "
+            "extracted_at, provenance_chunk_ids_json "
+            "FROM claims WHERE version_id = ? "
+            "ORDER BY extracted_at ASC, id ASC"
+        )
+        with self._connect() as connection:
+            rows = connection.execute(sql, (version_id,)).fetchall()
+        return [_row_to_claim(row) for row in rows]
 
     def delete_for_version(self, version_id: str) -> int:
         with self._connect() as connection:

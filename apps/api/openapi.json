@@ -3198,6 +3198,177 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HighValueChunk": {
+        "description": "One ranked chunk row.\n\n``score`` is the composite importance, ``signals`` carries the\nper-component contributions for explainability, and the raw\ncounts (``claim_count`` / ``process_step_count`` / …) are\nsurfaced so the UI doesn't have to multiply back the\nnormalisation.\n\n``heading`` and ``snippet`` come from the semantic document\nsection the chunk maps to (per ADR-031 chunks today are 1:1\nwith sections); the snippet is a deterministic prefix capped at\n240 chars so an operator can recognise the content without\nneeding to fetch the full section.",
+        "properties": {
+          "char_count": {
+            "minimum": 0.0,
+            "title": "Char Count",
+            "type": "integer"
+          },
+          "chunk_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "claim_count": {
+            "minimum": 0.0,
+            "title": "Claim Count",
+            "type": "integer"
+          },
+          "entity_mention_count": {
+            "minimum": 0.0,
+            "title": "Entity Mention Count",
+            "type": "integer"
+          },
+          "graph_degree": {
+            "minimum": 0.0,
+            "title": "Graph Degree",
+            "type": "integer"
+          },
+          "heading": {
+            "maxLength": 500,
+            "minLength": 0,
+            "title": "Heading",
+            "type": "string"
+          },
+          "process_step_count": {
+            "minimum": 0.0,
+            "title": "Process Step Count",
+            "type": "integer"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Section Id",
+            "type": "string"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/HighValueChunkSignals"
+          },
+          "snippet": {
+            "maxLength": 240,
+            "minLength": 0,
+            "title": "Snippet",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "section_id",
+          "heading",
+          "snippet",
+          "char_count",
+          "score",
+          "signals",
+          "claim_count",
+          "process_step_count",
+          "graph_degree",
+          "entity_mention_count"
+        ],
+        "title": "HighValueChunk",
+        "type": "object"
+      },
+      "HighValueChunkSignals": {
+        "description": "Per-component normalised contribution to the composite score.\n\nEvery field lives in ``[0, 1]``: it's the raw count for this\nchunk divided by the document's per-component max. A score of\n``1.0`` means \"the densest chunk in this document on this\nsignal\". The composite ``score`` on the parent row is a\nweighted sum; the weights are exposed on the response so\noperators can inspect the formula.",
+        "properties": {
+          "claims": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Claims",
+            "type": "number"
+          },
+          "entity_density": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Entity Density",
+            "type": "number"
+          },
+          "graph_degree": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Graph Degree",
+            "type": "number"
+          },
+          "process_steps": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Process Steps",
+            "type": "number"
+          }
+        },
+        "required": [
+          "claims",
+          "process_steps",
+          "graph_degree",
+          "entity_density"
+        ],
+        "title": "HighValueChunkSignals",
+        "type": "object"
+      },
+      "HighValueChunksResponse": {
+        "description": "Response envelope for ``GET /documents/{id}/high-value-chunks``.\n\n``items`` is sorted by ``score`` DESC then ``chunk_id`` ASC so\nties tie-break deterministically. The list is truncated to\n``limit`` rows; the route enforces the cap via Query validation\nso the wire stays bounded.\n\n``weights`` is the formula the ranker used — surfacing it on\nthe wire means an operator can inspect and (in a future\niteration) override the weighting without re-deploying.",
+        "properties": {
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HighValueChunk"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v0.1",
+            "default": "v0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "total_chunks": {
+            "description": "Number of chunks in the version (the pool the ranker scored).",
+            "minimum": 0.0,
+            "title": "Total Chunks",
+            "type": "integer"
+          },
+          "version_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_number": {
+            "minimum": 1.0,
+            "title": "Version Number",
+            "type": "integer"
+          },
+          "weights": {
+            "$ref": "#/components/schemas/HighValueChunkSignals",
+            "description": "Weights applied to the normalised per-component signals when computing the composite score. Exposed on the wire for transparency."
+          }
+        },
+        "required": [
+          "schema_version",
+          "document_id",
+          "version_id",
+          "version_number",
+          "total_chunks",
+          "weights",
+          "items"
+        ],
+        "title": "HighValueChunksResponse",
+        "type": "object"
+      },
       "HitlConfig": {
         "properties": {
           "default_validation_method": {
@@ -7562,6 +7733,76 @@
           }
         },
         "summary": "Get Document Graph"
+      }
+    },
+    "/documents/{document_id}/high-value-chunks": {
+      "get": {
+        "description": "Rank the chunks of one version by a composite importance\nscore (converged plan §C.2).\n\nThe score is a weighted sum of four normalised signals —\nclaim count, process-step count, chunk-relation graph\ndegree, and entity-mention density — surfaced on the wire\nper-chunk so the UI can explain *why* a chunk ranks high.\nDefaults to ``document.latest_version_id``; operators\ninspecting drift between two passes pass the explicit\nversion id.\n\nCold-start documents (extraction has not run yet, or the\nversion produced no semantic output) return an empty\n``items`` list with HTTP 200 — the UI renders that as a\nfriendly \"no chunks yet\" state. Tombstone semantics mirror\nthe sibling per-version content routes (ADR-027 §3): a\nfully-purged document family surfaces as 410 Gone, an\nindividual PURGED version surfaces as 410 with the\nper-version tombstone envelope. Hidden-existence (D.5)\napplies to non-purged invisibility: missing document or a\nversion_id not in the family returns plain 404.",
+        "operationId": "get_document_high_value_chunks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighValueChunksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document High Value Chunks"
       }
     },
     "/documents/{document_id}/lineage": {
