@@ -698,3 +698,234 @@
   font-size: var(--orb-fs-sm);
   line-height: 1.55;
 }
+
+/* ── Confidence panel (converged plan §C.1) ──────────────────────── */
+
+.orb-app .kf-confidence {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+.orb-app .kf-confidence__empty {
+  padding: 18px 16px;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+  background: var(--orb-bg-elev);
+  border: 1px dashed var(--orb-border);
+  border-radius: var(--orb-r-sm);
+}
+.orb-app .kf-confidence__overall {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  align-items: baseline;
+}
+.orb-app .kf-confidence__num {
+  grid-row: 1 / span 2;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--orb-fg);
+}
+.orb-app .kf-confidence__num.is-passing {
+  color: var(--orb-ok);
+}
+.orb-app .kf-confidence__num.is-failing {
+  color: var(--orb-err);
+}
+.orb-app .kf-confidence__cap {
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-confidence__bar {
+  position: relative;
+  height: 6px;
+  background: var(--orb-bg-hov);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 6px;
+  grid-column: 2;
+}
+.orb-app .kf-confidence__bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--orb-ok);
+  border-radius: 999px;
+}
+.orb-app .kf-confidence__bar-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--orb-fg);
+  transform: translateX(-1px);
+  opacity: 0.65;
+}
+.orb-app .kf-confidence__routing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .kf-confidence__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.orb-app .kf-confidence__chip.is-routing-auto,
+.orb-app .kf-confidence__chip.is-method-auto {
+  background: var(--orb-ok-bg);
+  color: var(--orb-ok-fg);
+}
+.orb-app .kf-confidence__chip.is-routing-human,
+.orb-app .kf-confidence__chip.is-method-human {
+  background: var(--orb-warn-bg);
+  color: var(--orb-warn-fg);
+}
+.orb-app .kf-confidence__chip.is-routing-external,
+.orb-app .kf-confidence__chip.is-method-external {
+  background: var(--orb-err-bg);
+  color: var(--orb-err-fg);
+}
+.orb-app .kf-confidence__signals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.orb-app .kf-confidence__signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.orb-app .kf-confidence__signal-h {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--orb-fs-sm);
+}
+.orb-app .kf-confidence__signal-name {
+  color: var(--orb-fg);
+}
+.orb-app .kf-confidence__signal-val {
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-confidence__signal-bar {
+  height: 4px;
+  background: var(--orb-bg-hov);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.orb-app .kf-confidence__signal-bar-fill {
+  height: 100%;
+  background: var(--orb-fg-muted);
+}
+.orb-app .kf-confidence__signal.is-flag .kf-confidence__signal-h {
+  color: var(--orb-warn-fg);
+}
+
+/* ── High-value chunks panel (converged plan §C.2) ──────────────── */
+
+.orb-app .kf-hv__empty {
+  padding: 18px 16px;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+  background: var(--orb-bg-elev);
+  border: 1px dashed var(--orb-border);
+  border-radius: var(--orb-r-sm);
+}
+.orb-app .kf-hv__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.orb-app .kf-hv__row {
+  border: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  border-radius: var(--orb-r-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.orb-app .kf-hv__row-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.orb-app .kf-hv__rank {
+  color: var(--orb-fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  min-width: 22px;
+}
+.orb-app .kf-hv__heading {
+  flex: 1;
+  font-size: var(--orb-fs-md);
+  font-weight: 600;
+  color: var(--orb-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb-app .kf-hv__score {
+  font-size: var(--orb-fs-sm);
+  font-weight: 600;
+  color: var(--orb-ok);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--orb-ok-bg);
+}
+.orb-app .kf-hv__snippet {
+  margin: 0;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.orb-app .kf-hv__signals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.orb-app .kf-hv__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg-dim);
+  font-size: 10.5px;
+}
+.orb-app .kf-hv__chip.is-active {
+  color: var(--orb-fg-muted);
+  background: var(--orb-warn-bg);
+}
+.orb-app .kf-hv__chip-label {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.orb-app .kf-hv__chip-val {
+  font-weight: 600;
+  color: var(--orb-fg);
+}

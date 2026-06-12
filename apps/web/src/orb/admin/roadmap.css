@@ -1,0 +1,98 @@
+/* Roadmap gallery — converged plan §C.3. */
+
+.orb-app .kf-roadmap {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 12px 4px 24px;
+}
+.orb-app .kf-roadmap__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.orb-app .kf-roadmap__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--orb-fg);
+}
+.orb-app .kf-roadmap__subtitle {
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+  margin: 0;
+  max-width: 72ch;
+}
+.orb-app .kf-roadmap__section-sub {
+  margin: 0 0 12px;
+  font-size: var(--orb-fs-sm);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-roadmap__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.orb-app .kf-roadmap__card {
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--orb-border);
+  background: var(--orb-bg-elev);
+  border-radius: var(--orb-r-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: not-allowed;
+  font: inherit;
+  opacity: 0.85;
+}
+.orb-app .kf-roadmap__card[disabled] {
+  filter: grayscale(35%);
+}
+.orb-app .kf-roadmap__card-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.orb-app .kf-roadmap__card-title {
+  font-size: var(--orb-fs-md);
+  font-weight: 600;
+  color: var(--orb-fg);
+}
+.orb-app .kf-roadmap__chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg-muted);
+  white-space: nowrap;
+}
+.orb-app .kf-roadmap__card-body {
+  margin: 0;
+  font-size: var(--orb-fs-sm);
+  line-height: 1.5;
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-roadmap__card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--orb-fg-dim);
+  margin-top: auto;
+}
+.orb-app .kf-roadmap__card-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--orb-bg-hov);
+  color: var(--orb-fg-muted);
+}
+.orb-app .kf-roadmap__card-tag.is-blocked {
+  background: var(--orb-warn-bg);
+  color: var(--orb-warn-fg);
+}

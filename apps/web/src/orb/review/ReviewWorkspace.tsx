@@ -23,10 +23,12 @@ import type { ReactElement } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { BatchBanner } from "./BatchBanner";
+import { ConfidencePanel } from "./ConfidencePanel";
 import { DocGraphTab } from "./DocGraphTab";
 import { DocHeader } from "./DocHeader";
 import { DocRail, type RailSort, type RailSortColumn } from "./DocRail";
 import { DocTabs, type DocTab } from "./DocTabs";
+import { HighValueChunksPanel } from "./HighValueChunksPanel";
 import { LineageModal, SimilarDocumentsModal } from "./LineageSimilarModals";
 import { LinkedView, type LinkedViewPdf } from "./LinkedView";
 import { PipelineTab } from "./PipelineTab";
@@ -449,6 +451,8 @@ export function ReviewWorkspace({
                 live.refetch();
               }}
             />
+            <ConfidencePanel documentId={params.docId ?? null} />
+            <HighValueChunksPanel documentId={params.docId ?? null} />
             <PipelineTab document={activeDoc} />
           </div>
         )}
