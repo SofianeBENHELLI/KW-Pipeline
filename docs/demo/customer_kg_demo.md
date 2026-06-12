@@ -98,6 +98,48 @@ For the duplicate-detection beat, upload the same file again under a
 different name; the upload route returns `DUPLICATE_DETECTED` and
 extract returns 409.
 
+## Path 2b — the MVP-completion beats (Knowledge Forge)
+
+The MVP-completion sprint (converged plan §C, 2026-06) layered four
+operator-facing surfaces on top of the validated document. Run them
+in this order after the first upload + validate to show the full
+story:
+
+1. **Confidence dashboard** — once a doc lands at `NEEDS_REVIEW`,
+   open `/kf/review/<id>?tab=pipeline`. The new **Confidence** card
+   between the FSM card and the lifecycle history surfaces the
+   composite score, threshold tick, per-signal bars, and the HITL
+   routing chip (`routed · auto / human / external`). Talking
+   point: *the data has been on disk since EPIC-A slice 1 — what
+   was missing was the surface.*
+2. **High-value chunks** — same tab, the **High-value chunks** card
+   ranks the top 10 chunks by composite importance (claims +
+   process steps + graph degree + entity density). Click into one
+   to show the per-chunk signal chips. Talking point: *on an 800-
+   section document this turns "where do I start?" from minutes
+   into seconds.*
+3. **Knowledge Explorer** — navigate to `/kf/explore`. Show the
+   Atlas landing (top topics + metric cards), then click a topic
+   to land on the focused lens (`/kf/explore/topics/<id>`). ADR-028
+   "never default to a full-corpus render" is the design point;
+   the lens is bounded to depth 2 with a relation-budget cap.
+4. **Taxonomy admin** — `/kf/admin/taxonomy?taxonomy_id=…`. Walk
+   the lineage list, demote → promote a draft, validate it →
+   `VALIDATED_V1`. The Concepts expand panel under a draft row
+   shows the Accept / Reject / Defer / Merge actions; the
+   `Synthesize` button on a draft calls the LLM creator and folds
+   accepted suggestions into the tree.
+5. **Roadmap gallery** — `/kf/admin/roadmap`. Five categories of
+   intentionally-disabled cards covering everything that the
+   converged plan §D defers. Talking point: *every card is greyed
+   out by design — this is the post-MVP backlog, not what we ship
+   today.*
+
+The same five beats are independent of Path 3 (Anthropic / Neo4j).
+None of them require a graph backend to be visible; the Explorer
+lens and taxonomy admin work against the in-memory projector by
+default.
+
 ## Path 3 — enriched demo (optional Anthropic and/or Neo4j)
 
 Both add-ons are independent — turn on either or both.
@@ -159,6 +201,11 @@ is identical.
 
 ## See also
 
+- [`docs/roadmap/2026-05-17-converged-knowledge-pipeline-plan.md`](../roadmap/2026-05-17-converged-knowledge-pipeline-plan.md)
+  — the MVP scope this runbook closes out (§C.1 confidence
+  dashboard, §C.2 high-value chunks, §C.3 roadmap gallery, §C.4
+  this runbook), with the §D post-MVP roadmap surfaced through the
+  `/kf/admin/roadmap` gallery card.
 - [`docs/architecture/knowledge_graph_payload.md`](../architecture/knowledge_graph_payload.md)
   — the v0.2 wire contract that the runbook above demonstrates.
 - [`docs/adr/ADR-012-knowledge-graph-layer.md`](../adr/ADR-012-knowledge-graph-layer.md)
@@ -166,3 +213,10 @@ is identical.
   store tradeoffs.
 - [`docs/adr/ADR-013-llm-provider-and-no-langchain.md`](../adr/ADR-013-llm-provider-and-no-langchain.md)
   — why entity extraction calls Anthropic directly, no LangChain.
+- [`docs/adr/ADR-018-taxonomy-versioning-lifecycle.md`](../adr/ADR-018-taxonomy-versioning-lifecycle.md)
+  — the DRAFT → CANDIDATE_V0 → VALIDATED_V1 → ARCHIVED state
+  machine the `/kf/admin/taxonomy` beat drives.
+- [`docs/adr/ADR-023-hitl-routing-and-spc-sampling.md`](../adr/ADR-023-hitl-routing-and-spc-sampling.md)
+  — the confidence scorer the §C.1 panel reads from.
+- [`docs/adr/ADR-028-kw-explorer-large-corpus-ux.md`](../adr/ADR-028-kw-explorer-large-corpus-ux.md)
+  — the focused-lens contract the Explorer beat demonstrates.
