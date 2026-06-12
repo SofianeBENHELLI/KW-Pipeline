@@ -45,6 +45,7 @@ import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { ChatPanel } from "./search/ChatPanel";
 import { SearchPanel } from "./search/SearchPanel";
 import { AdminHub } from "./admin/AdminHub";
+import { RoadmapView } from "./admin/RoadmapView";
 import { DxShell } from "./shell/DxShell";
 import type { RailTileId } from "./shell/IconRail";
 import type { TopNavTab } from "./shell/TopBar";
@@ -157,6 +158,7 @@ export function KnowledgeForgeApp({
         <Route path="explore/*" element={<ExploreView />} />
         <Route path="search/*" element={<SearchPanel />} />
         <Route path="chat/*" element={<ChatPanel />} />
+        <Route path="admin/roadmap" element={<RoadmapView />} />
         <Route path="admin/*" element={<AdminHub />} />
         <Route
           path="settings/*"

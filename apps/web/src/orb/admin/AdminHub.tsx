@@ -65,6 +65,13 @@ const TILES: TileDef[] = [
     icon: OrbI.cog,
     href: "/kf/settings",
   },
+  {
+    id: "roadmap",
+    title: "Roadmap",
+    body: "Vision gallery — every post-MVP feature on the converged plan, intentionally disabled so the demo doesn't over-promise.",
+    icon: OrbI.spark,
+    href: "/kf/admin/roadmap",
+  },
 ];
 
 export function AdminHub(): ReactElement {
