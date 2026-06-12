@@ -212,6 +212,14 @@ export type ApiSimilarDocumentsResponse = Schemas["SimilarDocumentsResponse"];
 /** One similarity-ranked document. */
 export type ApiSimilarDocument = Schemas["SimilarDocument"];
 
+// ─── Document confidence dashboard (converged plan §C.1, ADR-023) ────────
+
+/** Response body of ``GET /documents/{id}/confidence``. */
+export type ApiDocumentConfidenceResponse =
+  Schemas["DocumentConfidenceResponse"];
+/** Composite confidence score with the per-signal breakdown. */
+export type ApiConfidenceScore = Schemas["ConfidenceScore"];
+
 // ─── Knowledge taxonomy (public read — ADR-017) ─────────────────────────
 
 /** Merged imposed + computed taxonomy returned by

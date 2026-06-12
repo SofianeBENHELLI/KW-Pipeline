@@ -36,6 +36,7 @@ import type {
   ApiFocusedNeighborhood,
   ApiKnowledgeGraphPage,
   ApiKnowledgeGraphProjection,
+  ApiDocumentConfidenceResponse,
   ApiLineageResponse,
   ApiSimilarDocumentsResponse,
   ApiProjectionStatusResponse,
@@ -1332,6 +1333,32 @@ export async function getSimilarDocuments(
       params: {
         path: { document_id: documentId },
         query: k !== undefined ? { k } : undefined,
+      },
+      signal,
+    }),
+  );
+}
+
+/**
+ * GET /documents/{document_id}/confidence (converged plan §C.1, ADR-023)
+ *
+ * Composite confidence score + per-signal breakdown + HITL routing
+ * outcome for one document version. Defaults to the document's
+ * latest version; pass ``versionId`` to inspect a historical pass.
+ * ``has_score=false`` with HTTP 200 is the "scorer never ran" case —
+ * the panel renders an empty state for the score while keeping the
+ * routing outcome visible.
+ */
+export async function getDocumentConfidence(
+  documentId: string,
+  options: { versionId?: string; signal?: AbortSignal } = {},
+): Promise<ApiDocumentConfidenceResponse> {
+  const { versionId, signal } = options;
+  return unwrap(
+    await http.GET("/documents/{document_id}/confidence", {
+      params: {
+        path: { document_id: documentId },
+        query: versionId !== undefined ? { version_id: versionId } : undefined,
       },
       signal,
     }),
